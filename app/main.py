@@ -507,40 +507,45 @@ def kit(request: Request, asset_id: str):
                 f"<button type=button onclick=\"cp('{cid}',this)\" class='mt-1 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg'>📋 복사</button>")
 
     imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
-    photo_dls = "".join(f"<a href='{dl(im)}' download class='px-2 py-1 bg-slate-100 rounded text-xs mr-1 mb-1 inline-block'>사진{i+1} ⬇</a>"
-                        for i, im in enumerate(imgs) if dl(im))
+
+    def pack_btn(pid, has_video):
+        what = "글+사진+영상" if has_video else "글+사진"
+        return (f"<a href='/kit/{asset_id}/pack/{pid}' class='inline-flex items-center gap-1 mt-3 px-4 py-2.5 "
+                f"bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold rounded-xl'>⬇ 이 채널 통째로 받기 ({what})</a>")
+
     cards = ""
     for p in pieces:
         k, pl = p.kind.value, p.payload
+        has_video = bool(pl.get("video_path"))
         if k == "blog":
             b = _re.sub(r"\[사진\d+\]", "", pl.get("body", "")).strip()
             cards += _kit_card("📝 네이버 블로그 <span class='text-xs text-slate-400'>(복사→네이버 글쓰기 붙여넣기)</span>",
                 "<div class='text-xs text-slate-400 mb-1'>제목</div>" + copy_block("blogT", pl.get("title", ""), "16")
                 + "<div class='text-xs text-slate-400 mt-3 mb-1'>본문</div>" + copy_block("blogB", b, "40")
-                + (f"<div class='mt-3'>{photo_dls}</div>" if photo_dls else "")
-                + "<p class='text-xs text-slate-400 mt-2'>본문 붙여넣고, 사진을 순서대로 넣으세요. 마지막에 지도·연락처는 위 본문에 포함됨.</p>")
+                + pack_btn(p.id, False)
+                + "<p class='text-xs text-slate-400 mt-2'>‘통째로 받기’엔 본문·사진이 순서대로 들어있어요.</p>")
         elif k == "caption":
-            cards += _kit_card("📷 인스타그램 캡션",
-                copy_block("cap", pl.get("text", ""), "40") + (f"<div class='mt-3'>{photo_dls}</div>" if photo_dls else ""))
+            cards += _kit_card("📷 인스타그램 <span class='text-xs text-slate-400'>(캡션+사진 묶음)</span>",
+                copy_block("cap", pl.get("text", ""), "40") + pack_btn(p.id, has_video))
         elif k == "short" and p.channel.value == "youtube":
-            v = dl(pl.get("video_path", ""))
-            cards += _kit_card("▶️ 유튜브 쇼츠",
+            cards += _kit_card("▶️ 유튜브 쇼츠 <span class='text-xs text-slate-400'>(제목·설명+영상 묶음)</span>",
                 "<div class='text-xs text-slate-400 mb-1'>제목</div>" + copy_block("ytT", pl.get("title", ""), "16")
                 + "<div class='text-xs text-slate-400 mt-3 mb-1'>설명</div>" + copy_block("ytD", pl.get("narration", ""), "28")
-                + (f"<div class='mt-3'><a href='{v}' download class='px-3 py-2 bg-emerald-500 text-white text-sm font-bold rounded-lg'>⬇ 영상 다운로드</a></div>" if v else ""))
+                + pack_btn(p.id, has_video))
         elif k == "short" and p.channel.value == "instagram":
-            v = dl(pl.get("video_path", ""))
-            cards += _kit_card("🎬 인스타 릴스",
-                (f"<a href='{v}' download class='px-3 py-2 bg-emerald-500 text-white text-sm font-bold rounded-lg'>⬇ 릴스 영상 다운로드</a>" if v else "영상 없음"))
+            cards += _kit_card("🎬 인스타 릴스 <span class='text-xs text-slate-400'>(캡션+영상 묶음)</span>",
+                (copy_block("reel", pl.get("text", ""), "24") if pl.get("text") else "") + pack_btn(p.id, has_video))
         elif k == "x_post":
-            cards += _kit_card("𝕏 X (트위터)", copy_block("xp", pl.get("text", ""), "24"))
+            cards += _kit_card("𝕏 X (트위터)", copy_block("xp", pl.get("text", ""), "24") + pack_btn(p.id, has_video))
     js = ("<script>function cp(id,btn){const t=document.getElementById(id);t.select();"
           "navigator.clipboard.writeText(t.value);btn.textContent='✅ 복사됨';"
           "setTimeout(()=>btn.textContent='📋 복사',1500);}</script>")
+    all_btn = (f"<a href='/kit/{asset_id}/pack-all' class='block text-center bg-indigo-600 hover:bg-indigo-700 "
+               "text-white font-extrabold py-3.5 rounded-2xl mb-4'>⬇ 5채널 전체 한 번에 받기 (채널별 폴더 정리)</a>")
     body = ("<a href='/me' class='text-sm text-slate-400'>← 내 작업실</a>"
             "<h2 class='text-xl font-extrabold mt-2 mb-1'>발행 소재</h2>"
-            "<p class='text-slate-500 text-sm mb-4'>글은 <b>복사</b>, 사진·영상은 <b>다운로드</b>해서 각 앱(네이버·인스타·유튜브·X)에 올리세요.</p>"
-            + cards + js)
+            "<p class='text-slate-500 text-sm mb-4'>채널마다 <b>글+사진+영상이 한 묶음</b>이에요. 통째로 받아 각 앱에 올리고, 글은 복사해서 붙여넣으세요.</p>"
+            + all_btn + cards + js)
     return HTMLResponse(_subscriber_page("발행 소재", body))
 
 
@@ -557,6 +562,93 @@ def dl_media(request: Request, asset_id: str, fname: str):
     ext = fname.rsplit(".", 1)[-1].lower()
     mt = {"mp4": "video/mp4", "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png"}.get(ext, "application/octet-stream")
     return FileResponse(path, media_type=mt, filename=fname)
+
+
+CHKO = {"blog": "네이버블로그", "caption": "인스타그램", "x_post": "X"}
+
+
+def _ch_folder(piece) -> str:
+    if piece.kind.value == "short":
+        return "유튜브쇼츠" if piece.channel.value == "youtube" else "인스타릴스"
+    return CHKO.get(piece.kind.value, piece.kind.value)
+
+
+def _piece_pack_entries(piece, imgs, prefix=""):
+    """채널 하나의 (zip경로, 소스) 목록 — 글.txt + 사진 + 영상 한 묶음."""
+    k, pl = piece.kind.value, piece.payload
+    ent = []
+
+    def add(name, src):
+        ent.append((f"{prefix}{name}", src))
+    if k == "blog":
+        txt = f"[제목]\n{pl.get('title','')}\n\n[본문]\n{pl.get('body','')}\n"
+        if pl.get("tags"):
+            txt += "\n[태그]\n" + " ".join(pl["tags"]) + "\n"
+        add("네이버블로그_글.txt", ("text", txt))
+        for i, im in enumerate(imgs, 1):
+            add(f"사진{i}{os.path.splitext(im)[1] or '.jpg'}", im)
+    elif k == "caption":
+        add("인스타_캡션.txt", ("text", pl.get("text", "")))
+        for i, im in enumerate(imgs, 1):
+            add(f"사진{i}{os.path.splitext(im)[1] or '.jpg'}", im)
+    elif k == "short" and piece.channel.value == "youtube":
+        add("유튜브_제목설명.txt", ("text", f"[제목]\n{pl.get('title','')}\n\n[설명]\n{pl.get('narration','')}\n"))
+        if pl.get("video_path"):
+            add("유튜브쇼츠_영상.mp4", pl["video_path"])
+    elif k == "short" and piece.channel.value == "instagram":
+        if pl.get("text"):
+            add("릴스_캡션.txt", ("text", pl["text"]))
+        if pl.get("video_path"):
+            add("인스타릴스_영상.mp4", pl["video_path"])
+    elif k == "x_post":
+        add("X_글.txt", ("text", pl.get("text", "")))
+    return ent
+
+
+def _write_zip(out_path, entries):
+    import zipfile
+    with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as z:
+        for arc, src in entries:
+            if isinstance(src, tuple) and src[0] == "text":
+                z.writestr(arc, src[1])
+            elif src and os.path.exists(src):
+                z.write(src, arcname=arc)
+
+
+@app.get("/kit/{asset_id}/pack/{pid}")
+def kit_pack(request: Request, asset_id: str, pid: str):
+    """채널 1개 통째 ZIP(글+사진+영상)."""
+    u = auth.current_user(request)
+    pieces = _owned_pieces(u, asset_id) if u else None
+    if not pieces:
+        return HTMLResponse(status_code=404)
+    piece = next((p for p in pieces if p.id == pid), None)
+    if not piece:
+        return HTMLResponse(status_code=404)
+    imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
+    out_dir = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), pieces[0].tenant_id)
+    os.makedirs(out_dir, exist_ok=True)
+    out = os.path.join(out_dir, f"pack_{pid[:8]}.zip")
+    _write_zip(out, _piece_pack_entries(piece, imgs))
+    return FileResponse(out, media_type="application/zip", filename=f"{_ch_folder(piece)}.zip")
+
+
+@app.get("/kit/{asset_id}/pack-all")
+def kit_pack_all(request: Request, asset_id: str):
+    """5채널 전체 ZIP — 채널별 폴더로 정리."""
+    u = auth.current_user(request)
+    pieces = _owned_pieces(u, asset_id) if u else None
+    if not pieces:
+        return HTMLResponse(status_code=404)
+    imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
+    entries = []
+    for p in pieces:
+        entries += _piece_pack_entries(p, imgs, prefix=f"{_ch_folder(p)}/")
+    out_dir = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), pieces[0].tenant_id)
+    os.makedirs(out_dir, exist_ok=True)
+    out = os.path.join(out_dir, f"all_{asset_id[:8]}.zip")
+    _write_zip(out, entries)
+    return FileResponse(out, media_type="application/zip", filename="올린다_5채널_전체.zip")
 
 
 @app.get("/demo/{name}")
