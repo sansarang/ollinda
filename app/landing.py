@@ -256,10 +256,12 @@ def _pricing() -> str:
         tag = "<div class='absolute -top-3 left-1/2 -translate-x-1/2 grad-btn text-white text-xs font-bold px-3 py-1 rounded-full'>가장 인기</div>" if hot else ""
         lis = "".join(f"<li class='flex gap-2 items-start'><span class='text-indigo-500 mt-0.5'>✓</span><span>{f}</span></li>" for f in feats)
         btn = "grad-btn text-white" if hot else "bg-slate-100 hover:bg-slate-200"
+        href = {"셀프": "/billing?plan=self", "대행": "#contact", "건당": "/billing?plan=self"}.get(name, "/signup")
+        cta = {"셀프": "구독 시작", "대행": "도입 문의", "건당": "시작하기"}.get(name, "시작하기")
         cards += (f"<div class='reveal card-hover {wrap} bg-white rounded-3xl p-8 flex flex-col'>{tag}"
                   f"<div class='font-bold text-lg text-slate-500'>{name}</div><div class='text-3xl font-extrabold my-3'>{price}</div>"
                   f"<ul class='space-y-2.5 text-sm text-slate-600 flex-1 mt-2'>{lis}</ul>"
-                  f"<a href='/signup' class='{btn} mt-7 text-center px-4 py-3.5 rounded-2xl font-bold'>시작하기</a></div>")
+                  f"<a href='{href}' class='{btn} mt-7 text-center px-4 py-3.5 rounded-2xl font-bold'>{cta}</a></div>")
     return f"<section id='pricing' class='bg-slate-50 py-20'><div class='max-w-5xl mx-auto px-5'><h2 class='reveal text-3xl sm:text-4xl font-extrabold text-center mb-3'>합리적인 요금</h2><p class='reveal text-center text-slate-500 mb-14'>대행사 1/3 가격으로, 결과는 더 확실하게.</p><div class='grid sm:grid-cols-3 gap-6 items-stretch pt-3'>{cards}</div></div></section>"
 
 

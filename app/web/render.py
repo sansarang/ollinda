@@ -72,6 +72,7 @@ def shell(active: str, title: str, body: str, subtitle: str = "", actions: str =
         + _si("/admin/board?channel=x", "X (트위터)", "c_x", active)
         + '<p class="px-3 text-[11px] font-semibold text-slate-500 mt-4 mb-1">관리</p>'
         + _si("/admin/shops", "가게 관리", "shops", active, "shops")
+        + _si("/admin/users", "구독자 관리", "users", active, "shops")
         + _si("/admin/industries", "업종 프로필", "industries", active)
         + '</nav>'
         '<div class="px-3 py-4 border-t border-white/5">'

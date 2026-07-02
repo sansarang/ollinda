@@ -47,6 +47,10 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS users(
               id TEXT PRIMARY KEY, email TEXT UNIQUE, pw_hash TEXT, salt TEXT,
               kakao_id TEXT, name TEXT, plan TEXT DEFAULT 'free', created_at TEXT);
+            CREATE TABLE IF NOT EXISTS subscriptions(
+              id TEXT PRIMARY KEY, user_id TEXT UNIQUE, plan TEXT, status TEXT,
+              billing_key TEXT, customer_key TEXT, amount INTEGER,
+              started_at TEXT, expires_at TEXT, last_payment_at TEXT, created_at TEXT);
             """
         )
         # 마이그레이션: tenants 신규 컬럼(연락처·장소·자율레벨·사업형태)
@@ -60,7 +64,8 @@ def init_db() -> None:
             except sqlite3.OperationalError:
                 pass
         # 마이그레이션: users.tenant_id (구독자 ↔ 본인 가게), free_used (무료 생성 횟수)
-        for col, ddl in [("tenant_id", "TEXT"), ("free_used", "INTEGER DEFAULT 0")]:
+        for col, ddl in [("tenant_id", "TEXT"), ("free_used", "INTEGER DEFAULT 0"),
+                         ("usage_month", "TEXT"), ("month_used", "INTEGER DEFAULT 0")]:
             try:
                 c.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
             except sqlite3.OperationalError:
@@ -198,6 +203,74 @@ def set_user_tenant(uid: str, tid: str) -> None:
 def incr_user_free(uid: str, n: int = 1) -> None:
     with _conn() as c:
         c.execute("UPDATE users SET free_used = COALESCE(free_used,0) + ? WHERE id=?", (n, uid))
+
+
+def _ym() -> str:
+    return datetime.utcnow().strftime("%Y%m")
+
+
+def month_usage(uid: str) -> int:
+    """이번 달 사용량(월이 바뀌면 0)."""
+    with _conn() as c:
+        r = c.execute("SELECT usage_month, month_used FROM users WHERE id=?", (uid,)).fetchone()
+    if not r or (r["usage_month"] or "") != _ym():
+        return 0
+    return r["month_used"] or 0
+
+
+def incr_month_usage(uid: str, n: int = 1) -> None:
+    """이번 달 사용량 +n (월 바뀌면 리셋 후 카운트)."""
+    ym = _ym()
+    with _conn() as c:
+        r = c.execute("SELECT usage_month, month_used FROM users WHERE id=?", (uid,)).fetchone()
+        cur = (r["month_used"] or 0) if r and (r["usage_month"] or "") == ym else 0
+        c.execute("UPDATE users SET usage_month=?, month_used=? WHERE id=?", (ym, cur + n, uid))
+
+
+def list_users() -> list[dict]:
+    with _conn() as c:
+        rows = c.execute("SELECT * FROM users ORDER BY created_at DESC").fetchall()
+    return [dict(r) for r in rows]
+
+
+def reset_usage(uid: str) -> None:
+    with _conn() as c:
+        c.execute("UPDATE users SET free_used=0, month_used=0 WHERE id=?", (uid,))
+
+
+# ── 구독(결제) ─────────────────────────────────────────
+def get_subscription(user_id: str) -> Optional[dict]:
+    try:
+        with _conn() as c:
+            r = c.execute("SELECT * FROM subscriptions WHERE user_id=?", (user_id,)).fetchone()
+        return dict(r) if r else None
+    except sqlite3.OperationalError:
+        return None
+
+
+def upsert_subscription(user_id: str, plan: str, status: str, billing_key: str = "",
+                        customer_key: str = "", amount: int = 0, expires_at: str = "") -> None:
+    existing = get_subscription(user_id)
+    sid = existing["id"] if existing else str(uuid.uuid4())
+    started = existing["started_at"] if existing else _now()
+    with _conn() as c:
+        c.execute(
+            "INSERT OR REPLACE INTO subscriptions"
+            "(id,user_id,plan,status,billing_key,customer_key,amount,started_at,expires_at,last_payment_at,created_at)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (sid, user_id, plan, status, billing_key or (existing or {}).get("billing_key", ""),
+             customer_key or (existing or {}).get("customer_key", ""), amount,
+             started, expires_at, _now(), (existing or {}).get("created_at") or _now()))
+
+
+def subs_due_for_charge(within_days: int = 1) -> list[dict]:
+    """만료 임박(within_days 내) 활성 구독 — 정기결제 갱신 대상."""
+    from datetime import timedelta
+    cutoff = (datetime.utcnow() + timedelta(days=within_days)).isoformat()
+    with _conn() as c:
+        rows = c.execute("SELECT * FROM subscriptions WHERE status='active' AND billing_key!='' "
+                         "AND expires_at<=?", (cutoff,)).fetchall()
+    return [dict(r) for r in rows]
 
 
 def get_user_by_tenant(tid: str) -> Optional[dict]:
