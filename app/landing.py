@@ -44,7 +44,12 @@ _HEAD = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>올린다 — 사진 한 장이면, 매출이 올라갑니다</title>
 <meta name=description content="사장님은 사진만 올리세요. AI가 인스타·네이버블로그·유튜브·X 콘텐츠를 만들고 검색 상위에 뜨게 최적화해 자동 발행합니다. 소상공인 AI 마케팅 자동화 올린다.">
-<meta name=keywords content="AI 마케팅,소상공인,인스타 자동,네이버 블로그 자동,콘텐츠 자동화,썬팅,카페,미용실,올린다">
+<meta name=keywords content="AI 마케팅,소상공인 마케팅,셀러 마케팅,인스타 자동 업로드,네이버 블로그 자동,유튜브 쇼츠 자동,콘텐츠 자동화,SNS 대행,쿠팡 마케팅,올린다,Ollinda">
+<meta name=robots content="index,follow,max-image-preview:large,max-snippet:-1">
+<meta name=author content="올린다 (Ollinda)">
+<meta name=theme-color content="#6366f1">
+<meta property=og:site_name content="올린다">
+<meta property=og:locale content="ko_KR">
 <meta property=og:type content=website>
 <meta property=og:title content="올린다 — 사진 한 장이면, 매출이 올라갑니다">
 <meta property=og:description content="AI가 5개 채널 콘텐츠를 만들고 자동 발행. 소상공인 마케팅 자동화.">
@@ -58,7 +63,7 @@ _HEAD = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css" rel=stylesheet>
 <script src="https://cdn.tailwindcss.com"></script>
 <script type=application/ld+json>{"@context":"https://schema.org","@type":"SoftwareApplication","name":"올린다","applicationCategory":"BusinessApplication","offers":{"@type":"Offer","price":"39900","priceCurrency":"KRW"}}</script>
-""".replace("__BASE__", BASE) + _STYLE + """</head><body class="bg-white text-slate-800">"""
+""".replace("__BASE__", BASE) + _STYLE + """</head><body class="bg-white text-slate-800 overflow-x-hidden">"""
 
 _FOOT = """
 <script>
@@ -258,14 +263,31 @@ def _pricing() -> str:
     return f"<section id='pricing' class='bg-slate-50 py-20'><div class='max-w-5xl mx-auto px-5'><h2 class='reveal text-3xl sm:text-4xl font-extrabold text-center mb-3'>합리적인 요금</h2><p class='reveal text-center text-slate-500 mb-14'>대행사 1/3 가격으로, 결과는 더 확실하게.</p><div class='grid sm:grid-cols-3 gap-6 items-stretch pt-3'>{cards}</div></div></section>"
 
 
+_QA = [("정말 사진만 올리면 되나요?", "네. 사진과 한 줄 설명만 주시면 AI가 5채널 콘텐츠를 만듭니다. 사진 1장만 있어도 자막·음성이 들어간 세로 숏폼까지 자동 생성됩니다."),
+       ("쿠팡·11번가 셀러도 되나요?", "네. '온라인 셀러'로 설정하면 글 마무리가 지도 대신 구매 링크/검색어로, 키워드가 지역명 대신 상품·후기 키워드로 자동 전환됩니다. (쿠팡은 직링크 정책상 '검색어 유도'를 권장)"),
+       ("제 SNS 비밀번호를 줘야 하나요?", "아니요. 공식 OAuth로 한 번만 권한을 허용하면 됩니다. 비밀번호는 저장하지 않습니다."),
+       ("네이버 블로그도 되나요?", "글·사진을 완성해 드리고, 임시저장된 글을 네이버에서 발행만 누르시면 됩니다. (네이버는 공식 발행 API가 없어 반자동)"),
+       ("업종이 특이해도 되나요?", "어떤 업종이든 AI가 맞춤 프로필을 자동 생성합니다.")]
+
+
 def _faq() -> str:
-    qa = [("정말 사진만 올리면 되나요?", "네. 사진과 한 줄 설명만 주시면 AI가 5채널 콘텐츠를 만듭니다. 사진 1장만 있어도 자막·음성이 들어간 세로 숏폼까지 자동 생성됩니다."),
-          ("쿠팡·11번가 셀러도 되나요?", "네. '온라인 셀러'로 설정하면 글 마무리가 지도 대신 구매 링크/검색어로, 키워드가 지역명 대신 상품·후기 키워드로 자동 전환됩니다. (쿠팡은 직링크 정책상 '검색어 유도'를 권장)"),
-          ("제 SNS 비밀번호를 줘야 하나요?", "아니요. 공식 OAuth로 한 번만 권한을 허용하면 됩니다. 비밀번호는 저장하지 않습니다."),
-          ("네이버 블로그도 되나요?", "글·사진을 완성해 드리고, 임시저장된 글을 네이버에서 발행만 누르시면 됩니다. (네이버는 공식 발행 API가 없어 반자동)"),
-          ("업종이 특이해도 되나요?", "어떤 업종이든 AI가 맞춤 프로필을 자동 생성합니다.")]
-    items = "".join(f"<details class='reveal bg-white rounded-2xl border border-slate-100 p-5'><summary class='font-semibold cursor-pointer'>{q}</summary><p class='text-slate-500 text-sm mt-2'>{a}</p></details>" for q, a in qa)
-    return f"<section class='py-20'><div class='max-w-3xl mx-auto px-5'><h2 class='reveal text-3xl sm:text-4xl font-extrabold text-center mb-10'>자주 묻는 질문</h2><div class='space-y-3'>{items}</div></div></section>"
+    items = "".join(f"<details class='reveal bg-white rounded-2xl border border-slate-100 p-5'><summary class='font-semibold cursor-pointer'>{q}</summary><p class='text-slate-500 text-sm mt-2'>{a}</p></details>" for q, a in _QA)
+    return f"<section id='faq' class='py-20'><div class='max-w-3xl mx-auto px-5'><h2 class='reveal text-3xl sm:text-4xl font-extrabold text-center mb-10'>자주 묻는 질문</h2><div class='space-y-3'>{items}</div></div></section>"
+
+
+def _seo_jsonld() -> str:
+    """검색 리치결과용 구조화 데이터 — Organization + WebSite + FAQPage(구글 FAQ 노출)."""
+    import json
+    faq = {"@context": "https://schema.org", "@type": "FAQPage",
+           "mainEntity": [{"@type": "Question", "name": q,
+                           "acceptedAnswer": {"@type": "Answer", "text": a}} for q, a in _QA]}
+    org = {"@context": "https://schema.org", "@type": "Organization", "name": "올린다",
+           "url": BASE + "/", "logo": BASE + "/demo/og.png",
+           "description": "소상공인·온라인 셀러를 위한 AI 마케팅 콘텐츠 자동 생성·발행 서비스"}
+    site = {"@context": "https://schema.org", "@type": "WebSite", "name": "올린다",
+            "url": BASE + "/", "inLanguage": "ko-KR"}
+    return "".join(f'<script type="application/ld+json">{json.dumps(x, ensure_ascii=False)}</script>'
+                   for x in (org, site, faq))
 
 
 def _contact() -> str:
@@ -341,7 +363,7 @@ def _kakao_float() -> str:
 
 
 def render() -> str:
-    return (_HEAD + _nav() + _hero() + _video() + _demo_widget() + _stats() + _problem()
+    return (_HEAD + _seo_jsonld() + _nav() + _hero() + _video() + _demo_widget() + _stats() + _problem()
             + _modes() + _features() + _pricing() + _faq() + _contact() + _cta() + _footer()
             + _kakao_float() + _FOOT)
 

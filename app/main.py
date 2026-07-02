@@ -102,6 +102,25 @@ def root(request: Request):
     return landing.render()
 
 
+@app.get("/robots.txt")
+def robots():
+    base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
+    body = (f"User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /me\nDisallow: /u/\n"
+            f"Sitemap: {base}/sitemap.xml\n")
+    return Response(body, media_type="text/plain")
+
+
+@app.get("/sitemap.xml")
+def sitemap():
+    base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
+    urls = ["/", "/privacy"]
+    items = "".join(f"<url><loc>{base}{u}</loc><changefreq>weekly</changefreq>"
+                    f"<priority>{'1.0' if u == '/' else '0.5'}</priority></url>" for u in urls)
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>'
+           '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + items + '</urlset>')
+    return Response(xml, media_type="application/xml")
+
+
 @app.get("/privacy", response_class=HTMLResponse)
 def privacy():
     from app import landing
