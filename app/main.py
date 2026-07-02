@@ -427,17 +427,34 @@ def my_dashboard(request: Request, ok: str = "", err: str = ""):
                  "style='background:linear-gradient(120deg,#334155,#4338ca)'>"
                  f"<div><div class='text-xs text-white/70'>내 플랜</div>"
                  f"<div class='font-bold'>{_pn} · {_usage}</div></div>{_upbtn}</div>")
+    greeting = (f"<div class='mb-4'><div class='text-2xl font-extrabold'>안녕하세요, {esc(t.name)}님 👋</div>"
+                "<div class='text-slate-500 text-sm mt-0.5'>사진 한 장이면 5개 채널 콘텐츠가 완성돼요.</div></div>")
     main_cta = ("<div class='rounded-3xl p-7 mb-4 text-center text-white' "
                 "style='background:linear-gradient(120deg,#6366f1,#a855f7,#ec4899)'>"
-                "<div class='text-2xl font-extrabold mb-1'>사진만 올리면 끝 ✨</div>"
-                "<p class='text-white/85 text-sm mb-4'>인스타·네이버·유튜브·X 5채널 콘텐츠 + 영상 + 캐러셀을 AI가 자동 생성합니다.</p>"
-                f"<a href='/u/{tok}' class='inline-block bg-white text-indigo-700 font-extrabold px-8 py-4 rounded-2xl text-lg'>📷 사진 올려 생성하기</a></div>")
+                "<div class='text-2xl font-extrabold mb-1'>📷 사진 올리고 시작하기</div>"
+                "<p class='text-white/85 text-sm mb-4'>인스타·네이버·유튜브·X 콘텐츠 + 영상을 AI 전문가팀이 자동으로 만들어요.</p>"
+                f"<a href='/u/{tok}' class='inline-block bg-white text-indigo-700 font-extrabold px-8 py-4 rounded-2xl text-lg shadow-lg'>지금 사진 올리기 →</a></div>")
+
+    def _step(n, emoji, title, desc):
+        return ("<div class='relative bg-slate-50 rounded-2xl p-4 text-center'>"
+                f"<div class='absolute -top-2 left-3 w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center'>{n}</div>"
+                f"<div class='text-3xl mb-1 mt-1'>{emoji}</div>"
+                f"<div class='font-bold text-sm'>{title}</div><div class='text-xs text-slate-500 mt-0.5'>{desc}</div></div>")
+    steps = ("<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-4'>"
+             "<h2 class='font-bold mb-3'>이렇게 사용해요 · 딱 3단계</h2>"
+             "<div class='grid grid-cols-1 sm:grid-cols-3 gap-3'>"
+             + _step(1, "📷", "사진 올리기", "가게·상품 사진 1장")
+             + _step(2, "🤖", "AI가 제작", "5채널 글+영상 자동 생성")
+             + _step(3, "⬇️", "받아서 올리기", "다운로드 → 각 앱에 붙여넣기")
+             + "</div></div>")
     content = ("<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-4'>"
-               "<h2 class='font-bold mb-3'>최근 만든 콘텐츠</h2>" + hist + "</div>")
+               "<h2 class='font-bold mb-1'>내가 만든 콘텐츠</h2>"
+               "<p class='text-xs text-slate-400 mb-3'>항목을 누르면 ‘발행 소재’(복사·다운로드)로 이동해요.</p>" + hist + "</div>")
     settings = ("<details class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5'>"
-                "<summary class='font-bold cursor-pointer text-slate-600'>⚙️ 가게·스토어 설정 수정</summary>"
+                "<summary class='font-bold cursor-pointer text-slate-600'>⚙️ 가게 정보 수정 (상호·전화·주소 등)</summary>"
                 "<div class='mt-3'>" + store_form + "</div></details>")
-    return _subscriber_page(f"{esc(t.name)} · 내 작업실", banner + plan_card + main_cta + channels + content + settings)
+    return _subscriber_page(f"{esc(t.name)} · 내 작업실",
+                            greeting + plan_card + main_cta + steps + content + settings)
 
 
 @app.post("/me/store")
