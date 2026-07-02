@@ -336,7 +336,8 @@ def _footer() -> str:
 
 
 def _kakao_float() -> str:
-    return f'<a href="#contact" class="kakao-float" title="카카오 상담">TALK</a>'
+    return ('<a href="https://pf.kakao.com/_EGrPX/chat" target="_blank" rel="noopener" '
+            'class="kakao-float" title="카카오톡 상담">TALK</a>')
 
 
 def render() -> str:
