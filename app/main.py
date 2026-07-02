@@ -364,8 +364,16 @@ def my_dashboard(request: Request, ok: str = "", err: str = ""):
         f"<input name=brand_name value=\"{esc(t.brand_name)}\" placeholder='🏷 브랜드명 (셀러)' class='{inp}'>"
         f"<input name=search_kw value=\"{esc(t.search_kw)}\" placeholder='🔎 검색어 유도 (쿠팡 등)' class='{inp}'>"
         f"<input name=buy_url value=\"{esc(t.buy_url)}\" placeholder='🔗 상세페이지/스토어 URL' class='{inp}'>"
-        "<button class='bg-indigo-600 text-white font-bold py-2.5 rounded-xl sm:col-span-2'>저장하고 시작</button></form>"
+        "<button class='bg-indigo-600 text-white font-bold py-2.5 rounded-xl sm:col-span-2'>저장</button></form>"
         "<p class='text-xs text-slate-400 mt-2'>매장이면 글 끝에 지도·연락처, 셀러면 구매 링크/검색어로 자동 전환됩니다.</p>")
+    # 온보딩용 최소 폼(필수 3개만 — 나머지는 나중에 설정에서)
+    store_form_min = (
+        "<form method=post action='/me/store' class='space-y-2'>"
+        f"<input name=name value=\"{esc(t.name)}\" placeholder='상호/브랜드 *' required class='{inp}'>"
+        f"<input name=industry placeholder='업종 또는 파는 상품 * (예: 카페, 캠핑 폴딩박스)' required class='{inp}'>"
+        f"<select name=biz_type class='{inp} font-semibold'>{bopts}</select>"
+        "<button class='w-full bg-indigo-600 text-white font-bold py-3 rounded-xl'>완료하고 시작하기 →</button></form>"
+        "<p class='text-xs text-slate-400 mt-2'>전화·주소·마켓 등 상세정보는 나중에 ‘설정’에서 추가하면 됩니다.</p>")
     # ② 내 채널 연결
     connected = {a.channel: a for a in db.list_channel_accounts(t.id)}
     rows = ""
@@ -401,10 +409,9 @@ def my_dashboard(request: Request, ok: str = "", err: str = ""):
     onboarded = bool((t.industry or "").strip())
     if not onboarded:
         intro = ("<div class='bg-indigo-50 text-indigo-700 p-4 rounded-2xl mb-4 text-sm'>"
-                 "👋 시작하려면 가게/상품 정보를 <b>딱 한 번만</b> 입력해 주세요. "
-                 "이후엔 사진만 올리면 AI가 다 만들어 드립니다.</div>")
+                 "🎉 가입 완료! 시작하려면 <b>딱 3가지</b>만 알려주세요. (30초)</div>")
         card = ("<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5'>"
-                "<h2 class='font-bold mb-3'>가게·스토어 정보 (최초 1회)</h2>" + store_form + "</div>")
+                "<h2 class='font-bold mb-3'>내 가게/상품 정보</h2>" + store_form_min + "</div>")
         return _subscriber_page(f"{esc(t.name)} · 시작 설정", banner + intro + card)
     # 온보딩 완료 → 사진 올려 생성이 메인
     from app.services import pay as _pay
