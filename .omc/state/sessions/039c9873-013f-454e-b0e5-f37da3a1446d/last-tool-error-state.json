@@ -1,0 +1,7 @@
+{
+  "tool_name": "WebFetch",
+  "tool_input_preview": "{\"url\":\"https://jason-wood-bias-touched.trycloudflare.com/\",\"prompt\":\"Does the page load? Does it contain \\\"올린다\\\" or \\\"매출이 올라갑니다\\\"? Answer yes/no briefly, or state the error.\"}",
+  "error": "ECONNREFUSED",
+  "timestamp": "2026-06-30T01:08:08.342Z",
+  "retry_count": 1
+}

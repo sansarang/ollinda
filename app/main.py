@@ -1,0 +1,1501 @@
+"""
+shopcast 웹 MVP — 서버렌더(FastAPI).
+흐름: 사장님 업로드(/u/{token}) → AI 캡션 생성 → 운영자 검수(/admin) → 인스타 발행(토큰 없으면 시뮬).
+실행: uvicorn app.main:app --reload
+"""
+from __future__ import annotations
+
+import os
+
+import base64
+import secrets
+import time
+
+from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+
+from app import auth, storage
+from app.kakao import make_router as kakao_router
+from app.google_auth import make_router as google_router
+
+from app import db, oauth, seo
+from app.domain.models import Channel, ContentStatus
+from app.industries import ACTIVE_INDUSTRIES, PROFILES
+from app.registry import get_publisher
+from app.services.ingest import ingest_upload
+from app.services.publish import publish_and_record
+from app.services.revise import autofix_instruction, revise_piece
+from app.web.render import badge, esc, nav, page, shell, stat_card
+
+# 상태 한글 라벨
+STATUS_KO = {"draft": "검수대기", "approved": "승인됨", "rejected": "반려",
+             "scheduled": "예약됨", "published": "발행완료", "failed": "실패"}
+CHMAP = {"instagram": "인스타", "naver_blog": "네이버", "youtube": "유튜브", "x": "X"}
+FREE_LIMIT = 2   # 가입자 무료 생성 횟수
+
+# 구글 로고(4색 G) — 간편가입 버튼용
+GOOGLE_SVG = ('<svg width="20" height="20" viewBox="0 0 48 48" class="inline-block align-middle">'
+              '<path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 '
+              '14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>'
+              '<path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 '
+              '5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>'
+              '<path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 '
+              '16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>'
+              '<path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 '
+              '2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>')
+
+
+def _google_btn(label: str = "구글로 가입하기") -> str:
+    return (f"<a href='/login/google' class='flex items-center justify-center gap-2 w-full py-3 rounded-xl "
+            f"font-bold border border-slate-200 bg-white text-slate-700 mb-3 hover:bg-slate-50 shadow-sm'>"
+            f"{GOOGLE_SVG} {label}</a>")
+
+# OAuth 연결 지원 채널(자동 발행 가능한 것만)
+CONNECTABLE = [Channel.INSTAGRAM, Channel.YOUTUBE, Channel.X]
+CHANNEL_LABEL = {Channel.INSTAGRAM: "📷 인스타그램", Channel.YOUTUBE: "▶️ 유튜브", Channel.X: "𝕏 (트위터)"}
+
+app = FastAPI(title="shopcast", version="0.3.0")
+
+
+@app.middleware("http")
+async def admin_basic_auth(request, call_next):
+    """/admin* 운영자 보호(HTTP Basic). SHOPCAST_ADMIN_PASS 설정 시에만 활성(미설정=로컬개발).
+    사장님 업로드(/u/*)·OAuth 콜백·미디어는 공개 유지."""
+    if request.url.path.startswith("/admin"):
+        pw = os.environ.get("SHOPCAST_ADMIN_PASS")
+        if pw:
+            user = os.environ.get("SHOPCAST_ADMIN_USER", "admin")
+            ok = False
+            auth = request.headers.get("authorization", "")
+            if auth.startswith("Basic "):
+                try:
+                    u, _, p = base64.b64decode(auth[6:]).decode().partition(":")
+                    ok = secrets.compare_digest(u, user) and secrets.compare_digest(p, pw)
+                except Exception:
+                    ok = False
+            if not ok:
+                return Response("운영자 인증 필요", status_code=401,
+                                headers={"WWW-Authenticate": 'Basic realm="shopcast admin"'})
+    return await call_next(request)
+
+
+@app.on_event("startup")
+def _startup() -> None:
+    db.init_db()
+    if not db.list_tenants():           # 시작 업종 6종 데모 가게 시드
+        for key in ACTIVE_INDUSTRIES:
+            p = PROFILES[key]
+            db.create_tenant(name=f"데모 {p.name}", industry=p.name, region="수원")
+
+
+@app.get("/health")
+def health() -> dict:
+    return {"ok": True, "service": "shopcast", "version": app.version}
+
+
+@app.get("/", response_class=HTMLResponse)
+def root(request: Request):
+    # 로그인 상태면 첫 화면 = 사용자 대시보드(작업실), 비로그인이면 마케팅 랜딩
+    if auth.current_user(request):
+        return RedirectResponse("/me", status_code=303)
+    from app import landing
+    return landing.render()
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+def privacy():
+    from app import landing
+    return landing.privacy()
+
+
+app.include_router(kakao_router())
+app.include_router(google_router())
+
+_DEMO_HITS: dict = {}   # ip -> [timestamps] (무료 체험 rate limit)
+
+
+@app.post("/api/demo")
+async def api_demo(request: Request, industry: str = Form(""), note: str = Form(""),
+                   biz_type: str = Form("local"), marketplace: str = Form(""),
+                   search_kw: str = Form(""), photo: UploadFile = File(None)):
+    """랜딩 '무료로 만들어보기' = 가입 유도 퍼널.
+    미가입자는 생성 불가(가입 유도), 가입자만 무료 2회를 '내 작업실'에서 사용."""
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"require_signup": True,
+                             "message": "가입하면 내 사진으로 인스타·블로그·유튜브·X 5채널을 무료 2회 만들어드려요!"})
+    used = u.get("free_used") or 0
+    free = (u.get("plan") or "free") == "free"
+    if free and used >= FREE_LIMIT:
+        return JSONResponse({"limit": True,
+                             "message": f"무료 {FREE_LIMIT}회를 모두 사용했어요. 요금제로 무제한 이용하세요."})
+    left = (FREE_LIMIT - used) if free else None
+    return JSONResponse({"go_dashboard": True,
+                         "message": "내 작업실에서 사진을 올리면 바로 만들어드려요!"
+                                    + (f" (무료 {left}회 남음)" if left is not None else "")})
+
+
+@app.post("/api/contact")
+async def api_contact(company: str = Form(""), manager: str = Form(""), phone: str = Form(""),
+                      email: str = Form(""), message: str = Form("")):
+    """랜딩 문의 — SMTP 설정 시 메일 발송, 항상 로그로 백업(리드 보존)."""
+    to = "etetetetet5ea@kakao.com"
+    body = f"[올린다 문의]\n상호:{company}\n담당:{manager}\n연락처:{phone}\n이메일:{email}\n내용:{message}"
+    sent = False
+    host, user, pw = (os.environ.get("SMTP_HOST"), os.environ.get("SMTP_USER"), os.environ.get("SMTP_PASS"))
+    if host and user and pw:
+        try:
+            import smtplib
+            from email.mime.text import MIMEText
+            msg = MIMEText(body)
+            msg["Subject"] = f"[올린다 문의] {company}"
+            msg["From"] = user
+            msg["To"] = to
+            with smtplib.SMTP(host, int(os.environ.get("SMTP_PORT", "587"))) as s:
+                s.starttls(); s.login(user, pw); s.send_message(msg)
+            sent = True
+        except Exception:
+            sent = False
+    try:
+        d = os.environ.get("SHOPCAST_STORAGE", "storage")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "contacts.log"), "a") as f:
+            f.write(body.replace("\n", " | ") + "\n")
+    except Exception:
+        pass
+    return JSONResponse({"ok": True, "mailed": sent})
+
+
+@app.get("/demo-upload/{name}")
+def demo_upload(name: str):
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+        return HTMLResponse(status_code=404)
+    path = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), "demo", name)
+    if not os.path.exists(path):
+        return HTMLResponse(status_code=404)
+    return FileResponse(path)
+
+
+# ── 회원가입/로그인 ───────────────────────────────────────
+def _auth_page(title: str, inner: str) -> str:
+    from app import landing
+    return (landing._HEAD + "<div class='max-w-md mx-auto px-5 py-16'>"
+            f"<a href='/' class='text-indigo-600 text-sm'>← 홈</a>"
+            f"<h1 class='text-2xl font-extrabold mt-3 mb-6'>{esc(title)}</h1>{inner}</div>" + landing._FOOT)
+
+
+@app.get("/signup", response_class=HTMLResponse)
+def signup_get(from_: str = ""):
+    social = (_google_btn("구글로 가입하기")
+              + "<a href='/login/kakao' class='block text-center mb-4 py-3 rounded-xl font-bold' "
+              "style='background:#FEE500;color:#191600'>💬 카카오로 3초 가입</a>"
+              "<div class='text-center text-xs text-slate-400 mb-4'>승인 한 번이면 가입 완료 · 또는 이메일</div>")
+    form = ("<form method=post action='/signup' class='space-y-3'>"
+            "<input name=email type=email placeholder='이메일' required class='w-full border rounded-xl p-3'>"
+            "<input name=pw type=password placeholder='비밀번호' required class='w-full border rounded-xl p-3'>"
+            "<button class='w-full bg-slate-100 text-slate-600 font-bold py-3 rounded-xl'>이메일로 가입</button></form>"
+            "<p class='text-sm text-slate-400 mt-4 text-center'>이미 회원? <a href='/login' class='text-indigo-600'>로그인</a></p>")
+    return _auth_page("가입하고 시작하기", social + form)
+
+
+@app.post("/signup")
+def signup_post(email: str = Form(""), pw: str = Form("")):
+    if not (email and pw) or db.get_user_by_email(email):
+        return RedirectResponse("/signup?err=1", status_code=303)
+    h, salt = auth.hash_pw(pw)
+    u = db.create_user(email=email, pw_hash=h, salt=salt)
+    resp = RedirectResponse("/me", status_code=303)
+    resp.set_cookie(auth.COOKIE, auth.make_session(u["id"]), max_age=604800, httponly=True)
+    return resp
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_get():
+    form = (_google_btn("구글로 로그인")
+            + "<a href='/login/kakao' class='block text-center mb-4 py-3 rounded-xl font-bold' "
+            "style='background:#FEE500;color:#191600'>💬 카카오로 로그인</a>"
+            "<form method=post action='/login' class='space-y-3'>"
+            "<input name=email type=email placeholder='이메일' required class='w-full border rounded-xl p-3'>"
+            "<input name=pw type=password placeholder='비밀번호' required class='w-full border rounded-xl p-3'>"
+            "<button class='w-full bg-indigo-600 text-white font-bold py-3 rounded-xl'>로그인</button></form>")
+    return _auth_page("로그인", form)
+
+
+@app.post("/login")
+def login_post(email: str = Form(""), pw: str = Form("")):
+    u = db.get_user_by_email(email)
+    if not u or not auth.verify_pw(pw, u["salt"] or "", u["pw_hash"] or ""):
+        return RedirectResponse("/login?err=1", status_code=303)
+    resp = RedirectResponse("/me", status_code=303)
+    resp.set_cookie(auth.COOKIE, auth.make_session(u["id"]), max_age=604800, httponly=True)
+    return resp
+
+
+@app.get("/logout")
+def logout():
+    resp = RedirectResponse("/", status_code=303)
+    resp.delete_cookie(auth.COOKIE)
+    return resp
+
+
+@app.get("/welcome", response_class=HTMLResponse)
+def welcome(request: Request):
+    u = auth.current_user(request)
+    who = esc(u.get("email") or u.get("name") or "회원") if u else "회원"
+    inner = (f"<div class='bg-white rounded-2xl border p-6 text-center'>"
+             f"<div class='text-4xl mb-2'>🎉</div><p class='font-bold text-lg mb-1'>{who}님, 가입 완료!</p>"
+             "<p class='text-slate-500 text-sm mb-4'>내 작업실에서 ① 가게 설정 ② 채널 연결 ③ 사진 올려 생성을 시작하세요.</p>"
+             "<a href='/me' class='inline-block bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl'>내 작업실로 가기 →</a></div>")
+    return _auth_page("환영합니다", inner)
+
+
+def _subscriber_page(title: str, inner: str) -> str:
+    from app import landing
+    return (landing._HEAD + "<div class='max-w-3xl mx-auto px-5 py-10'>"
+            f"<div class='flex items-center justify-between mb-6'>"
+            f"<a href='/' class='font-extrabold text-xl flex items-center gap-2'>{landing.LOGO}<span>올린다</span></a>"
+            f"<a href='/logout' class='text-sm text-slate-400'>로그아웃</a></div>"
+            f"<h1 class='text-2xl font-extrabold mb-4'>{esc(title)}</h1>{inner}</div>" + landing._FOOT)
+
+
+def _ensure_user_tenant(u: dict):
+    """구독자(user)에게 본인 가게(tenant)가 없으면 생성·연결."""
+    tid = u.get("tenant_id")
+    t = db.get_tenant(tid) if tid else None
+    if t:
+        return t
+    name = (u.get("name") or (u.get("email") or "내 가게").split("@")[0])
+    t = db.create_tenant(name=name, industry="", region="", biz_type="local")
+    db.set_user_tenant(u["id"], t.id)
+    return t
+
+
+@app.get("/me", response_class=HTMLResponse)
+def my_dashboard(request: Request, ok: str = "", err: str = ""):
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    t = _ensure_user_tenant(u)
+    tok = db.tenant_token(t.id)
+    inp = "w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
+    banner = ""
+    if ok:
+        banner = f"<div class='bg-emerald-50 text-emerald-700 p-3 rounded-xl mb-4 text-sm'>✅ {esc(ok)}</div>"
+    if err:
+        banner = f"<div class='bg-rose-50 text-rose-600 p-3 rounded-xl mb-4 text-sm'>⚠️ {esc(err)}</div>"
+    # ① 가게/스토어 설정
+    bopts = "".join(f"<option value='{k}'{' selected' if (t.biz_type or 'local') == k else ''}>{lab}</option>"
+                    for k, lab in [("local", "🏪 동네 매장(방문 유도)"), ("seller", "📦 온라인 셀러(구매 유도)"),
+                                   ("hybrid", "🔁 매장+온라인")])
+    mkopts = "".join(f"<option value='{k}'{' selected' if (t.marketplace or '') == k else ''}>{v}</option>"
+                     for k, v in [("", "마켓 선택(셀러)"), ("coupang", "쿠팡"), ("11st", "11번가"),
+                                  ("smartstore", "스마트스토어"), ("gmarket", "지마켓"), ("self", "자사몰")])
+    store_form = (
+        f"<form method=post action='/me/store' class='grid sm:grid-cols-2 gap-2'>"
+        f"<input name=name value=\"{esc(t.name)}\" placeholder='상호/브랜드 *' required class='{inp}'>"
+        f"<input name=industry value=\"{esc(t.industry)}\" placeholder='업종/상품 * (예: 카페, 캠핑 폴딩박스)' required class='{inp}'>"
+        f"<input name=region value=\"{esc(t.region)}\" placeholder='지역 (매장)' class='{inp}'>"
+        f"<select name=biz_type class='{inp} font-semibold'>{bopts}</select>"
+        f"<input name=phone value=\"{esc(t.phone)}\" placeholder='📞 전화 (매장)' class='{inp}'>"
+        f"<input name=address value=\"{esc(t.address)}\" placeholder='📍 주소 (매장)' class='{inp}'>"
+        f"<select name=marketplace class='{inp}'>{mkopts}</select>"
+        f"<input name=brand_name value=\"{esc(t.brand_name)}\" placeholder='🏷 브랜드명 (셀러)' class='{inp}'>"
+        f"<input name=search_kw value=\"{esc(t.search_kw)}\" placeholder='🔎 검색어 유도 (쿠팡 등)' class='{inp}'>"
+        f"<input name=buy_url value=\"{esc(t.buy_url)}\" placeholder='🔗 상세페이지/스토어 URL' class='{inp}'>"
+        "<button class='bg-indigo-600 text-white font-bold py-2.5 rounded-xl sm:col-span-2'>저장하고 시작</button></form>"
+        "<p class='text-xs text-slate-400 mt-2'>매장이면 글 끝에 지도·연락처, 셀러면 구매 링크/검색어로 자동 전환됩니다.</p>")
+    # ② 내 채널 연결
+    connected = {a.channel: a for a in db.list_channel_accounts(t.id)}
+    rows = ""
+    for ch in CONNECTABLE:
+        acc = connected.get(ch)
+        if acc and acc.access_token_enc:
+            state = "<span class='text-emerald-600 text-sm font-semibold'>✅ 연결됨</span>"
+            btn = f"<a href='/me/connect/{ch.value}/start' class='px-3 py-1.5 bg-slate-200 rounded-lg text-xs'>다시 연결</a>"
+        elif oauth.configured(ch):
+            state = "<span class='text-slate-400 text-sm'>미연결</span>"
+            btn = f"<a href='/me/connect/{ch.value}/start' class='px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs'>연결하기</a>"
+        else:
+            state = "<span class='text-amber-600 text-sm'>준비 중(앱 심사)</span>"
+            btn = "<span class='text-xs text-slate-400'>곧 제공</span>"
+        rows += (f"<div class='flex items-center justify-between bg-white rounded-xl border p-3 mb-2'>"
+                 f"<div><b>{CHANNEL_LABEL[ch]}</b><br>{state}</div>{btn}</div>")
+    channels = ("<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-4'>"
+                "<h2 class='font-bold mb-1'>② 내 채널 연결 (발행할 곳)</h2>"
+                "<p class='text-xs text-slate-400 mb-3'>비밀번호 없이 공식 OAuth로 1회 허용 → 내 계정에 자동 발행. "
+                "네이버는 공식 API가 없어 글을 완성해 드리면 직접 발행(반자동).</p>" + rows + "</div>")
+    # ③ 콘텐츠 만들기 + 이력
+    jobs = db.list_jobs(tenant_id=t.id, limit=50)
+    if jobs:
+        rowsj = "".join(
+            f"<tr class='border-t'><td class='py-2 pr-2'>{esc((j['title'] or '')[:32])}</td>"
+            f"<td class='text-slate-400 pr-2'>{esc(CHMAP.get(j['channel'], j['channel']))}</td>"
+            f"<td class='pr-2'>{esc(STATUS_KO.get(j['status'], j['status']))}</td>"
+            f"<td class='text-slate-400 text-xs'>{esc(j['created_at'])}</td></tr>" for j in jobs)
+        hist = f"<div class='overflow-x-auto'><table class='w-full text-sm'><tbody>{rowsj}</tbody></table></div>"
+    else:
+        hist = "<p class='text-slate-400 text-sm'>아직 만든 콘텐츠가 없어요. 사진을 올리면 여기에 쌓입니다.</p>"
+    # ── 최초 1회 온보딩 vs 작동 대시보드 ──
+    onboarded = bool((t.industry or "").strip())
+    if not onboarded:
+        intro = ("<div class='bg-indigo-50 text-indigo-700 p-4 rounded-2xl mb-4 text-sm'>"
+                 "👋 시작하려면 가게/상품 정보를 <b>딱 한 번만</b> 입력해 주세요. "
+                 "이후엔 사진만 올리면 AI가 다 만들어 드립니다.</div>")
+        card = ("<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5'>"
+                "<h2 class='font-bold mb-3'>가게·스토어 정보 (최초 1회)</h2>" + store_form + "</div>")
+        return _subscriber_page(f"{esc(t.name)} · 시작 설정", banner + intro + card)
+    # 온보딩 완료 → 사진 올려 생성이 메인
+    main_cta = ("<div class='rounded-3xl p-7 mb-4 text-center text-white' "
+                "style='background:linear-gradient(120deg,#6366f1,#a855f7,#ec4899)'>"
+                "<div class='text-2xl font-extrabold mb-1'>사진만 올리면 끝 ✨</div>"
+                "<p class='text-white/85 text-sm mb-4'>인스타·네이버·유튜브·X 5채널 콘텐츠 + 영상 + 캐러셀을 AI가 자동 생성합니다.</p>"
+                f"<a href='/u/{tok}' class='inline-block bg-white text-indigo-700 font-extrabold px-8 py-4 rounded-2xl text-lg'>📷 사진 올려 생성하기</a></div>")
+    content = ("<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-4'>"
+               "<h2 class='font-bold mb-3'>최근 만든 콘텐츠</h2>" + hist + "</div>")
+    settings = ("<details class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5'>"
+                "<summary class='font-bold cursor-pointer text-slate-600'>⚙️ 가게·스토어 설정 수정</summary>"
+                "<div class='mt-3'>" + store_form + "</div></details>")
+    return _subscriber_page(f"{esc(t.name)} · 내 작업실", banner + main_cta + channels + content + settings)
+
+
+@app.post("/me/store")
+def my_store(request: Request, name: str = Form(""), industry: str = Form(""), region: str = Form(""),
+             biz_type: str = Form("local"), phone: str = Form(""), address: str = Form(""),
+             marketplace: str = Form(""), brand_name: str = Form(""),
+             search_kw: str = Form(""), buy_url: str = Form("")):
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    t = _ensure_user_tenant(u)
+    db.rename_tenant(t.id, name, industry, region)
+    db.update_tenant_profile(t.id, phone, address, t.hours, t.map_url)
+    db.update_tenant_classification(t.id, biz_type, marketplace, buy_url, search_kw, brand_name)
+    if industry.strip():
+        from app.industries import ensure_profile
+        ensure_profile(industry.strip())
+    return RedirectResponse("/me?ok=설정을 저장했어요", status_code=303)
+
+
+@app.get("/me/connect/{channel}/start")
+def my_connect_start(request: Request, channel: str):
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    t = _ensure_user_tenant(u)
+    try:
+        ch = Channel(channel)
+    except ValueError:
+        return RedirectResponse("/me?err=지원하지 않는 채널", status_code=303)
+    if not oauth.configured(ch):
+        return RedirectResponse("/me?err=아직 준비 중(앱 심사) 채널입니다", status_code=303)
+    return RedirectResponse(oauth.authorize_url(ch, t.id))
+
+
+@app.get("/demo/{name}")
+def demo_asset(name: str):
+    """랜딩 데모/테스트 결과용 샘플 파일(사진/영상/음성)."""
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name):   # 경로 조작 차단
+        return HTMLResponse(status_code=404)
+    path = os.path.join(os.path.dirname(__file__), "static", "demo", name)
+    if not os.path.exists(path):
+        return HTMLResponse(status_code=404)
+    ext = name.rsplit(".", 1)[-1].lower()
+    media = {"mp4": "video/mp4", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+             "png": "image/png", "mp3": "audio/mpeg"}.get(ext, "application/octet-stream")
+    return FileResponse(path, media_type=media)
+
+
+# ── 운영자 대시보드 ──────────────────────────────────────
+@app.get("/admin", response_class=HTMLResponse)
+def admin():
+    drafts = db.list_pieces(ContentStatus.DRAFT)
+    failed = db.list_pieces(ContentStatus.FAILED)
+    published = db.list_pieces(ContentStatus.PUBLISHED)
+    auto_shops = sum(1 for t in db.list_tenants() if (t.autonomy or 0) >= 1)
+    cards = ("<div class='grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6'>"
+             + stat_card("확인 필요(예외)", len(drafts) + len(failed), "amber")
+             + stat_card("자동 발행", len(published), "emerald")
+             + stat_card("자동화 가게", f"{auto_shops}/{len(db.list_tenants())}", "indigo")
+             + stat_card("실패", len(failed), "rose") + "</div>")
+    # 예외(사람 확인 필요) = 검수대기/실패를 세트로 묶어 표시
+    sets = db.list_sets(statuses=["draft", "failed"])
+    if not sets:
+        exc = ("<div class='bg-white rounded-2xl border border-slate-100 p-8 text-center text-slate-400'>"
+               "🎉 확인할 예외가 없습니다 — 자동 발행이 잘 돌고 있어요.</div>")
+    else:
+        exc = ""
+        for s in sets:
+            ps = [p for p in db.get_set_pieces(s["asset_id"])
+                  if p.status in (ContentStatus.DRAFT, ContentStatus.FAILED)]
+            if not ps:
+                continue
+            rep = next((p for p in ps if p.payload.get("text") or p.payload.get("title")), ps[0])
+            preview = esc((rep.payload.get("text") or rep.payload.get("title") or "")[:64])
+            chips = "".join(
+                f"<span class='text-[11px] px-2 py-1 rounded-lg bg-slate-50 border border-slate-100 mr-1 mb-1 inline-block'>"
+                f"{CHMAP.get(p.channel.value, p.channel.value)} {badge(p.status.value)}</span>" for p in ps)
+            why = "점수 미달·반자동·발행실패 → 사람 확인"
+            exc += (
+                "<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-4 mb-3 flex gap-4 items-start'>"
+                f"<img src='/asset/{ps[0].id}' class='w-14 h-14 object-cover rounded-xl bg-slate-100 shrink-0'>"
+                "<div class='flex-1 min-w-0'>"
+                f"<div class='flex items-center gap-2 flex-wrap'><b class='text-slate-800'>{esc(s['tenant'])}</b>"
+                f"<span class='text-xs text-slate-400'>{esc(s['created'])} · {len(ps)}건 예외</span></div>"
+                f"<div class='text-sm text-slate-500 truncate mt-0.5'>{preview}…</div>"
+                f"<div class='mt-2'>{chips}</div><div class='text-[11px] text-amber-600 mt-1'>⚠️ {why}</div></div>"
+                f"<a href='/admin/set/{s['asset_id']}' class='px-4 py-2 bg-indigo-600 text-white text-xs font-semibold rounded-xl hover:bg-indigo-700 shrink-0'>처리</a></div>")
+    # 자동 발행 로그(최근)
+    log = ""
+    for p in published[:12]:
+        t = db.get_tenant(p.tenant_id)
+        log += (f"<div class='flex items-center gap-2 text-xs py-1.5 border-b border-slate-50'>"
+                f"<span class='text-emerald-500'>✅</span><b class='text-slate-600'>{esc(t.name if t else '')}</b>"
+                f"<span class='text-slate-400'>{CHMAP.get(p.channel.value, p.channel.value)}</span>"
+                f"<span class='text-slate-500 truncate flex-1'>{esc((p.payload.get('text') or p.payload.get('title') or '')[:40])}</span></div>")
+    log_box = (f"<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-4 mt-6'>"
+               f"<div class='font-bold text-slate-700 mb-2 text-sm'>🤖 최근 자동 발행</div>"
+               f"{log or '<p class=text-slate-400 text-sm>아직 자동 발행 내역이 없습니다.</p>'}</div>")
+    head = "<h2 class='font-bold text-slate-700 mb-3'>⚠️ 확인 필요 (예외만)</h2>"
+    return shell("review", "운영 현황", cards + head + exc + log_box,
+                 subtitle="자동 발행 중 — 예외만 확인하세요")
+
+
+@app.get("/admin/board", response_class=HTMLResponse)
+def board(tenant: str = "", channel: str = "", status: str = "", q: str = "",
+          date_from: str = "", date_to: str = "", page: int = 1):
+    jobs = db.list_jobs(tenant_id=tenant or None, channel=channel or None,
+                        status=status or None, q=q, date_from=date_from, date_to=date_to)
+    tenants = db.list_tenants()
+    # 통계
+    def cnt(s):
+        return sum(1 for j in jobs if j["status"] == s)
+    cards = ("<div class='grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6'>"
+             + stat_card("검수 대기", cnt("draft"), "amber")
+             + stat_card("승인됨", cnt("approved"), "indigo")
+             + stat_card("발행 완료", cnt("published"), "emerald")
+             + stat_card("실패", cnt("failed"), "rose") + "</div>")
+    # 상태 탭
+    def tab(label, sval):
+        on = sval == status
+        cls = "bg-indigo-600 text-white" if on else "bg-white text-slate-500 border border-slate-200 hover:bg-slate-50"
+        qp = f"?status={sval}" + (f"&channel={channel}" if channel else "") + (f"&tenant={tenant}" if tenant else "")
+        return f"<a href='/admin/board{qp}' class='px-4 py-2 rounded-xl text-sm font-medium {cls}'>{label}</a>"
+    tabs = ("<div class='flex flex-wrap gap-2 mb-4'>" + tab("전체", "")
+            + "".join(tab(STATUS_KO[s], s) for s in ["draft", "approved", "scheduled", "published", "failed"]) + "</div>")
+    # 필터
+    topt = "<option value=''>전체 가게</option>" + "".join(
+        f"<option value='{t.id}'{' selected' if t.id == tenant else ''}>{esc(t.name)}</option>" for t in tenants)
+    chmap = {"instagram": "인스타그램", "naver_blog": "네이버 블로그", "youtube": "유튜브", "x": "X"}
+    copt = "<option value=''>전체 채널</option>" + "".join(
+        f"<option value='{c}'{' selected' if c == channel else ''}>{l}</option>" for c, l in chmap.items())
+    sopt = "<option value=''>전체 상태</option>" + "".join(
+        f"<option value='{s}'{' selected' if s == status else ''}>{STATUS_KO[s]}</option>" for s in STATUS_KO)
+    inp = "border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400 outline-none"
+    filt = (f"<form method=get action='/admin/board' class='bg-white rounded-2xl border border-slate-100 shadow-sm p-4 mb-5 flex flex-wrap items-center gap-2'>"
+            f"<input name=q value=\"{esc(q)}\" placeholder='🔍 제목 검색' class='{inp} flex-1 min-w-[140px]'>"
+            f"<select name=tenant class='{inp}'>{topt}</select>"
+            f"<select name=channel class='{inp}'>{copt}</select>"
+            f"<select name=status class='{inp}'>{sopt}</select>"
+            f"<input type=date name=date_from value='{esc(date_from)}' class='{inp}'>"
+            f"<span class='text-slate-300'>~</span>"
+            f"<input type=date name=date_to value='{esc(date_to)}' class='{inp}'>"
+            f"<button class='px-5 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700'>검색</button>"
+            f"<a href='/admin/board' class='px-4 py-2 bg-slate-100 text-slate-600 text-sm rounded-xl hover:bg-slate-200'>초기화</a></form>")
+    bulk = (f"<form method=post action='/admin/board/bulk' class='mb-3'>"
+            f"<input type=hidden name=tenant value=\"{esc(tenant)}\"><input type=hidden name=channel value=\"{esc(channel)}\">"
+            f"<button class='px-4 py-2 bg-emerald-600 text-white rounded-xl text-sm font-semibold hover:bg-emerald-700'>"
+            f"🚀 우수(85+) 검수대기 일괄 승인·발행</button></form>")
+    # 페이지네이션
+    per = 20
+    total = len(jobs)
+    pages = max(1, (total + per - 1) // per)
+    page = max(1, min(page, pages))
+    page_jobs = jobs[(page - 1) * per: page * per]
+    # 테이블
+    head = ("<tr class='text-left text-xs text-slate-400 border-b border-slate-100'>"
+            "<th class='px-4 py-3 font-semibold'>가게</th><th class='px-4 py-3 font-semibold'>채널</th>"
+            "<th class='px-4 py-3 font-semibold'>제목</th><th class='px-4 py-3 font-semibold'>상태</th>"
+            "<th class='px-4 py-3 font-semibold'>점수</th><th class='px-4 py-3 font-semibold'>예상 노출</th>"
+            "<th class='px-4 py-3 font-semibold'>생성</th>"
+            "<th class='px-4 py-3 font-semibold'>발행</th><th class='px-4 py-3 font-semibold text-right'>액션</th></tr>")
+    rows = ""
+    for j in page_jobs:
+        sc = j["score"]
+        sc_html = ("<span class='px-2 py-0.5 rounded-full text-xs font-bold "
+                   + ("bg-emerald-50 text-emerald-600" if (sc or 0) >= 85 else
+                      "bg-amber-50 text-amber-600" if (sc or 0) >= 70 else "bg-rose-50 text-rose-600")
+                   + f"'>{sc}</span>") if sc is not None else "<span class='text-slate-300'>-</span>"
+        rows += ("<tr class='border-b border-slate-50 hover:bg-slate-50/70 transition'>"
+                 f"<td class='px-4 py-3 text-sm font-medium text-slate-700'>{esc(j['tenant'])}</td>"
+                 f"<td class='px-4 py-3 text-xs text-slate-500'>{esc(chmap.get(j['channel'], j['channel']))}<br><span class='text-slate-300'>{esc(j['kind'])}</span></td>"
+                 f"<td class='px-4 py-3 text-sm text-slate-700 max-w-[220px] truncate'>{esc(j['title'][:38])}</td>"
+                 f"<td class='px-4 py-3'>{badge(j['status'])}<div class='text-[11px] text-slate-400 mt-0.5'>{STATUS_KO.get(j['status'],'')}</div></td>"
+                 f"<td class='px-4 py-3'>{sc_html}</td>"
+                 f"<td class='px-4 py-3 text-xs text-emerald-600 font-medium'>{esc(j.get('reach') or '-')}</td>"
+                 f"<td class='px-4 py-3 text-xs text-slate-400'>{esc(j['created_at'])}</td>"
+                 f"<td class='px-4 py-3 text-xs text-slate-400'>{esc(j['published_at'] or '-')}</td>"
+                 f"<td class='px-4 py-3 text-right'><a href='/admin/review/{j['id']}' class='px-3 py-1.5 bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg hover:bg-indigo-600 hover:text-white transition'>검수</a></td></tr>")
+    if not page_jobs:
+        rows = "<tr><td colspan=9 class='px-4 py-12 text-center text-slate-400'>조건에 맞는 콘텐츠가 없습니다.</td></tr>"
+    # 페이지 네비
+    def pl(pg):
+        qp = (f"?page={pg}" + (f"&status={status}" if status else "") + (f"&channel={channel}" if channel else "")
+              + (f"&tenant={tenant}" if tenant else "") + (f"&q={q}" if q else ""))
+        return f"/admin/board{qp}"
+    nav_pg = ""
+    if pages > 1:
+        prev = f"<a href='{pl(page-1)}' class='px-3 py-1.5 rounded-lg bg-slate-100 text-sm'>← 이전</a>" if page > 1 else ""
+        nxt = f"<a href='{pl(page+1)}' class='px-3 py-1.5 rounded-lg bg-slate-100 text-sm'>다음 →</a>" if page < pages else ""
+        nav_pg = f"<div class='flex items-center justify-center gap-3 mt-1'>{prev}<span class='text-sm text-slate-500'>{page} / {pages}</span>{nxt}</div>"
+    table = (f"<div class='bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden'>"
+             f"<div class='overflow-x-auto'><table class='w-full'>{head}{rows}</table></div>"
+             f"<div class='px-4 py-3 text-xs text-slate-400 border-t border-slate-50'>총 {total}건 · {page}/{pages} 페이지</div></div>{nav_pg}")
+    return shell("board", "포스팅 현황판", cards + tabs + filt + bulk + table,
+                 subtitle=f"전체 발행 작업 현황 · {total}건")
+
+
+@app.post("/admin/board/bulk")
+def board_bulk(tenant: str = Form(""), channel: str = Form("")):
+    """필터 범위 내 점수 85+ 검수대기 → 승인·발행(반자동 채널은 건너뜀)."""
+    jobs = db.list_jobs(tenant_id=tenant or None, channel=channel or None, status="draft")
+    for j in jobs:
+        if (j["score"] or 0) >= 85:
+            p = db.get_piece(j["id"])
+            if not p:
+                continue
+            pub = get_publisher(p.channel)
+            if not pub.supports_auto_publish:   # 네이버 등 반자동은 일괄에서 제외
+                continue
+            db.set_piece_status(p.id, ContentStatus.APPROVED)
+            p.status = ContentStatus.APPROVED
+            publish_and_record(p)
+    return RedirectResponse(f"/admin/board?tenant={tenant}&channel={channel}", status_code=303)
+
+
+@app.get("/admin/set/{asset_id}", response_class=HTMLResponse)
+def set_detail(asset_id: str):
+    ps = db.get_set_pieces(asset_id)
+    if not ps:
+        return HTMLResponse("<p>없는 세트입니다.</p>", status_code=404)
+    t = db.get_tenant(ps[0].tenant_id)
+    rlo = sum((p.payload.get("reach") or {}).get("low", 0) for p in ps)
+    rhi = sum((p.payload.get("reach") or {}).get("high", 0) for p in ps)
+    top = (f"<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-5 flex flex-wrap items-center gap-3'>"
+           f"<img src='/asset/{ps[0].id}' class='w-14 h-14 rounded-xl object-cover'>"
+           f"<div class='flex-1'><b class='text-slate-800'>{esc(t.name if t else '')}</b>"
+           f"<div class='text-sm text-emerald-600 font-semibold'>👁 세트 합산 예상 도달 {rlo:,}~{rhi:,}</div></div>"
+           f"<form method=post action='/admin/set/{asset_id}/approve-all'><button class='px-4 py-2 bg-slate-100 text-slate-700 text-sm font-semibold rounded-xl hover:bg-slate-200'>전체 승인</button></form>"
+           f"<form method=post action='/admin/set/{asset_id}/publish-all'><button class='px-4 py-2 bg-emerald-600 text-white text-sm font-semibold rounded-xl hover:bg-emerald-700'>🚀 전체 발행</button></form></div>")
+    rows = ""
+    for p in ps:
+        r = p.payload.get("reach") or {}
+        sc = (p.payload.get("ranking_audit") or {}).get("score")
+        prev = esc((p.payload.get("text") or p.payload.get("title") or "")[:80])
+        rows += ("<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-4 mb-3 flex gap-4 items-center'>"
+                 f"<img src='/asset/{p.id}' class='w-14 h-14 rounded-xl object-cover bg-slate-100 shrink-0'>"
+                 "<div class='flex-1 min-w-0'>"
+                 f"<div class='flex items-center gap-2 mb-0.5'><b class='text-sm'>{CHMAP.get(p.channel.value, p.channel.value)} {p.kind.value}</b>"
+                 f"{badge(p.status.value)}"
+                 + (f"<span class='text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 font-semibold'>{sc}점</span>" if sc is not None else "")
+                 + (f"<span class='text-xs text-slate-400'>👁 {r.get('label','')}</span>" if r else "") + "</div>"
+                 f"<div class='text-sm text-slate-500 truncate'>{prev}…</div></div>"
+                 f"<a href='/admin/review/{p.id}' class='px-4 py-2 bg-indigo-600 text-white text-xs font-semibold rounded-xl hover:bg-indigo-700 shrink-0'>상세 검수</a></div>")
+    body = f"<a href='/admin' class='text-sm text-slate-400'>← 검수 목록</a><div class='mt-2'>{top}{rows}</div>"
+    return shell("review", "세트 검수", body, subtitle=f"{t.name if t else ''} · {len(ps)}개 채널")
+
+
+@app.post("/admin/set/{asset_id}/approve-all")
+def set_approve_all(asset_id: str):
+    for p in db.get_set_pieces(asset_id):
+        if p.status in (ContentStatus.DRAFT,):
+            db.set_piece_status(p.id, ContentStatus.APPROVED)
+    return RedirectResponse(f"/admin/set/{asset_id}", status_code=303)
+
+
+@app.post("/admin/set/{asset_id}/publish-all", response_class=HTMLResponse)
+def set_publish_all(asset_id: str):
+    results = []
+    for p in db.get_set_pieces(asset_id):
+        if p.status == ContentStatus.REJECTED:
+            continue
+        if p.status != ContentStatus.PUBLISHED:
+            db.set_piece_status(p.id, ContentStatus.APPROVED)
+            p.status = ContentStatus.APPROVED
+            res = publish_and_record(p)
+            results.append((p.channel.value, res))
+    return RedirectResponse("/admin", status_code=303)
+
+
+AUTONOMY_LABEL = {0: "수동 검수", 1: "점수게이트 자동(85+)", 2: "완전 자동"}
+
+
+@app.get("/admin/shops", response_class=HTMLResponse)
+def shops(ok: str = "", err: str = ""):
+    base = os.environ.get("SHOPCAST_BASE", "http://127.0.0.1:8000")
+    inp = "border border-slate-200 rounded-lg px-2 py-1.5 text-sm w-full"
+    banner = (f"<div class='bg-emerald-50 text-emerald-700 p-3 rounded-xl mb-3 text-sm'>✅ {esc(ok)}</div>" if ok else "")
+    banner += (f"<div class='bg-rose-50 text-rose-600 p-3 rounded-xl mb-3 text-sm'>⚠️ {esc(err)}</div>" if err else "")
+    aopt0 = "".join(f"<option value='{lv}'>{lab}</option>" for lv, lab in AUTONOMY_LABEL.items())
+    addform = (
+        "<details class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-4'>"
+        "<summary class='font-bold text-slate-700 cursor-pointer'>➕ 새 고객(가게) 추가</summary>"
+        "<form method=post action='/admin/shops/new' class='grid sm:grid-cols-2 gap-2 mt-3'>"
+        f"<input name=name placeholder='상호 *' required class='{inp}'>"
+        f"<input name=industry placeholder='업종 * (자유 입력 — 예: 꽃집, 헬스장, 치과)' required class='{inp}'>"
+        f"<input name=region placeholder='지역 (예: 수원 영통)' class='{inp}'>"
+        f"<select name=autonomy class='{inp}'>{aopt0}</select>"
+        # ── 사업형태(분류축) ──
+        f"<select name=biz_type class='{inp} sm:col-span-2 font-semibold'>"
+        "<option value=local>🏪 동네 매장(소상공인) — 방문·예약 유도</option>"
+        "<option value=seller>📦 온라인 셀러(쿠팡·11번가·스토어) — 구매 유도</option>"
+        "<option value=hybrid>🔁 매장+온라인 동시</option></select>"
+        f"<input name=phone placeholder='📞 전화 (매장)' class='{inp}'>"
+        f"<input name=hours placeholder='🕐 영업시간 (매장)' class='{inp}'>"
+        f"<input name=address placeholder='📍 주소 (매장)' class='{inp}'>"
+        f"<input name=map_url placeholder='🗺 네이버 지도 링크 (매장)' class='{inp}'>"
+        # ── 셀러 부가정보 ──
+        f"<select name=marketplace class='{inp}'>"
+        "<option value=''>🛒 마켓 선택 (셀러)</option><option value=coupang>쿠팡</option>"
+        "<option value=11st>11번가</option><option value=smartstore>스마트스토어</option>"
+        "<option value=gmarket>지마켓</option><option value=self>자사몰</option></select>"
+        f"<input name=brand_name placeholder='🏷 브랜드/스토어명 (셀러)' class='{inp}'>"
+        f"<input name=buy_url placeholder='🔗 상세페이지/스토어 URL (셀러)' class='{inp}'>"
+        f"<input name=search_kw placeholder='🔎 검색어 유도 — 쿠팡 등 직링크 불가시 (셀러)' class='{inp}'>"
+        "<button class='px-4 py-2 bg-indigo-600 text-white text-sm font-bold rounded-xl sm:col-span-2'>"
+        "가게 추가 (업종 프로필 자동 생성)</button></form>"
+        "<p class='text-xs text-slate-400 mt-2'>※ 업종 프리셋에 없으면 AI가 맞춤 프로필을 자동 생성합니다. "
+        "사업형태(매장/셀러)에 따라 글 마무리(지도 vs 구매링크)·CTA·키워드가 자동으로 달라집니다. "
+        "쿠팡은 외부 직링크 제약이 있어 '검색어 유도'를 권장합니다.</p>"
+        "</details>")
+    biz_meta = {"local": ("🏪 동네매장", "bg-emerald-100 text-emerald-700"),
+                "seller": ("📦 온라인셀러", "bg-amber-100 text-amber-700"),
+                "hybrid": ("🔁 매장+온라인", "bg-indigo-100 text-indigo-700")}
+    mk_names = {"coupang": "쿠팡", "11st": "11번가", "smartstore": "스마트스토어",
+                "gmarket": "지마켓", "self": "자사몰", "": ""}
+    cards = ""
+    for t in db.list_tenants():
+        tok = db.tenant_token(t.id)
+        link = f"{base}/u/{tok}"
+        aopt = "".join(f"<option value='{lv}'{' selected' if (t.autonomy or 0) == lv else ''}>{lab}</option>"
+                       for lv, lab in AUTONOMY_LABEL.items())
+        bt = (t.biz_type or "local")
+        blabel, bcls = biz_meta.get(bt, biz_meta["local"])
+        mk = mk_names.get(t.marketplace or "", t.marketplace or "")
+        biz_badge = (f"<span class='text-[11px] font-bold px-2 py-0.5 rounded-full {bcls}'>{blabel}"
+                     + (f" · {esc(mk)}" if (bt in ('seller', 'hybrid') and mk) else "") + "</span>")
+        bopt = "".join(f"<option value='{k}'{' selected' if bt == k else ''}>{lab.split(' ',1)[1] if ' ' in lab else lab}</option>"
+                       for k, (lab, _c) in biz_meta.items())
+        mopt = "".join(f"<option value='{k}'{' selected' if (t.marketplace or '') == k else ''}>{v or '마켓 선택'}</option>"
+                       for k, v in mk_names.items())
+        bizform = (
+            f"<form method=post action='/admin/shops/{t.id}/classify' class='grid sm:grid-cols-2 gap-2 mt-2'>"
+            f"<select name=biz_type class='{inp} font-semibold'>{bopt}</select>"
+            f"<select name=marketplace class='{inp}'>{mopt}</select>"
+            f"<input name=brand_name value=\"{esc(t.brand_name)}\" placeholder='🏷 브랜드/스토어명' class='{inp}'>"
+            f"<input name=search_kw value=\"{esc(t.search_kw)}\" placeholder='🔎 검색어 유도(쿠팡 등)' class='{inp}'>"
+            f"<input name=buy_url value=\"{esc(t.buy_url)}\" placeholder='🔗 상세페이지/스토어 URL' class='{inp} sm:col-span-2'>"
+            "<button class='px-3 py-1.5 bg-amber-500 text-white text-xs font-semibold rounded-lg sm:col-span-2'>"
+            "사업형태·구매정보 저장 (글 마무리/CTA 자동 전환)</button></form>")
+        cards += (
+            "<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-3'>"
+            "<div class='flex flex-wrap items-center gap-3 mb-3'>"
+            f"<b class='text-slate-800'>{esc(t.name)}</b>"
+            f"{biz_badge}"
+            f"<span class='text-xs text-slate-400'>{esc(t.industry)} · {esc(t.region)}</span>"
+            f"<a href='/u/{tok}' class='text-indigo-600 text-xs break-all'>{esc(link)}</a>"
+            "<div class='ml-auto flex gap-2'>"
+            f"<a href='/admin/connect/{t.id}' class='px-3 py-1.5 bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg hover:bg-slate-200'>🔗 계정 연결</a>"
+            f"<form method=post action='/admin/shops/{t.id}/remix' class='inline'><button class='px-3 py-1.5 bg-fuchsia-100 text-fuchsia-700 text-xs font-semibold rounded-lg hover:bg-fuchsia-200' title='잘 된 콘텐츠 포맷으로 새 변형 생성'>🔥 위너 리믹스</button></form>"
+            f"<a href='/u/{tok}' class='px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg'>업로드</a></div></div>"
+            # 자동화 레벨
+            f"<form method=post action='/admin/shops/{t.id}/autonomy' class='flex items-center gap-2 mb-3'>"
+            "<span class='text-xs font-semibold text-slate-500'>🤖 자동화</span>"
+            f"<select name=level class='{inp} max-w-xs'>{aopt}</select>"
+            "<button class='px-3 py-1.5 bg-slate-800 text-white text-xs rounded-lg'>적용</button>"
+            "<span class='text-[11px] text-slate-400'>수동→점수게이트→완전자동 (검수 부담↓)</span></form>"
+            # 연락처/장소(블로그 자동 삽입)
+            f"<form method=post action='/admin/shops/{t.id}/profile' class='grid sm:grid-cols-2 gap-2'>"
+            f"<input name=phone value=\"{esc(t.phone)}\" placeholder='📞 전화번호' class='{inp}'>"
+            f"<input name=hours value=\"{esc(t.hours)}\" placeholder='🕐 영업시간' class='{inp}'>"
+            f"<input name=address value=\"{esc(t.address)}\" placeholder='📍 주소' class='{inp}'>"
+            f"<input name=map_url value=\"{esc(t.map_url)}\" placeholder='🗺 네이버 지도 링크' class='{inp}'>"
+            "<button class='px-3 py-1.5 bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg sm:col-span-2'>연락처·장소 저장 (블로그에 자동 삽입)</button></form>"
+            + bizform +
+            "</div>")
+    return shell("shops", "가게 관리", banner + addform + cards, subtitle=f"등록 가게 {len(db.list_tenants())}곳")
+
+
+@app.post("/admin/shops/new")
+def shop_new(name: str = Form(""), industry: str = Form(""), region: str = Form(""),
+             autonomy: int = Form(0), phone: str = Form(""), hours: str = Form(""),
+             address: str = Form(""), map_url: str = Form(""), biz_type: str = Form("local"),
+             marketplace: str = Form(""), brand_name: str = Form(""),
+             buy_url: str = Form(""), search_kw: str = Form("")):
+    if not (name.strip() and industry.strip()):
+        return RedirectResponse("/admin/shops", status_code=303)
+    from app.industries import ensure_profile
+    t = db.create_tenant(name.strip(), industry.strip(), region.strip(), biz_type.strip() or "local")
+    db.set_autonomy(t.id, autonomy)
+    db.update_tenant_profile(t.id, phone, address, hours, map_url)
+    db.update_tenant_classification(t.id, biz_type, marketplace, buy_url, search_kw, brand_name)
+    ensure_profile(industry.strip())   # 프리셋에 없으면 AI가 업종 프로필 자동 생성·저장
+    return RedirectResponse("/admin/shops", status_code=303)
+
+
+@app.post("/admin/shops/{tid}/classify")
+def shop_classify(tid: str, biz_type: str = Form("local"), marketplace: str = Form(""),
+                  brand_name: str = Form(""), buy_url: str = Form(""), search_kw: str = Form("")):
+    db.update_tenant_classification(tid, biz_type, marketplace, buy_url, search_kw, brand_name)
+    return RedirectResponse("/admin/shops", status_code=303)
+
+
+@app.post("/admin/shops/{tid}/remix")
+def shop_remix(tid: str):
+    """위너 리믹스 — 이 가게에서 가장 점수 높았던 콘텐츠의 소재로 새 변형을 재생성(검증된 포맷 재활용)."""
+    t = db.get_tenant(tid)
+    if not t:
+        return RedirectResponse("/admin/shops", status_code=303)
+    jobs = [j for j in db.list_jobs(tenant_id=tid, limit=200) if j.get("score")]
+    if not jobs:
+        return RedirectResponse("/admin/shops?err=리믹스할 콘텐츠가 아직 없어요", status_code=303)
+    best = max(jobs, key=lambda j: j["score"])
+    piece = db.get_piece(best["id"])
+    imgs = [p for p in ((piece.payload.get("image_paths") if piece else []) or []) if p and os.path.exists(p)]
+    if not imgs:
+        return RedirectResponse("/admin/shops?err=원본 사진이 없어 리믹스 불가", status_code=303)
+    try:
+        files = [(open(p, "rb").read(), os.path.basename(p)) for p in imgs[:4]]
+    except Exception:
+        return RedirectResponse("/admin/shops?err=사진 읽기 실패", status_code=303)
+    base_note = (piece.payload.get("title") or piece.payload.get("narration") or t.name)[:60]
+    remix_note = f"[리믹스 — 잘 된 콘텐츠({best['score']}점) 새 버전. 다른 훅·각도로 변형] {base_note}"
+    ingest_upload(t, files, remix_note)
+    return RedirectResponse(f"/admin/shops?ok=리믹스 생성 완료(원본 {best['score']}점)", status_code=303)
+
+
+@app.get("/admin/ops", response_class=HTMLResponse)
+def ops(ok: str = "", err: str = ""):
+    """대행 운영 관제탑 — 오늘 할 일 큐 + 가게별 파이프라인 + 주간 스케줄."""
+    tenants = db.list_tenants()
+    inp = "border border-slate-200 rounded-lg px-2 py-1.5 text-sm"
+    total_draft = week_pub = behind = 0
+    cards = ""
+    for t in tenants:
+        st = db.tenant_ops_stats(t.id)
+        target = t.publish_schedule or 0
+        tok = db.tenant_token(t.id)
+        week_pub += st["pub_week"]; total_draft += st["draft"]
+        if st["total"] == 0:
+            light, bcls, status = "⚪", "bg-slate-100 text-slate-500", "소재 없음 — 사진 요청"
+        elif st["draft"] > 0:
+            light, bcls, status = "🔴", "bg-rose-100 text-rose-700", f"검수 대기 {st['draft']}건"
+        elif target and st["pub_week"] < target:
+            light, bcls, status = "🟡", "bg-amber-100 text-amber-700", f"발행 부족 {st['pub_week']}/{target}"
+            behind += 1
+        else:
+            light, bcls, status = "🟢", "bg-emerald-100 text-emerald-700", "정상"
+        sopts = "".join(f"<option value='{n}'{' selected' if target == n else ''}>"
+                        f"{'미설정' if n == 0 else f'주 {n}회'}</option>" for n in (0, 1, 2, 3, 5, 7))
+        review_btn = (f"<a href='/admin/board?tenant={t.id}&status=draft' class='px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg'>검수 {st['draft']}건 →</a>"
+                      if st["draft"] else "")
+        cards += (
+            "<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-4'>"
+            f"<div class='flex items-center gap-2 mb-1'><span class='text-lg'>{light}</span>"
+            f"<b class='text-slate-800'>{esc(t.name)}</b>"
+            f"<span class='text-[11px] text-slate-400'>{esc(t.industry or '업종 미설정')}</span>"
+            f"<span class='ml-auto text-[11px] font-semibold px-2 py-0.5 rounded-full {bcls}'>{esc(status)}</span></div>"
+            f"<div class='text-xs text-slate-500 mb-3'>이번주 발행 {st['pub_week']} · 검수대기 {st['draft']} · 누적 {st['total']}</div>"
+            "<div class='flex flex-wrap gap-2 items-center'>"
+            + review_btn
+            + f"<a href='/u/{tok}' class='px-3 py-1.5 bg-emerald-500 text-white text-xs font-semibold rounded-lg'>📷 사진 올리기</a>"
+            + f"<a href='/admin/adpack/{t.id}' class='px-3 py-1.5 bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-lg'>🎯 광고 소재팩</a>"
+            + f"<form method=post action='/admin/shops/{t.id}/remix' class='inline'><button class='px-3 py-1.5 bg-fuchsia-100 text-fuchsia-700 text-xs font-semibold rounded-lg'>🔥 리믹스</button></form>"
+            + f"<form method=post action='/admin/shops/{t.id}/schedule' class='inline flex items-center gap-1 ml-auto'>"
+            + f"<span class='text-[11px] text-slate-400'>주간목표</span><select name=weekly class='{inp}'>{sopts}</select>"
+            + "<button class='px-2 py-1.5 bg-slate-800 text-white text-xs rounded-lg'>저장</button></form>"
+            "</div></div>")
+    # 오늘 할 일 큐(검수 대기 세트)
+    drafts = db.list_sets(statuses=["draft"], limit=100)
+    if drafts:
+        todo = "".join(
+            "<div class='flex items-center gap-3 bg-white rounded-xl border border-rose-100 p-3'>"
+            "<span>🔴</span>"
+            f"<div><b class='text-sm'>{esc(d['tenant'] or '(가게)')}</b> "
+            f"<span class='text-xs text-slate-400'>{d['n']}개 · {esc(d['created'])}</span></div>"
+            f"<a href='/admin/set/{d['asset_id']}' class='ml-auto px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg'>검수하기 →</a></div>"
+            for d in drafts)
+        todo_html = f"<div class='space-y-2'>{todo}</div>"
+    else:
+        todo_html = "<div class='bg-emerald-50 text-emerald-700 rounded-xl p-4 text-sm'>✅ 검수할 대기 건이 없습니다. 깔끔!</div>"
+    banner = (f"<div class='bg-emerald-50 text-emerald-700 p-3 rounded-xl mb-4 text-sm'>✅ {esc(ok)}</div>" if ok else "")
+    banner += (f"<div class='bg-rose-50 text-rose-600 p-3 rounded-xl mb-4 text-sm'>⚠️ {esc(err)}</div>" if err else "")
+    stats = ("<div class='grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6'>"
+             + stat_card("검수 대기(할 일)", total_draft, "rose")
+             + stat_card("이번주 발행", week_pub, "emerald")
+             + stat_card("발행 부족 가게", behind, "amber")
+             + stat_card("등록 가게", len(tenants), "indigo") + "</div>")
+    body = (banner + stats
+            + "<h2 class='font-bold text-slate-700 mb-2'>📋 오늘 할 일 (검수 대기)</h2>" + todo_html
+            + "<h2 class='font-bold text-slate-700 mt-6 mb-2'>🏪 가게별 상태</h2>"
+            + f"<div class='grid sm:grid-cols-2 gap-3'>{cards or '<p class=\"text-slate-400 text-sm\">등록된 가게가 없습니다.</p>'}</div>")
+    return shell("ops", "운영 관제탑", body, subtitle=f"대행 {len(tenants)}곳 · 오늘 검수 {total_draft}건")
+
+
+@app.post("/admin/shops/{tid}/schedule")
+def shop_schedule(tid: str, weekly: int = Form(0)):
+    db.set_publish_schedule(tid, weekly)
+    return RedirectResponse("/admin/ops?ok=주간 발행 목표를 저장했어요", status_code=303)
+
+
+def _best_video_piece(tid: str):
+    """그 가게의 광고로 쓸 숏폼(점수 높은 것 우선, 영상 있는 것)."""
+    jobs = [j for j in db.list_jobs(tenant_id=tid, limit=300) if j.get("kind") == "short"]
+    jobs.sort(key=lambda j: (j.get("score") or 0), reverse=True)
+    for j in jobs:
+        p = db.get_piece(j["id"])
+        if p and p.payload.get("video_path") and os.path.exists(p.payload["video_path"]):
+            return p
+    return None
+
+
+def _med(tid: str, path: str) -> str:
+    return f"/admin/media/{tid}/{os.path.basename(path)}" if (path and os.path.exists(path)) else ""
+
+
+@app.get("/admin/media/{tid}/{fname}")
+def admin_media(tid: str, fname: str):
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", fname):
+        return HTMLResponse(status_code=404)
+    path = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), tid, fname)
+    if not os.path.exists(path):
+        return HTMLResponse(status_code=404)
+    ext = fname.rsplit(".", 1)[-1].lower()
+    mt = {"mp4": "video/mp4", "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+          "zip": "application/zip", "mp3": "audio/mpeg"}.get(ext, "application/octet-stream")
+    return FileResponse(path, media_type=mt)
+
+
+@app.get("/admin/adpack/{tid}", response_class=HTMLResponse)
+def adpack(tid: str):
+    """광고 소재팩 — 6/15초 광고컷 + 규격 + 광고카피 3세트 + zip."""
+    from app.services import adpack as ap
+    t = db.get_tenant(tid)
+    if not t:
+        return HTMLResponse("없는 가게입니다.", status_code=404)
+    piece = _best_video_piece(tid)
+    if not piece:
+        body = ("<a href='/admin/ops' class='text-sm text-slate-400'>← 관제탑</a>"
+                "<div class='bg-amber-50 text-amber-700 p-4 rounded-2xl mt-3'>아직 광고로 만들 영상이 없어요. "
+                f"먼저 <a href='/u/{db.tenant_token(tid)}' class='underline font-semibold'>사진을 올려 숏폼</a>을 생성하세요.</div>")
+        return shell("ops", f"{esc(t.name)} · 광고 소재팩", body, subtitle="영상 없음")
+    out_dir = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), tid)
+    # 광고컷(캐시)
+    cuts = piece.payload.get("ad_cuts") or {}
+    if not cuts or not all(os.path.exists(v) for v in cuts.values()):
+        cuts = ap.build_cuts(piece.payload["video_path"], out_dir)
+        piece.payload["ad_cuts"] = cuts
+        db.save_piece(piece)
+    # 광고카피(캐시)
+    copies = piece.payload.get("ad_copy")
+    if not copies:
+        copies = ap.build_copy(t, piece)
+        piece.payload["ad_copy"] = copies
+        db.save_piece(piece)
+    variants = piece.payload.get("video_variants") or {}
+    # 영상 미리보기 타일
+    vids = []
+    for label, path in [("세로 원본(9:16)", piece.payload.get("video_path")),
+                        ("광고컷 15초", cuts.get("15s")), ("광고컷 6초", cuts.get("6s")),
+                        ("정사각 1:1", variants.get("square")), ("피드 4:5", variants.get("feed45"))]:
+        url = _med(tid, path or "")
+        if url:
+            vids.append(f"<div class='bg-white rounded-2xl border border-slate-100 p-2'>"
+                        f"<video src='{url}' controls muted class='w-full rounded-xl' style='max-height:360px'></video>"
+                        f"<div class='text-xs font-semibold text-slate-600 text-center py-1'>{label}</div></div>")
+    copy_cards = "".join(
+        "<div class='bg-white rounded-2xl border border-slate-100 p-4'>"
+        f"<div class='text-[11px] font-bold text-fuchsia-600 mb-1'>버전 {i+1}</div>"
+        f"<div class='font-bold text-slate-800 mb-1'>{esc(c['headline'])}</div>"
+        f"<p class='text-sm text-slate-600 mb-2'>{esc(c['body'])}</p>"
+        f"<span class='text-xs bg-slate-800 text-white px-2 py-1 rounded'>{esc(c['cta'])}</span></div>"
+        for i, c in enumerate(copies))
+    guide = ("<div class='bg-indigo-50 text-indigo-700 rounded-2xl p-4 text-sm mt-4'>"
+             "📣 <b>광고 돌리는 법</b>: 6초=인지형 / 15초=전환형. 메타 광고관리자(또는 유튜브 캠페인)에 "
+             "위 영상 + 광고카피를 넣고 예산·타겟만 설정하면 됩니다. 규격(1:1·4:5·9:16)은 노출 위치별로 자동 매칭돼요.</div>")
+    body = (f"<a href='/admin/ops' class='text-sm text-slate-400'>← 관제탑</a>"
+            f"<div class='flex items-center gap-3 mt-2 mb-4'><h1 class='text-xl font-extrabold'>{esc(t.name)} 광고 소재팩</h1>"
+            f"<a href='/admin/adpack/{tid}/zip' class='ml-auto bg-indigo-600 text-white font-bold text-sm px-4 py-2 rounded-xl'>⬇ 전체 zip 다운로드</a></div>"
+            "<h2 class='font-bold text-slate-700 mb-2'>🎬 영상 소재 (광고용)</h2>"
+            f"<div class='grid sm:grid-cols-2 lg:grid-cols-3 gap-3'>{''.join(vids)}</div>"
+            "<h2 class='font-bold text-slate-700 mt-6 mb-2'>✍️ 광고 카피 (A/B/C)</h2>"
+            f"<div class='grid sm:grid-cols-3 gap-3'>{copy_cards}</div>" + guide)
+    return shell("ops", f"{esc(t.name)} · 광고 소재팩", body, subtitle="유료광고 바로 투입 가능")
+
+
+@app.get("/admin/adpack/{tid}/zip")
+def adpack_zip(tid: str):
+    from app.services import adpack as ap
+    t = db.get_tenant(tid)
+    piece = _best_video_piece(tid)
+    if not (t and piece):
+        return HTMLResponse("소재 없음", status_code=404)
+    out_dir = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), tid)
+    cuts = piece.payload.get("ad_cuts") or ap.build_cuts(piece.payload["video_path"], out_dir)
+    variants = piece.payload.get("video_variants") or {}
+    copies = piece.payload.get("ad_copy") or ap.build_copy(t, piece)
+    files = {}
+    if piece.payload.get("video_path"):
+        files["세로_원본_9x16.mp4"] = piece.payload["video_path"]
+    if cuts.get("15s"):
+        files["광고_15초.mp4"] = cuts["15s"]
+    if cuts.get("6s"):
+        files["광고_6초.mp4"] = cuts["6s"]
+    if variants.get("square"):
+        files["정사각_1x1.mp4"] = variants["square"]
+    if variants.get("feed45"):
+        files["피드_4x5.mp4"] = variants["feed45"]
+    for i, p in enumerate((piece.payload.get("image_paths") or [])[:4]):
+        files[f"사진{i+1}.jpg"] = p
+    zpath = ap.build_zip(out_dir, files, ap.copy_text(t, copies))
+    return FileResponse(zpath, filename="광고소재팩.zip", media_type="application/zip")
+
+
+@app.post("/admin/shops/{tid}/autonomy")
+def shop_autonomy(tid: str, level: int = Form(0)):
+    db.set_autonomy(tid, level)
+    return RedirectResponse("/admin/shops", status_code=303)
+
+
+@app.post("/admin/shops/{tid}/profile")
+def shop_profile(tid: str, phone: str = Form(""), address: str = Form(""),
+                 hours: str = Form(""), map_url: str = Form("")):
+    db.update_tenant_profile(tid, phone, address, hours, map_url)
+    return RedirectResponse("/admin/shops", status_code=303)
+
+
+@app.get("/admin/industries", response_class=HTMLResponse)
+def industries_page():
+    from app.industries import PROFILES
+    inp = "border border-slate-200 rounded-lg px-2 py-1.5 text-sm w-full"
+    # 프리셋(읽기 전용)
+    pres = "".join(
+        f"<div class='bg-white rounded-xl border border-slate-100 p-3 text-sm'>"
+        f"<b>{esc(p.name)}</b> <span class='text-[11px] text-emerald-600'>프리셋</span>"
+        f"<div class='text-xs text-slate-500 mt-1'>{esc(p.persona[:60])}…</div></div>"
+        for p in PROFILES.values())
+    # AI/수정 프로필(편집 가능)
+    customs = db.list_industry_profiles()
+    forms = ""
+    for c in customs:
+        forms += (
+            f"<form method=post action='/admin/industries/{esc(c['key'])}' class='bg-white rounded-2xl border border-slate-100 shadow-sm p-4 mb-3'>"
+            f"<div class='flex items-center gap-2 mb-2'><b>{esc(c['name'])}</b>"
+            f"<span class='text-[11px] px-2 py-0.5 rounded bg-violet-50 text-violet-600'>{esc(c.get('source','ai'))}</span></div>"
+            f"<input type=hidden name=name value=\"{esc(c['name'])}\">"
+            f"<label class='text-xs text-slate-500'>페르소나(말투)</label><textarea name=persona rows=2 class='{inp} mb-2'>{esc(c.get('persona',''))}</textarea>"
+            f"<label class='text-xs text-slate-500'>톤</label><input name=tone value=\"{esc(c.get('tone',''))}\" class='{inp} mb-2'>"
+            f"<label class='text-xs text-slate-500'>해시태그(쉼표)</label><input name=hashtags value=\"{esc(', '.join(c.get('hashtag_seeds',[])))}\" class='{inp} mb-2'>"
+            f"<label class='text-xs text-slate-500'>콘텐츠 앵글(줄바꿈)</label><textarea name=angles rows=2 class='{inp} mb-2'>{esc(chr(10).join(c.get('content_angles',[])))}</textarea>"
+            f"<label class='text-xs text-slate-500'>촬영 가이드(줄바꿈)</label><textarea name=photo rows=2 class='{inp} mb-2'>{esc(chr(10).join(c.get('photo_guide',[])))}</textarea>"
+            f"<label class='text-xs text-slate-500'>CTA</label><input name=cta value=\"{esc(c.get('cta',''))}\" class='{inp} mb-2'>"
+            f"<label class='text-xs text-slate-500'>주의(줄바꿈)</label><input name=cautions value=\"{esc(', '.join(c.get('cautions',[])))}\" class='{inp} mb-3'>"
+            "<div class='flex gap-2'><button class='px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl'>저장</button>"
+            f"<button formaction='/admin/industries/{esc(c['key'])}/regen' class='px-4 py-2 bg-slate-100 text-slate-700 text-sm font-semibold rounded-xl'>🤖 AI 재생성</button></div></form>")
+    if not customs:
+        forms = "<div class='bg-white rounded-2xl border border-slate-100 p-6 text-center text-slate-400'>AI 생성 업종이 아직 없습니다. 가게 추가 시 프리셋에 없는 업종이면 자동 생성됩니다.</div>"
+    body = ("<h2 class='font-bold text-slate-700 mb-2'>🤖 AI 생성·수정 업종</h2>" + forms
+            + "<h2 class='font-bold text-slate-700 mt-6 mb-2'>📌 프리셋 업종(코드 내장)</h2>"
+            + f"<div class='grid sm:grid-cols-3 gap-2'>{pres}</div>")
+    return shell("industries", "업종 프로필", body, subtitle="업종별 톤·해시태그·가이드 관리")
+
+
+@app.post("/admin/industries/{key}")
+def industries_save(key: str, name: str = Form(""), persona: str = Form(""), tone: str = Form(""),
+                    hashtags: str = Form(""), angles: str = Form(""), photo: str = Form(""),
+                    cta: str = Form(""), cautions: str = Form("")):
+    from app.industries import _to_list
+    data = {"key": key, "name": name, "aliases": [name], "persona": persona, "tone": tone,
+            "hashtag_seeds": [("#" + t.lstrip("#")) for t in _to_list(hashtags)],
+            "content_angles": _to_list(angles), "photo_guide": _to_list(photo),
+            "cta": cta, "cautions": _to_list(cautions)}
+    db.save_industry_profile(key, name, data, source="manual")
+    return RedirectResponse("/admin/industries", status_code=303)
+
+
+@app.post("/admin/industries/{key}/regen")
+def industries_regen(key: str):
+    from app.industries import _generate_ai
+    cur = db.get_industry_profile(key)
+    name = (cur or {}).get("name", key)
+    data = _generate_ai(name, key)
+    if data:
+        db.save_industry_profile(key, name, data, source="ai")
+    return RedirectResponse("/admin/industries", status_code=303)
+
+
+# ── 계정 연결 (OAuth) ────────────────────────────────────
+@app.get("/admin/connect/{tenant_id}", response_class=HTMLResponse)
+def connect_page(tenant_id: str, ok: str = "", err: str = ""):
+    t = db.get_tenant(tenant_id)
+    if not t:
+        return HTMLResponse("<p>없는 가게입니다.</p>", status_code=404)
+    connected = {a.channel: a for a in db.list_channel_accounts(tenant_id)}
+    rows = []
+    for ch in CONNECTABLE:
+        acc = connected.get(ch)
+        if acc and acc.access_token_enc:
+            meta = f" <span class='text-xs text-slate-400'>{esc(str(acc.meta))}</span>"
+            state = f"<span class='text-green-600 text-sm font-semibold'>✅ 연결됨</span>{meta}"
+            btn = (f"<a href='/admin/connect/{tenant_id}/{ch.value}/start' "
+                   f"class='px-3 py-1.5 bg-slate-200 rounded-lg text-xs'>다시 연결</a>")
+        elif oauth.configured(ch):
+            state = "<span class='text-slate-400 text-sm'>미연결</span>"
+            btn = (f"<a href='/admin/connect/{tenant_id}/{ch.value}/start' "
+                   f"class='px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs'>연결하기</a>")
+        else:
+            state = "<span class='text-amber-600 text-sm'>⚙️ 앱 키 미설정</span>"
+            btn = "<span class='text-xs text-slate-400'>env 설정 필요</span>"
+        rows.append(f"<div class='bg-white rounded-xl shadow-sm p-4 mb-2 flex items-center justify-between'>"
+                    f"<div><b>{CHANNEL_LABEL[ch]}</b><br>{state}</div>{btn}</div>")
+    banner = ""
+    if ok:
+        banner = f"<div class='bg-green-50 text-green-700 p-3 rounded-lg mb-3 text-sm'>✅ {esc(ok)} 연결 완료</div>"
+    if err:
+        banner = f"<div class='bg-rose-50 text-rose-600 p-3 rounded-lg mb-3 text-sm'>⚠️ {esc(err)}</div>"
+    note = ("<p class='text-xs text-slate-400 mt-4'>※ 네이버 블로그는 공식 발행 API가 없어 자동연결 불가(초안 제공→사장님 직접 발행). "
+            "인스타는 비즈/크리에이터 계정 + Meta 앱 심사가 필요합니다.</p>")
+    body = (nav("shops") + f"<a href='/admin/shops' class='text-sm text-slate-400'>← 가게</a>"
+            f"<h1 class='text-xl font-bold mt-2 mb-4'>{esc(t.name)} · 계정 연결</h1>{banner}"
+            + "".join(rows) + note)
+    return page("계정 연결", body)
+
+
+@app.get("/admin/connect/{tenant_id}/{channel}/start")
+def connect_start(tenant_id: str, channel: str):
+    try:
+        ch = Channel(channel)
+    except ValueError:
+        return HTMLResponse("<p>지원하지 않는 채널.</p>", status_code=400)
+    if not oauth.configured(ch):
+        return RedirectResponse(f"/admin/connect/{tenant_id}?err=앱 키 미설정({channel})", status_code=303)
+    return RedirectResponse(oauth.authorize_url(ch, tenant_id))
+
+
+@app.get("/oauth/callback")
+def oauth_callback(code: str = "", state: str = "", error: str = ""):
+    tenant_id, ch = oauth.parse_state(state)
+    if not tenant_id or not ch:
+        return HTMLResponse("<p>잘못된 state(변조 의심).</p>", status_code=400)
+    # 구독자 본인 가게면 /me로, 운영자면 /admin/connect로 복귀
+    owner = db.get_user_by_tenant(tenant_id)
+    base = "/me" if owner else f"/admin/connect/{tenant_id}"
+    if error or not code:
+        return RedirectResponse(f"{base}?err=취소되었거나 코드 없음", status_code=303)
+    try:
+        tok = oauth.exchange_code(ch, code, state)
+        db.save_channel_account(tenant_id, ch, tok["access_token"], tok.get("refresh_token", ""), tok.get("meta"))
+    except Exception as e:
+        return RedirectResponse(f"{base}?err={esc(str(e)[:80])}", status_code=303)
+    return RedirectResponse(f"{base}?ok={CHANNEL_LABEL.get(ch, ch.value)} 연결 완료", status_code=303)
+
+
+# ── 사장님 업로드 ────────────────────────────────────────
+@app.get("/u/{token}", response_class=HTMLResponse)
+def upload_form(token: str):
+    import json as _json
+    from app.industries import resolve_industry, example_for
+    tenant, _ = db.get_tenant_by_token(token)
+    if not tenant:
+        return HTMLResponse("<p>잘못된 링크입니다.</p>", status_code=404)
+    prof = resolve_industry(tenant.industry)
+    ex = example_for(prof)
+    purposes = ["방문 유도", "판매 전환", "신상품 홍보", "신뢰 쌓기", "이벤트"]
+    popt = "<option value=''>선택안함</option>" + "".join(
+        f"<option{' selected' if p == ex.get('purpose') else ''}>{p}</option>" for p in purposes)
+    # 왼쪽 입력 폼
+    form = (f"<form method=post action='/u/{token}/upload' enctype='multipart/form-data' class='bg-white rounded-2xl shadow-sm p-5'>"
+            f"<label class='block text-sm font-semibold mb-1'>📷 사진 (여러 장 가능 · 최대 10장)</label>"
+            f"<input type=file name=photos accept='image/*' multiple required class='mb-4 block w-full text-sm'>"
+            f"<label class='block text-sm font-semibold mb-1'>✏️ 한 줄 설명</label>"
+            f"<input name=note id=f_note placeholder=\"예) {esc(ex.get('note',''))}\" required class='mb-3 block w-full border rounded-lg p-2 text-sm'>"
+            f"<label class='block text-sm font-semibold mb-1'>🎯 목적 (선택)</label>"
+            f"<select name=purpose id=f_purpose class='mb-3 block w-full border rounded-lg p-2 text-sm'>{popt}</select>"
+            f"<label class='block text-sm font-semibold mb-1'>👥 타겟 고객 (선택)</label>"
+            f"<input name=target id=f_target placeholder=\"예) {esc(ex.get('target',''))}\" class='mb-3 block w-full border rounded-lg p-2 text-sm'>"
+            f"<label class='block text-sm font-semibold mb-1'>➕ 추가 정보 (선택)</label>"
+            f"<input name=extra id=f_extra placeholder=\"예) {esc(ex.get('extra',''))}\" class='mb-3 block w-full border rounded-lg p-2 text-sm'>"
+            f"<label class='block text-sm font-semibold mb-1'>📝 요청사항 (선택 · 꼭 반영할 점)</label>"
+            f"<input name=request id=f_request placeholder='예) 급매 꼭 강조 / 주차 가능 넣어줘 / 차분한 톤' class='mb-4 block w-full border rounded-lg p-2 text-sm'>"
+            f"<button class='w-full bg-blue-600 text-white font-bold py-3 rounded-lg'>보내기</button></form>")
+    # 오른쪽 가이드 패널 (업종 프로필 기반)
+    angles = "".join(f"<li>· {esc(a)}</li>" for a in prof.content_angles)
+    photog = "".join(f"<li>· {esc(g)}</li>" for g in prof.photo_guide)
+    guide = (f"<div class='bg-blue-50 rounded-2xl p-5 text-sm'>"
+             f"<div class='font-bold text-blue-800 mb-2'>📌 {esc(prof.name)} — 이렇게 보내주세요</div>"
+             f"<div class='font-semibold text-slate-700 mt-2 mb-1'>📸 좋은 사진</div><ul class='text-slate-600 space-y-0.5'>{photog}</ul>"
+             f"<div class='font-semibold text-slate-700 mt-3 mb-1'>💡 이런 소재가 좋아요</div><ul class='text-slate-600 space-y-0.5'>{angles}</ul>"
+             f"<div class='font-semibold text-slate-700 mt-3 mb-1'>✍️ 작성 예시</div>"
+             f"<div class='bg-white rounded-lg p-3 text-slate-600 text-xs leading-relaxed'>"
+             f"{esc(ex.get('note',''))}<br>목적: {esc(ex.get('purpose',''))} · 타겟: {esc(ex.get('target','-'))} · 추가: {esc(ex.get('extra',''))}</div>"
+             f"<button type=button onclick='fillEx()' class='mt-2 w-full bg-blue-600 text-white text-sm font-bold py-2 rounded-lg'>✨ 예시로 채우기</button>"
+             f"<p class='text-xs text-slate-400 mt-2'>밝고 또렷한 사진일수록 결과가 좋아요. 흔들리거나 어두운 사진 ❌</p></div>")
+    script = (f"<script>var EX={_json.dumps(ex)};function fillEx(){{"
+              f"document.getElementById('f_note').value=EX.note||'';"
+              f"document.getElementById('f_purpose').value=EX.purpose||'';"
+              f"document.getElementById('f_target').value=EX.target||'';"
+              f"document.getElementById('f_extra').value=EX.extra||'';}}</script>")
+    body = (f"<h1 class='text-xl font-bold mb-1'>{esc(tenant.name)}</h1>"
+            f"<p class='text-slate-500 text-sm mb-5'>사진과 한 줄 설명만 보내주세요. 나머지는 저희가 합니다 🙂</p>"
+            f"<div class='grid md:grid-cols-2 gap-4'>{form}{guide}</div>{script}")
+    return page(f"{tenant.name} · 업로드", body)
+
+
+@app.post("/u/{token}/upload", response_class=HTMLResponse)
+async def upload(token: str, photos: list[UploadFile] = File(...), note: str = Form(""),
+                 purpose: str = Form(""), target: str = Form(""), extra: str = Form(""),
+                 request: str = Form("")):
+    tenant, _ = db.get_tenant_by_token(token)
+    if not tenant:
+        return HTMLResponse("<p>잘못된 링크입니다.</p>", status_code=404)
+    # 가입자 무료 2회 제한(셀프서비스 가게만 — 운영자/대행 가게는 소유 유저 없음 → 무제한)
+    owner = db.get_user_by_tenant(tenant.id)
+    if owner and (owner.get("plan") or "free") == "free" and (owner.get("free_used") or 0) >= FREE_LIMIT:
+        up = ("<div class='bg-white rounded-2xl shadow-sm p-7 text-center max-w-md mx-auto'>"
+              "<div class='text-4xl mb-2'>🎁</div>"
+              f"<h1 class='text-xl font-bold mb-1'>무료 {FREE_LIMIT}회를 모두 사용했어요</h1>"
+              "<p class='text-slate-500 text-sm mb-4'>요금제를 시작하면 무제한으로 5채널 콘텐츠를 만들 수 있어요.</p>"
+              "<a href='/#pricing' class='inline-block bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl'>요금제 보기</a></div>")
+        return page("무료 횟수 소진", up)
+    files = [(await ph.read(), ph.filename or "photo.jpg") for ph in photos if ph.filename]
+    if not files:
+        return HTMLResponse("<p>사진을 한 장 이상 올려주세요.</p>", status_code=400)
+    # 목적/타겟/추가정보를 메모에 합쳐 생성기 프롬프트가 모두 활용
+    full_note = note
+    if purpose:
+        full_note += f" | 콘텐츠 목적: {purpose}"
+    if target:
+        full_note += f" | 타겟 고객: {target}"
+    if extra:
+        full_note += f" | 추가 정보: {extra}"
+    if request.strip():           # 요청사항 = 최우선 지시(맨 앞)
+        full_note = f"[반드시 반영할 요청] {request.strip()}\n" + full_note
+    ingest_upload(tenant, files, full_note)
+    if owner:                                    # 셀프서비스 사용자 → 무료 횟수 차감
+        db.incr_user_free(owner["id"])
+    left = (FREE_LIMIT - ((owner.get("free_used") or 0) + 1)) if owner and (owner.get("plan") or "free") == "free" else None
+    left_msg = (f"<p class='text-xs text-slate-400 mt-2'>남은 무료 {max(left,0)}회</p>" if left is not None else "")
+    body = ("<div class='bg-white rounded-xl shadow-sm p-6 text-center'>"
+            "<div class='text-4xl mb-2'>✅</div>"
+            "<h1 class='text-xl font-bold mb-1'>접수됐어요!</h1>"
+            "<p class='text-slate-500 text-sm'>콘텐츠를 만들어 검토 후 올려드릴게요.</p>"
+            f"{left_msg}"
+            f"<a href='/me' class='inline-block mt-4 text-indigo-600 text-sm font-semibold'>내 작업실에서 보기 →</a></div>")
+    return page("접수 완료", body)
+
+
+# ── 검수 (채널/종류별) ───────────────────────────────────
+def _audit_box(audit: dict | None) -> str:
+    """상위노출 점검 결과(점수+경고) 표시."""
+    if not audit:
+        return ""
+    score = audit.get("score", 0)
+    grade = audit.get("grade", "")
+    color = "emerald" if score >= 85 else ("amber" if score >= 70 else "rose")
+    warns = audit.get("warnings", [])
+    items = "".join(f"<li>⚠️ {esc(w)}</li>" for w in warns) or "<li>✅ 주요 이슈 없음</li>"
+    return (f"<div class='text-xs bg-{color}-50 text-{color}-700 rounded-lg p-2 mb-3'>"
+            f"<b>📊 상위노출 점검: {score}/100 ({esc(grade)})</b>"
+            f"<ul class='mt-1 space-y-0.5'>{items}</ul></div>")
+
+
+def _info(label: str, val: str) -> str:
+    if not val:
+        return ""
+    return (f"<div class='mb-2'><span class='text-xs font-semibold text-slate-500'>{esc(label)}</span>"
+            f"<div class='text-sm bg-slate-50 rounded-lg p-2'>{esc(val)}</div></div>")
+
+
+def _scenes_table(scenes: list) -> str:
+    if not scenes:
+        return ""
+    rows = ""
+    for i, s in enumerate(scenes, 1):
+        rows += ("<tr class='border-t'>"
+                 f"<td class='p-1 align-top text-slate-400'>{i}</td>"
+                 f"<td class='p-1 align-top whitespace-nowrap'>{esc(s.get('time_range',''))}</td>"
+                 f"<td class='p-1 align-top'>{esc(s.get('visual_description',''))}</td>"
+                 f"<td class='p-1 align-top'>{esc(s.get('camera_movement',''))}</td>"
+                 f"<td class='p-1 align-top font-semibold'>{esc(s.get('on_screen_text',''))}</td>"
+                 f"<td class='p-1 align-top text-slate-600'>{esc(s.get('narration_segment',''))}</td></tr>")
+    return ("<p class='text-xs font-semibold text-slate-500 mt-3 mb-1'>🎬 장면 구성</p>"
+            "<div class='overflow-x-auto'><table class='text-xs w-full'>"
+            "<tr class='text-slate-400'><td>#</td><td>시간</td><td>비주얼</td><td>카메라</td><td>자막</td><td>내레이션</td></tr>"
+            f"{rows}</table></div>")
+
+
+def _editor(pid: str, p) -> str:
+    """종류별 편집 UI + 풍부한 메타 표시."""
+    from app.domain.models import ContentKind
+    if p.kind == ContentKind.BLOG:                      # 네이버 블로그 SEO 초안
+        n = len(p.payload.get("image_paths") or [])
+        numbered = "".join(
+            f"<div class='inline-block text-center mr-2'>"
+            f"<img src='/asset/{pid}/{i}' class='h-20 w-20 object-cover rounded-lg border'>"
+            f"<div class='text-xs font-semibold text-blue-600'>[사진{i+1}]</div></div>"
+            for i in range(n))
+        legend = (f"<p class='text-xs font-semibold text-slate-500 mb-1'>📸 본문 [사진N] 위치에 넣을 사진(순서대로)</p>"
+                  f"<div class='flex overflow-x-auto mb-3'>{numbered}</div>") if n else ""
+        info = (legend
+                + _info("메타설명", p.payload.get("meta_description", ""))
+                + _info("이미지 배치 제안", p.payload.get("recommended_image_placement", ""))
+                + _info("SEO 키워드", ", ".join(p.payload.get("seo_keywords", []))))
+        return (info + f"<form method=post action='/admin/review/{pid}/save' class='space-y-2'>"
+                f"<input name=title value=\"{esc(p.payload.get('title',''))}\" class='w-full border rounded-lg p-2 text-sm font-bold'>"
+                f"<textarea name=body rows=14 class='w-full border rounded-lg p-3 text-sm'>{esc(p.payload.get('body',''))}</textarea>"
+                f"<input name=tags value=\"{esc(', '.join(p.payload.get('tags', [])))}\" class='w-full border rounded-lg p-2 text-xs' placeholder='태그'>"
+                f"<button class='px-4 py-2 bg-slate-200 rounded-lg text-sm'>💾 저장</button></form>")
+    if p.kind == ContentKind.SHORT:                     # 유튜브 숏 기획
+        meta = (_info("길이 · 플랫폼", f"{p.payload.get('duration','')} · {p.payload.get('target_platform','')}")
+                + _info("0~3초 훅", p.payload.get("hook_strategy", ""))
+                + _info("🎙 내레이션(TTS 대본)", p.payload.get("narration", ""))
+                + _scenes_table(p.payload.get("scenes", []))
+                + f"<p class='text-xs text-amber-600 mt-2'>※ {esc(p.payload.get('tts_note',''))} · {esc(p.payload.get('bgm_note',''))}</p>")
+        return (meta + f"<form method=post action='/admin/review/{pid}/save' class='space-y-2 mt-3'>"
+                f"<input name=title value=\"{esc(p.payload.get('title',''))}\" class='w-full border rounded-lg p-2 text-sm font-bold' placeholder='제목'>"
+                f"<input name=subtitle value=\"{esc(p.payload.get('subtitle',''))}\" class='w-full border rounded-lg p-2 text-sm' placeholder='영상 자막(번인)'>"
+                f"<button class='px-4 py-2 bg-slate-200 rounded-lg text-sm'>💾 저장</button></form>")
+    return (f"<form method=post action='/admin/review/{pid}/save'>"   # 인스타 캡션
+            f"<textarea name=text rows=10 class='w-full border rounded-lg p-3 text-sm mb-2'>{esc(p.payload.get('text',''))}</textarea>"
+            f"<button class='px-4 py-2 bg-slate-200 rounded-lg text-sm'>💾 저장</button></form>")
+
+
+def _gallery(pid: str, p) -> str:
+    """업로드된 사진 전부를 썸네일로 표시(여러 장)."""
+    n = len(p.payload.get("image_paths") or [p.payload.get("image_path")])
+    thumbs = "".join(
+        f"<img src='/asset/{pid}/{i}' class='h-24 w-24 object-cover rounded-lg bg-white border'>"
+        for i in range(n))
+    cap = f"<p class='text-xs text-slate-400 mb-1'>사진 {n}장</p>" if n > 1 else ""
+    return cap + f"<div class='flex gap-2 overflow-x-auto mb-4'>{thumbs}</div>"
+
+
+def _blog_preview(pid: str, p) -> str:
+    """네이버 글쓰기 화면처럼 — 문단 사이사이 사진 인라인 + 장소 + 연락처."""
+    import re
+    t = db.get_tenant(p.tenant_id)
+    title = esc(p.payload.get("title", ""))
+    body = p.payload.get("body", "") or ""
+    n_imgs = len(p.payload.get("image_paths") or [])
+    # [사진N] 마커로 분할 → 문단 + 이미지 교차 배치
+    parts = re.split(r"\[사진(\d+)\]", body)
+    html_blocks = ""
+    for i, seg in enumerate(parts):
+        if i % 2 == 0:  # 텍스트 문단
+            txt = esc(seg.strip())
+            if txt:
+                html_blocks += f"<p class='text-sm text-slate-700 leading-relaxed whitespace-pre-line my-2'>{txt}</p>"
+        else:  # 사진 번호
+            idx = int(seg) - 1
+            if 0 <= idx < n_imgs:
+                html_blocks += f"<img src='/asset/{pid}/{idx}' class='w-full max-h-72 object-cover rounded-xl my-2'>"
+    # 장소 + 연락처 블록(가게 프로필)
+    place = ""
+    if t and (t.address or t.map_url):
+        maplink = f"<a href='{esc(t.map_url)}' class='text-indigo-600 underline'>네이버 지도</a>" if t.map_url else ""
+        place = (f"<div class='mt-3 p-3 bg-slate-50 rounded-xl text-sm'>📍 <b>찾아오시는 길</b><br>"
+                 f"{esc(t.address)} {maplink}</div>")
+    contact = ""
+    if t and (t.phone or t.hours):
+        contact = (f"<div class='mt-2 p-3 bg-slate-50 rounded-xl text-sm'>📞 <b>연락처</b><br>"
+                   f"{esc(t.phone)}" + (f" · 영업 {esc(t.hours)}" if t.hours else "") + "</div>")
+    tags = " ".join("#" + esc(x) for x in p.payload.get("tags", []))
+    miss = ("<p class='text-xs text-amber-600 mt-2'>※ 장소·연락처가 비어있어요 — 가게 관리에서 입력하면 자동으로 들어갑니다.</p>"
+            if not (place or contact) else "")
+    return (f"<div class='bg-white border border-slate-200 rounded-2xl p-4 mb-3'>"
+            f"<div class='text-xs text-slate-400 mb-2'>📝 네이버 발행 미리보기</div>"
+            f"<h3 class='text-base font-bold text-slate-800 mb-2'>{title}</h3>"
+            f"{html_blocks}{place}{contact}"
+            f"<p class='text-xs text-indigo-500 mt-2'>{tags}</p>{miss}</div>")
+
+
+def _media(pid: str, p) -> str:
+    from app.domain.models import ContentKind
+    if p.kind == ContentKind.BLOG:
+        return _blog_preview(pid, p)
+    if p.kind == ContentKind.SHORT:
+        if p.payload.get("video_path") and os.path.exists(p.payload["video_path"]):
+            return (f"<video src='/video/{pid}' controls class='w-full max-h-96 rounded-xl bg-black mb-2'></video>"
+                    + _gallery(pid, p))
+        return (_gallery(pid, p)
+                + f"<p class='text-xs text-amber-600 mb-3'>⚠️ 영상 미생성: {esc(p.payload.get('assemble_note',''))}</p>")
+    return _gallery(pid, p)
+
+
+@app.get("/admin/review/{pid}", response_class=HTMLResponse)
+def review(pid: str):
+    p = db.get_piece(pid)
+    if not p:
+        return HTMLResponse("<p>없는 콘텐츠입니다.</p>", status_code=404)
+    t = db.get_tenant(p.tenant_id)
+    pub = get_publisher(p.channel)
+    actions = ("<div class='flex gap-2 mt-3'>"
+               f"<form method=post action='/admin/review/{pid}/approve'><button class='px-4 py-2 bg-blue-600 text-white rounded-lg text-sm'>✅ 승인</button></form>"
+               f"<form method=post action='/admin/review/{pid}/reject'><button class='px-4 py-2 bg-rose-100 text-rose-600 rounded-lg text-sm'>✕ 반려</button></form>")
+    if p.status == ContentStatus.APPROVED:
+        label = "📋 초안 내보내기" if not pub.supports_auto_publish else "🚀 발행"
+        actions += f"<form method=post action='/admin/publish/{pid}'><button class='px-4 py-2 bg-green-600 text-white rounded-lg text-sm'>{label}</button></form>"
+    actions += "</div>"
+    # AI 수정 지시 + 자동 보완
+    autofix = ""
+    if (p.payload.get("ranking_audit") or {}).get("warnings"):
+        autofix = (f"<form method=post action='/admin/review/{pid}/autofix' class='mt-2'>"
+                   f"<button class='px-3 py-2 bg-violet-100 text-violet-700 rounded-lg text-sm font-semibold'>"
+                   f"✨ AI 자동 보완 (점검 경고 반영)</button></form>")
+    revise = (f"<div class='mt-4 pt-3 border-t'>"
+              f"<p class='text-xs font-semibold text-slate-500 mb-1'>✏️ AI에게 수정 지시</p>"
+              f"<form method=post action='/admin/review/{pid}/revise' class='flex gap-2'>"
+              f"<input name=instruction placeholder='예: 가격 정보 추가 / 더 친근하게 / 제목 더 강하게' "
+              f"class='flex-1 border rounded-lg p-2 text-sm'>"
+              f"<button class='px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm'>수정</button></form>"
+              f"{autofix}</div>")
+    actions += revise
+    body = (nav() +
+            f"<a href='/admin' class='text-sm text-slate-400'>← 대시보드</a>"
+            f"<h1 class='text-xl font-bold mt-2 mb-1'>{esc(t.name if t else '')} {badge(p.status.value)}</h1>"
+            f"<p class='text-xs text-slate-400 mb-2'>{p.channel.value} · {p.kind.value}"
+            + ("" if pub.supports_auto_publish else " · <span class='text-amber-600'>반자동(사람 발행)</span>") + "</p>"
+            + (f"<div class='text-xs bg-emerald-50 text-emerald-700 rounded-lg p-2 mb-2'>🎯 SEO 타겟 키워드: "
+               f"{esc(', '.join(p.payload.get('target_keywords', [])))}</div>"
+               if p.payload.get("target_keywords") else "")
+            + _audit_box(p.payload.get("ranking_audit"))
+            + (lambda r: (f"<div class='text-xs bg-violet-50 text-violet-700 rounded-lg p-2 mb-3'>"
+                          f"<b>👁 예상 노출: {esc(r.get('label',''))} ({esc(r.get('unit',''))})</b> "
+                          f"<span class='text-violet-400'>· {esc(r.get('basis',''))} · {esc(r.get('note',''))}</span></div>")
+               if r else "")(p.payload.get("reach"))
+            + _media(pid, p) + _editor(pid, p) + actions)
+    return page("검수", body)
+
+
+@app.post("/admin/review/{pid}/save")
+def review_save(pid: str, text: str = Form(None), title: str = Form(None),
+                body: str = Form(None), subtitle: str = Form(None), tags: str = Form(None)):
+    fields = {}
+    if text is not None:
+        fields["text"] = text
+    if title is not None:
+        fields["title"] = title
+    if body is not None:
+        fields["body"] = body
+    if subtitle is not None:
+        fields["subtitle"] = subtitle
+    if tags is not None:
+        fields["tags"] = [t.strip().lstrip("#") for t in tags.split(",") if t.strip()]
+    db.update_piece_payload(pid, fields)
+    return RedirectResponse(f"/admin/review/{pid}", status_code=303)
+
+
+@app.post("/admin/review/{pid}/approve")
+def review_approve(pid: str):
+    db.set_piece_status(pid, ContentStatus.APPROVED)
+    return RedirectResponse(f"/admin/review/{pid}", status_code=303)
+
+
+@app.post("/admin/review/{pid}/reject")
+def review_reject(pid: str):
+    db.set_piece_status(pid, ContentStatus.REJECTED)
+    return RedirectResponse("/admin", status_code=303)
+
+
+@app.post("/admin/review/{pid}/revise")
+def review_revise(pid: str, instruction: str = Form("")):
+    p = db.get_piece(pid)
+    if p and instruction.strip():
+        revise_piece(p, instruction.strip())
+    return RedirectResponse(f"/admin/review/{pid}", status_code=303)
+
+
+@app.post("/admin/review/{pid}/autofix")
+def review_autofix(pid: str):
+    p = db.get_piece(pid)
+    if p:
+        audit = p.payload.get("ranking_audit") or seo.quality_audit(p.channel.value, p.kind.value, p.payload)
+        revise_piece(p, autofix_instruction(audit, p.kind.value))
+    return RedirectResponse(f"/admin/review/{pid}", status_code=303)
+
+
+@app.post("/admin/publish/{pid}", response_class=HTMLResponse)
+def publish(pid: str):
+    p = db.get_piece(pid)
+    if not p:
+        return HTMLResponse("<p>없는 콘텐츠입니다.</p>", status_code=404)
+    result = publish_and_record(p)
+    # 반자동(네이버): 발행 대신 '초안 복사 + 사람이 발행' 안내
+    if result.detail.get("manual"):
+        d = result.detail.get("draft", {})
+        full = (esc(d.get("title", "")) + "\n\n" + esc(d.get("body", ""))
+                + "\n\n" + esc(" ".join("#" + x for x in d.get("tags", []))))
+        n = len(p.payload.get("image_paths") or [])
+        numbered = "".join(
+            f"<div class='inline-block text-center mr-2'>"
+            f"<img src='/asset/{pid}/{i}' class='h-24 w-24 object-cover rounded-lg border'>"
+            f"<div class='text-xs font-semibold text-blue-600'>[사진{i+1}]</div></div>"
+            for i in range(n))
+        legend = (f"<p class='text-xs font-semibold text-slate-500 mt-2 mb-1'>📸 [사진N] 위치에 넣을 사진(순서대로)</p>"
+                  f"<div class='flex overflow-x-auto mb-3'>{numbered}</div>") if n else ""
+        body = (nav() + f"<a href='/admin' class='text-sm text-slate-400'>← 대시보드</a>"
+                "<h1 class='text-xl font-bold mt-2 mb-2'>📋 네이버 블로그 초안</h1>"
+                f"<p class='text-xs text-slate-500 mb-3'>{esc(d.get('guide',''))}</p>"
+                f"<textarea readonly rows=16 class='w-full border rounded-lg p-3 text-sm mb-3'>{full}</textarea>"
+                f"{legend}"
+                f"<form method=post action='/admin/review/{pid}/done'>"
+                f"<button class='px-4 py-2 bg-green-600 text-white rounded-lg text-sm'>✅ 직접 발행 완료로 표시</button></form>")
+        return page("초안 내보내기", body)
+    msg = (f"🚀 발행 성공 (id={esc(result.external_id)})" if result.ok else f"⚠️ 발행 실패: {esc(result.error)}")
+    sim = " <span class='text-xs text-amber-600'>(시뮬레이션)</span>" if result.detail.get("simulated") else ""
+    body = (nav() + f"<div class='bg-white rounded-xl shadow-sm p-6'><p class='font-semibold'>{msg}{sim}</p>"
+            f"<a href='/admin' class='inline-block mt-4 text-blue-600 text-sm'>← 대시보드</a></div>")
+    return page("발행 결과", body)
+
+
+@app.post("/admin/review/{pid}/done")
+def review_done(pid: str):
+    """반자동(네이버) — 사장님/운영자가 직접 발행 후 완료 표시."""
+    db.set_piece_status(pid, ContentStatus.PUBLISHED)
+    return RedirectResponse("/admin", status_code=303)
+
+
+# ── 미디어 서빙 ──────────────────────────────────────────
+@app.get("/asset/{pid}")
+def asset_image(pid: str):
+    p = db.get_piece(pid)
+    if not p:
+        return HTMLResponse(status_code=404)
+    path = p.payload.get("image_path")
+    if not path or not os.path.exists(path):
+        return HTMLResponse(status_code=404)
+    return FileResponse(path)
+
+
+@app.get("/asset/{pid}/{idx}")
+def asset_image_idx(pid: str, idx: int):
+    p = db.get_piece(pid)
+    if not p:
+        return HTMLResponse(status_code=404)
+    paths = p.payload.get("image_paths") or [p.payload.get("image_path")]
+    if idx < 0 or idx >= len(paths) or not paths[idx] or not os.path.exists(paths[idx]):
+        return HTMLResponse(status_code=404)
+    return FileResponse(paths[idx])
+
+
+@app.get("/video/{pid}")
+def asset_video(pid: str):
+    p = db.get_piece(pid)
+    if not p:
+        return HTMLResponse(status_code=404)
+    path = p.payload.get("video_path")
+    if not path or not os.path.exists(path):
+        return HTMLResponse(status_code=404)
+    return FileResponse(path, media_type="video/mp4")

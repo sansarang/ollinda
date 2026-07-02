@@ -1,0 +1,31 @@
+# Render 배포 설정 (Docker 런타임 — ffmpeg 필요해서 Docker 사용)
+# 사용: GitHub에 push → Render에서 "New + → Blueprint" → 이 repo 선택
+services:
+  - type: web
+    name: shopcast
+    runtime: docker
+    plan: starter            # 무료(free)는 디스크 미지원·슬립 → 영속 원하면 starter+
+    healthCheckPath: /health
+    envVars:
+      - key: SHOPCAST_SECRET        # state 서명·쿠키 비밀
+        generateValue: true
+      - key: SHOPCAST_ADMIN_USER
+        value: admin
+      - key: SHOPCAST_ADMIN_PASS    # 운영자 대시보드 비밀번호(자동생성)
+        generateValue: true
+      - key: SHOPCAST_BASE          # 최초 배포 후 실제 URL로 채워넣기 (https://shopcast.onrender.com)
+        sync: false
+      - key: ANTHROPIC_API_KEY      # 실제 AI 캡션/블로그 (대시보드에 직접 입력)
+        sync: false
+      - key: IG_APP_ID
+        sync: false
+      - key: IG_APP_SECRET
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+    disk:                          # SQLite/업로드 영속(무료플랜은 디스크 불가 → 데이터 휘발)
+      name: data
+      mountPath: /data
+      sizeGB: 1

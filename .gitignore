@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.sqlite
+*.db
+run.sh
+storage/
+downloaded_files/
+.DS_Store
+# 외부 레퍼런스(별도 repo) — 코어와 분리 보관, 커밋 제외
+references/
+
+# 비밀키(절대 커밋 금지)
+deploy.sh
+data/
+*.zip

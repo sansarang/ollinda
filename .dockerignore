@@ -1,0 +1,11 @@
+references/
+__pycache__/
+*.pyc
+*.sqlite
+*.db
+storage/
+.venv/
+venv/
+.git/
+.DS_Store
+run.sh

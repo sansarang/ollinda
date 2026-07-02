@@ -1,0 +1,13 @@
+# shopcast 코어 의존성 (Phase 0~1)
+fastapi
+uvicorn[standard]
+python-multipart
+anthropic
+requests
+pydantic
+Pillow
+# 미디어/발행 (키는 나중에 — 미설정 시 graceful)
+#   TTS: ELEVENLABS_API_KEY / AI영상: RUNWAY_API_KEY / AI이미지: GEMINI_API_KEY
+#   인스타: IG_APP_ID/SECRET / 유튜브: GOOGLE_CLIENT_ID/SECRET / X: X_CLIENT_ID/SECRET
+# playwright                    # 네이버 블로그 자동포스팅(선택) — 설치 후 `playwright install chromium`
+# Pillow                        # 이미지 처리(선택)
