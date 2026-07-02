@@ -394,15 +394,13 @@ def my_dashboard(request: Request, ok: str = "", err: str = ""):
                 "<h2 class='font-bold mb-1'>② 내 채널 연결 (발행할 곳)</h2>"
                 "<p class='text-xs text-slate-400 mb-3'>비밀번호 없이 공식 OAuth로 1회 허용 → 내 계정에 자동 발행. "
                 "네이버는 공식 API가 없어 글을 완성해 드리면 직접 발행(반자동).</p>" + rows + "</div>")
-    # ③ 콘텐츠 만들기 + 이력
-    jobs = db.list_jobs(tenant_id=t.id, limit=50)
-    if jobs:
-        rowsj = "".join(
-            f"<tr class='border-t'><td class='py-2 pr-2'>{esc((j['title'] or '')[:32])}</td>"
-            f"<td class='text-slate-400 pr-2'>{esc(CHMAP.get(j['channel'], j['channel']))}</td>"
-            f"<td class='pr-2'>{esc(STATUS_KO.get(j['status'], j['status']))}</td>"
-            f"<td class='text-slate-400 text-xs'>{esc(j['created_at'])}</td></tr>" for j in jobs)
-        hist = f"<div class='overflow-x-auto'><table class='w-full text-sm'><tbody>{rowsj}</tbody></table></div>"
+    # ③ 콘텐츠 이력(세트 단위) → 각 항목 = 발행 소재(/kit)
+    sets = db.list_sets(tenant_id=t.id, limit=50)
+    if sets:
+        hist = "<div class='space-y-2'>" + "".join(
+            f"<a href='/kit/{s['asset_id']}' class='flex items-center justify-between bg-white border border-slate-100 rounded-xl p-3 hover:bg-slate-50'>"
+            f"<div><b class='text-sm'>{esc(s['created'])}</b> <span class='text-xs text-slate-400'>{s['n']}개 채널</span></div>"
+            "<span class='text-indigo-600 text-sm font-semibold'>발행 소재 →</span></a>" for s in sets) + "</div>"
     else:
         hist = "<p class='text-slate-400 text-sm'>아직 만든 콘텐츠가 없어요. 사진을 올리면 여기에 쌓입니다.</p>"
     # ── 최초 1회 온보딩 vs 작동 대시보드 ──
@@ -473,6 +471,92 @@ def my_connect_start(request: Request, channel: str):
     if not oauth.configured(ch):
         return RedirectResponse("/me?err=아직 준비 중(앱 심사) 채널입니다", status_code=303)
     return RedirectResponse(oauth.authorize_url(ch, t.id))
+
+
+def _owned_pieces(user, asset_id):
+    """세트가 로그인 유저 소유인지 확인 후 pieces 반환(아니면 None)."""
+    pieces = db.get_set_pieces(asset_id)
+    if not pieces:
+        return None
+    ut = (user or {}).get("tenant_id")
+    return pieces if (ut and ut == pieces[0].tenant_id) else None
+
+
+def _kit_card(title, inner):
+    return (f"<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-4 mb-3'>"
+            f"<div class='font-bold mb-2'>{title}</div>{inner}</div>")
+
+
+@app.get("/kit/{asset_id}", response_class=HTMLResponse)
+def kit(request: Request, asset_id: str):
+    """발행 소재(반자동) — 글 복사 + 사진/영상 다운로드해서 각 앱에 붙여넣기/업로드."""
+    import re as _re
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    pieces = _owned_pieces(u, asset_id)
+    if pieces is None:
+        return HTMLResponse(_subscriber_page("접근 불가",
+            "<div class='bg-rose-50 text-rose-600 p-4 rounded-2xl'>내 콘텐츠가 아니거나 없는 세트예요.</div>"))
+
+    def dl(path):
+        return f"/dl/{asset_id}/{os.path.basename(path)}" if (path and os.path.exists(path)) else ""
+
+    def copy_block(cid, text, h="28"):
+        return (f"<textarea id='{cid}' readonly class='w-full h-{h} border border-slate-200 rounded-xl p-2 text-sm bg-slate-50'>{esc(text)}</textarea>"
+                f"<button type=button onclick=\"cp('{cid}',this)\" class='mt-1 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg'>📋 복사</button>")
+
+    imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
+    photo_dls = "".join(f"<a href='{dl(im)}' download class='px-2 py-1 bg-slate-100 rounded text-xs mr-1 mb-1 inline-block'>사진{i+1} ⬇</a>"
+                        for i, im in enumerate(imgs) if dl(im))
+    cards = ""
+    for p in pieces:
+        k, pl = p.kind.value, p.payload
+        if k == "blog":
+            b = _re.sub(r"\[사진\d+\]", "", pl.get("body", "")).strip()
+            cards += _kit_card("📝 네이버 블로그 <span class='text-xs text-slate-400'>(복사→네이버 글쓰기 붙여넣기)</span>",
+                "<div class='text-xs text-slate-400 mb-1'>제목</div>" + copy_block("blogT", pl.get("title", ""), "16")
+                + "<div class='text-xs text-slate-400 mt-3 mb-1'>본문</div>" + copy_block("blogB", b, "40")
+                + (f"<div class='mt-3'>{photo_dls}</div>" if photo_dls else "")
+                + "<p class='text-xs text-slate-400 mt-2'>본문 붙여넣고, 사진을 순서대로 넣으세요. 마지막에 지도·연락처는 위 본문에 포함됨.</p>")
+        elif k == "caption":
+            cards += _kit_card("📷 인스타그램 캡션",
+                copy_block("cap", pl.get("text", ""), "40") + (f"<div class='mt-3'>{photo_dls}</div>" if photo_dls else ""))
+        elif k == "short" and p.channel.value == "youtube":
+            v = dl(pl.get("video_path", ""))
+            cards += _kit_card("▶️ 유튜브 쇼츠",
+                "<div class='text-xs text-slate-400 mb-1'>제목</div>" + copy_block("ytT", pl.get("title", ""), "16")
+                + "<div class='text-xs text-slate-400 mt-3 mb-1'>설명</div>" + copy_block("ytD", pl.get("narration", ""), "28")
+                + (f"<div class='mt-3'><a href='{v}' download class='px-3 py-2 bg-emerald-500 text-white text-sm font-bold rounded-lg'>⬇ 영상 다운로드</a></div>" if v else ""))
+        elif k == "short" and p.channel.value == "instagram":
+            v = dl(pl.get("video_path", ""))
+            cards += _kit_card("🎬 인스타 릴스",
+                (f"<a href='{v}' download class='px-3 py-2 bg-emerald-500 text-white text-sm font-bold rounded-lg'>⬇ 릴스 영상 다운로드</a>" if v else "영상 없음"))
+        elif k == "x_post":
+            cards += _kit_card("𝕏 X (트위터)", copy_block("xp", pl.get("text", ""), "24"))
+    js = ("<script>function cp(id,btn){const t=document.getElementById(id);t.select();"
+          "navigator.clipboard.writeText(t.value);btn.textContent='✅ 복사됨';"
+          "setTimeout(()=>btn.textContent='📋 복사',1500);}</script>")
+    body = ("<a href='/me' class='text-sm text-slate-400'>← 내 작업실</a>"
+            "<h2 class='text-xl font-extrabold mt-2 mb-1'>발행 소재</h2>"
+            "<p class='text-slate-500 text-sm mb-4'>글은 <b>복사</b>, 사진·영상은 <b>다운로드</b>해서 각 앱(네이버·인스타·유튜브·X)에 올리세요.</p>"
+            + cards + js)
+    return HTMLResponse(_subscriber_page("발행 소재", body))
+
+
+@app.get("/dl/{asset_id}/{fname}")
+def dl_media(request: Request, asset_id: str, fname: str):
+    import re
+    u = auth.current_user(request)
+    pieces = _owned_pieces(u, asset_id) if u else None
+    if not pieces or not re.fullmatch(r"[A-Za-z0-9._-]+", fname):
+        return HTMLResponse(status_code=404)
+    path = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), pieces[0].tenant_id, fname)
+    if not os.path.exists(path):
+        return HTMLResponse(status_code=404)
+    ext = fname.rsplit(".", 1)[-1].lower()
+    mt = {"mp4": "video/mp4", "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png"}.get(ext, "application/octet-stream")
+    return FileResponse(path, media_type=mt, filename=fname)
 
 
 @app.get("/demo/{name}")

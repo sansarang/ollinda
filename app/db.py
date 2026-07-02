@@ -354,14 +354,18 @@ def get_set_pieces(asset_id: str) -> list[ContentPiece]:
     return [_row_to_piece(r) for r in rows]
 
 
-def list_sets(statuses: Optional[list[str]] = None, limit: int = 100) -> list[dict]:
-    """검수 큐를 '세트(asset_id)' 단위로 묶어 최신순 반환."""
+def list_sets(statuses: Optional[list[str]] = None, limit: int = 100,
+              tenant_id: Optional[str] = None) -> list[dict]:
+    """검수 큐를 '세트(asset_id)' 단위로 묶어 최신순 반환. tenant_id로 특정 가게만."""
     q = ("SELECT cp.asset_id, cp.tenant_id, t.name AS tname, MAX(cp.created_at) AS created, "
          "COUNT(*) AS n FROM content_pieces cp LEFT JOIN tenants t ON cp.tenant_id=t.id ")
-    args: list = []
+    conds, args = [], []
     if statuses:
-        q += "WHERE cp.status IN (%s) " % ",".join("?" * len(statuses))
-        args += statuses
+        conds.append("cp.status IN (%s)" % ",".join("?" * len(statuses))); args += statuses
+    if tenant_id:
+        conds.append("cp.tenant_id=?"); args.append(tenant_id)
+    if conds:
+        q += "WHERE " + " AND ".join(conds) + " "
     q += "GROUP BY cp.asset_id ORDER BY created DESC LIMIT ?"
     args.append(limit)
     with _conn() as c:
