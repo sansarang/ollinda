@@ -28,16 +28,30 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
         paths.append(storage.save_upload(data, fname or "photo.jpg", tenant.id))
     # 대표 Asset(첫 장)에 메모 기록 — 나머지 장은 images로 전달
     asset = db.create_asset(tenant.id, AssetType.IMAGE, paths[0], note)
-    # 비전: 대표 사진을 실제 분석해 생성 프롬프트에 반영(키 없으면 ""). DB엔 원본 메모 유지.
+    # 👁 비전: 대표 사진을 실제 분석해 생성 프롬프트에 반영(키 없으면 ""). DB엔 원본 메모 유지.
     analysis = vision.analyze(paths[0], tenant.industry)
     if analysis:
         asset.note = f"{note}\n\n[사진 분석(실제 이미지 기반)]\n{analysis}"
-    pieces = generate_for(tenant, asset, kinds, images=paths)
+    # 🎯 마케팅 전략가 — 전 채널이 공유할 크리에이티브 브리프(1콜). 프롬프트에 주입 → 채널 일관성.
+    from app.generators.strategist import build_brief, brief_to_directive
+    from app.generators.editor import polish
+    brief = build_brief(tenant, asset)
+    asset.note = asset.note + brief_to_directive(brief)
+    brief_public = {k: v for k, v in brief.items() if not k.startswith("_")}
+    pieces = generate_for(tenant, asset, kinds, images=paths)   # ✍️ 카피라이터·🎬 영상감독
     for p in pieces:
         p.payload.setdefault("image_path", paths[0])
         p.payload.setdefault("biz_type", getattr(tenant, "biz_type", "local") or "local")
         p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value, p.payload)
+        polish(tenant, p)                                       # 🔍 SEO 편집장(저점수만 리라이트)
         p.payload["reach"] = reach.estimate(p.channel.value, p.kind.value, p.payload)
+        p.payload["brief"] = brief_public
+        ex = ["🎯 전략가", "✍️ 카피라이터"]
+        if p.kind == ContentKind.SHORT:
+            ex.append("🎬 영상감독")
+        if p.payload.get("edited_by_seo"):
+            ex.append("🔍 SEO편집장")
+        p.payload["experts"] = ex
         db.save_piece(p)
     # 인스타 릴스: 숏 영상을 인스타 채널로도 발행(캐러셀 + 릴스 둘 다)
     short = next((p for p in pieces if p.kind == ContentKind.SHORT

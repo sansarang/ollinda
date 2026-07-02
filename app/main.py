@@ -513,6 +513,10 @@ def kit(request: Request, asset_id: str):
         return (f"<a href='/kit/{asset_id}/pack/{pid}' class='inline-flex items-center gap-1 mt-3 px-4 py-2.5 "
                 f"bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold rounded-xl'>⬇ 이 채널 통째로 받기 ({what})</a>")
 
+    def eb(pl):
+        ex = pl.get("experts") or []
+        return (f"<div class='text-[11px] text-indigo-400 font-semibold mb-2'>{' → '.join(ex)}</div>" if ex else "")
+
     cards = ""
     for p in pieces:
         k, pl = p.kind.value, p.payload
@@ -520,32 +524,38 @@ def kit(request: Request, asset_id: str):
         if k == "blog":
             b = _re.sub(r"\[사진\d+\]", "", pl.get("body", "")).strip()
             cards += _kit_card("📝 네이버 블로그 <span class='text-xs text-slate-400'>(복사→네이버 글쓰기 붙여넣기)</span>",
-                "<div class='text-xs text-slate-400 mb-1'>제목</div>" + copy_block("blogT", pl.get("title", ""), "16")
+                eb(pl) + "<div class='text-xs text-slate-400 mb-1'>제목</div>" + copy_block("blogT", pl.get("title", ""), "16")
                 + "<div class='text-xs text-slate-400 mt-3 mb-1'>본문</div>" + copy_block("blogB", b, "40")
                 + pack_btn(p.id, False)
                 + "<p class='text-xs text-slate-400 mt-2'>‘통째로 받기’엔 본문·사진이 순서대로 들어있어요.</p>")
         elif k == "caption":
             cards += _kit_card("📷 인스타그램 <span class='text-xs text-slate-400'>(캡션+사진 묶음)</span>",
-                copy_block("cap", pl.get("text", ""), "40") + pack_btn(p.id, has_video))
+                eb(pl) + copy_block("cap", pl.get("text", ""), "40") + pack_btn(p.id, has_video))
         elif k == "short" and p.channel.value == "youtube":
             cards += _kit_card("▶️ 유튜브 쇼츠 <span class='text-xs text-slate-400'>(제목·설명+영상 묶음)</span>",
-                "<div class='text-xs text-slate-400 mb-1'>제목</div>" + copy_block("ytT", pl.get("title", ""), "16")
+                eb(pl) + "<div class='text-xs text-slate-400 mb-1'>제목</div>" + copy_block("ytT", pl.get("title", ""), "16")
                 + "<div class='text-xs text-slate-400 mt-3 mb-1'>설명</div>" + copy_block("ytD", pl.get("narration", ""), "28")
                 + pack_btn(p.id, has_video))
         elif k == "short" and p.channel.value == "instagram":
             cards += _kit_card("🎬 인스타 릴스 <span class='text-xs text-slate-400'>(캡션+영상 묶음)</span>",
-                (copy_block("reel", pl.get("text", ""), "24") if pl.get("text") else "") + pack_btn(p.id, has_video))
+                eb(pl) + (copy_block("reel", pl.get("text", ""), "24") if pl.get("text") else "") + pack_btn(p.id, has_video))
         elif k == "x_post":
-            cards += _kit_card("𝕏 X (트위터)", copy_block("xp", pl.get("text", ""), "24") + pack_btn(p.id, has_video))
+            cards += _kit_card("𝕏 X (트위터)", eb(pl) + copy_block("xp", pl.get("text", ""), "24") + pack_btn(p.id, has_video))
     js = ("<script>function cp(id,btn){const t=document.getElementById(id);t.select();"
           "navigator.clipboard.writeText(t.value);btn.textContent='✅ 복사됨';"
           "setTimeout(()=>btn.textContent='📋 복사',1500);}</script>")
+    brief = next((p.payload.get("brief") for p in pieces if p.payload.get("brief")), None)
+    pipeline = ("<div class='bg-indigo-50 border border-indigo-100 rounded-2xl p-4 mb-4'>"
+                "<div class='text-sm font-bold text-indigo-700 mb-1'>🤖 AI 전문가 팀이 제작했어요</div>"
+                "<div class='text-xs text-indigo-500'>🎯 마케팅 전략가 → ✍️ 카피라이터 → 🔍 SEO 편집장 → 🎬 영상 감독</div>"
+                + (f"<div class='text-xs text-slate-500 mt-2'>핵심 전략 키워드: <b>{esc(brief.get('core_keyword',''))}</b> · 앵글: {esc(brief.get('angle',''))}</div>" if brief else "")
+                + "</div>")
     all_btn = (f"<a href='/kit/{asset_id}/pack-all' class='block text-center bg-indigo-600 hover:bg-indigo-700 "
                "text-white font-extrabold py-3.5 rounded-2xl mb-4'>⬇ 5채널 전체 한 번에 받기 (채널별 폴더 정리)</a>")
     body = ("<a href='/me' class='text-sm text-slate-400'>← 내 작업실</a>"
             "<h2 class='text-xl font-extrabold mt-2 mb-1'>발행 소재</h2>"
             "<p class='text-slate-500 text-sm mb-4'>채널마다 <b>글+사진+영상이 한 묶음</b>이에요. 통째로 받아 각 앱에 올리고, 글은 복사해서 붙여넣으세요.</p>"
-            + all_btn + cards + js)
+            + pipeline + all_btn + cards + js)
     return HTMLResponse(_subscriber_page("발행 소재", body))
 
 
