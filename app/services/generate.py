@@ -13,6 +13,10 @@ def generate_for(tenant: Tenant, asset: Asset, kinds: list[ContentKind],
     """요청된 종류(kinds)별로 콘텐츠 초안을 생성한다. images=업로드된 사진 경로들(여러 장)."""
     pieces: list[ContentPiece] = []
     for kind in kinds:
-        gen = get_generator(kind)   # 미등록이면 KeyError → 상위에서 처리
-        pieces.append(gen.generate(tenant, asset, images))
+        try:
+            gen = get_generator(kind)   # 미등록이면 KeyError
+            pieces.append(gen.generate(tenant, asset, images))
+        except Exception:               # 한 채널 실패(예: AI 크레딧 부족)해도 나머지는 진행
+            import logging
+            logging.exception("[generate] %s 생성 실패", kind)
     return pieces

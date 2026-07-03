@@ -199,6 +199,8 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
         import logging
         logging.exception("[demo] 생성 실패")
         return JSONResponse({"error": "생성 중 문제가 생겼어요. 잠시 후 다시 시도해주세요."})
+    if not pieces:                       # AI 크레딧 부족 등 → 정직하게 안내(횟수 차감 안 함)
+        return JSONResponse({"error": "지금 AI 생성이 일시적으로 불가해요. 잠시 후 다시 시도해주세요."})
     db.incr_demo_ip(ip)
     left = max(0, FREE_LIMIT - db.demo_ip_count(ip))
     return JSONResponse({"ok": True, "result_html": _demo_result_html(asset_id, pieces, brief), "left": left})
@@ -1683,7 +1685,9 @@ async def upload(token: str, photos: list[UploadFile] = File(...), note: str = F
     if request.strip():           # 요청사항 = 최우선 지시(맨 앞)
         full_note = f"[반드시 반영할 요청] {request.strip()}\n" + full_note
     try:
-        ingest_upload(tenant, files, full_note)
+        made = ingest_upload(tenant, files, full_note)
+        if not made:                               # 0개 생성(예: AI 크레딧 부족)
+            raise RuntimeError("no pieces generated")
     except Exception:                              # 사용자에겐 500 대신 친절 안내
         import logging
         logging.exception("[upload] 생성 실패 tenant=%s", tenant.id)
