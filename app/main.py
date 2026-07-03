@@ -366,13 +366,29 @@ def my_dashboard(request: Request, ok: str = "", err: str = ""):
         f"<input name=buy_url value=\"{esc(t.buy_url)}\" placeholder='🔗 상세페이지/스토어 URL' class='{inp}'>"
         "<button class='bg-indigo-600 text-white font-bold py-2.5 rounded-xl sm:col-span-2'>저장</button></form>"
         "<p class='text-xs text-slate-400 mt-2'>매장이면 글 끝에 지도·연락처, 셀러면 구매 링크/검색어로 자동 전환됩니다.</p>")
-    # 온보딩용 최소 폼(필수 3개만 — 나머지는 나중에 설정에서)
+    # 온보딩용 최소 폼(필수 3개만 — 나머지는 나중에 설정에서). 셀러/동네매장 = 큰 토글로 명확히.
+    _bt = (t.biz_type or "local")
+
+    def _bopt(val, emoji, label, desc):
+        sel = "peer-checked:border-indigo-600 peer-checked:bg-indigo-50 peer-checked:text-indigo-700"
+        return (f"<label class='cursor-pointer'>"
+                f"<input type=radio name=biz_type value='{val}'{' checked' if _bt == val else ''} class='peer sr-only'>"
+                f"<div class='border-2 border-slate-200 rounded-xl p-3 text-center transition {sel}'>"
+                f"<div class='text-2xl'>{emoji}</div><div class='font-bold text-sm mt-1'>{label}</div>"
+                f"<div class='text-[11px] text-slate-400 mt-0.5'>{desc}</div></div></label>")
+    biz_toggle = ("<div class='mt-1'><div class='text-xs font-semibold text-slate-500 mb-1'>사업형태 *</div>"
+                  "<div class='grid grid-cols-2 gap-2'>"
+                  + _bopt("local", "🏪", "동네 매장", "방문·예약 유도 · 지도/연락처")
+                  + _bopt("seller", "📦", "온라인 셀러", "구매링크·상품 키워드")
+                  + "</div></div>")
     store_form_min = (
-        "<form method=post action='/me/store' class='space-y-2'>"
-        f"<input name=name value=\"{esc(t.name)}\" placeholder='상호/브랜드 *' required class='{inp}'>"
-        f"<input name=industry placeholder='업종 또는 파는 상품 * (예: 카페, 캠핑 폴딩박스)' required class='{inp}'>"
-        f"<select name=biz_type class='{inp} font-semibold'>{bopts}</select>"
-        "<button class='w-full bg-indigo-600 text-white font-bold py-3 rounded-xl'>완료하고 시작하기 →</button></form>"
+        "<form method=post action='/me/store' class='space-y-3'>"
+        f"<div><div class='text-xs font-semibold text-slate-500 mb-1'>상호/브랜드 *</div>"
+        f"<input name=name value=\"{esc(t.name)}\" placeholder='예: 초량 루마썬팅' required class='{inp}'></div>"
+        f"<div><div class='text-xs font-semibold text-slate-500 mb-1'>업종 또는 파는 상품 *</div>"
+        f"<input name=industry placeholder='예: 카페, 썬팅, 캠핑 폴딩박스' required class='{inp}'></div>"
+        + biz_toggle
+        + "<button class='w-full bg-indigo-600 text-white font-bold py-3.5 rounded-xl text-base'>완료하고 시작하기 →</button></form>"
         "<p class='text-xs text-slate-400 mt-2'>전화·주소·마켓 등 상세정보는 나중에 ‘설정’에서 추가하면 됩니다.</p>")
     # ② 내 채널 연결
     connected = {a.channel: a for a in db.list_channel_accounts(t.id)}
@@ -1614,7 +1630,17 @@ async def upload(token: str, photos: list[UploadFile] = File(...), note: str = F
         full_note += f" | 추가 정보: {extra}"
     if request.strip():           # 요청사항 = 최우선 지시(맨 앞)
         full_note = f"[반드시 반영할 요청] {request.strip()}\n" + full_note
-    ingest_upload(tenant, files, full_note)
+    try:
+        ingest_upload(tenant, files, full_note)
+    except Exception:                              # 사용자에겐 500 대신 친절 안내
+        import logging
+        logging.exception("[upload] 생성 실패 tenant=%s", tenant.id)
+        err = ("<div class='bg-white rounded-xl shadow-sm p-6 text-center max-w-md mx-auto'>"
+               "<div class='text-4xl mb-2'>😢</div>"
+               "<h1 class='text-xl font-bold mb-1'>생성 중 문제가 생겼어요</h1>"
+               "<p class='text-slate-500 text-sm mb-4'>잠시 후 다시 시도해 주세요. 계속되면 우측 하단 카톡으로 알려주세요.</p>"
+               f"<a href='/u/{token}' class='inline-block bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl'>다시 시도</a></div>")
+        return page("생성 오류", err)             # 실패 시 사용량 차감 안 함
     _record_usage(owner)                          # 플랜별 사용량 차감
     body = ("<div class='bg-white rounded-xl shadow-sm p-6 text-center'>"
             "<div class='text-4xl mb-2'>✅</div>"
