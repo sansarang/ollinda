@@ -179,21 +179,73 @@ _DEMO_HITS: dict = {}   # ip -> [timestamps] (무료 체험 rate limit)
 async def api_demo(request: Request, industry: str = Form(""), note: str = Form(""),
                    biz_type: str = Form("local"), marketplace: str = Form(""),
                    search_kw: str = Form(""), photo: UploadFile = File(None)):
-    """랜딩 '무료로 만들어보기' = 가입 유도 퍼널.
-    미가입자는 생성 불가(가입 유도), 가입자만 무료 2회를 '내 작업실'에서 사용."""
-    u = auth.current_user(request)
-    if not u:
-        return JSONResponse({"require_signup": True,
-                             "message": "가입하면 내 사진으로 인스타·블로그·유튜브·X 5채널을 무료 2회 만들어드려요!"})
-    used = u.get("free_used") or 0
-    free = (u.get("plan") or "free") == "free"
-    if free and used >= FREE_LIMIT:
+    """랜딩 무료체험 — 미가입자도 IP당 2회 실시간 생성(텍스트 3채널). 영상·내사진 반영은 가입 유도."""
+    if not (industry or "").strip():
+        return JSONResponse({"error": "업종/상품을 입력해주세요."})
+    ip = (request.headers.get("cf-connecting-ip")
+          or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+          or (request.client.host if request.client else "") or "unknown")
+    if db.demo_ip_count(ip) >= FREE_LIMIT:
         return JSONResponse({"limit": True,
-                             "message": f"무료 {FREE_LIMIT}회를 모두 사용했어요. 요금제로 무제한 이용하세요."})
-    left = (FREE_LIMIT - used) if free else None
-    return JSONResponse({"go_dashboard": True,
-                         "message": "내 작업실에서 사진을 올리면 바로 만들어드려요!"
-                                    + (f" (무료 {left}회 남음)" if left is not None else "")})
+                             "message": "무료 체험 2회를 모두 사용했어요. 가입하면 내 사진으로 영상까지 만들 수 있어요!"})
+    img_bytes = None
+    if photo is not None and getattr(photo, "filename", ""):
+        img_bytes = await photo.read()
+    try:
+        from app.services import demo as demo_svc
+        _tid, asset_id, pieces, brief = demo_svc.run_demo(industry, biz_type, note, img_bytes,
+                                                          getattr(photo, "filename", None))
+    except Exception:
+        import logging
+        logging.exception("[demo] 생성 실패")
+        return JSONResponse({"error": "생성 중 문제가 생겼어요. 잠시 후 다시 시도해주세요."})
+    db.incr_demo_ip(ip)
+    left = max(0, FREE_LIMIT - db.demo_ip_count(ip))
+    return JSONResponse({"ok": True, "result_html": _demo_result_html(asset_id, pieces, brief), "left": left})
+
+
+def _demo_result_html(asset_id, pieces, brief) -> str:
+    import re as _re
+    CH = {"blog": "📝 네이버 블로그", "caption": "📷 인스타그램", "x_post": "𝕏 X"}
+    cards = ""
+    for p in pieces:
+        k, pl = p.kind.value, p.payload
+        txt = ((pl.get("title", "") + "\n\n" + _re.sub(r"\[사진\d+\]", "", pl.get("body", "")).strip())
+               if k == "blog" else pl.get("text", ""))
+        cards += ("<div class='bg-white/10 rounded-xl p-3 mb-2'>"
+                  f"<div class='text-white font-bold text-sm mb-1'>{CH.get(k, k)}</div>"
+                  f"<textarea readonly class='w-full h-28 rounded-lg p-2 text-xs text-slate-800'>{esc(txt)}</textarea>"
+                  "<button onclick=\"navigator.clipboard.writeText(this.previousElementSibling.value);this.textContent='✅ 복사됨'\" "
+                  "class='mt-1 px-3 py-1 bg-white text-indigo-700 text-xs font-bold rounded-lg'>📋 복사</button></div>")
+    kw = (brief or {}).get("core_keyword", "")
+    cta = ("<a href='/login/kakao' class='block text-center py-2.5 rounded-xl font-extrabold mb-2' "
+           "style='background:#FEE500;color:#191600'>💬 카카오로 3초 가입 (영상까지 만들기)</a>"
+           "<a href='/login/google' class='block text-center py-2.5 rounded-xl font-bold bg-white text-slate-700'>구글로 가입</a>")
+    return ("<div class='rounded-2xl p-4' style='background:rgba(255,255,255,.08)'>"
+            "<div class='text-center text-white font-bold'>✅ AI 전문가팀이 만든 결과예요</div>"
+            f"<div class='text-center text-slate-300 text-xs mb-3'>핵심 키워드 <b>{esc(kw)}</b> · 복사해서 바로 쓰세요</div>"
+            + cards
+            + f"<a href='/d/{asset_id}.zip' class='block text-center py-2.5 rounded-xl bg-emerald-500 text-white font-bold mb-3'>⬇ 전체 글 다운로드 (ZIP)</a>"
+            + "<div class='text-center text-slate-300 text-xs mb-2'>🎬 유튜브·릴스 <b>영상</b> + <b>내 사진</b> 반영은 가입하면 바로!</div>"
+            + cta + "</div>")
+
+
+@app.get("/d/{asset_id}.zip")
+def demo_zip(asset_id: str):
+    if not db.asset_is_demo(asset_id):
+        return HTMLResponse(status_code=404)
+    pieces = db.get_set_pieces(asset_id)
+    if not pieces:
+        return HTMLResponse(status_code=404)
+    imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
+    entries = []
+    for p in pieces:
+        entries += _piece_pack_entries(p, imgs, prefix=f"{_ch_folder(p)}/")
+    out_dir = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), pieces[0].tenant_id)
+    os.makedirs(out_dir, exist_ok=True)
+    out = os.path.join(out_dir, f"demo_{asset_id[:8]}.zip")
+    _write_zip(out, entries)
+    return FileResponse(out, media_type="application/zip", filename="올린다_체험_글.zip")
 
 
 @app.post("/api/contact")

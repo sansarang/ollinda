@@ -76,23 +76,20 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
  const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
  df.addEventListener('submit',async e=>{e.preventDefault();
   const box=document.getElementById('demoResult');
-  box.innerHTML='<div class="text-center text-slate-200 py-6"><span class="dot inline-block w-3 h-3 rounded-full bg-indigo-400 align-middle"></span> 확인 중…</div>';
   const ind=document.getElementById('d_ind').value.trim();
+  if(!ind){box.innerHTML='<div class="text-amber-300 text-sm text-center py-3">업종/상품을 입력해주세요.</div>';return;}
+  box.innerHTML='<div class="text-center text-slate-200 py-6"><span class="dot inline-block w-3 h-3 rounded-full bg-indigo-400 align-middle"></span> AI 전문가팀이 만드는 중… (20~40초 걸려요)</div>';
   const biz=(document.querySelector('input[name="d_biz"]:checked')||{}).value||'local';
   const fd=new FormData();fd.append('industry',ind);fd.append('biz_type',biz);
+  fd.append('note',(document.getElementById('d_note')||{}).value||'');
+  const ph=document.getElementById('d_photo');if(ph&&ph.files&&ph.files[0])fd.append('photo',ph.files[0]);
   try{const r=await fetch('/api/demo',{method:'POST',body:fd});const d=await r.json();
-   if(d.go_dashboard){window.location.href='/me';return;}
-   let cta;
-   if(d.limit){cta='<a href="#pricing" class="block py-3 rounded-xl font-bold bg-white text-indigo-700">요금제 보기 →</a>';}
-   else{cta='<a href="/login/google" class="flex items-center justify-center gap-2 py-3 rounded-xl font-extrabold mb-2 bg-white text-slate-700"><svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg> 구글로 가입하기</a>'
-        +'<a href="/login/kakao" class="block py-3 rounded-xl font-extrabold" style="background:#FEE500;color:#191600">💬 카카오로 3초 가입</a>';}
-   box.innerHTML='<div class="rounded-2xl p-5 text-center" style="background:rgba(255,255,255,.1)">'
-    +'<div class="text-4xl mb-2">🎁</div>'
-    +'<p class="text-white font-bold mb-1">'+esc(d.message||'가입하면 바로 만들어드려요!')+'</p>'
-    +'<p class="text-slate-300 text-xs mb-4">사진은 가입 후 \\'내 작업실\\'에서 올리면 5채널이 자동 생성됩니다.</p>'
-    +cta+'</div>';
-   box.scrollIntoView({behavior:'smooth',block:'nearest'});
-  }catch(err){box.innerHTML='<div class="text-rose-300 text-sm text-center">오류가 발생했어요. 잠시 후 다시.</div>';}
+   if(d.ok){box.innerHTML=d.result_html;box.scrollIntoView({behavior:'smooth',block:'nearest'});return;}
+   if(d.limit){box.innerHTML='<div class="rounded-2xl p-5 text-center" style="background:rgba(255,255,255,.1)">'
+     +'<div class="text-3xl mb-2">🎁</div><p class="text-white font-bold mb-3">'+esc(d.message)+'</p>'
+     +'<a href="/login/kakao" class="block py-3 rounded-xl font-extrabold" style="background:#FEE500;color:#191600">💬 카카오로 가입</a></div>';return;}
+   box.innerHTML='<div class="text-rose-300 text-sm text-center py-3">'+esc(d.error||'오류가 발생했어요. 잠시 후 다시.')+'</div>';
+  }catch(err){box.innerHTML='<div class="text-rose-300 text-sm text-center py-3">오류가 발생했어요. 잠시 후 다시.</div>';}
  });})();
 // 문의 폼
 (function(){const cf=document.getElementById('contactForm');if(!cf)return;
@@ -175,17 +172,20 @@ def _demo_widget() -> str:
     return """
 <section class="bg-slate-950 pb-20"><div class="max-w-3xl mx-auto px-5">
  <div class="glass rounded-3xl p-6 sm:p-8 text-left">
-  <div class="text-center mb-4"><div class="text-white font-extrabold text-lg">🎬 내 가게로 무료 2회 만들어보기</div>
-   <p class="text-slate-300 text-sm mt-1">가입하면 내 사진으로 5채널 콘텐츠·영상을 바로 만들어드려요</p></div>
+  <div class="text-center mb-4"><div class="text-white font-extrabold text-lg">🎬 지금 바로 무료로 만들어보기</div>
+   <p class="text-slate-300 text-sm mt-1">가입 없이 업종만 입력하면 5채널 글을 즉시 생성 (IP당 2회 무료)</p></div>
   <form id="demoForm" class="space-y-3">
    <input id="d_ind" placeholder="업종/상품 (예: 꽃집, 헬스장, 캠핑 폴딩박스...)" class="w-full rounded-xl px-4 py-3 text-slate-800 outline-none">
+   <input id="d_note" placeholder="한 줄 설명 (선택 · 예: 겨울 신메뉴 출시)" class="w-full rounded-xl px-4 py-3 text-slate-800 outline-none">
    <div class="flex gap-2 text-sm">
      <label class="flex-1"><input type="radio" name="d_biz" value="local" checked class="peer hidden"><div class="text-center py-2.5 rounded-xl bg-white/10 text-slate-200 peer-checked:bg-emerald-500 peer-checked:text-white font-bold cursor-pointer">🏪 동네 매장</div></label>
      <label class="flex-1"><input type="radio" name="d_biz" value="seller" class="peer hidden"><div class="text-center py-2.5 rounded-xl bg-white/10 text-slate-200 peer-checked:bg-amber-500 peer-checked:text-white font-bold cursor-pointer">📦 온라인 셀러</div></label>
    </div>
+   <label class="block text-xs text-slate-400">📷 사진 (선택 · 넣으면 사진 반영 글이 나와요)
+     <input id="d_photo" type="file" accept="image/*" class="mt-1 block w-full text-slate-300 text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-white/20 file:text-white"></label>
    <button class="grad-btn w-full py-3.5 rounded-xl text-white font-extrabold text-lg">✨ 무료로 만들어보기</button></form>
   <div id="demoResult" class="mt-5"></div>
-  <p class="text-center text-slate-500 text-xs mt-3">가입한 회원만 무료 2회 · 사진은 가입 후 ‘내 작업실’에서 업로드</p>
+  <p class="text-center text-slate-500 text-xs mt-3">미가입도 IP당 2회 무료 · 🎬 영상·내사진 반영은 가입 후 바로</p>
  </div></div></section>"""
 
 

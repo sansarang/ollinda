@@ -58,11 +58,12 @@ def init_db() -> None:
                          ("map_url", "TEXT"), ("autonomy", "INTEGER DEFAULT 0"),
                          ("biz_type", "TEXT DEFAULT 'local'"), ("marketplace", "TEXT"),
                          ("buy_url", "TEXT"), ("search_kw", "TEXT"), ("brand_name", "TEXT"),
-                         ("publish_schedule", "INTEGER DEFAULT 0")]:
+                         ("publish_schedule", "INTEGER DEFAULT 0"), ("is_demo", "INTEGER DEFAULT 0")]:
             try:
                 c.execute(f"ALTER TABLE tenants ADD COLUMN {col} {ddl}")
             except sqlite3.OperationalError:
                 pass
+        c.execute("CREATE TABLE IF NOT EXISTS demo_usage(ip TEXT PRIMARY KEY, count INTEGER, last TEXT)")
         # 마이그레이션: users.tenant_id (구독자 ↔ 본인 가게), free_used (무료 생성 횟수)
         for col, ddl in [("tenant_id", "TEXT"), ("free_used", "INTEGER DEFAULT 0"),
                          ("usage_month", "TEXT"), ("month_used", "INTEGER DEFAULT 0")]:
@@ -236,6 +237,32 @@ def list_users() -> list[dict]:
 def reset_usage(uid: str) -> None:
     with _conn() as c:
         c.execute("UPDATE users SET free_used=0, month_used=0 WHERE id=?", (uid,))
+
+
+# ── 랜딩 무료체험(미가입) — IP 기준 횟수 ────────────────
+def demo_ip_count(ip: str) -> int:
+    with _conn() as c:
+        r = c.execute("SELECT count FROM demo_usage WHERE ip=?", (ip,)).fetchone()
+    return (r["count"] or 0) if r else 0
+
+
+def incr_demo_ip(ip: str) -> None:
+    with _conn() as c:
+        c.execute("INSERT INTO demo_usage(ip,count,last) VALUES(?,1,?) "
+                  "ON CONFLICT(ip) DO UPDATE SET count=count+1, last=excluded.last", (ip, _now()))
+
+
+def mark_tenant_demo(tid: str) -> None:
+    with _conn() as c:
+        c.execute("UPDATE tenants SET is_demo=1 WHERE id=?", (tid,))
+
+
+def asset_is_demo(asset_id: str) -> bool:
+    """자산이 '무료체험(데모)' 소속인지 — 데모 다운로드 보안 게이트."""
+    with _conn() as c:
+        r = c.execute("SELECT t.is_demo FROM content_pieces cp JOIN tenants t ON cp.tenant_id=t.id "
+                      "WHERE cp.asset_id=? LIMIT 1", (asset_id,)).fetchone()
+    return bool(r and r["is_demo"])
 
 
 # ── 구독(결제) ─────────────────────────────────────────
