@@ -1,0 +1,159 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1783033417371,
+  "projectRoot": "/Users/youngjinjung/Desktop/shopcast",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Python",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "requirements.txt"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "pip",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": "snake_case",
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "app",
+      "assets",
+      "docs"
+    ],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "app": {
+      "path": "app",
+      "purpose": "Application code",
+      "fileCount": 16,
+      "lastAccessed": 1783033417358,
+      "keyFiles": [
+        "__init__.py",
+        "auth.py",
+        "db.py",
+        "formats.py",
+        "google_auth.py"
+      ]
+    },
+    "assets": {
+      "path": "assets",
+      "purpose": "Static assets",
+      "fileCount": 0,
+      "lastAccessed": 1783033417359,
+      "keyFiles": []
+    },
+    "data": {
+      "path": "data",
+      "purpose": "Data files",
+      "fileCount": 1,
+      "lastAccessed": 1783033417359,
+      "keyFiles": [
+        "shopcast.sqlite"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 0,
+      "lastAccessed": 1783033417359,
+      "keyFiles": []
+    },
+    "references": {
+      "path": "references",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1783033417359,
+      "keyFiles": []
+    },
+    "app/assets": {
+      "path": "app/assets",
+      "purpose": "Static assets",
+      "fileCount": 0,
+      "lastAccessed": 1783033417360,
+      "keyFiles": []
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "app/main.py",
+      "accessCount": 19,
+      "lastAccessed": 1783064148447,
+      "type": "file"
+    },
+    {
+      "path": "app/landing.py",
+      "accessCount": 10,
+      "lastAccessed": 1783064207021,
+      "type": "file"
+    },
+    {
+      "path": "app/db.py",
+      "accessCount": 3,
+      "lastAccessed": 1783052078472,
+      "type": "file"
+    },
+    {
+      "path": "app/services/ingest.py",
+      "accessCount": 2,
+      "lastAccessed": 1783034399439,
+      "type": "file"
+    },
+    {
+      "path": "app/services/generate.py",
+      "accessCount": 2,
+      "lastAccessed": 1783052528358,
+      "type": "file"
+    },
+    {
+      "path": "app/generators/text_claude.py",
+      "accessCount": 1,
+      "lastAccessed": 1783034242498,
+      "type": "file"
+    },
+    {
+      "path": "app/seo.py",
+      "accessCount": 1,
+      "lastAccessed": 1783034297785,
+      "type": "file"
+    },
+    {
+      "path": "app/generators/strategist.py",
+      "accessCount": 1,
+      "lastAccessed": 1783034334421,
+      "type": "file"
+    },
+    {
+      "path": "app/generators/editor.py",
+      "accessCount": 1,
+      "lastAccessed": 1783034365581,
+      "type": "file"
+    },
+    {
+      "path": "app/services/demo.py",
+      "accessCount": 1,
+      "lastAccessed": 1783052099521,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}
