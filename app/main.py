@@ -217,45 +217,47 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
     if not pieces:                                   # 크레딧 부족 등 → 가입 유도로 대체
         return JSONResponse({"require_signup": True, "message": "가입하면 내 사진으로 5채널을 무료 2회 만들어드려요!"})
     db.incr_demo_ip(ip)
-    return JSONResponse({"teaser": True, "teaser_html": _teaser_html(pieces, brief)})
+    return JSONResponse({"teaser": True, "teaser_html": _teaser_html(pieces, brief, biz_type)})
 
 
-def _teaser_html(pieces, brief) -> str:
-    """실제 생성물 → 앞부분만 보이고 나머지는 흐리게(🔒). 영상은 흐린 목업. 가입 유도."""
+def _teaser_html(pieces, brief, biz_type: str = "local") -> str:
+    """인스타 1채널만 '전체 공개'(캡션 전부 + 실제 영상 재생), 나머지 4채널은 흐리게(🔒) → 가입 유도."""
     import re as _re
-    labels = {"blog": "📝 네이버 블로그", "caption": "📷 인스타그램", "x_post": "𝕏 X"}
+    by = {p.kind.value: p for p in pieces}
+    cap = by.get("caption")
+    insta_text = (cap.payload.get("text", "") if cap else "").strip()
+    sample = "/demo/seller_short.mp4" if biz_type == "seller" else "/demo/local_short.mp4"
+    # 📷 인스타그램 — 전체 공개 (캡션 전부 + 실제 영상 자동재생)
+    insta = ("<div class='bg-white/10 rounded-2xl p-4 mb-3 ring-2 ring-emerald-400/60'>"
+             "<div class='flex items-center gap-2 mb-2'>"
+             "<span class='text-white text-sm font-bold'>📷 인스타그램</span>"
+             "<span class='text-[10px] bg-emerald-500 text-white px-2 py-0.5 rounded-full font-bold'>✅ 전체 공개</span></div>"
+             f"<div class='text-slate-100 text-[13px] leading-relaxed whitespace-pre-wrap mb-3'>{esc(insta_text)}</div>"
+             f"<video src='{sample}' autoplay muted loop playsinline controls preload='metadata' "
+             "class='w-full rounded-xl bg-black' style='max-height:420px'></video>"
+             "<div class='text-[11px] text-slate-400 mt-1 text-center'>🎬 릴스 영상까지 자동 생성 (실제 예시)</div></div>")
 
-    def blurred(text):
-        clear, rest = esc((text or "")[:55]), esc((text or "")[55:420])
-        return (f"<div class='text-slate-100 text-xs leading-relaxed'>{clear}…</div>"
-                "<div class='relative mt-1'>"
-                f"<div style='filter:blur(4.5px);user-select:none' class='text-slate-300 text-xs leading-relaxed max-h-20 overflow-hidden'>{rest}</div>"
+    # 나머지 채널 — 흐리게 잠금
+    def locked(label, text):
+        t = esc((text or "")[:300])
+        return ("<div class='bg-white/5 rounded-xl p-3 mb-2 relative overflow-hidden'>"
+                f"<div class='text-slate-400 text-[11px] font-semibold mb-1'>{label}</div>"
+                f"<div style='filter:blur(5px);user-select:none' class='text-slate-300 text-xs leading-relaxed max-h-16 overflow-hidden'>{t}</div>"
                 "<div class='absolute inset-0 flex items-center justify-center'>"
-                "<span class='text-white text-[11px] font-bold bg-black/50 px-3 py-1 rounded-full'>🔒 가입하면 전체 공개</span></div></div>")
-    cards = ""
-    for p in pieces:
-        k, pl = p.kind.value, p.payload
-        if k == "blog":
-            body = _re.sub(r"\[사진\d+\]", "", pl.get("body", "")).strip()
-            inner = f"<div class='text-white font-bold text-sm mb-1'>{esc(pl.get('title',''))}</div>" + blurred(body)
-        else:
-            inner = blurred(pl.get("text", ""))
-        cards += (f"<div class='bg-white/10 rounded-xl p-3 mb-2'>"
-                  f"<div class='text-slate-400 text-[11px] font-semibold mb-1'>{labels.get(k, k)}</div>{inner}</div>")
-    video_mock = ("<div class='bg-white/10 rounded-xl p-3 mb-2'>"
-                  "<div class='text-slate-400 text-[11px] font-semibold mb-1'>▶️ 유튜브 쇼츠 · 🎬 릴스</div>"
-                  "<div class='relative rounded-lg overflow-hidden' style='aspect-ratio:16/9;background:linear-gradient(120deg,#6366f1,#a855f7,#ec4899)'>"
-                  "<div style='backdrop-filter:blur(3px);background:rgba(0,0,0,.25)' class='absolute inset-0 flex flex-col items-center justify-center'>"
-                  "<span class='text-3xl'>▶️</span><span class='text-white text-xs font-bold mt-1'>✅ 영상 생성 완료 · 🔒 가입하면 재생·다운로드</span></div></div></div>")
+                "<span class='text-white text-[11px] font-bold bg-black/60 px-3 py-1 rounded-full'>🔒 가입하면 공개</span></div></div>")
+    blog, x = by.get("blog"), by.get("x_post")
+    blog_txt = (blog.payload.get("title", "") + " · " + _re.sub(r"\[사진\d+\]", "", blog.payload.get("body", "")).strip()) if blog else ""
+    others = (locked("📝 네이버 블로그 (상위노출 최적화)", blog_txt)
+              + locked("▶️ 유튜브 쇼츠", "제목·설명·자막까지 넣은 세로 쇼츠 영상이 완성됐어요")
+              + locked("𝕏 X (트위터)", x.payload.get("text", "") if x else ""))
     cta = ("<a href='/login/kakao' class='block text-center py-3 rounded-xl font-extrabold mb-2' "
-           "style='background:#FEE500;color:#191600'>💬 카카오로 3초 가입하고 전체 보기</a>"
+           "style='background:#FEE500;color:#191600'>💬 카카오로 3초 가입하고 5채널 전부 받기</a>"
            "<a href='/login/google' class='block text-center py-3 rounded-xl font-bold bg-white text-slate-700'>구글로 가입</a>")
-    kw = esc((brief or {}).get("core_keyword", ""))
     return ("<div class='rounded-2xl p-4' style='background:rgba(255,255,255,.06)'>"
-            "<div class='text-center text-white font-extrabold'>✨ 방금 만든 결과 미리보기</div>"
-            f"<div class='text-center text-slate-300 text-xs mb-3'>핵심 키워드 <b>{kw}</b> 반영 · 가입하면 전체 공개 + 다운로드</div>"
-            + cards + video_mock
-            + "<div class='text-center text-emerald-300 text-xs font-bold my-2'>👆 이 정도 퀄리티, 내 가게 걸로 전부 받으세요</div>"
+            "<div class='text-center text-white font-extrabold text-lg'>✨ 방금 만든 결과</div>"
+            "<div class='text-center text-slate-300 text-xs mb-3'>인스타 1개만 미리 열어드렸어요 · 나머지 4채널은 가입하면 전부 공개</div>"
+            + insta + others
+            + "<div class='text-center text-emerald-300 text-sm font-bold my-3'>👆 이건 인스타 하나예요. 가입하면 <u>5채널 전부 + 영상 + 다운로드</u></div>"
             + cta + "</div>")
 
 
