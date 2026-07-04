@@ -74,6 +74,8 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
 // 셀프 체험 위젯
 (function(){const df=document.getElementById('demoForm');if(!df)return;
  const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+ const pf=document.getElementById('d_photo');
+ if(pf)pf.addEventListener('change',()=>{document.getElementById('d_photoname').textContent=(pf.files&&pf.files[0])?('✓ '+pf.files[0].name):'';});
  df.addEventListener('submit',async e=>{e.preventDefault();
   const box=document.getElementById('demoResult');
   const ind=document.getElementById('d_ind').value.trim();
@@ -81,7 +83,7 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
   box.innerHTML='<div class="text-center text-slate-200 py-6"><span class="dot inline-block w-3 h-3 rounded-full bg-indigo-400 align-middle"></span> AI 전문가팀이 실제로 만드는 중… (20~40초)</div>';
   const biz=(document.querySelector('input[name="d_biz"]:checked')||{}).value||'local';
   const fd=new FormData();fd.append('industry',ind);fd.append('biz_type',biz);
-  fd.append('note',(document.getElementById('d_note')||{}).value||'');
+  if(pf&&pf.files&&pf.files[0])fd.append('photo',pf.files[0]);
   try{const r=await fetch('/api/demo',{method:'POST',body:fd});const d=await r.json();
    if(d.teaser){box.innerHTML=d.teaser_html;box.scrollIntoView({behavior:'smooth',block:'nearest'});return;}
    if(d.go_dashboard){window.location.href='/me';return;}
@@ -178,18 +180,21 @@ def _demo_widget() -> str:
     return """
 <section class="bg-slate-950 pb-20"><div class="max-w-3xl mx-auto px-5">
  <div class="glass rounded-3xl p-6 sm:p-8 text-left">
-  <div class="text-center mb-4"><div class="text-white font-extrabold text-lg">🎬 내 업종으로 지금 만들어보기</div>
-   <p class="text-slate-300 text-sm mt-1">업종만 입력하면 <b class="text-white">진짜로 생성</b>해서 미리 보여드려요 (가입하면 전체 공개·다운로드)</p></div>
+  <div class="text-center mb-4"><div class="text-white font-extrabold text-lg">🎬 내 사진으로 지금 만들어보기</div>
+   <p class="text-slate-300 text-sm mt-1">사진 올리고 업종만 고르면 <b class="text-white">진짜로 생성</b>해서 바로 보여드려요 · 가입 없이</p></div>
   <form id="demoForm" class="space-y-3">
+   <label class="block bg-white/10 border-2 border-dashed border-white/30 rounded-xl px-4 py-4 text-center cursor-pointer hover:bg-white/15">
+     <span class="text-white font-bold">📷 사진 올리기</span>
+     <span class="block text-slate-400 text-xs mt-0.5">가게·상품 사진 한 장 (선택)</span>
+     <input id="d_photo" type="file" accept="image/*" class="hidden"><span id="d_photoname" class="block text-emerald-300 text-xs mt-1"></span></label>
    <input id="d_ind" placeholder="업종/상품 (예: 꽃집, 헬스장, 캠핑 폴딩박스...)" class="w-full rounded-xl px-4 py-3 text-slate-800 outline-none">
-   <input id="d_note" placeholder="한 줄 설명 (선택 · 예: 겨울 신메뉴 출시, 봄맞이 할인)" class="w-full rounded-xl px-4 py-3 text-slate-800 outline-none">
    <div class="flex gap-2 text-sm">
      <label class="flex-1"><input type="radio" name="d_biz" value="local" checked class="peer hidden"><div class="text-center py-2.5 rounded-xl bg-white/10 text-slate-200 peer-checked:bg-emerald-500 peer-checked:text-white font-bold cursor-pointer">🏪 동네 매장</div></label>
      <label class="flex-1"><input type="radio" name="d_biz" value="seller" class="peer hidden"><div class="text-center py-2.5 rounded-xl bg-white/10 text-slate-200 peer-checked:bg-amber-500 peer-checked:text-white font-bold cursor-pointer">📦 온라인 셀러</div></label>
    </div>
    <button class="grad-btn w-full py-3.5 rounded-xl text-white font-extrabold text-lg">✨ 실제로 만들어보기</button></form>
   <div id="demoResult" class="mt-5"></div>
-  <p class="text-center text-slate-500 text-xs mt-3">가입하면 <b class="text-slate-300">내 사진</b>으로 영상까지 무료 2회 · 전체 공개·다운로드</p>
+  <p class="text-center text-slate-500 text-xs mt-3">가입 없이 미리보기 · 가입하면 <b class="text-slate-300">5채널 전부 + 영상</b> 무료 2회</p>
  </div></div></section>"""
 
 

@@ -207,9 +207,13 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
           or (request.client.host if request.client else "") or "unknown")
     if db.demo_ip_count(ip) >= 5:                    # 남용 방지(조용히)
         return JSONResponse({"require_signup": True, "message": "가입하면 내 사진으로 5채널을 무료 2회 만들어드려요!"})
+    img_bytes = None
+    if photo is not None and getattr(photo, "filename", ""):
+        img_bytes = await photo.read()
     try:
         from app.services import teaser as teaser_svc
-        _t, _a, pieces, brief = teaser_svc.run_teaser(industry, biz_type, note)
+        _t, _a, pieces, brief = teaser_svc.run_teaser(industry, biz_type, note, img_bytes,
+                                                      getattr(photo, "filename", None))
     except Exception:
         import logging
         logging.exception("[teaser] 실패")
@@ -220,19 +224,40 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
     return JSONResponse({"teaser": True, "teaser_html": _teaser_html(pieces, brief, biz_type)})
 
 
+def _img_thumb_data_uri(path, max_px: int = 640) -> str:
+    """업로드 사진 → 작은 base64 썸네일(data URI). 실패 시 ''."""
+    try:
+        if not (path and os.path.exists(path)):
+            return ""
+        from PIL import Image
+        import io
+        import base64
+        im = Image.open(path).convert("RGB")
+        im.thumbnail((max_px, max_px))
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=80)
+        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        return ""
+
+
 def _teaser_html(pieces, brief, biz_type: str = "local") -> str:
-    """인스타 1채널만 '전체 공개'(캡션 전부 + 실제 영상 재생), 나머지 4채널은 흐리게(🔒) → 가입 유도."""
+    """인스타 1채널만 '전체 공개'(내 사진 + 캡션 전부 + 실제 영상), 나머지 4채널은 흐리게(🔒) → 가입 유도."""
     import re as _re
     by = {p.kind.value: p for p in pieces}
     cap = by.get("caption")
     insta_text = (cap.payload.get("text", "") if cap else "").strip()
+    imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
+    thumb = _img_thumb_data_uri(imgs[0]) if imgs else ""
+    photo_html = (f"<img src='{thumb}' class='w-full rounded-xl mb-2' style='max-height:300px;object-fit:cover'>" if thumb else "")
     sample = "/demo/seller_short.mp4" if biz_type == "seller" else "/demo/local_short.mp4"
-    # 📷 인스타그램 — 전체 공개 (캡션 전부 + 실제 영상 자동재생)
+    # 📷 인스타그램 — 전체 공개 (내 사진 + 캡션 전부 + 실제 영상 자동재생)
     insta = ("<div class='bg-white/10 rounded-2xl p-4 mb-3 ring-2 ring-emerald-400/60'>"
              "<div class='flex items-center gap-2 mb-2'>"
              "<span class='text-white text-sm font-bold'>📷 인스타그램</span>"
              "<span class='text-[10px] bg-emerald-500 text-white px-2 py-0.5 rounded-full font-bold'>✅ 전체 공개</span></div>"
-             f"<div class='text-slate-100 text-[13px] leading-relaxed whitespace-pre-wrap mb-3'>{esc(insta_text)}</div>"
+             + photo_html
+             + f"<div class='text-slate-100 text-[13px] leading-relaxed whitespace-pre-wrap mb-3'>{esc(insta_text)}</div>"
              f"<video src='{sample}' autoplay muted loop playsinline controls preload='metadata' "
              "class='w-full rounded-xl bg-black' style='max-height:420px'></video>"
              "<div class='text-[11px] text-slate-400 mt-1 text-center'>🎬 릴스 영상까지 자동 생성 (실제 예시)</div></div>")
