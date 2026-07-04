@@ -78,10 +78,12 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
   const box=document.getElementById('demoResult');
   const ind=document.getElementById('d_ind').value.trim();
   if(!ind){box.innerHTML='<div class="text-amber-300 text-sm text-center py-3">업종/상품을 입력해주세요.</div>';return;}
-  box.innerHTML='<div class="text-center text-slate-200 py-6"><span class="dot inline-block w-3 h-3 rounded-full bg-indigo-400 align-middle"></span> 확인 중…</div>';
+  box.innerHTML='<div class="text-center text-slate-200 py-6"><span class="dot inline-block w-3 h-3 rounded-full bg-indigo-400 align-middle"></span> AI 전문가팀이 실제로 만드는 중… (20~40초)</div>';
   const biz=(document.querySelector('input[name="d_biz"]:checked')||{}).value||'local';
   const fd=new FormData();fd.append('industry',ind);fd.append('biz_type',biz);
+  fd.append('note',(document.getElementById('d_note')||{}).value||'');
   try{const r=await fetch('/api/demo',{method:'POST',body:fd});const d=await r.json();
+   if(d.teaser){box.innerHTML=d.teaser_html;box.scrollIntoView({behavior:'smooth',block:'nearest'});return;}
    if(d.go_dashboard){window.location.href='/me';return;}
    let cta;
    if(d.limit){cta='<a href="#pricing" class="block py-3 rounded-xl font-bold bg-white text-indigo-700">요금제 보기 →</a>';}
@@ -176,17 +178,18 @@ def _demo_widget() -> str:
     return """
 <section class="bg-slate-950 pb-20"><div class="max-w-3xl mx-auto px-5">
  <div class="glass rounded-3xl p-6 sm:p-8 text-left">
-  <div class="text-center mb-4"><div class="text-white font-extrabold text-lg">🎬 내 가게로 무료 2회 만들어보기</div>
-   <p class="text-slate-300 text-sm mt-1">가입하면 내 사진으로 5채널 콘텐츠·영상을 바로 만들어드려요</p></div>
+  <div class="text-center mb-4"><div class="text-white font-extrabold text-lg">🎬 내 업종으로 지금 만들어보기</div>
+   <p class="text-slate-300 text-sm mt-1">업종만 입력하면 <b class="text-white">진짜로 생성</b>해서 미리 보여드려요 (가입하면 전체 공개·다운로드)</p></div>
   <form id="demoForm" class="space-y-3">
    <input id="d_ind" placeholder="업종/상품 (예: 꽃집, 헬스장, 캠핑 폴딩박스...)" class="w-full rounded-xl px-4 py-3 text-slate-800 outline-none">
+   <input id="d_note" placeholder="한 줄 설명 (선택 · 예: 겨울 신메뉴 출시, 봄맞이 할인)" class="w-full rounded-xl px-4 py-3 text-slate-800 outline-none">
    <div class="flex gap-2 text-sm">
      <label class="flex-1"><input type="radio" name="d_biz" value="local" checked class="peer hidden"><div class="text-center py-2.5 rounded-xl bg-white/10 text-slate-200 peer-checked:bg-emerald-500 peer-checked:text-white font-bold cursor-pointer">🏪 동네 매장</div></label>
      <label class="flex-1"><input type="radio" name="d_biz" value="seller" class="peer hidden"><div class="text-center py-2.5 rounded-xl bg-white/10 text-slate-200 peer-checked:bg-amber-500 peer-checked:text-white font-bold cursor-pointer">📦 온라인 셀러</div></label>
    </div>
-   <button class="grad-btn w-full py-3.5 rounded-xl text-white font-extrabold text-lg">✨ 무료로 만들어보기</button></form>
+   <button class="grad-btn w-full py-3.5 rounded-xl text-white font-extrabold text-lg">✨ 실제로 만들어보기</button></form>
   <div id="demoResult" class="mt-5"></div>
-  <p class="text-center text-slate-500 text-xs mt-3">가입하면 무료 2회 · 사진은 가입 후 ‘내 작업실’에서 업로드</p>
+  <p class="text-center text-slate-500 text-xs mt-3">가입하면 <b class="text-slate-300">내 사진</b>으로 영상까지 무료 2회 · 전체 공개·다운로드</p>
  </div></div></section>"""
 
 

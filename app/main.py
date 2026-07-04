@@ -179,20 +179,75 @@ _DEMO_HITS: dict = {}   # ip -> [timestamps] (무료 체험 rate limit)
 async def api_demo(request: Request, industry: str = Form(""), note: str = Form(""),
                    biz_type: str = Form("local"), marketplace: str = Form(""),
                    search_kw: str = Form(""), photo: UploadFile = File(None)):
-    """랜딩 '무료로 만들어보기' = 가입 유도 퍼널. 실제 생성은 가입 후 '내 작업실'에서(무료 2회)."""
+    """랜딩 데모 — 미가입자는 '실제 생성 티저(흐리게)'로 가입 유도. 로그인 회원은 작업실로."""
     u = auth.current_user(request)
-    if not u:
-        return JSONResponse({"require_signup": True,
-                             "message": "가입하면 내 사진으로 인스타·블로그·유튜브·X 5채널을 무료 2회 만들어드려요!"})
-    used = u.get("free_used") or 0
-    free = (u.get("plan") or "free") == "free"
-    if free and used >= FREE_LIMIT:
-        return JSONResponse({"limit": True,
-                             "message": f"무료 {FREE_LIMIT}회를 모두 사용했어요. 요금제로 무제한 이용하세요."})
-    left = (FREE_LIMIT - used) if free else None
-    return JSONResponse({"go_dashboard": True,
-                         "message": "내 작업실에서 사진을 올리면 바로 만들어드려요!"
-                                    + (f" (무료 {left}회 남음)" if left is not None else "")})
+    if u:                                            # 로그인 회원 → 작업실에서 실제 생성
+        used = u.get("free_used") or 0
+        free = (u.get("plan") or "free") == "free"
+        if free and used >= FREE_LIMIT:
+            return JSONResponse({"limit": True, "message": f"무료 {FREE_LIMIT}회를 모두 사용했어요. 요금제로 무제한 이용하세요."})
+        left = (FREE_LIMIT - used) if free else None
+        return JSONResponse({"go_dashboard": True,
+                             "message": "내 작업실에서 사진을 올리면 바로 만들어드려요!"
+                                        + (f" (무료 {left}회 남음)" if left is not None else "")})
+    # 미로그인 → 실제 생성 후 '흐리게' 미리보기(티저)로 가입 유도
+    if not (industry or "").strip():
+        return JSONResponse({"require_signup": True, "message": "업종/상품을 입력하면 실제로 만들어 보여드려요!"})
+    ip = (request.headers.get("cf-connecting-ip")
+          or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+          or (request.client.host if request.client else "") or "unknown")
+    if db.demo_ip_count(ip) >= 5:                    # 남용 방지(조용히)
+        return JSONResponse({"require_signup": True, "message": "가입하면 내 사진으로 5채널을 무료 2회 만들어드려요!"})
+    try:
+        from app.services import teaser as teaser_svc
+        _t, _a, pieces, brief = teaser_svc.run_teaser(industry, biz_type, note)
+    except Exception:
+        import logging
+        logging.exception("[teaser] 실패")
+        return JSONResponse({"require_signup": True, "message": "가입하면 바로 만들어드려요!"})
+    if not pieces:                                   # 크레딧 부족 등 → 가입 유도로 대체
+        return JSONResponse({"require_signup": True, "message": "가입하면 내 사진으로 5채널을 무료 2회 만들어드려요!"})
+    db.incr_demo_ip(ip)
+    return JSONResponse({"teaser": True, "teaser_html": _teaser_html(pieces, brief)})
+
+
+def _teaser_html(pieces, brief) -> str:
+    """실제 생성물 → 앞부분만 보이고 나머지는 흐리게(🔒). 영상은 흐린 목업. 가입 유도."""
+    import re as _re
+    labels = {"blog": "📝 네이버 블로그", "caption": "📷 인스타그램", "x_post": "𝕏 X"}
+
+    def blurred(text):
+        clear, rest = esc((text or "")[:55]), esc((text or "")[55:420])
+        return (f"<div class='text-slate-100 text-xs leading-relaxed'>{clear}…</div>"
+                "<div class='relative mt-1'>"
+                f"<div style='filter:blur(4.5px);user-select:none' class='text-slate-300 text-xs leading-relaxed max-h-20 overflow-hidden'>{rest}</div>"
+                "<div class='absolute inset-0 flex items-center justify-center'>"
+                "<span class='text-white text-[11px] font-bold bg-black/50 px-3 py-1 rounded-full'>🔒 가입하면 전체 공개</span></div></div>")
+    cards = ""
+    for p in pieces:
+        k, pl = p.kind.value, p.payload
+        if k == "blog":
+            body = _re.sub(r"\[사진\d+\]", "", pl.get("body", "")).strip()
+            inner = f"<div class='text-white font-bold text-sm mb-1'>{esc(pl.get('title',''))}</div>" + blurred(body)
+        else:
+            inner = blurred(pl.get("text", ""))
+        cards += (f"<div class='bg-white/10 rounded-xl p-3 mb-2'>"
+                  f"<div class='text-slate-400 text-[11px] font-semibold mb-1'>{labels.get(k, k)}</div>{inner}</div>")
+    video_mock = ("<div class='bg-white/10 rounded-xl p-3 mb-2'>"
+                  "<div class='text-slate-400 text-[11px] font-semibold mb-1'>▶️ 유튜브 쇼츠 · 🎬 릴스</div>"
+                  "<div class='relative rounded-lg overflow-hidden' style='aspect-ratio:16/9;background:linear-gradient(120deg,#6366f1,#a855f7,#ec4899)'>"
+                  "<div style='backdrop-filter:blur(3px);background:rgba(0,0,0,.25)' class='absolute inset-0 flex flex-col items-center justify-center'>"
+                  "<span class='text-3xl'>▶️</span><span class='text-white text-xs font-bold mt-1'>✅ 영상 생성 완료 · 🔒 가입하면 재생·다운로드</span></div></div></div>")
+    cta = ("<a href='/login/kakao' class='block text-center py-3 rounded-xl font-extrabold mb-2' "
+           "style='background:#FEE500;color:#191600'>💬 카카오로 3초 가입하고 전체 보기</a>"
+           "<a href='/login/google' class='block text-center py-3 rounded-xl font-bold bg-white text-slate-700'>구글로 가입</a>")
+    kw = esc((brief or {}).get("core_keyword", ""))
+    return ("<div class='rounded-2xl p-4' style='background:rgba(255,255,255,.06)'>"
+            "<div class='text-center text-white font-extrabold'>✨ 방금 만든 결과 미리보기</div>"
+            f"<div class='text-center text-slate-300 text-xs mb-3'>핵심 키워드 <b>{kw}</b> 반영 · 가입하면 전체 공개 + 다운로드</div>"
+            + cards + video_mock
+            + "<div class='text-center text-emerald-300 text-xs font-bold my-2'>👆 이 정도 퀄리티, 내 가게 걸로 전부 받으세요</div>"
+            + cta + "</div>")
 
 
 @app.post("/api/contact")
