@@ -75,7 +75,10 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
 (function(){const df=document.getElementById('demoForm');if(!df)return;
  const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
  const pf=document.getElementById('d_photo');
- if(pf)pf.addEventListener('change',()=>{document.getElementById('d_photoname').textContent=(pf.files&&pf.files[0])?('✓ '+pf.files[0].name):'';});
+ if(pf)pf.addEventListener('change',()=>{var f=pf.files&&pf.files[0];
+   document.getElementById('d_photoname').textContent=f?('✓ '+f.name):'';
+   var pv=document.getElementById('d_preview');
+   if(f){pv.src=URL.createObjectURL(f);pv.classList.remove('hidden');}else{pv.classList.add('hidden');}});
  df.addEventListener('submit',async e=>{e.preventDefault();
   const box=document.getElementById('demoResult');
   const ind=document.getElementById('d_ind').value.trim();
@@ -193,6 +196,7 @@ def _demo_widget() -> str:
      <span class="text-white font-bold">📷 사진 올리기</span>
      <span class="block text-slate-400 text-xs mt-0.5">가게·상품 사진 한 장 (선택)</span>
      <input id="d_photo" type="file" accept="image/*" class="hidden"><span id="d_photoname" class="block text-emerald-300 text-xs mt-1"></span></label>
+   <img id="d_preview" class="hidden w-full rounded-xl" style="max-height:240px;object-fit:cover" alt="올린 사진 미리보기">
    <input id="d_ind" placeholder="업종/상품 (예: 꽃집, 헬스장, 캠핑 폴딩박스...)" class="w-full rounded-xl px-4 py-3 text-slate-800 outline-none">
    <div class="flex gap-2 text-sm">
      <label class="flex-1"><input type="radio" name="d_biz" value="local" checked class="peer hidden"><div class="text-center py-2.5 rounded-xl bg-white/10 text-slate-200 peer-checked:bg-emerald-500 peer-checked:text-white font-bold cursor-pointer">🏪 동네 매장</div></label>

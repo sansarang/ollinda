@@ -875,10 +875,15 @@ def kit(request: Request, asset_id: str):
                 + "</div>")
     all_btn = (f"<a href='/kit/{asset_id}/pack-all' class='block text-center bg-indigo-600 hover:bg-indigo-700 "
                "text-white font-extrabold py-3.5 rounded-2xl mb-4'>⬇ 5채널 전체 한 번에 받기 (채널별 폴더 정리)</a>")
+    thumbs = "".join(f"<img src='/dl/{asset_id}/{os.path.basename(im)}' class='h-24 w-24 object-cover rounded-lg border border-slate-100'>"
+                     for im in imgs if im and os.path.exists(im))
+    photos_strip = (("<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-4 mb-4'>"
+                     "<div class='font-bold text-sm mb-2'>📷 내가 올린 사진</div>"
+                     f"<div class='flex gap-2 flex-wrap'>{thumbs}</div></div>") if thumbs else "")
     body = ("<a href='/me' class='text-sm text-slate-400'>← 내 작업실</a>"
             "<h2 class='text-xl font-extrabold mt-2 mb-1'>발행 소재</h2>"
             "<p class='text-slate-500 text-sm mb-4'>채널마다 <b>글+사진+영상이 한 묶음</b>이에요. 통째로 받아 각 앱에 올리고, 글은 복사해서 붙여넣으세요.</p>"
-            + pipeline + all_btn + cards + js)
+            + photos_strip + pipeline + all_btn + cards + js)
     return HTMLResponse(_subscriber_page("발행 소재", body))
 
 
