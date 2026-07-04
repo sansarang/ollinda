@@ -43,3 +43,16 @@ def search(query: str, limit: int = 5) -> list[dict]:
         return out
     except Exception:
         return []
+
+
+def rank(keyword: str, store_name: str, limit: int = 5) -> int | None:
+    """참고용 순위 — 네이버 지역검색 상위 limit 안에서 내 가게 위치(1~limit).
+    상위 밖이면 0, 조회 불가(무키/실패)면 None."""
+    items = search(keyword, limit)
+    if not items:
+        return None
+    key = re.sub(r"\s+", "", store_name or "")
+    for i, it in enumerate(items, 1):
+        if key and key in re.sub(r"\s+", "", it.get("name", "")):
+            return i
+    return 0

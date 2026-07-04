@@ -64,6 +64,8 @@ def init_db() -> None:
             except sqlite3.OperationalError:
                 pass
         c.execute("CREATE TABLE IF NOT EXISTS demo_usage(ip TEXT PRIMARY KEY, count INTEGER, last TEXT)")
+        c.execute("CREATE TABLE IF NOT EXISTS place_news("
+                  "id TEXT PRIMARY KEY, tenant_id TEXT, text TEXT, created_at TEXT)")
         # 마이그레이션: users.tenant_id (구독자 ↔ 본인 가게), free_used (무료 생성 횟수)
         for col, ddl in [("tenant_id", "TEXT"), ("free_used", "INTEGER DEFAULT 0"),
                          ("usage_month", "TEXT"), ("month_used", "INTEGER DEFAULT 0")]:
@@ -255,6 +257,23 @@ def incr_demo_ip(ip: str) -> None:
 def mark_tenant_demo(tid: str) -> None:
     with _conn() as c:
         c.execute("UPDATE tenants SET is_demo=1 WHERE id=?", (tid,))
+
+
+# ── 플레이스 소식 ─────────────────────────────────────
+def add_place_news(tenant_id: str, text: str) -> None:
+    with _conn() as c:
+        c.execute("INSERT INTO place_news(id,tenant_id,text,created_at) VALUES(?,?,?,?)",
+                  (str(uuid.uuid4()), tenant_id, text, _now()))
+
+
+def list_place_news(tenant_id: str, limit: int = 6) -> list[dict]:
+    try:
+        with _conn() as c:
+            rows = c.execute("SELECT id,text,created_at FROM place_news WHERE tenant_id=? "
+                             "ORDER BY created_at DESC LIMIT ?", (tenant_id, limit)).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.OperationalError:
+        return []
 
 
 def asset_is_demo(asset_id: str) -> bool:

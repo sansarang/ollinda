@@ -463,7 +463,17 @@ def _perf_report(tenant_id: str) -> str:
             "<p class='text-xs text-slate-400 mb-3'>내 콘텐츠가 상위노출 요인을 얼마나 갖췄는지 · 노리는 키워드</p>"
             + cards
             + (f"<div class='text-sm font-semibold text-slate-600 mb-1'>🎯 노리는 키워드</div>{chips}" if chips else "")
-            + "<p class='text-xs text-slate-400 mt-3'>※ 네이버 실시간 검색순위 추적은 곧 추가됩니다.</p></div>")
+            + "<div class='mt-3'><button onclick='checkRank()' class='px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg'>🔎 키워드 순위 조회 (참고)</button>"
+            + "<div id='rankbox' class='mt-2'></div></div>"
+            + "<script>async function checkRank(){var b=document.getElementById('rankbox');"
+              "b.innerHTML='<span class=\"text-slate-400 text-xs\">조회 중…</span>';"
+              "try{var r=await fetch('/me/rank');var d=await r.json();"
+              "if(!d.configured){b.innerHTML='<span class=\"text-slate-400 text-xs\">네이버 키를 등록하면 순위 조회가 켜집니다.</span>';return;}"
+              "if(!d.items||!d.items.length){b.innerHTML='<span class=\"text-slate-400 text-xs\">타겟 키워드가 아직 없어요.</span>';return;}"
+              "b.innerHTML=d.items.map(function(it){var s=(it.rank===null)?'조회불가':(it.rank>=1?('네이버 지역 '+it.rank+'위 ✅'):'상위 5위 밖');"
+              "return '<div class=\"flex justify-between border-b border-slate-100 py-1.5 text-sm\"><span class=\"text-slate-600\">'+it.kw+'</span><span class=\"font-bold text-slate-800\">'+s+'</span></div>';}).join('');"
+              "}catch(e){b.innerHTML='<span class=\"text-rose-400 text-xs\">조회 실패</span>';}}</script>"
+            + "<p class='text-xs text-slate-400 mt-3'>※ 순위는 참고용(위치·기기별로 달라요). 실시간 자동추적은 로드맵.</p></div>")
 
 
 @app.get("/me", response_class=HTMLResponse)
@@ -634,8 +644,37 @@ def my_dashboard(request: Request, ok: str = "", err: str = ""):
     settings = ("<details class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5'>"
                 "<summary class='font-bold cursor-pointer text-slate-600'>⚙️ 가게 정보 수정 (검색으로 자동입력)</summary>"
                 "<div class='mt-3'>" + search_box + store_form + place_js + "</div></details>")
+    # 📢 플레이스 소식 + ⭐ 리뷰 유도 (매장/하이브리드) — 플레이스 상위노출 직접 도움
+    place_section = review_section = ""
+    if (t.biz_type or "local") in ("local", "hybrid"):
+        news = db.list_place_news(t.id, 6)
+        nitems = "".join(
+            "<div class='bg-slate-50 rounded-xl p-3 mb-2'>"
+            f"<textarea id='pn{i}' class='hidden'>{esc(n['text'])}</textarea>"
+            f"<div class='text-sm text-slate-700 whitespace-pre-wrap'>{esc(n['text'])}</div>"
+            f"<button onclick=\"navigator.clipboard.writeText(document.getElementById('pn{i}').value);this.textContent='✅ 복사됨'\" "
+            "class='mt-2 px-3 py-1 bg-indigo-600 text-white text-xs font-bold rounded-lg'>📋 복사</button></div>"
+            for i, n in enumerate(news)) or "<p class='text-slate-400 text-sm'>아직 소식이 없어요. 버튼으로 만들어보세요.</p>"
+        place_section = (
+            "<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-4'>"
+            "<h2 class='font-bold mb-1'>📢 플레이스 소식 <span class='text-xs text-emerald-600 font-normal'>(상위노출에 직접 도움)</span></h2>"
+            "<p class='text-xs text-slate-400 mb-3'>주 2~3회 스마트플레이스 ‘소식’에 올리면 신선도 점수↑. 복사해서 붙여넣기만.</p>"
+            "<form method=post action='/me/place-news'><button class='w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2.5 rounded-xl mb-3'>✨ 소식 3개 자동 생성</button></form>"
+            + nitems + "</div>")
+        from app import seo as _seo
+        rq = _seo.review_request(t.name, t.region, t.industry)
+        review_section = (
+            "<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-4'>"
+            "<h2 class='font-bold mb-1'>⭐ 리뷰 요청 <span class='text-xs text-emerald-600 font-normal'>(진짜 방문자 리뷰 = 최강 순위요인)</span></h2>"
+            "<p class='text-xs text-slate-400 mb-3'>방문 손님에게 문구를 보내거나, 카드를 출력해 카운터에 두세요.</p>"
+            f"<textarea id='rvq' class='hidden'>{esc(rq)}</textarea>"
+            f"<div class='bg-slate-50 rounded-xl p-3 text-sm text-slate-700 whitespace-pre-wrap mb-2'>{esc(rq)}</div>"
+            "<div class='flex gap-2'>"
+            "<button onclick=\"navigator.clipboard.writeText(document.getElementById('rvq').value);this.textContent='✅ 복사됨'\" class='px-3 py-2 bg-indigo-600 text-white text-sm font-bold rounded-lg'>📋 문구 복사</button>"
+            "<a href='/me/review-card.png' download class='px-3 py-2 bg-slate-800 text-white text-sm font-bold rounded-lg'>⬇ 리뷰 요청 카드</a></div></div>")
     return _subscriber_page(f"{esc(t.name)} · 내 작업실",
-                            greeting + plan_card + upload_section + content + _perf_report(t.id) + steps + settings)
+                            greeting + plan_card + upload_section + content + _perf_report(t.id)
+                            + place_section + review_section + steps + settings)
 
 
 @app.post("/me/store")
@@ -654,6 +693,92 @@ def my_store(request: Request, name: str = Form(""), industry: str = Form(""), r
         from app.industries import ensure_profile
         ensure_profile(industry.strip())
     return RedirectResponse("/me?ok=설정을 저장했어요", status_code=303)
+
+
+@app.post("/me/place-news")
+def my_place_news(request: Request):
+    """플레이스 소식 3개 자동 생성 → 저장(붙여넣기용)."""
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    t = _ensure_user_tenant(u)
+    try:
+        from app.services import place_news
+        for txt in place_news.generate(t, 3):
+            db.add_place_news(t.id, txt)
+        msg = "플레이스 소식 3개를 만들었어요! 아래에서 복사해 스마트플레이스 소식에 올리세요"
+    except Exception:
+        msg = "소식 생성 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요"
+    return RedirectResponse(f"/me?ok={msg}", status_code=303)
+
+
+@app.get("/me/rank")
+def my_rank(request: Request):
+    """참고용 순위 조회 — 타겟 키워드로 네이버 지역검색 상위 노출 여부(대략)."""
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"items": [], "configured": False})
+    t = _ensure_user_tenant(u)
+    from app.services import place
+    kws: list = []
+    for s in db.list_sets(tenant_id=t.id, limit=50):
+        for p in db.get_set_pieces(s["asset_id"]):
+            for k in (p.payload.get("target_keywords") or []):
+                if k and k not in kws:
+                    kws.append(k)
+    items = [{"kw": k, "rank": place.rank(k, t.name)} for k in kws[:6]]
+    return JSONResponse({"items": items, "configured": place.configured()})
+
+
+def _kfont(size: int):
+    from PIL import ImageFont
+    for p in ("/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
+              "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+              "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
+              "/System/Library/Fonts/AppleSDGothicNeo.ttc"):
+        try:
+            return ImageFont.truetype(p, size)
+        except Exception:
+            continue
+    from PIL import ImageFont as _IF
+    return _IF.load_default()
+
+
+@app.get("/me/review-card.png")
+def review_card(request: Request):
+    """카운터 비치용 리뷰 요청 카드(이미지). 방문자 리뷰 유도."""
+    u = auth.current_user(request)
+    if not u:
+        return HTMLResponse(status_code=403)
+    t = _ensure_user_tenant(u)
+    from PIL import Image, ImageDraw
+    import io
+
+    W = H = 1080
+    img = Image.new("RGB", (W, H), (99, 102, 241))
+    top = Image.new("RGB", (W, H), (236, 72, 153))
+    mask = Image.new("L", (W, H))
+    md = ImageDraw.Draw(mask)
+    for y in range(H):
+        md.line([(0, y), (W, y)], fill=int(255 * y / H))
+    img.paste(top, (0, 0), mask)
+    d = ImageDraw.Draw(img)
+
+    def center(text, y, font, fill="white"):
+        w = d.textbbox((0, 0), text, font=font)[2]
+        d.text(((W - w) / 2, y), text, font=font, fill=fill)
+    center("⭐⭐⭐⭐⭐", 150, _kfont(90))
+    center("리뷰 남겨주세요", 300, _kfont(84))
+    # 흰 박스
+    d.rounded_rectangle([120, 470, W - 120, 780], radius=32, fill="white")
+    center(esc(t.name) if False else t.name, 520, _kfont(60), fill=(30, 30, 40))
+    center("네이버에서 검색 후", 630, _kfont(44), fill=(90, 90, 100))
+    center(f"‘{t.name}’ 방문자 리뷰 ✍️", 700, _kfont(48), fill=(99, 102, 241))
+    center("여러분의 한 줄 후기가 큰 힘이 됩니다 🙏", 850, _kfont(40))
+    center("made by 올린다", 1000, _kfont(28), fill=(255, 255, 255))
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return Response(buf.getvalue(), media_type="image/png")
 
 
 @app.get("/me/connect/{channel}/start")
