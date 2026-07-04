@@ -160,10 +160,10 @@ def _video() -> str:
     <video src="/demo/local_short.mp4" controls autoplay muted loop playsinline class="w-full"></video>
     <div class="bg-slate-900 text-slate-300 text-sm px-5 py-3">초량 루마썬팅 — 사진 → AI가 자동 생성한 세로 숏폼 + <b class="text-emerald-300">방문·연락 유도</b>. 실제 결과물.</div></div>
    <div class="max-w-3xl mx-auto mt-6 rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-black">
-    <video src="/demo/process.mp4" controls muted loop playsinline class="w-full"></video>
+    <video src="/demo/process.mp4" controls autoplay muted loop playsinline preload="auto" class="w-full"></video>
     <div class="bg-slate-900 text-slate-300 text-sm px-5 py-3">＋ 전체 발행 과정 — 네이버 블로그·인스타·유튜브·X 한 번에 (지도·연락처 마무리)</div></div></div>
   <div id="pane-seller" class="reveal hidden max-w-sm mx-auto rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-black">
-   <video src="/demo/seller_short.mp4" controls muted loop playsinline class="w-full"></video>
+   <video src="/demo/seller_short.mp4" controls autoplay muted loop playsinline preload="auto" class="w-full"></video>
    <div class="bg-slate-900 text-slate-300 text-sm px-5 py-3">셀프 썬팅 키트 셀러 — 사진 1장 → AI가 자동 생성한 세로 숏폼(릴스/쇼츠) + <b class="text-amber-300">쿠팡 구매 유도</b>. 실제 프로그램 결과물.</div></div>
  </div>
  <script>
@@ -172,7 +172,13 @@ def _video() -> str:
    document.getElementById('pane-seller').classList.toggle('hidden', m!=='seller');
    document.getElementById('tab-local').className='px-5 py-2.5 rounded-full font-bold text-sm '+(m==='local'?'bg-emerald-500 text-white':'bg-white/10 text-slate-300');
    document.getElementById('tab-seller').className='px-5 py-2.5 rounded-full font-bold text-sm '+(m==='seller'?'bg-amber-500 text-white':'bg-white/10 text-slate-300');
+   var pane=document.getElementById('pane-'+m);
+   if(pane)pane.querySelectorAll('video').forEach(function(v){v.muted=true;var p=v.play();if(p&&p.catch)p.catch(function(){});});
  }
+ // 접속 시 보이는 영상 자동재생 보장(브라우저 muted 정책)
+ window.addEventListener('load',function(){
+   document.querySelectorAll('#video video').forEach(function(v){v.muted=true;var p=v.play();if(p&&p.catch)p.catch(function(){});});
+ });
  </script></section>"""
 
 
