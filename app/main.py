@@ -34,7 +34,7 @@ CHMAP = {"instagram": "인스타", "naver_blog": "네이버", "youtube": "유튜
 FREE_LIMIT = 2   # 가입자 무료 생성 횟수
 # 오너(사장) 영구 무제한 라이선스 — 이 이메일들은 모든 한도 면제. env로 추가 가능.
 OWNER_EMAILS = {e.strip().lower() for e in os.environ.get(
-    "SHOPCAST_OWNER_EMAILS", "etetetetet5ea@kakao.com").split(",") if e.strip()}
+    "SHOPCAST_OWNER_EMAILS", "etetetetet5ea@kakao.com,etetet3ea1101@gmail.com").split(",") if e.strip()}
 
 
 def _is_owner(user: dict | None) -> bool:
