@@ -510,11 +510,11 @@ def my_dashboard(request: Request, ok: str = "", err: str = ""):
                  f"<div class='font-bold'>{_pn} · {_usage}</div></div>{_upbtn}</div>")
     greeting = (f"<div class='mb-4'><div class='text-2xl font-extrabold'>안녕하세요, {esc(t.name)}님 👋</div>"
                 "<div class='text-slate-500 text-sm mt-0.5'>사진 한 장이면 5개 채널 콘텐츠가 완성돼요.</div></div>")
-    main_cta = ("<div class='rounded-3xl p-7 mb-4 text-center text-white' "
-                "style='background:linear-gradient(120deg,#6366f1,#a855f7,#ec4899)'>"
-                "<div class='text-2xl font-extrabold mb-1'>📷 사진 올리고 시작하기</div>"
-                "<p class='text-white/85 text-sm mb-4'>인스타·네이버·유튜브·X 콘텐츠 + 영상을 AI 전문가팀이 자동으로 만들어요.</p>"
-                f"<a href='/u/{tok}' class='inline-block bg-white text-indigo-700 font-extrabold px-8 py-4 rounded-2xl text-lg shadow-lg'>지금 사진 올리기 →</a></div>")
+    # 📷 업로드 폼을 대시보드에 인라인 삽입 (별도 페이지 이동 없음)
+    upload_section = ("<div class='rounded-2xl p-5 mb-4 text-white' style='background:linear-gradient(120deg,#6366f1,#a855f7,#ec4899)'>"
+                      "<div class='text-xl font-extrabold mb-0.5'>📷 사진 올려 5채널 생성</div>"
+                      "<p class='text-white/85 text-sm'>사진 + 한 줄 설명만 넣고 <b>생성하기</b> → 인스타·네이버·유튜브·X + 영상을 AI 전문가팀이 만들어요.</p></div>"
+                      + _upload_form_html(t, tok))
 
     def _step(n, emoji, title, desc):
         return ("<div class='relative bg-slate-50 rounded-2xl p-4 text-center'>"
@@ -529,13 +529,13 @@ def my_dashboard(request: Request, ok: str = "", err: str = ""):
              + _step(3, "⬇️", "받아서 올리기", "다운로드 → 각 앱에 붙여넣기")
              + "</div></div>")
     content = ("<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-4'>"
-               "<h2 class='font-bold mb-1'>내가 만든 콘텐츠</h2>"
-               "<p class='text-xs text-slate-400 mb-3'>항목을 누르면 ‘발행 소재’(복사·다운로드)로 이동해요.</p>" + hist + "</div>")
+               "<h2 class='font-bold mb-1'>📋 생성된 콘텐츠 · 검수/발행 소재</h2>"
+               "<p class='text-xs text-slate-400 mb-3'>항목을 누르면 ‘발행 소재’(글 복사·사진/영상 다운로드)로 이동해요.</p>" + hist + "</div>")
     settings = ("<details class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5'>"
                 "<summary class='font-bold cursor-pointer text-slate-600'>⚙️ 가게 정보 수정 (상호·전화·주소 등)</summary>"
                 "<div class='mt-3'>" + store_form + "</div></details>")
     return _subscriber_page(f"{esc(t.name)} · 내 작업실",
-                            greeting + plan_card + main_cta + steps + content + settings)
+                            greeting + plan_card + upload_section + content + steps + settings)
 
 
 @app.post("/me/store")
@@ -1620,20 +1620,16 @@ def oauth_callback(code: str = "", state: str = "", error: str = ""):
 
 
 # ── 사장님 업로드 ────────────────────────────────────────
-@app.get("/u/{token}", response_class=HTMLResponse)
-def upload_form(token: str):
+def _upload_form_html(tenant, token: str) -> str:
+    """업로드 폼(입력+가이드) — 대시보드 인라인/독립 페이지 공용."""
     import json as _json
     from app.industries import resolve_industry, example_for
-    tenant, _ = db.get_tenant_by_token(token)
-    if not tenant:
-        return HTMLResponse("<p>잘못된 링크입니다.</p>", status_code=404)
     prof = resolve_industry(tenant.industry)
     ex = example_for(prof)
     purposes = ["방문 유도", "판매 전환", "신상품 홍보", "신뢰 쌓기", "이벤트"]
     popt = "<option value=''>선택안함</option>" + "".join(
         f"<option{' selected' if p == ex.get('purpose') else ''}>{p}</option>" for p in purposes)
-    # 왼쪽 입력 폼
-    form = (f"<form method=post action='/u/{token}/upload' enctype='multipart/form-data' class='bg-white rounded-2xl shadow-sm p-5'>"
+    form = (f"<form method=post action='/u/{token}/upload' enctype='multipart/form-data' class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5'>"
             f"<label class='block text-sm font-semibold mb-1'>📷 사진 (여러 장 가능 · 최대 10장)</label>"
             f"<input type=file name=photos accept='image/*' multiple required class='mb-4 block w-full text-sm'>"
             f"<label class='block text-sm font-semibold mb-1'>✏️ 한 줄 설명</label>"
@@ -1646,8 +1642,8 @@ def upload_form(token: str):
             f"<input name=extra id=f_extra placeholder=\"예) {esc(ex.get('extra',''))}\" class='mb-3 block w-full border rounded-lg p-2 text-sm'>"
             f"<label class='block text-sm font-semibold mb-1'>📝 요청사항 (선택 · 꼭 반영할 점)</label>"
             f"<input name=request id=f_request placeholder='예) 급매 꼭 강조 / 주차 가능 넣어줘 / 차분한 톤' class='mb-4 block w-full border rounded-lg p-2 text-sm'>"
-            f"<button class='w-full bg-blue-600 text-white font-bold py-3 rounded-lg'>보내기</button></form>")
-    # 오른쪽 가이드 패널 (업종 프로필 기반)
+            f"<button class='w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl'>✨ 5채널 콘텐츠 생성하기</button>"
+            f"<p class='text-xs text-slate-400 mt-2 text-center'>생성은 20~40초 걸려요. 완료되면 아래 목록에 쌓입니다.</p></form>")
     angles = "".join(f"<li>· {esc(a)}</li>" for a in prof.content_angles)
     photog = "".join(f"<li>· {esc(g)}</li>" for g in prof.photo_guide)
     guide = (f"<div class='bg-blue-50 rounded-2xl p-5 text-sm'>"
@@ -1664,14 +1660,22 @@ def upload_form(token: str):
               f"document.getElementById('f_purpose').value=EX.purpose||'';"
               f"document.getElementById('f_target').value=EX.target||'';"
               f"document.getElementById('f_extra').value=EX.extra||'';}}</script>")
+    return f"<div class='grid md:grid-cols-2 gap-4'>{form}{guide}</div>{script}"
+
+
+@app.get("/u/{token}", response_class=HTMLResponse)
+def upload_form(token: str):
+    tenant, _ = db.get_tenant_by_token(token)
+    if not tenant:
+        return HTMLResponse("<p>잘못된 링크입니다.</p>", status_code=404)
     body = (f"<h1 class='text-xl font-bold mb-1'>{esc(tenant.name)}</h1>"
             f"<p class='text-slate-500 text-sm mb-5'>사진과 한 줄 설명만 보내주세요. 나머지는 저희가 합니다 🙂</p>"
-            f"<div class='grid md:grid-cols-2 gap-4'>{form}{guide}</div>{script}")
+            + _upload_form_html(tenant, token))
     return page(f"{tenant.name} · 업로드", body)
 
 
 @app.post("/u/{token}/upload", response_class=HTMLResponse)
-async def upload(token: str, photos: list[UploadFile] = File(...), note: str = Form(""),
+async def upload(token: str, req: Request, photos: list[UploadFile] = File(...), note: str = Form(""),
                  purpose: str = Form(""), target: str = Form(""), extra: str = Form(""),
                  request: str = Form("")):
     tenant, _ = db.get_tenant_by_token(token)
@@ -1709,6 +1713,8 @@ async def upload(token: str, photos: list[UploadFile] = File(...), note: str = F
                f"<a href='/u/{token}' class='inline-block bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl'>다시 시도</a></div>")
         return page("생성 오류", err)             # 실패 시 사용량 차감 안 함
     _record_usage(owner)                          # 플랜별 사용량 차감
+    if auth.current_user(req):                     # 로그인 회원 → 대시보드로 복귀(한 화면)
+        return RedirectResponse("/me?ok=콘텐츠를 만들었어요! 아래 목록에서 확인하세요", status_code=303)
     body = ("<div class='bg-white rounded-xl shadow-sm p-6 text-center'>"
             "<div class='text-4xl mb-2'>✅</div>"
             "<h1 class='text-xl font-bold mb-1'>접수됐어요!</h1>"
