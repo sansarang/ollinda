@@ -257,8 +257,11 @@ def _teaser_html(pieces, brief, biz_type: str = "local") -> str:
              "<span class='text-white text-sm font-bold'>📷 인스타그램</span>"
              "<span class='text-[10px] bg-emerald-500 text-white px-2 py-0.5 rounded-full font-bold'>✅ 전체 공개</span></div>"
              + photo_html
-             + f"<div class='text-slate-100 text-[13px] leading-relaxed whitespace-pre-wrap mb-3'>{esc(insta_text)}</div>"
-             f"<video src='{sample}' autoplay muted loop playsinline controls preload='metadata' "
+             + f"<div class='text-slate-100 text-[13px] leading-relaxed whitespace-pre-wrap mb-2'>{esc(insta_text)}</div>"
+             + f"<textarea id='tcap' class='hidden'>{esc(insta_text)}</textarea>"
+             + "<button onclick=\"navigator.clipboard.writeText(document.getElementById('tcap').value);this.textContent='✅ 복사됐어요 — 인스타에 붙여넣기'\" "
+               "class='w-full bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold py-2.5 rounded-xl mb-3'>📋 이 인스타 글 무료로 복사하기</button>"
+             + f"<video src='{sample}' autoplay muted loop playsinline controls preload='metadata' "
              "class='w-full rounded-xl bg-black' style='max-height:420px'></video>"
              "<div class='text-[11px] text-slate-400 mt-1 text-center'>🎬 릴스 영상까지 자동 생성 (실제 예시)</div></div>")
 
@@ -284,6 +287,13 @@ def _teaser_html(pieces, brief, biz_type: str = "local") -> str:
             + insta + others
             + "<div class='text-center text-emerald-300 text-sm font-bold my-3'>👆 이건 인스타 하나예요. 가입하면 <u>5채널 전부 + 영상 + 다운로드</u></div>"
             + cta + "</div>")
+
+
+@app.get("/api/place/search")
+def place_search(q: str = ""):
+    """가게명 검색 → 정보 자동입력 후보(네이버 지역검색). 키 없으면 빈 목록."""
+    from app.services import place
+    return JSONResponse({"items": place.search(q), "configured": place.configured()})
 
 
 @app.post("/api/contact")
@@ -422,6 +432,40 @@ def _ensure_user_tenant(u: dict):
     return t
 
 
+def _perf_report(tenant_id: str) -> str:
+    """생성 콘텐츠 성과 요약 — 세트/채널 발행물/평균 상위노출 점수/타겟 키워드."""
+    sets = db.list_sets(tenant_id=tenant_id, limit=200)
+    if not sets:
+        return ""
+    scores: list = []
+    kws: list = []
+    channels: set = set()
+    n_pieces = 0
+    for s in sets:
+        for p in db.get_set_pieces(s["asset_id"]):
+            n_pieces += 1
+            channels.add(p.channel.value)
+            sc = (p.payload.get("ranking_audit") or {}).get("score")
+            if isinstance(sc, (int, float)):
+                scores.append(sc)
+            for k in (p.payload.get("target_keywords") or []):
+                if k and k not in kws:
+                    kws.append(k)
+    avg = round(sum(scores) / len(scores)) if scores else 0
+    chips = "".join(f"<span class='inline-block bg-indigo-50 text-indigo-600 text-xs px-2 py-1 rounded-full mr-1 mb-1'>{esc(k)}</span>"
+                    for k in kws[:12])
+    cards = ("<div class='grid grid-cols-3 gap-3 mb-3'>"
+             + stat_card("만든 세트", len(sets), "indigo")
+             + stat_card("채널 발행물", n_pieces, "emerald")
+             + stat_card("평균 상위노출점수", f"{avg}", "amber") + "</div>")
+    return ("<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-4'>"
+            "<h2 class='font-bold mb-1'>📈 성과 리포트</h2>"
+            "<p class='text-xs text-slate-400 mb-3'>내 콘텐츠가 상위노출 요인을 얼마나 갖췄는지 · 노리는 키워드</p>"
+            + cards
+            + (f"<div class='text-sm font-semibold text-slate-600 mb-1'>🎯 노리는 키워드</div>{chips}" if chips else "")
+            + "<p class='text-xs text-slate-400 mt-3'>※ 네이버 실시간 검색순위 추적은 곧 추가됩니다.</p></div>")
+
+
 @app.get("/me", response_class=HTMLResponse)
 def my_dashboard(request: Request, ok: str = "", err: str = ""):
     u = auth.current_user(request)
@@ -444,12 +488,12 @@ def my_dashboard(request: Request, ok: str = "", err: str = ""):
                                   ("smartstore", "스마트스토어"), ("gmarket", "지마켓"), ("self", "자사몰")])
     store_form = (
         f"<form method=post action='/me/store' class='grid sm:grid-cols-2 gap-2'>"
-        f"<input name=name value=\"{esc(t.name)}\" placeholder='상호/브랜드 *' required class='{inp}'>"
-        f"<input name=industry value=\"{esc(t.industry)}\" placeholder='업종/상품 * (예: 카페, 캠핑 폴딩박스)' required class='{inp}'>"
-        f"<input name=region value=\"{esc(t.region)}\" placeholder='지역 (매장)' class='{inp}'>"
+        f"<input id=sf_name name=name value=\"{esc(t.name)}\" placeholder='상호/브랜드 *' required class='{inp}'>"
+        f"<input id=sf_industry name=industry value=\"{esc(t.industry)}\" placeholder='업종/상품 * (예: 카페, 캠핑 폴딩박스)' required class='{inp}'>"
+        f"<input id=sf_region name=region value=\"{esc(t.region)}\" placeholder='지역 (매장)' class='{inp}'>"
         f"<select name=biz_type class='{inp} font-semibold'>{bopts}</select>"
-        f"<input name=phone value=\"{esc(t.phone)}\" placeholder='📞 전화 (매장)' class='{inp}'>"
-        f"<input name=address value=\"{esc(t.address)}\" placeholder='📍 주소 (매장)' class='{inp}'>"
+        f"<input id=sf_phone name=phone value=\"{esc(t.phone)}\" placeholder='📞 전화 (매장)' class='{inp}'>"
+        f"<input id=sf_address name=address value=\"{esc(t.address)}\" placeholder='📍 주소 (매장)' class='{inp}'>"
         f"<select name=marketplace class='{inp}'>{mkopts}</select>"
         f"<input name=brand_name value=\"{esc(t.brand_name)}\" placeholder='🏷 브랜드명 (셀러)' class='{inp}'>"
         f"<input name=search_kw value=\"{esc(t.search_kw)}\" placeholder='🔎 검색어 유도 (쿠팡 등)' class='{inp}'>"
@@ -471,15 +515,44 @@ def my_dashboard(request: Request, ok: str = "", err: str = ""):
                   + _bopt("local", "🏪", "동네 매장", "방문·예약 유도 · 지도/연락처")
                   + _bopt("seller", "📦", "온라인 셀러", "구매링크·상품 키워드")
                   + "</div></div>")
+    search_box = (
+        "<div class='bg-indigo-50 rounded-xl p-3 mb-3'>"
+        "<div class='text-xs font-bold text-indigo-700 mb-1'>🔍 가게 이름으로 검색하면 자동 입력돼요 (타이핑 최소)</div>"
+        "<div class='flex gap-2'>"
+        f"<input id=place_q placeholder='예: 초량 루마썬팅' class='{inp} flex-1'>"
+        "<button type=button onclick='placeSearch()' class='px-4 bg-indigo-600 text-white rounded-xl font-bold text-sm whitespace-nowrap'>검색</button></div>"
+        "<div id=place_results class='mt-2 space-y-1'></div></div>")
+    place_js = (
+        "<script>"
+        "async function placeSearch(){var q=document.getElementById('place_q').value.trim();if(!q)return;"
+        "var b=document.getElementById('place_results');b.innerHTML='<div class=\"text-xs text-slate-400\">검색 중…</div>';"
+        "try{var r=await fetch('/api/place/search?q='+encodeURIComponent(q));var d=await r.json();"
+        "if(!d.items||!d.items.length){b.innerHTML='<div class=\"text-xs text-slate-400\">'+(d.configured?'결과가 없어요. 아래에 직접 입력해 주세요.':'검색 준비 중 — 아래에 직접 입력해 주세요.')+'</div>';return;}"
+        "window.__pl=d.items;b.innerHTML=d.items.map(function(it,i){return '<button type=button onclick=\"pickPlace('+i+')\" class=\"block w-full text-left bg-white border rounded-lg p-2 text-sm hover:bg-indigo-50\"><b>'+it.name+'</b> <span class=\"text-xs text-slate-400\">'+(it.category||'')+'</span><br><span class=\"text-xs text-slate-400\">'+(it.address||'')+'</span></button>';}).join('');"
+        "}catch(e){b.innerHTML='<div class=\"text-xs text-rose-400\">검색 실패</div>';}}"
+        "function pickPlace(i){var it=(window.__pl||[])[i];if(!it)return;"
+        "document.getElementById('sf_name').value=it.name||'';"
+        "document.getElementById('sf_industry').value=it.category||'';"
+        "var reg=(it.address||'').split(' ').slice(0,2).join(' ');"
+        "document.getElementById('sf_region').value=reg;"
+        "document.getElementById('sf_address').value=it.address||'';"
+        "document.getElementById('sf_phone').value=it.tel||'';"
+        "document.getElementById('place_results').innerHTML='<div class=\"text-xs text-emerald-600 font-bold\">✓ '+(it.name||'')+' 정보가 채워졌어요</div>';}"
+        "</script>")
     store_form_min = (
+        search_box +
         "<form method=post action='/me/store' class='space-y-3'>"
         f"<div><div class='text-xs font-semibold text-slate-500 mb-1'>상호/브랜드 *</div>"
-        f"<input name=name value=\"{esc(t.name)}\" placeholder='예: 초량 루마썬팅' required class='{inp}'></div>"
+        f"<input id=sf_name name=name value=\"{esc(t.name)}\" placeholder='예: 초량 루마썬팅' required class='{inp}'></div>"
         f"<div><div class='text-xs font-semibold text-slate-500 mb-1'>업종 또는 파는 상품 *</div>"
-        f"<input name=industry placeholder='예: 카페, 썬팅, 캠핑 폴딩박스' required class='{inp}'></div>"
+        f"<input id=sf_industry name=industry value=\"{esc(t.industry)}\" placeholder='예: 카페, 썬팅, 캠핑 폴딩박스' required class='{inp}'></div>"
+        f"<input type=hidden id=sf_region name=region value=\"{esc(t.region)}\">"
+        f"<input type=hidden id=sf_address name=address value=\"{esc(t.address)}\">"
+        f"<input type=hidden id=sf_phone name=phone value=\"{esc(t.phone)}\">"
         + biz_toggle
         + "<button class='w-full bg-indigo-600 text-white font-bold py-3.5 rounded-xl text-base'>완료하고 시작하기 →</button></form>"
-        "<p class='text-xs text-slate-400 mt-2'>전화·주소·마켓 등 상세정보는 나중에 ‘설정’에서 추가하면 됩니다.</p>")
+        "<p class='text-xs text-slate-400 mt-2'>검색하면 상호·업종·주소가 자동 입력돼요. 없으면 직접 입력하세요.</p>"
+        + place_js)
     # ② 내 채널 연결
     connected = {a.channel: a for a in db.list_channel_accounts(t.id)}
     rows = ""
@@ -559,10 +632,10 @@ def my_dashboard(request: Request, ok: str = "", err: str = ""):
                "<h2 class='font-bold mb-1'>📋 생성된 콘텐츠 · 검수/발행 소재</h2>"
                "<p class='text-xs text-slate-400 mb-3'>항목을 누르면 ‘발행 소재’(글 복사·사진/영상 다운로드)로 이동해요.</p>" + hist + "</div>")
     settings = ("<details class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5'>"
-                "<summary class='font-bold cursor-pointer text-slate-600'>⚙️ 가게 정보 수정 (상호·전화·주소 등)</summary>"
-                "<div class='mt-3'>" + store_form + "</div></details>")
+                "<summary class='font-bold cursor-pointer text-slate-600'>⚙️ 가게 정보 수정 (검색으로 자동입력)</summary>"
+                "<div class='mt-3'>" + search_box + store_form + place_js + "</div></details>")
     return _subscriber_page(f"{esc(t.name)} · 내 작업실",
-                            greeting + plan_card + upload_section + content + steps + settings)
+                            greeting + plan_card + upload_section + content + _perf_report(t.id) + steps + settings)
 
 
 @app.post("/me/store")
