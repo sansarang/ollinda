@@ -352,6 +352,36 @@ def place_search(q: str = ""):
     return JSONResponse({"items": place.search(q), "configured": place.configured()})
 
 
+@app.get("/api/lookup")
+def api_lookup(q: str = ""):
+    """가게 이름/상품 링크 하나로 자동 판별·입력.
+    URL→셀러(상품 파싱) / 이름→지역검색(매장) / 없으면 쇼핑검색(셀러)."""
+    from app.services import place, lookup
+    q = (q or "").strip()
+    if not q:
+        return JSONResponse({"type": "none"})
+    # A) URL 붙여넣기 → 셀러(상품 파싱)
+    if q.startswith(("http://", "https://")):
+        p = lookup.parse_url(q)
+        name = (p.get("name") or "")[:40]
+        return JSONResponse({"type": "seller", "name": name, "industry": name[:20],
+                             "image": p.get("image", ""), "buy_url": q,
+                             "desc": (p.get("description") or "")[:120]})
+    # 이름 → 지역검색(매장)
+    local = place.search(q)
+    if local:
+        it = local[0]
+        return JSONResponse({"type": "local", "name": it["name"], "industry": it["category"],
+                             "region": it["address"], "tel": it["tel"], "address": it["address"]})
+    # B) 지역 없음 → 쇼핑검색(셀러)
+    shop = place.shop_search(q)
+    if shop:
+        it = shop[0]
+        return JSONResponse({"type": "seller", "name": q, "industry": it["category"] or q,
+                             "image": it["image"], "buy_url": "", "mall": it["mall"]})
+    return JSONResponse({"type": "none", "configured": place.configured()})
+
+
 @app.post("/api/contact")
 async def api_contact(company: str = Form(""), manager: str = Form(""), phone: str = Form(""),
                       email: str = Form(""), message: str = Form("")):
@@ -1968,6 +1998,15 @@ def _upload_form_html(tenant, token: str) -> str:
     popt = "<option value=''>선택안함</option>" + "".join(
         f"<option{' selected' if p == ex.get('purpose') else ''}>{p}</option>" for p in purposes)
     form = (f"<form method=post action='/u/{token}/upload' enctype='multipart/form-data' onsubmit='return showGen()' class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5'>"
+            "<div class='bg-indigo-50 rounded-xl p-3 mb-4'>"
+            "<label class='block text-sm font-semibold mb-1'>🔍 가게 이름 또는 상품/스토어 링크</label>"
+            "<div class='flex gap-2'>"
+            "<input id=lk_q placeholder='예: 초량 루마썬팅  또는  https://스토어링크' class='flex-1 border rounded-lg p-2 text-sm'>"
+            "<button type=button onclick='lookupStore()' class='px-4 bg-indigo-600 text-white rounded-lg font-bold text-sm whitespace-nowrap'>자동 인식</button></div>"
+            "<div id=lk_result class='text-xs mt-1 text-slate-500'>이름/링크만 넣으면 업종·주소·전화가 자동으로 채워져요</div></div>"
+            "<input type=hidden name=s_name id=s_name><input type=hidden name=s_industry id=s_industry>"
+            "<input type=hidden name=s_biz id=s_biz><input type=hidden name=s_region id=s_region>"
+            "<input type=hidden name=s_tel id=s_tel><input type=hidden name=s_buy id=s_buy>"
             f"<label class='block text-sm font-semibold mb-1'>📷 사진 (여러 장 가능 · 최대 10장)</label>"
             f"<input type=file name=photos accept='image/*' multiple required class='mb-4 block w-full text-sm'>"
             f"<label class='block text-sm font-semibold mb-1'>✏️ 한 줄 설명</label>"
@@ -1997,7 +2036,18 @@ def _upload_form_html(tenant, token: str) -> str:
               f"document.getElementById('f_note').value=EX.note||'';"
               f"document.getElementById('f_purpose').value=EX.purpose||'';"
               f"document.getElementById('f_target').value=EX.target||'';"
-              f"document.getElementById('f_extra').value=EX.extra||'';}}</script>")
+              f"document.getElementById('f_extra').value=EX.extra||'';}}"
+              "async function lookupStore(){var q=document.getElementById('lk_q').value.trim();if(!q)return;"
+              "var b=document.getElementById('lk_result');b.innerHTML='<span class=\"text-slate-400\">인식 중…</span>';"
+              "try{var r=await fetch('/api/lookup?q='+encodeURIComponent(q));var d=await r.json();"
+              "if(d.type==='none'){b.innerHTML='<span class=\"text-slate-400\">못 찾았어요. 아래 한 줄 설명에 직접 적어주세요.</span>';return;}"
+              "document.getElementById('s_name').value=d.name||'';document.getElementById('s_industry').value=d.industry||'';"
+              "document.getElementById('s_biz').value=(d.type==='seller'?'seller':'local');document.getElementById('s_region').value=d.region||'';"
+              "document.getElementById('s_tel').value=d.tel||'';document.getElementById('s_buy').value=d.buy_url||'';"
+              "var kind=(d.type==='seller')?'📦 온라인 셀러':'🏪 매장';"
+              "b.innerHTML='<span class=\"text-emerald-600 font-bold\">✓ '+(d.name||'')+' · '+(d.industry||'')+' ('+kind+') 자동 인식됨</span>';"
+              "var nt=document.getElementById('f_note');if(nt&&!nt.value)nt.value=((d.name||'')+' '+(d.industry||'')).trim();"
+              "}catch(e){b.innerHTML='<span class=\"text-rose-400\">인식 실패</span>';}}</script>")
     gen_overlay = ("<div id='genOverlay' class='fixed inset-0 z-50 hidden items-center justify-center' style='background:rgba(15,23,42,.92)'>"
                    "<div class='bg-white rounded-2xl p-6 w-80 max-w-[90vw] text-center'>"
                    "<div id='gLabel' class='font-bold mb-3'>🎯 마케팅 전략가가 분석 중…</div>"
@@ -2024,10 +2074,25 @@ def upload_form(token: str):
 @app.post("/u/{token}/upload", response_class=HTMLResponse)
 async def upload(token: str, req: Request, photos: list[UploadFile] = File(...), note: str = Form(""),
                  purpose: str = Form(""), target: str = Form(""), extra: str = Form(""),
-                 request: str = Form("")):
+                 request: str = Form(""), s_name: str = Form(""), s_industry: str = Form(""),
+                 s_biz: str = Form(""), s_region: str = Form(""), s_tel: str = Form(""),
+                 s_buy: str = Form("")):
     tenant, _ = db.get_tenant_by_token(token)
     if not tenant:
         return HTMLResponse("<p>잘못된 링크입니다.</p>", status_code=404)
+    # 자동 인식(가게 이름/링크) 정보가 오면 tenant에 반영 후 생성 → 별도 설정 불필요
+    if s_name.strip() or s_industry.strip():
+        db.rename_tenant(tenant.id, s_name.strip() or tenant.name,
+                         s_industry.strip() or tenant.industry, s_region.strip() or tenant.region)
+        if s_tel.strip():
+            db.update_tenant_profile(tenant.id, s_tel.strip(), s_region.strip() or tenant.address, tenant.hours, tenant.map_url)
+        _bz = s_biz.strip() if s_biz.strip() in ("local", "seller", "hybrid") else (tenant.biz_type or "local")
+        db.update_tenant_classification(tenant.id, _bz, tenant.marketplace, s_buy.strip() or tenant.buy_url,
+                                        tenant.search_kw, tenant.brand_name)
+        if (s_industry.strip()):
+            from app.industries import ensure_profile
+            ensure_profile(s_industry.strip())
+        tenant, _ = db.get_tenant_by_token(token)   # 갱신본 재로드
     # 플랜별 쿼터(셀프서비스 가게만; 운영자/대행 tenant는 owner 없음 → 무제한)
     owner = db.get_user_by_tenant(tenant.id)
     block = _quota_block(owner)

@@ -45,6 +45,35 @@ def search(query: str, limit: int = 5) -> list[dict]:
         return []
 
 
+def shop_search(query: str, limit: int = 5) -> list[dict]:
+    """상품명 → 네이버 쇼핑검색 [{name, category, image, price, mall}]. 무키/실패 []."""
+    query = (query or "").strip()
+    if not (configured() and query):
+        return []
+    try:
+        r = requests.get(
+            "https://openapi.naver.com/v1/search/shop.json",
+            params={"query": query, "display": max(1, min(limit, 5))},
+            headers={"X-Naver-Client-Id": os.environ["NAVER_CLIENT_ID"],
+                     "X-Naver-Client-Secret": os.environ["NAVER_CLIENT_SECRET"]},
+            timeout=8)
+        if r.status_code != 200:
+            return []
+        out = []
+        for it in r.json().get("items", []):
+            cats = [it.get(k, "") for k in ("category4", "category3", "category2", "category1") if it.get(k)]
+            out.append({
+                "name": re.sub(r"<[^>]+>", "", it.get("title", "")).strip(),
+                "category": (cats[0] if cats else ""),
+                "image": it.get("image", ""),
+                "price": it.get("lprice", ""),
+                "mall": it.get("mallName", ""),
+            })
+        return out
+    except Exception:
+        return []
+
+
 def rank(keyword: str, store_name: str, limit: int = 5) -> int | None:
     """참고용 순위 — 네이버 지역검색 상위 limit 안에서 내 가게 위치(1~limit).
     상위 밖이면 0, 조회 불가(무키/실패)면 None."""

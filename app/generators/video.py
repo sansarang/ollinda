@@ -207,8 +207,12 @@ class ShortVideoGenerator(Generator):
             sent = _split_sentences(asset.note) or [asset.note[:30] or title]
         sent = sent[:MAX_SCENES]
 
-        outro_cta = buy if (strat.closing in ("buy", "both") and buy) else (
-            f"📍 {tenant.name} · 방문/문의 환영" if tenant.name else "방문/문의 환영")
+        if strat.closing in ("buy", "both") and buy:
+            outro_cta = buy                                    # 구매 링크
+        elif (getattr(tenant, "biz_type", "local") or "local") == "seller":
+            outro_cta = "🔗 프로필 링크에서 구매하세요"
+        else:
+            outro_cta = (f"📍 네이버 '{tenant.name}' 검색\n방문·예약 환영" if tenant.name else "방문·예약 환영")
 
         video_path, note, dur_sec, cover_path = self._build_scene_video(
             imgs, hook, sent, kws, tenant, strat, title, outro_cta)
@@ -479,14 +483,20 @@ class ShortVideoGenerator(Generator):
         return out
 
     # ───────────────────── ffmpeg: 영상(무음) + 오디오(연속) 분리 ─────────────────────
+    def _fade(self, dur: float) -> str:
+        """씬 전환용 페이드 인/아웃(딥) — 클립 길이 불변이라 오디오 싱크 영향 없음."""
+        if dur < 0.9:
+            return ""
+        return f",fade=t=in:st=0:d=0.22,fade=t=out:st={max(0.0, dur - 0.25):.2f}:d=0.22"
+
     def _scene_video(self, img, dur, idx, out) -> str | None:
-        """이미지 → 켄번스 + 색보정(통일감), 정확히 dur초 무음 영상. 자막은 ASS로 별도."""
+        """이미지 → 켄번스 + 색보정(통일감) + 페이드 전환, 정확히 dur초 무음 영상. 자막은 ASS로 별도."""
         frames = max(1, int(dur * FPS))
         zdir = "min(zoom+0.0012,1.12)" if idx % 2 == 0 else "if(eq(on,1),1.12,max(zoom-0.0012,1.0))"
         vf = (f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,"
               f"eq=contrast=1.06:saturation=1.12:brightness=0.02,"
               f"zoompan=z='{zdir}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-              f"d={frames}:s={W}x{H}:fps={FPS}")
+              f"d={frames}:s={W}x{H}:fps={FPS}" + self._fade(dur))
         cmd = ["ffmpeg", "-y", "-loop", "1", "-t", f"{dur:.2f}", "-i", img, "-vf", vf,
                "-map", "0:v", "-t", f"{dur:.2f}", "-r", str(FPS), "-pix_fmt", "yuv420p",
                "-c:v", "libx264", "-an", out]
@@ -501,6 +511,7 @@ class ShortVideoGenerator(Generator):
                   f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s={W}x{H}:fps={FPS}")
         else:
             vf = f"scale={W}:{H},setsar=1,fps={FPS}"
+        vf += self._fade(dur)
         cmd = ["ffmpeg", "-y", "-loop", "1", "-t", f"{dur:.2f}", "-i", png, "-vf", vf,
                "-t", f"{dur:.2f}", "-r", str(FPS), "-pix_fmt", "yuv420p", "-c:v", "libx264", "-an", out]
         r = subprocess.run(cmd, capture_output=True, timeout=120)
