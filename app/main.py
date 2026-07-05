@@ -227,7 +227,8 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
     if not pieces:                                   # 크레딧 부족/일시 오류 → 정직 안내
         return JSONResponse({"require_signup": True, "message": "지금 생성이 잠시 붐벼요. 잠깐 뒤 다시 시도해 주세요 🙏"})
     db.incr_demo_ip(ip)
-    return JSONResponse({"teaser": True, "teaser_html": _teaser_html(pieces, brief, biz_type)})
+    remaining = max(0, 2 - db.demo_ip_count(ip))
+    return JSONResponse({"teaser": True, "teaser_html": _teaser_html(pieces, brief, _a, remaining)})
 
 
 def _img_thumb_data_uri(path, max_px: int = 640) -> str:
@@ -247,59 +248,101 @@ def _img_thumb_data_uri(path, max_px: int = 640) -> str:
         return ""
 
 
-def _teaser_html(pieces, brief, biz_type: str = "local") -> str:
-    """인스타 1채널만 '전체 공개'(내 사진 + 캡션 전부 + 실제 영상), 나머지 4채널은 흐리게(🔒) → 가입 유도."""
+def _teaser_html(pieces, brief, asset_id, remaining: int = 0) -> str:
+    """미가입 무료 체험 결과 — 전체 공개(흐림 없음) + 복사·다운로드 + 내 사진으로 만든 실제 영상. 2회 후 가입 유도."""
     import re as _re
     by = {p.kind.value: p for p in pieces}
-    cap = by.get("caption")
-    insta_text = (cap.payload.get("text", "") if cap else "").strip()
     imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
-    thumbs = [x for x in (_img_thumb_data_uri(p) for p in imgs[:5]) if x]
-    if len(thumbs) == 1:
-        photo_html = f"<img src='{thumbs[0]}' class='w-full rounded-xl mb-2' style='max-height:300px;object-fit:cover'>"
-    elif len(thumbs) > 1:
-        strip = "".join(f"<img src='{u}' class='h-28 w-28 object-cover rounded-lg flex-shrink-0'>" for u in thumbs)
-        photo_html = (f"<div class='text-[11px] text-emerald-300 font-semibold mb-1'>내가 올린 사진 {len(thumbs)}장 · 캐러셀</div>"
-                      f"<div class='flex gap-2 overflow-x-auto mb-2 pb-1'>{strip}</div>")
-    else:
-        photo_html = ""
-    sample = "/demo/seller_short.mp4" if biz_type == "seller" else "/demo/local_short.mp4"
-    # 📷 인스타그램 — 전체 공개 (내 사진 + 캡션 전부 + 실제 영상 자동재생)
-    insta = ("<div class='bg-white/10 rounded-2xl p-4 mb-3 ring-2 ring-emerald-400/60'>"
-             "<div class='flex items-center gap-2 mb-2'>"
-             "<span class='text-white text-sm font-bold'>📷 인스타그램</span>"
-             "<span class='text-[10px] bg-emerald-500 text-white px-2 py-0.5 rounded-full font-bold'>✅ 전체 공개</span></div>"
-             + photo_html
-             + f"<div class='text-slate-100 text-[13px] leading-relaxed whitespace-pre-wrap mb-2'>{esc(insta_text)}</div>"
-             + f"<textarea id='tcap' class='hidden'>{esc(insta_text)}</textarea>"
-             + "<button onclick=\"navigator.clipboard.writeText(document.getElementById('tcap').value);this.textContent='✅ 복사됐어요 — 인스타에 붙여넣기'\" "
-               "class='w-full bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold py-2.5 rounded-xl mb-3'>📋 이 인스타 글 무료로 복사하기</button>"
-             + f"<video src='{sample}' autoplay muted loop playsinline controls preload='metadata' "
-             "class='w-full rounded-xl bg-black' style='max-height:420px'></video>"
-             "<div class='text-[11px] text-slate-400 mt-1 text-center'>🎬 릴스 영상까지 자동 생성 (실제 예시)</div></div>")
+    thumbs = [x for x in (_img_thumb_data_uri(p) for p in imgs[:6]) if x]
+    photos = (("<div class='flex gap-2 overflow-x-auto pb-1 mb-3'>"
+               + "".join(f"<img src='{u}' class='h-24 w-24 object-cover rounded-lg flex-shrink-0'>" for u in thumbs)
+               + "</div>") if thumbs else "")
 
-    # 나머지 채널 — 흐리게 잠금
-    def locked(label, text):
-        t = esc((text or "")[:300])
-        return ("<div class='bg-white/5 rounded-xl p-3 mb-2 relative overflow-hidden'>"
-                f"<div class='text-slate-400 text-[11px] font-semibold mb-1'>{label}</div>"
-                f"<div style='filter:blur(5px);user-select:none' class='text-slate-300 text-xs leading-relaxed max-h-16 overflow-hidden'>{t}</div>"
-                "<div class='absolute inset-0 flex items-center justify-center'>"
-                "<span class='text-white text-[11px] font-bold bg-black/60 px-3 py-1 rounded-full'>🔒 가입하면 공개</span></div></div>")
-    blog, x = by.get("blog"), by.get("x_post")
-    blog_txt = (blog.payload.get("title", "") + " · " + _re.sub(r"\[사진\d+\]", "", blog.payload.get("body", "")).strip()) if blog else ""
-    others = (locked("📝 네이버 블로그 (상위노출 최적화)", blog_txt)
-              + locked("▶️ 유튜브 쇼츠", "제목·설명·자막까지 넣은 세로 쇼츠 영상이 완성됐어요")
-              + locked("𝕏 X (트위터)", x.payload.get("text", "") if x else ""))
-    cta = ("<a href='/login/kakao' class='block text-center py-3 rounded-xl font-extrabold mb-2' "
-           "style='background:#FEE500;color:#191600'>💬 카카오로 3초 가입하고 5채널 전부 받기</a>"
-           "<a href='/login/google' class='block text-center py-3 rounded-xl font-bold bg-white text-slate-700'>구글로 가입</a>")
+    def copy_btn(cid, text):
+        return (f"<textarea id='{cid}' class='hidden'>{esc(text)}</textarea>"
+                f"<button type=button onclick=\"navigator.clipboard.writeText(document.getElementById('{cid}').value);this.textContent='✅ 복사됨'\" "
+                "class='mt-2 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg'>📋 복사</button>")
+
+    def card(label, inner):
+        return f"<div class='bg-white rounded-2xl p-4 shadow-sm'><div class='font-bold text-sm text-slate-700 mb-1'>{label}</div>{inner}</div>"
+
+    cards = []
+    cap = by.get("caption")
+    if cap:
+        cards.append(card("📷 인스타그램",
+            f"<div class='text-slate-700 text-sm whitespace-pre-wrap max-h-56 overflow-y-auto'>{esc(cap.payload.get('text',''))}</div>"
+            + copy_btn("t_cap", cap.payload.get("text", ""))))
+    blog = by.get("blog")
+    if blog:
+        body = _re.sub(r"\[사진\d+\]", "", blog.payload.get("body", "")).strip()
+        cards.append(card("📝 네이버 블로그",
+            f"<div class='font-bold text-slate-800 text-sm mb-1'>{esc(blog.payload.get('title',''))}</div>"
+            f"<div class='text-slate-600 text-xs whitespace-pre-wrap max-h-56 overflow-y-auto'>{esc(body)}</div>"
+            + copy_btn("t_blog", (blog.payload.get('title', '') + "\n\n" + body))))
+    x = by.get("x_post")
+    if x:
+        cards.append(card("𝕏 X (트위터)",
+            f"<div class='text-slate-700 text-sm whitespace-pre-wrap'>{esc(x.payload.get('text',''))}</div>"
+            + copy_btn("t_x", x.payload.get("text", ""))))
+    short = next((p for p in pieces if p.kind.value == "short" and p.payload.get("video_path")), None)
+    if short:
+        v = f"/d/{asset_id}/f/{os.path.basename(short.payload['video_path'])}"
+        cards.append(card("▶️ 유튜브 쇼츠 · 릴스 <span class='text-xs text-emerald-600'>(내 사진으로 만든 영상)</span>",
+            f"<video src='{v}' controls autoplay muted loop playsinline class='w-full rounded-xl bg-black' style='max-height:440px'></video>"
+            f"<a href='{v}' download class='inline-block mt-2 px-3 py-1.5 bg-emerald-500 text-white text-xs font-bold rounded-lg'>⬇ 영상 다운로드</a>"))
+    else:
+        cards.append(card("▶️ 유튜브 쇼츠 · 릴스",
+            "<div class='text-slate-500 text-sm'>🎬 영상은 지금 생성이 붐벼 잠깐 뒤 완성돼요. 위 글 채널은 바로 쓰세요!</div>"))
+
+    grid = "<div class='grid md:grid-cols-2 gap-3 mb-4'>" + "".join(cards) + "</div>"
+    zip_btn = f"<a href='/d/{asset_id}.zip' class='block text-center bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-xl mb-3'>⬇ 전체 다운로드 (글+사진+영상 ZIP)</a>"
+    if remaining > 0:
+        cta = (f"<div class='text-center text-white text-sm'>무료 체험 <b class='text-emerald-300'>{remaining}회</b> 남았어요 · 마음껏 만들어보세요!</div>"
+               "<div class='text-center text-slate-400 text-xs mt-1'>2회 다 쓰면 가입하고 무제한으로 계속 만들 수 있어요</div>")
+    else:
+        cta = ("<div class='text-center text-emerald-300 text-sm font-bold mb-2'>무료 체험 2회를 다 쓰셨어요! 마음에 드셨죠? 😊</div>"
+               "<a href='/login/kakao' class='block text-center py-3 rounded-xl font-extrabold mb-2' style='background:#FEE500;color:#191600'>💬 카카오로 가입하고 계속 만들기</a>"
+               "<a href='/login/google' class='block text-center py-3 rounded-xl font-bold bg-white text-slate-700'>구글로 가입</a>")
     return ("<div class='rounded-2xl p-4' style='background:rgba(255,255,255,.06)'>"
-            "<div class='text-center text-white font-extrabold text-lg'>✨ 방금 만든 결과</div>"
-            "<div class='text-center text-slate-300 text-xs mb-3'>인스타 1개만 미리 열어드렸어요 · 나머지 4채널은 가입하면 전부 공개</div>"
-            + insta + others
-            + "<div class='text-center text-emerald-300 text-sm font-bold my-3'>👆 이건 인스타 하나예요. 가입하면 <u>5채널 전부 + 영상 + 다운로드</u></div>"
-            + cta + "</div>")
+            "<div class='text-center text-white font-extrabold text-lg mb-1'>✨ 방금 만든 결과 (전체 공개)</div>"
+            "<div class='text-center text-slate-300 text-xs mb-3'>글은 복사, 사진·영상은 다운로드해서 바로 쓰세요</div>"
+            + photos + grid + zip_btn + cta + "</div>")
+
+
+@app.get("/d/{asset_id}/f/{fname}")
+def demo_media(asset_id: str, fname: str):
+    """데모(무료 체험) 미디어 — is_demo 자산만 공개 서빙."""
+    import re
+    if not db.asset_is_demo(asset_id) or not re.fullmatch(r"[A-Za-z0-9._-]+", fname):
+        return HTMLResponse(status_code=404)
+    pieces = db.get_set_pieces(asset_id)
+    if not pieces:
+        return HTMLResponse(status_code=404)
+    path = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), pieces[0].tenant_id, fname)
+    if not os.path.exists(path):
+        return HTMLResponse(status_code=404)
+    ext = fname.rsplit(".", 1)[-1].lower()
+    mt = {"mp4": "video/mp4", "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png"}.get(ext, "application/octet-stream")
+    return FileResponse(path, media_type=mt, filename=fname)
+
+
+@app.get("/d/{asset_id}.zip")
+def demo_zip(asset_id: str):
+    """데모 전체 ZIP(글+사진+영상) — is_demo 자산만."""
+    if not db.asset_is_demo(asset_id):
+        return HTMLResponse(status_code=404)
+    pieces = db.get_set_pieces(asset_id)
+    if not pieces:
+        return HTMLResponse(status_code=404)
+    imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
+    entries = []
+    for p in pieces:
+        entries += _piece_pack_entries(p, imgs, prefix=f"{_ch_folder(p)}/")
+    out_dir = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), pieces[0].tenant_id)
+    os.makedirs(out_dir, exist_ok=True)
+    out = os.path.join(out_dir, f"demo_{asset_id[:8]}.zip")
+    _write_zip(out, entries)
+    return FileResponse(out, media_type="application/zip", filename="올린다_무료체험.zip")
 
 
 @app.get("/api/place/search")
