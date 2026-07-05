@@ -1811,6 +1811,13 @@ def admin_user_reset(uid: str):
     return RedirectResponse("/admin/users?ok=사용량을 리셋했어요", status_code=303)
 
 
+@app.api_route("/admin/demo/reset", methods=["GET", "POST"])
+def admin_demo_reset(ip: str = ""):
+    """무료 체험 IP 사용량 초기화(ip 지정 시 해당 IP만, 없으면 전체)."""
+    db.reset_demo_usage(ip.strip())
+    return {"ok": True, "scope": ip.strip() or "전체", "message": "무료 체험 사용량을 초기화했어요"}
+
+
 @app.post("/admin/shops/{tid}/autonomy")
 def shop_autonomy(tid: str, level: int = Form(0)):
     db.set_autonomy(tid, level)

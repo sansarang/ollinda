@@ -258,6 +258,15 @@ def incr_demo_ip(ip: str) -> None:
                   "ON CONFLICT(ip) DO UPDATE SET count=count+1, last=excluded.last", (ip, _now()))
 
 
+def reset_demo_usage(ip: str = "") -> None:
+    """무료 체험 사용량 초기화(ip 지정 시 해당 IP만, 없으면 전체)."""
+    with _conn() as c:
+        if ip:
+            c.execute("DELETE FROM demo_usage WHERE ip=?", (ip,))
+        else:
+            c.execute("DELETE FROM demo_usage")
+
+
 def mark_tenant_demo(tid: str) -> None:
     with _conn() as c:
         c.execute("UPDATE tenants SET is_demo=1 WHERE id=?", (tid,))
