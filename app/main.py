@@ -187,7 +187,7 @@ _DEMO_HITS: dict = {}   # ip -> [timestamps] (무료 체험 rate limit)
 @app.post("/api/demo")
 async def api_demo(request: Request, industry: str = Form(""), note: str = Form(""),
                    biz_type: str = Form("local"), marketplace: str = Form(""),
-                   search_kw: str = Form(""), photo: UploadFile = File(None)):
+                   search_kw: str = Form(""), photos: list[UploadFile] = File(None)):
     """랜딩 데모 — 미가입자는 '실제 생성 티저(흐리게)'로 가입 유도. 로그인 회원은 작업실로."""
     u = auth.current_user(request)
     if u:                                            # 로그인 회원 → 작업실에서 실제 생성
@@ -205,21 +205,23 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
     ip = (request.headers.get("cf-connecting-ip")
           or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
           or (request.client.host if request.client else "") or "unknown")
-    if db.demo_ip_count(ip) >= 5:                    # 남용 방지(조용히)
-        return JSONResponse({"require_signup": True, "message": "가입하면 내 사진으로 5채널을 무료 2회 만들어드려요!"})
-    img_bytes = None
-    if photo is not None and getattr(photo, "filename", ""):
-        img_bytes = await photo.read()
+    if db.demo_ip_count(ip) >= 15:                   # 남용 방지(하루 15회, 매일 리셋)
+        return JSONResponse({"require_signup": True,
+                             "message": "오늘 무료 미리보기를 많이 사용하셨어요. 가입하면 계속 만들 수 있어요!"})
+    imgs = []
+    for f in (photos or []):
+        if getattr(f, "filename", ""):
+            imgs.append((await f.read(), f.filename))
+    imgs = imgs[:10]
     try:
         from app.services import teaser as teaser_svc
-        _t, _a, pieces, brief = teaser_svc.run_teaser(industry, biz_type, note, img_bytes,
-                                                      getattr(photo, "filename", None))
+        _t, _a, pieces, brief = teaser_svc.run_teaser(industry, biz_type, note, imgs)
     except Exception:
         import logging
         logging.exception("[teaser] 실패")
         return JSONResponse({"require_signup": True, "message": "가입하면 바로 만들어드려요!"})
-    if not pieces:                                   # 크레딧 부족 등 → 가입 유도로 대체
-        return JSONResponse({"require_signup": True, "message": "가입하면 내 사진으로 5채널을 무료 2회 만들어드려요!"})
+    if not pieces:                                   # 크레딧 부족/일시 오류 → 정직 안내
+        return JSONResponse({"require_signup": True, "message": "지금 생성이 잠시 붐벼요. 잠깐 뒤 다시 시도해 주세요 🙏"})
     db.incr_demo_ip(ip)
     return JSONResponse({"teaser": True, "teaser_html": _teaser_html(pieces, brief, biz_type)})
 
@@ -248,8 +250,15 @@ def _teaser_html(pieces, brief, biz_type: str = "local") -> str:
     cap = by.get("caption")
     insta_text = (cap.payload.get("text", "") if cap else "").strip()
     imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
-    thumb = _img_thumb_data_uri(imgs[0]) if imgs else ""
-    photo_html = (f"<img src='{thumb}' class='w-full rounded-xl mb-2' style='max-height:300px;object-fit:cover'>" if thumb else "")
+    thumbs = [x for x in (_img_thumb_data_uri(p) for p in imgs[:5]) if x]
+    if len(thumbs) == 1:
+        photo_html = f"<img src='{thumbs[0]}' class='w-full rounded-xl mb-2' style='max-height:300px;object-fit:cover'>"
+    elif len(thumbs) > 1:
+        strip = "".join(f"<img src='{u}' class='h-28 w-28 object-cover rounded-lg flex-shrink-0'>" for u in thumbs)
+        photo_html = (f"<div class='text-[11px] text-emerald-300 font-semibold mb-1'>내가 올린 사진 {len(thumbs)}장 · 캐러셀</div>"
+                      f"<div class='flex gap-2 overflow-x-auto mb-2 pb-1'>{strip}</div>")
+    else:
+        photo_html = ""
     sample = "/demo/seller_short.mp4" if biz_type == "seller" else "/demo/local_short.mp4"
     # 📷 인스타그램 — 전체 공개 (내 사진 + 캡션 전부 + 실제 영상 자동재생)
     insta = ("<div class='bg-white/10 rounded-2xl p-4 mb-3 ring-2 ring-emerald-400/60'>"

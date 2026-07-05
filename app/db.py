@@ -243,15 +243,25 @@ def reset_usage(uid: str) -> None:
 
 # ── 랜딩 무료체험(미가입) — IP 기준 횟수 ────────────────
 def demo_ip_count(ip: str) -> int:
+    """오늘 사용 횟수(날짜 바뀌면 0으로 리셋)."""
+    today = _now()[:10]
     with _conn() as c:
-        r = c.execute("SELECT count FROM demo_usage WHERE ip=?", (ip,)).fetchone()
-    return (r["count"] or 0) if r else 0
+        r = c.execute("SELECT count,last FROM demo_usage WHERE ip=?", (ip,)).fetchone()
+    if not r or (r["last"] or "")[:10] != today:
+        return 0
+    return r["count"] or 0
 
 
 def incr_demo_ip(ip: str) -> None:
+    now = _now()
+    today = now[:10]
     with _conn() as c:
-        c.execute("INSERT INTO demo_usage(ip,count,last) VALUES(?,1,?) "
-                  "ON CONFLICT(ip) DO UPDATE SET count=count+1, last=excluded.last", (ip, _now()))
+        r = c.execute("SELECT count,last FROM demo_usage WHERE ip=?", (ip,)).fetchone()
+        if r:
+            cur = (r["count"] or 0) if (r["last"] or "")[:10] == today else 0   # 날짜 바뀌면 리셋
+            c.execute("UPDATE demo_usage SET count=?, last=? WHERE ip=?", (cur + 1, now, ip))
+        else:
+            c.execute("INSERT INTO demo_usage(ip,count,last) VALUES(?,1,?)", (ip, now))
 
 
 def mark_tenant_demo(tid: str) -> None:
