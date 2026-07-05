@@ -973,33 +973,90 @@ def kit(request: Request, asset_id: str):
         ex = pl.get("experts") or []
         return (f"<div class='text-[11px] text-indigo-400 font-semibold mb-2'>{' → '.join(ex)}</div>" if ex else "")
 
+    tenant = db.get_tenant(pieces[0].tenant_id)
+    sname = (tenant.name if tenant else "내 가게")
+    handle = (_re.sub(r"[^a-zA-Z0-9]", "", sname) or "mystore").lower()[:15]
+    first_img = next((f"/dl/{asset_id}/{os.path.basename(im)}" for im in imgs if im and os.path.exists(im)), "")
+    wrap = "max-w-md mx-auto bg-white rounded-2xl border border-slate-200 shadow-sm mb-5"
+
+    def _av():
+        return ("<div class='w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0' "
+                f"style='background:linear-gradient(120deg,#6366f1,#ec4899)'>{esc(sname[:1])}</div>")
+
+    def _cp(cid, text, label):
+        return (f"<textarea id='{cid}' class='hidden'>{esc(text)}</textarea>"
+                f"<button type=button onclick=\"cp('{cid}',this)\" class='px-3 py-1.5 bg-slate-900 text-white text-xs font-bold rounded-lg'>📋 {label}</button>")
+
+    def _blog_body(body):
+        out = []
+        for seg in _re.split(r"(\[사진\d+\])", body or ""):
+            m = _re.fullmatch(r"\[사진(\d+)\]", seg or "")
+            if m:
+                i = int(m.group(1)) - 1
+                if 0 <= i < len(imgs) and imgs[i] and os.path.exists(imgs[i]):
+                    out.append(f"<img src='/dl/{asset_id}/{os.path.basename(imgs[i])}' class='my-3 rounded-xl w-full border border-slate-100'>")
+            else:
+                for ln in (seg or "").split("\n"):
+                    s = ln.strip()
+                    if s.startswith("#"):
+                        out.append(f"<h3 class='font-bold text-base mt-4 mb-1 text-slate-900'>{esc(s.lstrip('# '))}</h3>")
+                    elif s:
+                        out.append(f"<p class='mb-2 leading-relaxed text-slate-700 text-sm'>{esc(s)}</p>")
+        return "".join(out)
+
+    def _hd(label):
+        return f"<div class='text-xs font-bold text-slate-400 mb-1.5 max-w-md mx-auto'>{label} — 이렇게 올라가요</div>"
     cards = ""
     for p in pieces:
         k, pl = p.kind.value, p.payload
         has_video = bool(pl.get("video_path"))
-        if k == "blog":
-            b = _re.sub(r"\[사진\d+\]", "", pl.get("body", "")).strip()
-            cards += _kit_card("📝 네이버 블로그 <span class='text-xs text-slate-400'>(복사→네이버 글쓰기 붙여넣기)</span>",
-                eb(pl) + "<div class='text-xs text-slate-400 mb-1'>제목</div>" + copy_block("blogT", pl.get("title", ""), "16")
-                + "<div class='text-xs text-slate-400 mt-3 mb-1'>본문</div>" + copy_block("blogB", b, "40")
-                + pack_btn(p.id, False)
-                + "<p class='text-xs text-slate-400 mt-2'>‘통째로 받기’엔 본문·사진이 순서대로 들어있어요.</p>")
-        elif k == "caption":
-            cards += _kit_card("📷 인스타그램 <span class='text-xs text-slate-400'>(캡션+사진 묶음)</span>",
-                eb(pl) + copy_block("cap", pl.get("text", ""), "40") + pack_btn(p.id, has_video))
-        elif k == "short" and p.channel.value == "youtube":
-            cards += _kit_card("▶️ 유튜브 쇼츠 <span class='text-xs text-slate-400'>(제목·설명+영상 묶음)</span>",
-                eb(pl) + "<div class='text-xs text-slate-400 mb-1'>제목</div>" + copy_block("ytT", pl.get("title", ""), "16")
-                + "<div class='text-xs text-slate-400 mt-3 mb-1'>설명</div>" + copy_block("ytD", pl.get("narration", ""), "28")
-                + pack_btn(p.id, has_video))
-        elif k == "short" and p.channel.value == "instagram":
-            cards += _kit_card("🎬 인스타 릴스 <span class='text-xs text-slate-400'>(캡션+영상 묶음)</span>",
-                eb(pl) + (copy_block("reel", pl.get("text", ""), "24") if pl.get("text") else "") + pack_btn(p.id, has_video))
+        vurl = f"/dl/{asset_id}/{os.path.basename(pl.get('video_path',''))}" if (has_video and os.path.exists(pl.get("video_path", ""))) else ""
+        if k == "caption":
+            cap = pl.get("text", "")
+            media = (f"<img src='{first_img}' class='w-full aspect-square object-cover'>" if first_img
+                     else "<div class='w-full aspect-square bg-slate-100 flex items-center justify-center text-5xl text-slate-300'>📷</div>")
+            cards += (_hd("📷 인스타그램") + f"<div class='{wrap} overflow-hidden'>"
+                      "<div class='flex items-center gap-2 px-3 py-2.5'>" + _av()
+                      + f"<div class='font-semibold text-sm'>{esc(sname)}</div><div class='ml-auto text-slate-400'>⋯</div></div>" + media
+                      + "<div class='px-3 pt-2.5 flex items-center gap-4 text-2xl'><span>♡</span><span>💬</span><span>➤</span><span class='ml-auto'>🔖</span></div>"
+                      + f"<div class='px-3 py-2 text-sm whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto'><b>{esc(sname)}</b> {esc(cap)}</div>"
+                      + f"<div class='px-3 pb-3 flex gap-2'>{_cp('c_cap', cap, '캡션 복사')}{pack_btn(p.id, has_video)}</div></div>")
+        elif k == "blog":
+            title = pl.get("title", "")
+            plain = _re.sub(r"\[사진\d+\]", "", pl.get("body", "")).strip()
+            cards += (_hd("📝 네이버 블로그") + f"<div class='{wrap} p-5'>"
+                      f"<div class='text-lg font-extrabold text-slate-900 leading-snug mb-2'>{esc(title)}</div>"
+                      "<div class='flex items-center gap-2 text-xs text-slate-400 border-b border-slate-100 pb-2 mb-3'>" + _av()
+                      + f"<span>{esc(sname)} 블로그 · 방금 전</span></div>"
+                      + f"<div class='max-h-80 overflow-y-auto'>{_blog_body(pl.get('body',''))}</div>"
+                      + f"<div class='mt-4 flex flex-wrap gap-2'>{_cp('c_bt', title, '제목 복사')}{_cp('c_bb', plain, '본문 복사')}{pack_btn(p.id, False)}</div></div>")
         elif k == "x_post":
-            cards += _kit_card("𝕏 X (트위터)", eb(pl) + copy_block("xp", pl.get("text", ""), "24") + pack_btn(p.id, has_video))
-    js = ("<script>function cp(id,btn){const t=document.getElementById(id);t.select();"
-          "navigator.clipboard.writeText(t.value);btn.textContent='✅ 복사됨';"
-          "setTimeout(()=>btn.textContent='📋 복사',1500);}</script>")
+            xt = pl.get("text", "")
+            cards += (_hd("𝕏 X") + f"<div class='{wrap} p-4'>"
+                      "<div class='flex items-center gap-2 mb-2'>" + _av()
+                      + f"<div><div class='font-bold text-sm leading-tight'>{esc(sname)}</div><div class='text-slate-400 text-xs'>@{handle} · now</div></div><div class='ml-auto text-lg font-bold'>𝕏</div></div>"
+                      + f"<div class='text-sm whitespace-pre-wrap leading-relaxed text-slate-800'>{esc(xt)}</div>"
+                      + "<div class='flex items-center gap-10 text-slate-400 mt-3 text-sm'><span>💬</span><span>🔁</span><span>♡</span><span>📊</span></div>"
+                      + f"<div class='mt-3 flex gap-2'>{_cp('c_x', xt, '복사')}</div></div>")
+        elif k == "short" and p.channel.value in ("youtube", "instagram"):
+            title = pl.get("title", "") or (pl.get("text", "")[:30])
+            desc = pl.get("narration", "") or pl.get("text", "")
+            lab = "▶️ 유튜브 쇼츠" if p.channel.value == "youtube" else "🎬 인스타 릴스"
+            if vurl:
+                player = f"<video src='{vurl}' controls playsinline class='w-full max-h-[520px] bg-black'></video>"
+            elif first_img:
+                player = ("<div class='relative bg-black'>"
+                          f"<img src='{first_img}' class='w-full max-h-[420px] object-contain opacity-70'>"
+                          "<div class='absolute inset-0 flex flex-col items-center justify-center text-white'>"
+                          "<span class='text-4xl'>▶️</span><span class='text-xs mt-1'>영상은 ‘통째로 받기’에 포함</span></div></div>")
+            else:
+                player = "<div class='w-full aspect-video bg-black flex items-center justify-center text-white text-3xl'>▶️</div>"
+            cards += (_hd(lab) + f"<div class='{wrap} overflow-hidden'>{player}"
+                      f"<div class='p-3'><div class='font-bold text-sm mb-1'>{esc(title)}</div>"
+                      f"<div class='text-xs text-slate-500 whitespace-pre-wrap max-h-24 overflow-y-auto'>{esc(desc)}</div>"
+                      f"<div class='mt-3 flex gap-2'>{_cp('c_v' + p.id[:5], title, '제목')}{pack_btn(p.id, has_video)}</div></div></div>")
+    js = ("<script>function cp(id,btn){var t=document.getElementById(id);var o=btn.textContent;"
+          "navigator.clipboard.writeText(t.value);btn.textContent='✅ 복사됨';setTimeout(function(){btn.textContent=o;},1500);}</script>")
     brief = next((p.payload.get("brief") for p in pieces if p.payload.get("brief")), None)
     pipeline = ("<div class='bg-indigo-50 border border-indigo-100 rounded-2xl p-4 mb-4'>"
                 "<div class='text-sm font-bold text-indigo-700 mb-1'>🤖 AI 전문가 팀이 제작했어요</div>"
@@ -1014,9 +1071,9 @@ def kit(request: Request, asset_id: str):
                      "<div class='font-bold text-sm mb-2'>📷 내가 올린 사진</div>"
                      f"<div class='flex gap-2 flex-wrap'>{thumbs}</div></div>") if thumbs else "")
     body = ("<a href='/me' class='text-sm text-slate-400'>← 내 작업실</a>"
-            "<h2 class='text-xl font-extrabold mt-2 mb-1'>발행 소재</h2>"
-            "<p class='text-slate-500 text-sm mb-4'>채널마다 <b>글+사진+영상이 한 묶음</b>이에요. 통째로 받아 각 앱에 올리고, 글은 복사해서 붙여넣으세요.</p>"
-            + photos_strip + pipeline + all_btn + cards + js)
+            "<h1 class='text-2xl font-extrabold text-slate-900 mt-2 mb-1'>발행 소재</h1>"
+            "<p class='text-slate-400 text-sm mb-5'>각 앱에 올리면 <b class='text-slate-600'>이렇게</b> 보여요. 글은 복사, 사진·영상은 다운로드하세요.</p>"
+            + pipeline + all_btn + cards + js)
     return HTMLResponse(_subscriber_page("발행 소재", body))
 
 
@@ -2022,12 +2079,14 @@ def _upload_form_html(tenant, token: str) -> str:
           <button type=button onclick='lookupStore()' class='px-5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-sm whitespace-nowrap transition'>자동 인식</button></div>
         <div id=lk_result class='text-xs mt-2 text-slate-400'>입력하면 업종·주소가 자동으로 채워져요 (없어도 OK)</div></div>
       <div><label class='{lb}'>2. 사진</label>
-        <label class='block border-2 border-dashed border-slate-200 rounded-2xl px-4 py-9 text-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/40 transition'>
-          <div class='text-3xl mb-1'>📷</div>
-          <div class='font-semibold text-slate-700 text-sm'>사진 올리기</div>
-          <div class='text-xs text-slate-400 mt-0.5'>여러 장 가능 · 밝고 또렷할수록 좋아요</div>
-          <input type=file name=photos id=up_photos accept='image/*' multiple required class='hidden'></label>
-        <div id=up_preview class='flex gap-2 overflow-x-auto pb-1 mt-2'></div></div>
+        <label class='block border-2 border-dashed border-slate-200 rounded-2xl p-4 cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/40 transition'>
+          <div id=up_placeholder class='py-6 text-center'>
+            <div class='text-3xl mb-1'>📷</div>
+            <div class='font-semibold text-slate-700 text-sm'>사진 올리기</div>
+            <div class='text-xs text-slate-400 mt-0.5'>여러 장 가능 · 밝고 또렷할수록 좋아요</div></div>
+          <div id=up_preview class='hidden grid grid-cols-3 sm:grid-cols-4 gap-2'></div>
+          <div id=up_more class='hidden text-center text-xs text-indigo-500 mt-2 font-medium'>+ 다시 선택하려면 눌러주세요</div>
+          <input type=file name=photos id=up_photos accept='image/*' multiple required class='hidden'></label></div>
       <div><label class='{lb}'>3. 어떤 장사인가요?</label>{biz_toggle}</div>
       <div><label class='{lb}'>4. 목적 <span class='text-slate-400 font-normal text-xs'>(선택)</span></label>
         <div class='flex flex-wrap gap-2'>{chips}</div></div>
@@ -2037,9 +2096,11 @@ def _upload_form_html(tenant, token: str) -> str:
       <p class='text-center text-xs text-slate-400'>인스타·네이버·유튜브·X + 영상을 AI가 자동 생성 (20~40초)</p></form>"""
     js = ("<script>"
           "(function(){var f=document.getElementById('up_photos');if(f)f.addEventListener('change',function(){"
-          "var pv=document.getElementById('up_preview');pv.innerHTML='';"
-          "Array.from(f.files||[]).slice(0,8).forEach(function(x){var im=document.createElement('img');im.src=URL.createObjectURL(x);"
-          "im.className='h-20 w-20 object-cover rounded-xl flex-shrink-0 border border-slate-100';pv.appendChild(im);});});})();"
+          "var pv=document.getElementById('up_preview'),ph=document.getElementById('up_placeholder'),mo=document.getElementById('up_more');pv.innerHTML='';"
+          "var files=Array.from(f.files||[]);if(files.length){ph.classList.add('hidden');pv.classList.remove('hidden');mo.classList.remove('hidden');"
+          "files.slice(0,9).forEach(function(x){var im=document.createElement('img');im.src=URL.createObjectURL(x);"
+          "im.className='w-full aspect-square object-cover rounded-xl border border-slate-100';pv.appendChild(im);});"
+          "}else{ph.classList.remove('hidden');pv.classList.add('hidden');mo.classList.add('hidden');}});})();"
           "async function lookupStore(){var q=document.getElementById('lk_q').value.trim();if(!q)return;"
           "var b=document.getElementById('lk_result');b.innerHTML='<span class=\"text-slate-400\">인식 중…</span>';"
           "try{var r=await fetch('/api/lookup?q='+encodeURIComponent(q));var d=await r.json();"

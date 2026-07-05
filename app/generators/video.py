@@ -375,7 +375,7 @@ class ShortVideoGenerator(Generator):
                   f"[a]scale={tw}:{th}:force_original_aspect_ratio=decrease[fg];"
                   f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v]")
             cmd = ["ffmpeg", "-y", "-i", video, "-filter_complex", fc, "-map", "[v]", "-map", "0:a?",
-                   "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", dst]
+                   "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", "-pix_fmt", "yuv420p", "-c:a", "aac", dst]
             r = subprocess.run(cmd, capture_output=True, timeout=180)
             if r.returncode == 0 and os.path.exists(dst):
                 out[key] = dst
@@ -499,7 +499,7 @@ class ShortVideoGenerator(Generator):
               f"d={frames}:s={W}x{H}:fps={FPS}" + self._fade(dur))
         cmd = ["ffmpeg", "-y", "-loop", "1", "-t", f"{dur:.2f}", "-i", img, "-vf", vf,
                "-map", "0:v", "-t", f"{dur:.2f}", "-r", str(FPS), "-pix_fmt", "yuv420p",
-               "-c:v", "libx264", "-an", out]
+               "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", "-an", out]
         r = subprocess.run(cmd, capture_output=True, timeout=120)
         return out if (r.returncode == 0 and os.path.exists(out)) else None
 
@@ -513,7 +513,7 @@ class ShortVideoGenerator(Generator):
             vf = f"scale={W}:{H},setsar=1,fps={FPS}"
         vf += self._fade(dur)
         cmd = ["ffmpeg", "-y", "-loop", "1", "-t", f"{dur:.2f}", "-i", png, "-vf", vf,
-               "-t", f"{dur:.2f}", "-r", str(FPS), "-pix_fmt", "yuv420p", "-c:v", "libx264", "-an", out]
+               "-t", f"{dur:.2f}", "-r", str(FPS), "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", "-an", out]
         r = subprocess.run(cmd, capture_output=True, timeout=120)
         return out if (r.returncode == 0 and os.path.exists(out)) else None
 
@@ -534,7 +534,7 @@ class ShortVideoGenerator(Generator):
             # 로고는 -loop 1 로 전 구간 유지. 길이는 -t {total}로 정확히 고정(-shortest 금지: 무한 로고와 충돌해 잘림)
             cmd = ["ffmpeg", "-y", "-i", video, "-loop", "1", "-i", logo,
                    "-filter_complex", fc, "-map", "[v]", "-t", f"{total:.2f}", "-r", str(FPS),
-                   "-pix_fmt", "yuv420p", "-c:v", "libx264", out]
+                   "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", out]
             r = subprocess.run(cmd, capture_output=True, timeout=240)
             if r.returncode == 0 and os.path.exists(out) and _probe_dur(out) > total * 0.8:
                 return out
@@ -565,7 +565,7 @@ class ShortVideoGenerator(Generator):
                             "-c", "copy", out], capture_output=True, timeout=240)
         if (r.returncode != 0 or not os.path.exists(out)) and out.endswith(".mp4"):
             r = subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", listf,
-                                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", out],
+                                "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", "-pix_fmt", "yuv420p", "-an", out],
                                capture_output=True, timeout=300)
         return out if os.path.exists(out) else None
 
@@ -635,7 +635,7 @@ class ShortVideoGenerator(Generator):
             labels += f"[v{i}]"
         parts.append(f"{labels}concat=n={len(imgs)}:v=1:a=0[cat]")
         cmd += ["-filter_complex", ";".join(parts), "-map", "[cat]",
-                "-r", str(FPS), "-pix_fmt", "yuv420p", "-c:v", "libx264", out]
+                "-r", str(FPS), "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", out]
         try:
             r = subprocess.run(cmd, capture_output=True, timeout=180)
             if r.returncode != 0 or not os.path.exists(out):
