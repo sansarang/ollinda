@@ -205,9 +205,9 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
     ip = (request.headers.get("cf-connecting-ip")
           or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
           or (request.client.host if request.client else "") or "unknown")
-    if db.demo_ip_count(ip) >= 15:                   # 남용 방지(하루 15회, 매일 리셋)
+    if db.demo_ip_count(ip) >= 2:                    # 무료 미리보기 2회 → 그다음 가입 유도
         return JSONResponse({"require_signup": True,
-                             "message": "오늘 무료 미리보기를 많이 사용하셨어요. 가입하면 계속 만들 수 있어요!"})
+                             "message": "무료 미리보기 2회를 다 보셨어요! 가입하면 5채널 전부 + 영상까지 무료로 만들어드려요 🎁"})
     imgs = []
     for f in (photos or []):
         if getattr(f, "filename", ""):
