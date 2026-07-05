@@ -706,31 +706,22 @@ def my_dashboard(request: Request, ok: str = "", err: str = ""):
                  "style='background:linear-gradient(120deg,#334155,#4338ca)'>"
                  f"<div><div class='text-xs text-white/70'>내 플랜</div>"
                  f"<div class='font-bold'>{_pn} · {_usage}</div></div>{_upbtn}</div>")
-    greeting = (f"<div class='mb-4'><div class='text-2xl font-extrabold'>안녕하세요, {esc(t.name)}님 👋</div>"
-                "<div class='text-slate-500 text-sm mt-0.5'>사진 한 장이면 5개 채널 콘텐츠가 완성돼요.</div></div>")
-    # 📷 업로드 폼을 대시보드에 인라인 삽입 (별도 페이지 이동 없음)
-    upload_section = ("<div class='rounded-2xl p-5 mb-4 text-white' style='background:linear-gradient(120deg,#6366f1,#a855f7,#ec4899)'>"
-                      "<div class='text-xl font-extrabold mb-0.5'>📷 사진 올려 5채널 생성</div>"
-                      "<p class='text-white/85 text-sm'>사진 + 한 줄 설명만 넣고 <b>생성하기</b> → 인스타·네이버·유튜브·X + 영상을 AI 전문가팀이 만들어요.</p></div>"
-                      + _upload_form_html(t, tok))
-
-    def _step(n, emoji, title, desc):
-        return ("<div class='relative bg-slate-50 rounded-2xl p-4 text-center'>"
-                f"<div class='absolute -top-2 left-3 w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center'>{n}</div>"
-                f"<div class='text-3xl mb-1 mt-1'>{emoji}</div>"
-                f"<div class='font-bold text-sm'>{title}</div><div class='text-xs text-slate-500 mt-0.5'>{desc}</div></div>")
-    steps = ("<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-4'>"
-             "<h2 class='font-bold mb-3'>이렇게 사용해요 · 딱 3단계</h2>"
-             "<div class='grid grid-cols-1 sm:grid-cols-3 gap-3'>"
-             + _step(1, "📷", "사진 올리기", "가게·상품 사진 1장")
-             + _step(2, "🤖", "AI가 제작", "5채널 글+영상 자동 생성")
-             + _step(3, "⬇️", "받아서 올리기", "다운로드 → 각 앱에 붙여넣기")
-             + "</div></div>")
-    content = ("<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-4'>"
-               "<h2 class='font-bold mb-1'>📋 생성된 콘텐츠 · 검수/발행 소재</h2>"
-               "<p class='text-xs text-slate-400 mb-3'>항목을 누르면 ‘발행 소재’(글 복사·사진/영상 다운로드)로 이동해요.</p>" + hist + "</div>")
-    settings = ("<details class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5'>"
-                "<summary class='font-bold cursor-pointer text-slate-600'>⚙️ 가게 정보 수정 (검색으로 자동입력)</summary>"
+    greeting = ("<div class='flex items-center justify-between mb-5'>"
+                f"<div><div class='text-2xl font-extrabold text-slate-900'>{esc(t.name)}</div>"
+                "<div class='text-slate-400 text-sm'>사진만 올리면 5채널 콘텐츠가 완성돼요</div></div>"
+                "<div class='text-right'><div class='text-[11px] text-slate-400'>내 플랜</div>"
+                f"<div class='font-bold text-indigo-600 text-sm'>{_pn}</div></div></div>")
+    steps = ""   # 3단계 가이드 제거(간결화)
+    # ✨ 생성 카드 — 깔끔한 화이트 카드
+    upload_section = ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6 sm:p-7 mb-5'>"
+                      "<div class='mb-5'><div class='text-lg font-extrabold text-slate-900'>✨ 콘텐츠 만들기</div>"
+                      "<div class='text-sm text-slate-400'>가게 이름·사진만 있으면 끝</div></div>"
+                      + _upload_form_html(t, tok) + "</div>")
+    content = ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6 mb-5'>"
+               "<h2 class='font-bold text-slate-900 mb-1'>📋 내 콘텐츠</h2>"
+               "<p class='text-xs text-slate-400 mb-3'>항목을 누르면 발행 소재(복사·다운로드)로 이동해요.</p>" + hist + "</div>")
+    settings = ("<details class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6'>"
+                "<summary class='font-bold cursor-pointer text-slate-600 select-none'>⚙️ 가게 정보 수정 (검색으로 자동입력)</summary>"
                 "<div class='mt-3'>" + search_box + store_form + place_js + "</div></details>")
     # 📢 플레이스 소식 + ⭐ 리뷰 유도 (매장/하이브리드) — 플레이스 상위노출 직접 도움
     place_section = review_section = ""
@@ -779,9 +770,13 @@ def my_dashboard(request: Request, ok: str = "", err: str = ""):
         f"<input name=target placeholder='https://...' required class='{inp} flex-1'>"
         "<button class='px-4 bg-indigo-600 text-white font-bold rounded-xl text-sm whitespace-nowrap'>만들기</button></form>"
         + (litems or "<p class='text-slate-400 text-sm'>아직 링크가 없어요.</p>") + "</div>")
+    tools = ("<details class='mb-5'>"
+             "<summary class='font-bold text-slate-900 cursor-pointer select-none py-2'>🚀 상위노출·성과 도구 "
+             "<span class='text-xs text-slate-400 font-normal'>· 소식·리뷰·링크·성과</span></summary>"
+             "<div class='mt-2'>" + _perf_report(t.id) + place_section + review_section + link_section
+             + "</div></details>")
     return _subscriber_page(f"{esc(t.name)} · 내 작업실",
-                            greeting + plan_card + upload_section + content + _perf_report(t.id)
-                            + place_section + review_section + link_section + steps + settings)
+                            greeting + upload_section + content + tools + settings)
 
 
 @app.post("/me/store")
@@ -1989,75 +1984,77 @@ def oauth_callback(code: str = "", state: str = "", error: str = ""):
 
 # ── 사장님 업로드 ────────────────────────────────────────
 def _upload_form_html(tenant, token: str) -> str:
-    """업로드 폼(입력+가이드) — 대시보드 인라인/독립 페이지 공용."""
-    import json as _json
-    from app.industries import resolve_industry, example_for
-    prof = resolve_industry(tenant.industry)
-    ex = example_for(prof)
-    purposes = ["방문 유도", "판매 전환", "신상품 홍보", "신뢰 쌓기", "이벤트"]
-    popt = "<option value=''>선택안함</option>" + "".join(
-        f"<option{' selected' if p == ex.get('purpose') else ''}>{p}</option>" for p in purposes)
-    form = (f"<form method=post action='/u/{token}/upload' enctype='multipart/form-data' onsubmit='return showGen()' class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5'>"
-            "<div class='bg-indigo-50 rounded-xl p-3 mb-4'>"
-            "<label class='block text-sm font-semibold mb-1'>🔍 가게 이름 또는 상품/스토어 링크</label>"
-            "<div class='flex gap-2'>"
-            "<input id=lk_q placeholder='예: 초량 루마썬팅  또는  https://스토어링크' class='flex-1 border rounded-lg p-2 text-sm'>"
-            "<button type=button onclick='lookupStore()' class='px-4 bg-indigo-600 text-white rounded-lg font-bold text-sm whitespace-nowrap'>자동 인식</button></div>"
-            "<div id=lk_result class='text-xs mt-1 text-slate-500'>이름/링크만 넣으면 업종·주소·전화가 자동으로 채워져요</div></div>"
-            "<input type=hidden name=s_name id=s_name><input type=hidden name=s_industry id=s_industry>"
-            "<input type=hidden name=s_biz id=s_biz><input type=hidden name=s_region id=s_region>"
-            "<input type=hidden name=s_tel id=s_tel><input type=hidden name=s_buy id=s_buy>"
-            f"<label class='block text-sm font-semibold mb-1'>📷 사진 (여러 장 가능 · 최대 10장)</label>"
-            f"<input type=file name=photos accept='image/*' multiple required class='mb-4 block w-full text-sm'>"
-            f"<label class='block text-sm font-semibold mb-1'>✏️ 한 줄 설명</label>"
-            f"<input name=note id=f_note placeholder=\"예) {esc(ex.get('note',''))}\" required class='mb-3 block w-full border rounded-lg p-2 text-sm'>"
-            f"<label class='block text-sm font-semibold mb-1'>🎯 목적 (선택)</label>"
-            f"<select name=purpose id=f_purpose class='mb-3 block w-full border rounded-lg p-2 text-sm'>{popt}</select>"
-            f"<label class='block text-sm font-semibold mb-1'>👥 타겟 고객 (선택)</label>"
-            f"<input name=target id=f_target placeholder=\"예) {esc(ex.get('target',''))}\" class='mb-3 block w-full border rounded-lg p-2 text-sm'>"
-            f"<label class='block text-sm font-semibold mb-1'>➕ 추가 정보 (선택)</label>"
-            f"<input name=extra id=f_extra placeholder=\"예) {esc(ex.get('extra',''))}\" class='mb-3 block w-full border rounded-lg p-2 text-sm'>"
-            f"<label class='block text-sm font-semibold mb-1'>📝 요청사항 (선택 · 꼭 반영할 점)</label>"
-            f"<input name=request id=f_request placeholder='예) 급매 꼭 강조 / 주차 가능 넣어줘 / 차분한 톤' class='mb-4 block w-full border rounded-lg p-2 text-sm'>"
-            f"<button class='w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl'>✨ 5채널 콘텐츠 생성하기</button>"
-            f"<p class='text-xs text-slate-400 mt-2 text-center'>생성은 20~40초 걸려요. 완료되면 아래 목록에 쌓입니다.</p></form>")
-    angles = "".join(f"<li>· {esc(a)}</li>" for a in prof.content_angles)
-    photog = "".join(f"<li>· {esc(g)}</li>" for g in prof.photo_guide)
-    guide = (f"<div class='bg-blue-50 rounded-2xl p-5 text-sm'>"
-             f"<div class='font-bold text-blue-800 mb-2'>📌 {esc(prof.name)} — 이렇게 보내주세요</div>"
-             f"<div class='font-semibold text-slate-700 mt-2 mb-1'>📸 좋은 사진</div><ul class='text-slate-600 space-y-0.5'>{photog}</ul>"
-             f"<div class='font-semibold text-slate-700 mt-3 mb-1'>💡 이런 소재가 좋아요</div><ul class='text-slate-600 space-y-0.5'>{angles}</ul>"
-             f"<div class='font-semibold text-slate-700 mt-3 mb-1'>✍️ 작성 예시</div>"
-             f"<div class='bg-white rounded-lg p-3 text-slate-600 text-xs leading-relaxed'>"
-             f"{esc(ex.get('note',''))}<br>목적: {esc(ex.get('purpose',''))} · 타겟: {esc(ex.get('target','-'))} · 추가: {esc(ex.get('extra',''))}</div>"
-             f"<button type=button onclick='fillEx()' class='mt-2 w-full bg-blue-600 text-white text-sm font-bold py-2 rounded-lg'>✨ 예시로 채우기</button>"
-             f"<p class='text-xs text-slate-400 mt-2'>밝고 또렷한 사진일수록 결과가 좋아요. 흔들리거나 어두운 사진 ❌</p></div>")
-    script = (f"<script>var EX={_json.dumps(ex)};function fillEx(){{"
-              f"document.getElementById('f_note').value=EX.note||'';"
-              f"document.getElementById('f_purpose').value=EX.purpose||'';"
-              f"document.getElementById('f_target').value=EX.target||'';"
-              f"document.getElementById('f_extra').value=EX.extra||'';}}"
-              "async function lookupStore(){var q=document.getElementById('lk_q').value.trim();if(!q)return;"
-              "var b=document.getElementById('lk_result');b.innerHTML='<span class=\"text-slate-400\">인식 중…</span>';"
-              "try{var r=await fetch('/api/lookup?q='+encodeURIComponent(q));var d=await r.json();"
-              "if(d.type==='none'){b.innerHTML='<span class=\"text-slate-400\">못 찾았어요. 아래 한 줄 설명에 직접 적어주세요.</span>';return;}"
-              "document.getElementById('s_name').value=d.name||'';document.getElementById('s_industry').value=d.industry||'';"
-              "document.getElementById('s_biz').value=(d.type==='seller'?'seller':'local');document.getElementById('s_region').value=d.region||'';"
-              "document.getElementById('s_tel').value=d.tel||'';document.getElementById('s_buy').value=d.buy_url||'';"
-              "var kind=(d.type==='seller')?'📦 온라인 셀러':'🏪 매장';"
-              "b.innerHTML='<span class=\"text-emerald-600 font-bold\">✓ '+(d.name||'')+' · '+(d.industry||'')+' ('+kind+') 자동 인식됨</span>';"
-              "var nt=document.getElementById('f_note');if(nt&&!nt.value)nt.value=((d.name||'')+' '+(d.industry||'')).trim();"
-              "}catch(e){b.innerHTML='<span class=\"text-rose-400\">인식 실패</span>';}}</script>")
+    """모던·간결 생성 카드 — 가게이름/링크 자동인식 + 사진 + 형태 + 목적 → 5채널 생성."""
+    bt = (tenant.biz_type or "local")
+    inp = ("w-full border border-slate-200 rounded-xl px-4 py-3 text-sm "
+           "focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition")
+    chips = "".join(
+        "<label class='cursor-pointer'>"
+        f"<input type=radio name=purpose value='{p}' class='peer sr-only'>"
+        "<span class='inline-block px-3.5 py-2 rounded-full text-sm font-medium border border-slate-200 text-slate-600 "
+        f"peer-checked:bg-indigo-600 peer-checked:text-white peer-checked:border-indigo-600 transition'>{p}</span></label>"
+        for p in ["방문 유도", "판매 전환", "신상품 홍보", "이벤트·할인", "후기·신뢰"])
+
+    def _bz(val, emoji, label):
+        return ("<label class='cursor-pointer'>"
+                f"<input type=radio name=biztype value='{val}'{' checked' if bt == val else ''} "
+                f"onclick=\"document.getElementById('s_biz').value='{val}'\" class='peer sr-only'>"
+                "<div class='rounded-2xl border-2 border-slate-200 p-3.5 text-center transition "
+                f"peer-checked:border-indigo-600 peer-checked:bg-indigo-50 peer-checked:text-indigo-700'>"
+                f"<div class='text-2xl'>{emoji}</div><div class='font-bold text-sm mt-0.5'>{label}</div></div></label>")
+    biz_toggle = ("<div class='grid grid-cols-2 gap-2.5'>" + _bz("local", "🏪", "동네 매장")
+                  + _bz("seller", "📦", "온라인 셀러") + "</div>")
+    lb = "block text-sm font-bold text-slate-800 mb-2"
+    form = f"""<form method=post action='/u/{token}/upload' enctype='multipart/form-data' onsubmit='return showGen()' class='space-y-5'>
+      <input type=hidden name=s_name id=s_name><input type=hidden name=s_industry id=s_industry>
+      <input type=hidden name=s_biz id=s_biz value='{bt}'><input type=hidden name=s_region id=s_region>
+      <input type=hidden name=s_tel id=s_tel><input type=hidden name=s_buy id=s_buy>
+      <div><label class='{lb}'>1. 가게 이름 또는 상품 링크</label>
+        <div class='flex gap-2'>
+          <input id=lk_q placeholder='초량 루마썬팅 · https://스토어링크' class='{inp} flex-1'>
+          <button type=button onclick='lookupStore()' class='px-5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-sm whitespace-nowrap transition'>자동 인식</button></div>
+        <div id=lk_result class='text-xs mt-2 text-slate-400'>입력하면 업종·주소가 자동으로 채워져요 (없어도 OK)</div></div>
+      <div><label class='{lb}'>2. 사진</label>
+        <label class='block border-2 border-dashed border-slate-200 rounded-2xl px-4 py-9 text-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/40 transition'>
+          <div class='text-3xl mb-1'>📷</div>
+          <div class='font-semibold text-slate-700 text-sm'>사진 올리기</div>
+          <div class='text-xs text-slate-400 mt-0.5'>여러 장 가능 · 밝고 또렷할수록 좋아요</div>
+          <input type=file name=photos id=up_photos accept='image/*' multiple required class='hidden'></label>
+        <div id=up_preview class='flex gap-2 overflow-x-auto pb-1 mt-2'></div></div>
+      <div><label class='{lb}'>3. 어떤 장사인가요?</label>{biz_toggle}</div>
+      <div><label class='{lb}'>4. 목적 <span class='text-slate-400 font-normal text-xs'>(선택)</span></label>
+        <div class='flex flex-wrap gap-2'>{chips}</div></div>
+      <details class='text-sm'><summary class='cursor-pointer text-slate-500 select-none'>✏️ 강조할 점 추가 <span class='text-slate-400'>(선택)</span></summary>
+        <input name=note placeholder='예: 겨울 프로모션 꼭 강조해주세요' class='{inp} mt-2'></details>
+      <button class='w-full py-4 rounded-2xl text-white font-extrabold text-lg shadow-xl shadow-indigo-500/30 hover:shadow-indigo-500/50 transition' style='background:linear-gradient(120deg,#6366f1,#8b5cf6,#ec4899)'>✨ 5채널 콘텐츠 생성하기</button>
+      <p class='text-center text-xs text-slate-400'>인스타·네이버·유튜브·X + 영상을 AI가 자동 생성 (20~40초)</p></form>"""
+    js = ("<script>"
+          "(function(){var f=document.getElementById('up_photos');if(f)f.addEventListener('change',function(){"
+          "var pv=document.getElementById('up_preview');pv.innerHTML='';"
+          "Array.from(f.files||[]).slice(0,8).forEach(function(x){var im=document.createElement('img');im.src=URL.createObjectURL(x);"
+          "im.className='h-20 w-20 object-cover rounded-xl flex-shrink-0 border border-slate-100';pv.appendChild(im);});});})();"
+          "async function lookupStore(){var q=document.getElementById('lk_q').value.trim();if(!q)return;"
+          "var b=document.getElementById('lk_result');b.innerHTML='<span class=\"text-slate-400\">인식 중…</span>';"
+          "try{var r=await fetch('/api/lookup?q='+encodeURIComponent(q));var d=await r.json();"
+          "if(d.type==='none'){b.innerHTML='<span class=\"text-slate-400\">못 찾았어요 — 그냥 사진 올리고 만들어도 돼요</span>';return;}"
+          "document.getElementById('s_name').value=d.name||'';document.getElementById('s_industry').value=d.industry||'';"
+          "var bz=(d.type==='seller')?'seller':'local';document.getElementById('s_biz').value=bz;"
+          "document.getElementById('s_region').value=d.region||'';document.getElementById('s_tel').value=d.tel||'';document.getElementById('s_buy').value=d.buy_url||'';"
+          "var rb=document.querySelector('input[name=biztype][value=\"'+bz+'\"]');if(rb)rb.checked=true;"
+          "var kind=(bz==='seller')?'📦 온라인 셀러':'🏪 동네 매장';"
+          "b.innerHTML='<span class=\"text-emerald-600 font-semibold\">✓ '+(d.name||'')+' · '+(d.industry||'')+' · '+kind+' 자동 인식됨</span>';"
+          "}catch(e){b.innerHTML='<span class=\"text-rose-400\">인식 실패</span>';}}"
+          "function showGen(){var o=document.getElementById('genOverlay');o.classList.remove('hidden');o.classList.add('flex');"
+          "var st=[[0,'🎯 마케팅 전략가가 분석 중…'],[25,'✍️ 카피라이터가 글 쓰는 중…'],[55,'🔍 SEO 편집장이 다듬는 중…'],[80,'🎬 영상 감독이 마무리 중…']];"
+          "var p=0;setInterval(function(){p=Math.min(p+(p<70?1.5:0.4),96);var b=document.getElementById('gBar');if(!b)return;b.style.width=p+'%';document.getElementById('gPct').textContent=Math.round(p)+'%';var l=st[0][1];st.forEach(function(s){if(p>=s[0])l=s[1];});document.getElementById('gLabel').textContent=l;},500);return true;}"
+          "</script>")
     gen_overlay = ("<div id='genOverlay' class='fixed inset-0 z-50 hidden items-center justify-center' style='background:rgba(15,23,42,.92)'>"
-                   "<div class='bg-white rounded-2xl p-6 w-80 max-w-[90vw] text-center'>"
+                   "<div class='bg-white rounded-3xl p-7 w-80 max-w-[90vw] text-center shadow-2xl'>"
                    "<div id='gLabel' class='font-bold mb-3'>🎯 마케팅 전략가가 분석 중…</div>"
                    "<div class='w-full h-2.5 bg-slate-100 rounded-full overflow-hidden'><div id='gBar' class='h-full' style='width:0%;transition:width .4s;background:linear-gradient(90deg,#6366f1,#ec4899)'></div></div>"
                    "<div id='gPct' class='text-slate-400 text-xs mt-1'>0%</div>"
-                   "<p class='text-xs text-slate-400 mt-2'>AI 전문가팀이 5채널을 만드는 중… (20~40초)</p></div></div>")
-    gen_script = ("<script>function showGen(){var o=document.getElementById('genOverlay');o.classList.remove('hidden');o.classList.add('flex');"
-                  "var st=[[0,'🎯 마케팅 전략가가 분석 중…'],[25,'✍️ 카피라이터가 글 쓰는 중…'],[55,'🔍 SEO 편집장이 다듬는 중…'],[80,'🎬 영상 감독이 마무리 중…']];"
-                  "var p=0;setInterval(function(){p=Math.min(p+(p<70?1.5:0.4),96);var b=document.getElementById('gBar');if(!b)return;b.style.width=p+'%';document.getElementById('gPct').textContent=Math.round(p)+'%';var l=st[0][1];st.forEach(function(s){if(p>=s[0])l=s[1];});document.getElementById('gLabel').textContent=l;},500);return true;}</script>")
-    return f"<div class='grid md:grid-cols-2 gap-4'>{form}{guide}</div>{script}{gen_overlay}{gen_script}"
+                   "<p class='text-xs text-slate-400 mt-3'>AI 전문가팀이 5채널을 만드는 중… (20~40초)</p></div></div>")
+    return form + js + gen_overlay
 
 
 @app.get("/u/{token}", response_class=HTMLResponse)
