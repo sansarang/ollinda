@@ -38,6 +38,7 @@ body{font-family:'Pretendard','Apple SD Gothic Neo',system-ui,sans-serif;-webkit
 .glass{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);backdrop-filter:blur(12px)}
 .kakao-float{position:fixed;right:20px;bottom:20px;z-index:50;width:60px;height:60px;border-radius:9999px;
  background:#FEE500;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 30px -8px rgba(0,0,0,.4);font-weight:800;color:#191600;font-size:13px}
+@media(max-width:640px){.kakao-float{bottom:86px}}
 </style>"""
 
 _HEAD = """<!doctype html><html lang=ko><head><meta charset=utf-8>
@@ -63,7 +64,7 @@ _HEAD = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css" rel=stylesheet>
 <script src="https://cdn.tailwindcss.com"></script>
 <script type=application/ld+json>{"@context":"https://schema.org","@type":"SoftwareApplication","name":"올린다","applicationCategory":"BusinessApplication","offers":{"@type":"Offer","price":"39900","priceCurrency":"KRW"}}</script>
-""".replace("__BASE__", BASE) + _STYLE + """</head><body class="bg-white text-slate-800 overflow-x-hidden">"""
+""".replace("__BASE__", BASE) + _STYLE + """</head><body class="bg-white text-slate-800 overflow-x-hidden pb-20 sm:pb-0">"""
 
 _FOOT = """
 <script>
@@ -393,19 +394,47 @@ def _footer() -> str:
      <a href="/privacy" class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20">개인정보처리방침</a></div>
    </div>
   </div>
-  <div class="mt-8 pt-6 border-t border-white/10 text-center text-xs text-slate-500">© 2026 올린다 (Ollinda) · {CONTACT_EMAIL}</div>
+  <div class="mt-8 pt-6 border-t border-white/10 text-center text-xs text-slate-500 leading-relaxed">
+    © 2026 올린다 (Ollinda) · 가희디자인 · 사업자등록번호 106-48-91586<br>
+    문의 {CONTACT_EMAIL} · <a href="/privacy" class="underline hover:text-slate-300">개인정보처리방침</a> · 🔒 SSL 보안 연결
+  </div>
  </div></footer>"""
 
 
 def _kakao_float() -> str:
     return ('<a href="https://pf.kakao.com/_EGrPX/chat" target="_blank" rel="noopener" '
-            'class="kakao-float" title="카카오톡 상담">TALK</a>')
+            'onclick="trackEv(\'kakao_channel\',{})" class="kakao-float" title="카카오톡 상담">TALK</a>')
+
+
+def _ga() -> str:
+    """GA4(있으면) + 전환 이벤트 자동 추적(가입 클릭·데모 제출·스티키 CTA). 키 없으면 no-op."""
+    import os
+    gid = os.environ.get("GA_MEASUREMENT_ID", "").strip()
+    ga = ""
+    if gid:
+        ga = (f'<script async src="https://www.googletagmanager.com/gtag/js?id={gid}"></script>'
+              '<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}'
+              f'gtag("js",new Date());gtag("config","{gid}");</script>')
+    tracker = ("<script>function trackEv(n,p){try{if(window.gtag)gtag('event',n,p||{});}catch(e){}}"
+               "document.addEventListener('click',function(e){var a=e.target.closest&&e.target.closest('a[href^=\"/login\"]');"
+               "if(a){var m=a.href.indexOf('kakao')>-1?'kakao':(a.href.indexOf('google')>-1?'google':'login');trackEv('signup_click',{method:m});}});"
+               "document.addEventListener('submit',function(e){if(e.target&&e.target.id==='demoForm')trackEv('demo_submit',{});});</script>")
+    return ga + tracker
+
+
+def _sticky_cta() -> str:
+    """모바일 하단 고정 CTA — 스크롤 어디서든 전환 유도(모바일 전환율 핵심)."""
+    return ('<div class="fixed bottom-0 left-0 right-0 z-40 sm:hidden bg-white/95 backdrop-blur border-t border-slate-200 px-3 pt-3" '
+            'style="padding-bottom:max(12px,env(safe-area-inset-bottom))">'
+            '<a href="/login/kakao" onclick="trackEv(\'sticky_cta\',{})" '
+            'class="block text-center py-3.5 rounded-xl font-extrabold text-white" '
+            'style="background:linear-gradient(120deg,#6366f1,#8b5cf6,#ec4899)">✨ 무료로 시작하기 · 2회 무료</a></div>')
 
 
 def render() -> str:
-    return (_HEAD + _seo_jsonld() + _nav() + _hero() + _video() + _demo_widget() + _stats() + _problem()
+    return (_HEAD + _ga() + _seo_jsonld() + _nav() + _hero() + _video() + _demo_widget() + _stats() + _problem()
             + _modes() + _features() + _pricing() + _faq() + _contact() + _cta() + _footer()
-            + _kakao_float() + _FOOT)
+            + _kakao_float() + _sticky_cta() + _FOOT)
 
 
 def privacy() -> str:

@@ -127,7 +127,14 @@ async def admin_basic_auth(request, call_next):
             if not ok:
                 return Response("운영자 인증 필요", status_code=401,
                                 headers={"WWW-Authenticate": 'Basic realm="shopcast admin"'})
-    return await call_next(request)
+    resp = await call_next(request)
+    # 보안 헤더(신뢰·SEO) — 모든 응답에 적용
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    resp.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+    resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return resp
 
 
 @app.on_event("startup")
