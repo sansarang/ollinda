@@ -66,6 +66,9 @@ def init_db() -> None:
         c.execute("CREATE TABLE IF NOT EXISTS demo_usage(ip TEXT PRIMARY KEY, count INTEGER, last TEXT)")
         c.execute("CREATE TABLE IF NOT EXISTS place_news("
                   "id TEXT PRIMARY KEY, tenant_id TEXT, text TEXT, created_at TEXT)")
+        c.execute("CREATE TABLE IF NOT EXISTS links("
+                  "code TEXT PRIMARY KEY, tenant_id TEXT, target TEXT, label TEXT, "
+                  "clicks INTEGER DEFAULT 0, created_at TEXT)")
         # 마이그레이션: users.tenant_id (구독자 ↔ 본인 가게), free_used (무료 생성 횟수)
         for col, ddl in [("tenant_id", "TEXT"), ("free_used", "INTEGER DEFAULT 0"),
                          ("usage_month", "TEXT"), ("month_used", "INTEGER DEFAULT 0")]:
@@ -272,6 +275,39 @@ def list_place_news(tenant_id: str, limit: int = 6) -> list[dict]:
         with _conn() as c:
             rows = c.execute("SELECT id,text,created_at FROM place_news WHERE tenant_id=? "
                              "ORDER BY created_at DESC LIMIT ?", (tenant_id, limit)).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.OperationalError:
+        return []
+
+
+# ── 제휴/추적 단축링크 ────────────────────────────────
+def create_link(tenant_id: str, target: str, label: str = "") -> str:
+    code = uuid.uuid4().hex[:7]
+    with _conn() as c:
+        c.execute("INSERT INTO links(code,tenant_id,target,label,clicks,created_at) VALUES(?,?,?,?,0,?)",
+                  (code, tenant_id, target, label, _now()))
+    return code
+
+
+def get_link(code: str) -> Optional[dict]:
+    try:
+        with _conn() as c:
+            r = c.execute("SELECT * FROM links WHERE code=?", (code,)).fetchone()
+        return dict(r) if r else None
+    except sqlite3.OperationalError:
+        return None
+
+
+def incr_link_click(code: str) -> None:
+    with _conn() as c:
+        c.execute("UPDATE links SET clicks=clicks+1 WHERE code=?", (code,))
+
+
+def list_links(tenant_id: str, limit: int = 20) -> list[dict]:
+    try:
+        with _conn() as c:
+            rows = c.execute("SELECT * FROM links WHERE tenant_id=? ORDER BY created_at DESC LIMIT ?",
+                             (tenant_id, limit)).fetchall()
         return [dict(r) for r in rows]
     except sqlite3.OperationalError:
         return []

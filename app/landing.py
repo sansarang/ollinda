@@ -85,12 +85,18 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
   const box=document.getElementById('demoResult');
   const ind=document.getElementById('d_ind').value.trim();
   if(!ind){box.innerHTML='<div class="text-amber-300 text-sm text-center py-3">업종/상품을 입력해주세요.</div>';return;}
-  box.innerHTML='<div class="text-center text-slate-200 py-6"><span class="dot inline-block w-3 h-3 rounded-full bg-indigo-400 align-middle"></span> AI 전문가팀이 실제로 만드는 중… (20~40초)</div>';
+  box.innerHTML='<div class="rounded-2xl p-5" style="background:rgba(255,255,255,.06)">'
+    +'<div id="pgLabel" class="text-white font-bold text-sm text-center mb-3">🎯 마케팅 전략가가 분석 중…</div>'
+    +'<div class="w-full h-2.5 bg-white/10 rounded-full overflow-hidden"><div id="pgBar" class="h-full" style="width:0%;transition:width .4s;background:linear-gradient(90deg,#818cf8,#f472b6)"></div></div>'
+    +'<div id="pgPct" class="text-slate-400 text-xs text-center mt-1">0%</div></div>';
+  var _st=[[0,'🎯 마케팅 전략가가 분석 중…'],[25,'✍️ 카피라이터가 글 쓰는 중…'],[55,'🔍 SEO 편집장이 다듬는 중…'],[80,'🎬 영상 감독이 마무리 중…']];
+  var _pct=0;var _pg=setInterval(function(){_pct=Math.min(_pct+(_pct<70?2:0.5),95);var b=document.getElementById('pgBar');if(!b){clearInterval(_pg);return;}b.style.width=_pct+'%';document.getElementById('pgPct').textContent=Math.round(_pct)+'%';var l=_st[0][1];_st.forEach(function(s){if(_pct>=s[0])l=s[1];});document.getElementById('pgLabel').textContent=l;},500);
   const biz=(document.querySelector('input[name="d_biz"]:checked')||{}).value||'local';
   const fd=new FormData();fd.append('industry',ind);fd.append('biz_type',biz);
   fd.append('purpose',(document.getElementById('d_purpose')||{}).value||'');
   if(pf&&pf.files)Array.from(pf.files).slice(0,10).forEach(function(f){fd.append('photos',f);});
   try{const r=await fetch('/api/demo',{method:'POST',body:fd});const d=await r.json();
+   clearInterval(_pg);var _b=document.getElementById('pgBar');if(_b)_b.style.width='100%';
    if(d.teaser){box.innerHTML=d.teaser_html;box.scrollIntoView({behavior:'smooth',block:'nearest'});return;}
    if(d.go_dashboard){window.location.href='/me';return;}
    let cta;
@@ -103,7 +109,7 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
     +'<p class="text-slate-300 text-xs mb-4">가입 후 \\'내 작업실\\'에서 사진을 올리면 5채널이 자동 생성됩니다.</p>'
     +cta+'</div>';
    box.scrollIntoView({behavior:'smooth',block:'nearest'});
-  }catch(err){box.innerHTML='<div class="text-rose-300 text-sm text-center py-3">오류가 발생했어요. 잠시 후 다시.</div>';}
+  }catch(err){clearInterval(_pg);box.innerHTML='<div class="text-rose-300 text-sm text-center py-3">오류가 발생했어요. 잠시 후 다시.</div>';}
  });})();
 // 문의 폼
 (function(){const cf=document.getElementById('contactForm');if(!cf)return;

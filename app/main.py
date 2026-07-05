@@ -520,8 +520,10 @@ def my_dashboard(request: Request, ok: str = "", err: str = ""):
         f"<select name=marketplace class='{inp}'>{mkopts}</select>"
         f"<input name=brand_name value=\"{esc(t.brand_name)}\" placeholder='🏷 브랜드명 (셀러)' class='{inp}'>"
         f"<input name=search_kw value=\"{esc(t.search_kw)}\" placeholder='🔎 검색어 유도 (쿠팡 등)' class='{inp}'>"
-        f"<input name=buy_url value=\"{esc(t.buy_url)}\" placeholder='🔗 상세페이지/스토어 URL' class='{inp}'>"
+        f"<input name=buy_url value=\"{esc(t.buy_url)}\" placeholder='🔗 상세페이지/스토어/제휴 링크' class='{inp}'>"
+        f"<input name=map_url value=\"{esc(t.map_url)}\" placeholder='📍 네이버 플레이스 URL (매장)' class='{inp}'>"
         "<button class='bg-indigo-600 text-white font-bold py-2.5 rounded-xl sm:col-span-2'>저장</button></form>"
+        "<p class='text-xs text-slate-400 mt-1 sm:col-span-2'>💡 링크를 넣으면 글 끝에 <b>클릭 링크</b>로 자동 삽입돼요 (블로그·유튜브·X는 바로 클릭, 인스타는 프로필 안내).</p>"
         "<p class='text-xs text-slate-400 mt-2'>매장이면 글 끝에 지도·연락처, 셀러면 구매 링크/검색어로 자동 전환됩니다.</p>")
     # 온보딩용 최소 폼(필수 3개만 — 나머지는 나중에 설정에서). 셀러/동네매장 = 큰 토글로 명확히.
     _bt = (t.biz_type or "local")
@@ -685,22 +687,41 @@ def my_dashboard(request: Request, ok: str = "", err: str = ""):
             "<div class='flex gap-2'>"
             "<button onclick=\"navigator.clipboard.writeText(document.getElementById('rvq').value);this.textContent='✅ 복사됨'\" class='px-3 py-2 bg-indigo-600 text-white text-sm font-bold rounded-lg'>📋 문구 복사</button>"
             "<a href='/me/review-card.png' download class='px-3 py-2 bg-slate-800 text-white text-sm font-bold rounded-lg'>⬇ 리뷰 요청 카드</a></div></div>")
+    # 🔗 제휴·추적 링크 (모든 회원)
+    _base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
+    _links = db.list_links(t.id)
+    litems = "".join(
+        "<div class='flex items-center justify-between bg-slate-50 rounded-xl p-2.5 mb-2 text-sm'>"
+        f"<div class='min-w-0 truncate'><b>{esc(l.get('label') or '링크')}</b> "
+        f"<span class='text-slate-400 text-xs'>{_base}/r/{l['code']}</span></div>"
+        f"<div class='flex items-center gap-2 flex-shrink-0'><span class='text-xs text-emerald-600 font-bold'>👆 {l.get('clicks') or 0}회</span>"
+        f"<button onclick=\"navigator.clipboard.writeText('{_base}/r/{l['code']}');this.textContent='✅'\" class='px-2 py-1 bg-indigo-600 text-white text-xs rounded-lg'>복사</button></div></div>"
+        for l in _links)
+    link_section = (
+        "<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-4'>"
+        "<h2 class='font-bold mb-1'>🔗 제휴·추적 링크</h2>"
+        "<p class='text-xs text-slate-400 mb-3'>제휴/스토어/예약 링크를 넣으면 짧은 링크를 만들어드려요. 글·프로필에 넣으면 <b>클릭 수가 집계</b>됩니다.</p>"
+        "<form method=post action='/me/link' class='flex gap-2 mb-3'>"
+        f"<input name=label placeholder='이름(예:쿠팡)' class='{inp} w-28'>"
+        f"<input name=target placeholder='https://...' required class='{inp} flex-1'>"
+        "<button class='px-4 bg-indigo-600 text-white font-bold rounded-xl text-sm whitespace-nowrap'>만들기</button></form>"
+        + (litems or "<p class='text-slate-400 text-sm'>아직 링크가 없어요.</p>") + "</div>")
     return _subscriber_page(f"{esc(t.name)} · 내 작업실",
                             greeting + plan_card + upload_section + content + _perf_report(t.id)
-                            + place_section + review_section + steps + settings)
+                            + place_section + review_section + link_section + steps + settings)
 
 
 @app.post("/me/store")
 def my_store(request: Request, name: str = Form(""), industry: str = Form(""), region: str = Form(""),
              biz_type: str = Form("local"), phone: str = Form(""), address: str = Form(""),
              marketplace: str = Form(""), brand_name: str = Form(""),
-             search_kw: str = Form(""), buy_url: str = Form("")):
+             search_kw: str = Form(""), buy_url: str = Form(""), map_url: str = Form("")):
     u = auth.current_user(request)
     if not u:
         return RedirectResponse("/login", status_code=303)
     t = _ensure_user_tenant(u)
     db.rename_tenant(t.id, name, industry, region)
-    db.update_tenant_profile(t.id, phone, address, t.hours, t.map_url)
+    db.update_tenant_profile(t.id, phone, address, t.hours, (map_url.strip() or t.map_url))
     db.update_tenant_classification(t.id, biz_type, marketplace, buy_url, search_kw, brand_name)
     if industry.strip():
         from app.industries import ensure_profile
@@ -792,6 +813,30 @@ def review_card(request: Request):
     buf = io.BytesIO()
     img.save(buf, "PNG")
     return Response(buf.getvalue(), media_type="image/png")
+
+
+@app.post("/me/link")
+def my_link_create(request: Request, target: str = Form(""), label: str = Form("")):
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    t = _ensure_user_tenant(u)
+    if target.strip():
+        db.create_link(t.id, target.strip(), label.strip())
+    return RedirectResponse("/me?ok=추적 링크를 만들었어요", status_code=303)
+
+
+@app.get("/r/{code}")
+def link_redirect(code: str):
+    """제휴/추적 단축링크 — 클릭 집계 후 원본으로 이동."""
+    link = db.get_link(code)
+    if not link or not link.get("target"):
+        return RedirectResponse("/", status_code=302)
+    db.incr_link_click(code)
+    target = link["target"]
+    if not target.startswith(("http://", "https://")):
+        target = "https://" + target
+    return RedirectResponse(target, status_code=302)
 
 
 @app.get("/me/connect/{channel}/start")
@@ -1872,7 +1917,7 @@ def _upload_form_html(tenant, token: str) -> str:
     purposes = ["방문 유도", "판매 전환", "신상품 홍보", "신뢰 쌓기", "이벤트"]
     popt = "<option value=''>선택안함</option>" + "".join(
         f"<option{' selected' if p == ex.get('purpose') else ''}>{p}</option>" for p in purposes)
-    form = (f"<form method=post action='/u/{token}/upload' enctype='multipart/form-data' class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5'>"
+    form = (f"<form method=post action='/u/{token}/upload' enctype='multipart/form-data' onsubmit='return showGen()' class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5'>"
             f"<label class='block text-sm font-semibold mb-1'>📷 사진 (여러 장 가능 · 최대 10장)</label>"
             f"<input type=file name=photos accept='image/*' multiple required class='mb-4 block w-full text-sm'>"
             f"<label class='block text-sm font-semibold mb-1'>✏️ 한 줄 설명</label>"
@@ -1903,7 +1948,16 @@ def _upload_form_html(tenant, token: str) -> str:
               f"document.getElementById('f_purpose').value=EX.purpose||'';"
               f"document.getElementById('f_target').value=EX.target||'';"
               f"document.getElementById('f_extra').value=EX.extra||'';}}</script>")
-    return f"<div class='grid md:grid-cols-2 gap-4'>{form}{guide}</div>{script}"
+    gen_overlay = ("<div id='genOverlay' class='fixed inset-0 z-50 hidden items-center justify-center' style='background:rgba(15,23,42,.92)'>"
+                   "<div class='bg-white rounded-2xl p-6 w-80 max-w-[90vw] text-center'>"
+                   "<div id='gLabel' class='font-bold mb-3'>🎯 마케팅 전략가가 분석 중…</div>"
+                   "<div class='w-full h-2.5 bg-slate-100 rounded-full overflow-hidden'><div id='gBar' class='h-full' style='width:0%;transition:width .4s;background:linear-gradient(90deg,#6366f1,#ec4899)'></div></div>"
+                   "<div id='gPct' class='text-slate-400 text-xs mt-1'>0%</div>"
+                   "<p class='text-xs text-slate-400 mt-2'>AI 전문가팀이 5채널을 만드는 중… (20~40초)</p></div></div>")
+    gen_script = ("<script>function showGen(){var o=document.getElementById('genOverlay');o.classList.remove('hidden');o.classList.add('flex');"
+                  "var st=[[0,'🎯 마케팅 전략가가 분석 중…'],[25,'✍️ 카피라이터가 글 쓰는 중…'],[55,'🔍 SEO 편집장이 다듬는 중…'],[80,'🎬 영상 감독이 마무리 중…']];"
+                  "var p=0;setInterval(function(){p=Math.min(p+(p<70?1.5:0.4),96);var b=document.getElementById('gBar');if(!b)return;b.style.width=p+'%';document.getElementById('gPct').textContent=Math.round(p)+'%';var l=st[0][1];st.forEach(function(s){if(p>=s[0])l=s[1];});document.getElementById('gLabel').textContent=l;},500);return true;}</script>")
+    return f"<div class='grid md:grid-cols-2 gap-4'>{form}{guide}</div>{script}{gen_overlay}{gen_script}"
 
 
 @app.get("/u/{token}", response_class=HTMLResponse)
