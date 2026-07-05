@@ -88,6 +88,7 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
   box.innerHTML='<div class="text-center text-slate-200 py-6"><span class="dot inline-block w-3 h-3 rounded-full bg-indigo-400 align-middle"></span> AI 전문가팀이 실제로 만드는 중… (20~40초)</div>';
   const biz=(document.querySelector('input[name="d_biz"]:checked')||{}).value||'local';
   const fd=new FormData();fd.append('industry',ind);fd.append('biz_type',biz);
+  fd.append('purpose',(document.getElementById('d_purpose')||{}).value||'');
   if(pf&&pf.files)Array.from(pf.files).slice(0,10).forEach(function(f){fd.append('photos',f);});
   try{const r=await fetch('/api/demo',{method:'POST',body:fd});const d=await r.json();
    if(d.teaser){box.innerHTML=d.teaser_html;box.scrollIntoView({behavior:'smooth',block:'nearest'});return;}
@@ -200,6 +201,14 @@ def _demo_widget() -> str:
      <input id="d_photo" type="file" accept="image/*" multiple class="hidden"><span id="d_photoname" class="block text-emerald-300 text-xs mt-1"></span></label>
    <div id="d_preview" class="hidden flex gap-2 overflow-x-auto pb-1"></div>
    <input id="d_ind" placeholder="업종/상품 (예: 꽃집, 헬스장, 캠핑 폴딩박스...)" class="w-full rounded-xl px-4 py-3 text-slate-800 outline-none">
+   <select id="d_purpose" class="w-full rounded-xl px-4 py-3 text-slate-800 outline-none bg-white">
+     <option value="">🎯 무슨 목적으로 만들까요? (선택)</option>
+     <option value="방문 유도">🏬 매장 방문·예약 유도</option>
+     <option value="판매 전환">🛒 구매·판매 전환</option>
+     <option value="신상품 홍보">✨ 신상품·신메뉴 홍보</option>
+     <option value="이벤트·할인">🎉 이벤트·할인 알림</option>
+     <option value="신뢰·후기">⭐ 신뢰·후기 쌓기</option>
+   </select>
    <div class="flex gap-2 text-sm">
      <label class="flex-1"><input type="radio" name="d_biz" value="local" checked class="peer hidden"><div class="text-center py-2.5 rounded-xl bg-white/10 text-slate-200 peer-checked:bg-emerald-500 peer-checked:text-white font-bold cursor-pointer">🏪 동네 매장</div></label>
      <label class="flex-1"><input type="radio" name="d_biz" value="seller" class="peer hidden"><div class="text-center py-2.5 rounded-xl bg-white/10 text-slate-200 peer-checked:bg-amber-500 peer-checked:text-white font-bold cursor-pointer">📦 온라인 셀러</div></label>

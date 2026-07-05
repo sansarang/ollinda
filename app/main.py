@@ -187,7 +187,8 @@ _DEMO_HITS: dict = {}   # ip -> [timestamps] (무료 체험 rate limit)
 @app.post("/api/demo")
 async def api_demo(request: Request, industry: str = Form(""), note: str = Form(""),
                    biz_type: str = Form("local"), marketplace: str = Form(""),
-                   search_kw: str = Form(""), photos: list[UploadFile] = File(None)):
+                   search_kw: str = Form(""), purpose: str = Form(""),
+                   photos: list[UploadFile] = File(None)):
     """랜딩 데모 — 미가입자는 '실제 생성 티저(흐리게)'로 가입 유도. 로그인 회원은 작업실로."""
     u = auth.current_user(request)
     if u:                                            # 로그인 회원 → 작업실에서 실제 생성
@@ -209,13 +210,16 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
         return JSONResponse({"require_signup": True,
                              "message": "무료 미리보기 2회를 다 보셨어요! 가입하면 5채널 전부 + 영상까지 무료로 만들어드려요 🎁"})
     imgs = []
-    for f in (photos or []):
+    for f in (photos if isinstance(photos, list) else []):
         if getattr(f, "filename", ""):
             imgs.append((await f.read(), f.filename))
     imgs = imgs[:10]
+    full_note = (note or "").strip()
+    if purpose.strip():                              # 목적 → 생성 프롬프트에 반영(글·영상 톤↑)
+        full_note = (full_note + f" | 콘텐츠 목적: {purpose.strip()}").strip(" |")
     try:
         from app.services import teaser as teaser_svc
-        _t, _a, pieces, brief = teaser_svc.run_teaser(industry, biz_type, note, imgs)
+        _t, _a, pieces, brief = teaser_svc.run_teaser(industry, biz_type, full_note, imgs)
     except Exception:
         import logging
         logging.exception("[teaser] 실패")
