@@ -244,6 +244,12 @@ def reset_usage(uid: str) -> None:
         c.execute("UPDATE users SET free_used=0, month_used=0 WHERE id=?", (uid,))
 
 
+def delete_set(asset_id: str, tenant_id: str) -> None:
+    """콘텐츠 세트 삭제(본인 가게 것만) — 이력 관리."""
+    with _conn() as c:
+        c.execute("DELETE FROM content_pieces WHERE asset_id=? AND tenant_id=?", (asset_id, tenant_id))
+
+
 # ── 랜딩 무료체험(미가입) — IP 기준 횟수 ────────────────
 def demo_ip_count(ip: str) -> int:
     """IP당 무료 미리보기 누적 사용 횟수(리셋 없음 — 2회 후 가입 유도)."""

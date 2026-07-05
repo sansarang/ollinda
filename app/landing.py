@@ -152,8 +152,8 @@ def _hero() -> str:
   <p class="reveal mt-6 text-lg text-slate-300 max-w-2xl mx-auto">동네 사장님도, <b class="text-white">쿠팡·11번가 셀러</b>도 사진만 올리세요. AI가 <b class="text-white">인스타·블로그·유튜브·X</b> 콘텐츠를 만들고,
    <b class="text-white">검색 상위</b>에 띄워 <b class="text-white">매장 방문·상세페이지 구매</b>로 연결합니다.</p>
   <div class="reveal mt-8 flex flex-col sm:flex-row gap-3 justify-center">
-   <a href="/login/kakao" class="flex items-center justify-center px-8 py-4 rounded-2xl font-extrabold text-lg" style="background:#FEE500;color:#191600">💬 카카오로 가입</a>
-   <a href="/login/google" class="flex items-center justify-center gap-2 px-8 py-4 rounded-2xl font-extrabold text-lg bg-white text-slate-700 shadow-lg"><svg width="22" height="22" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg> 구글로 가입</a></div>
+   <a href="/login/kakao" class="flex items-center justify-center px-8 py-4 rounded-2xl font-extrabold text-lg" style="background:#FEE500;color:#191600">💬 카카오로 시작하기</a>
+   <a href="/login/google" class="flex items-center justify-center gap-2 px-8 py-4 rounded-2xl font-extrabold text-lg bg-white text-slate-700 shadow-lg"><svg width="22" height="22" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg> 구글로 시작하기</a></div>
   <p class="reveal mt-4 text-sm text-slate-400">이미 회원이세요? <a href="/login" class="text-white font-semibold underline underline-offset-2">로그인</a></p>
  </div></section>"""
 
@@ -357,8 +357,8 @@ def _cta() -> str:
   <h2 class="reveal text-4xl sm:text-5xl font-extrabold leading-tight">오늘 사진 한 장,<br><span class="grad-text">내일 손님으로</span></h2>
   <p class="reveal mt-5 text-slate-300 text-lg">지금 시작하면 첫 콘텐츠 세트를 무료로 만들어 드립니다.</p>
   <div class="reveal mt-9 flex flex-col sm:flex-row gap-3 justify-center">
-   <a href="/login/kakao" class="px-9 py-4 rounded-2xl font-extrabold text-lg" style="background:#FEE500;color:#191600">💬 카카오로 가입</a>
-   <a href="/login/google" class="flex items-center justify-center gap-2 px-9 py-4 rounded-2xl font-extrabold text-lg bg-white text-slate-700"><svg width="22" height="22" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg> 구글로 가입</a></div>
+   <a href="/login/kakao" class="px-9 py-4 rounded-2xl font-extrabold text-lg" style="background:#FEE500;color:#191600">💬 카카오로 시작하기</a>
+   <a href="/login/google" class="flex items-center justify-center gap-2 px-9 py-4 rounded-2xl font-extrabold text-lg bg-white text-slate-700"><svg width="22" height="22" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg> 구글로 시작하기</a></div>
   <p class="reveal mt-4 text-sm text-slate-400">이미 회원이세요? <a href="/login" class="text-white font-semibold underline underline-offset-2">로그인</a></p>
  </div></section>"""
 
@@ -395,7 +395,7 @@ def _footer() -> str:
    </div>
   </div>
   <div class="mt-8 pt-6 border-t border-white/10 text-center text-xs text-slate-500 leading-relaxed">
-    © 2026 올린다 (Ollinda) · 가희디자인 · 사업자등록번호 106-48-91586<br>
+    © 2026 올린다 (Ollinda) · 가피디자인 · 사업자등록번호 106-48-91586<br>
     문의 {CONTACT_EMAIL} · <a href="/privacy" class="underline hover:text-slate-300">개인정보처리방침</a> · 🔒 SSL 보안 연결
   </div>
  </div></footer>"""

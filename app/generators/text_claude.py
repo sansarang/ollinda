@@ -114,6 +114,19 @@ class BlogDraftGenerator(Generator):
         # 셀러: 본문 끝에 구매 블록 보강(누락 대비)
         if strat.closing in ("buy", "both") and buy and buy not in body:
             body = body.rstrip() + "\n\n" + buy
+        # 매장(local/hybrid): 글 끝에 '지도·연락처·플레이스' 블록 항상 보장
+        if (getattr(tenant, "biz_type", "local") or "local") in ("local", "hybrid") and "찾아오는 길" not in body:
+            cb = ["📍 찾아오는 길 · 문의"]
+            if getattr(tenant, "address", ""):
+                cb.append(tenant.address)
+            if getattr(tenant, "phone", ""):
+                cb.append(f"📞 {tenant.phone}")
+            if getattr(tenant, "hours", ""):
+                cb.append(f"🕒 {tenant.hours}")
+            cb.append(f"네이버에서 '{tenant.name}' 검색 → 플레이스에서 찜·예약·길찾기 ⭐")
+            if getattr(tenant, "map_url", ""):
+                cb.append(f"🗺 {tenant.map_url}")
+            body = body.rstrip() + "\n\n" + "\n".join(cb)
         markers = [{"marker": f"[사진{i+1}]", "image_index": i, "image_path": p}
                    for i, p in enumerate(imgs)]
         return ContentPiece(

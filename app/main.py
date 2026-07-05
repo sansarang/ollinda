@@ -460,7 +460,7 @@ def signup_post(email: str = Form(""), pw: str = Form("")):
     h, salt = auth.hash_pw(pw)
     u = db.create_user(email=email, pw_hash=h, salt=salt)
     resp = RedirectResponse("/me", status_code=303)
-    resp.set_cookie(auth.COOKIE, auth.make_session(u["id"]), max_age=604800, httponly=True)
+    resp.set_cookie(auth.COOKIE, auth.make_session(u["id"]), max_age=5184000, httponly=True, samesite="lax")
     return resp
 
 
@@ -482,7 +482,7 @@ def login_post(email: str = Form(""), pw: str = Form("")):
     if not u or not auth.verify_pw(pw, u["salt"] or "", u["pw_hash"] or ""):
         return RedirectResponse("/login?err=1", status_code=303)
     resp = RedirectResponse("/me", status_code=303)
-    resp.set_cookie(auth.COOKIE, auth.make_session(u["id"]), max_age=604800, httponly=True)
+    resp.set_cookie(auth.COOKIE, auth.make_session(u["id"]), max_age=5184000, httponly=True, samesite="lax")
     return resp
 
 
@@ -681,12 +681,16 @@ def my_dashboard(request: Request, ok: str = "", err: str = ""):
     # ③ 콘텐츠 이력(세트 단위) → 각 항목 = 발행 소재(/kit)
     sets = db.list_sets(tenant_id=t.id, limit=50)
     if sets:
-        hist = "<div class='space-y-2'>" + "".join(
-            f"<a href='/kit/{s['asset_id']}' class='flex items-center justify-between bg-white border border-slate-100 rounded-xl p-3 hover:bg-slate-50'>"
-            f"<div><b class='text-sm'>{esc(s['created'])}</b> <span class='text-xs text-slate-400'>{s['n']}개 채널</span></div>"
-            "<span class='text-indigo-600 text-sm font-semibold'>발행 소재 →</span></a>" for s in sets) + "</div>"
+        hist = "".join(
+            "<div class='flex items-center gap-3 py-3 border-b border-slate-100 last:border-0'>"
+            f"<div class='flex-1 min-w-0'><div class='font-semibold text-sm text-slate-800'>{esc(s['created'])}</div>"
+            f"<div class='text-xs text-slate-400'>{s['n']}개 채널</div></div>"
+            f"<a href='/kit/{s['asset_id']}' class='px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg'>보기</a>"
+            f"<form method=post action='/me/set/{s['asset_id']}/delete' onsubmit=\"return confirm('이 콘텐츠를 삭제할까요?')\">"
+            "<button class='px-2.5 py-1.5 bg-slate-100 text-slate-500 text-xs rounded-lg hover:bg-rose-100 hover:text-rose-600 transition'>삭제</button></form></div>"
+            for s in sets)
     else:
-        hist = "<p class='text-slate-400 text-sm'>아직 만든 콘텐츠가 없어요. 사진을 올리면 여기에 쌓입니다.</p>"
+        hist = "<p class='text-slate-400 text-sm py-4 text-center'>아직 만든 콘텐츠가 없어요. 위에서 사진 올려 만들어보세요.</p>"
     # ── 최초 1회 온보딩 vs 작동 대시보드 ──
     onboarded = bool((t.industry or "").strip())
     if not onboarded:
@@ -777,13 +781,13 @@ def my_dashboard(request: Request, ok: str = "", err: str = ""):
         f"<input name=target placeholder='https://...' required class='{inp} flex-1'>"
         "<button class='px-4 bg-indigo-600 text-white font-bold rounded-xl text-sm whitespace-nowrap'>만들기</button></form>"
         + (litems or "<p class='text-slate-400 text-sm'>아직 링크가 없어요.</p>") + "</div>")
+    perf = _perf_report(t.id)   # 성과 요약 — 상단에 바로 노출
     tools = ("<details class='mb-5'>"
-             "<summary class='font-bold text-slate-900 cursor-pointer select-none py-2'>🚀 상위노출·성과 도구 "
-             "<span class='text-xs text-slate-400 font-normal'>· 소식·리뷰·링크·성과</span></summary>"
-             "<div class='mt-2'>" + _perf_report(t.id) + place_section + review_section + link_section
-             + "</div></details>")
+             "<summary class='font-bold text-slate-900 cursor-pointer select-none py-2'>🚀 상위노출 도구 "
+             "<span class='text-xs text-slate-400 font-normal'>· 소식·리뷰·제휴링크</span></summary>"
+             "<div class='mt-2'>" + place_section + review_section + link_section + "</div></details>")
     return _subscriber_page(f"{esc(t.name)} · 내 작업실",
-                            greeting + upload_section + content + tools + settings)
+                            greeting + perf + upload_section + content + tools + settings)
 
 
 @app.post("/me/store")
@@ -899,6 +903,17 @@ def my_link_create(request: Request, target: str = Form(""), label: str = Form("
     if target.strip():
         db.create_link(t.id, target.strip(), label.strip())
     return RedirectResponse("/me?ok=추적 링크를 만들었어요", status_code=303)
+
+
+@app.post("/me/set/{asset_id}/delete")
+def my_set_delete(request: Request, asset_id: str):
+    """콘텐츠 세트 삭제(이력 관리) — 본인 것만."""
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    t = _ensure_user_tenant(u)
+    db.delete_set(asset_id, t.id)
+    return RedirectResponse("/me?ok=콘텐츠를 삭제했어요", status_code=303)
 
 
 @app.get("/r/{code}")

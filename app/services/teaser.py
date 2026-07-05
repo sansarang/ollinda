@@ -34,9 +34,9 @@ def run_teaser(industry: str, biz_type: str, note: str,
     asset.note = asset.note + brief_to_directive(brief)
     brief_pub = {k: v for k, v in brief.items() if not k.startswith("_")}
 
-    # 텍스트 3채널 + 영상(SHORT) — 실제 내 사진으로 생성. 영상 실패 시 generate_for가 알아서 건너뜀.
-    kinds = [ContentKind.CAPTION, ContentKind.BLOG, ContentKind.X_POST, ContentKind.SHORT]
-    pieces = generate_for(t, asset, kinds, images=(paths or None))   # ✍️ 카피 + 🎬 영상
+    # 텍스트 3채널만(빠름·안정). 영상은 무료 컨테이너에서 타임아웃 → 가입 후 생성으로.
+    kinds = [ContentKind.CAPTION, ContentKind.BLOG, ContentKind.X_POST]
+    pieces = generate_for(t, asset, kinds, images=(paths or None))   # ✍️ 카피
     for p in pieces:
         p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value, p.payload)
         p.payload["brief"] = brief_pub
