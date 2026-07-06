@@ -504,18 +504,12 @@ def signup_post(email: str = Form(""), pw: str = Form("")):
     return resp
 
 
-@app.get("/login", response_class=HTMLResponse)
+@app.get("/login")
 def login_get(request: Request):
-    if auth.current_user(request):          # 이미 로그인 → 재로그인 없이 바로 작업실
+    # 별도 로그인 페이지 없앰 — 로그인돼 있으면 작업실, 아니면 랜딩('시작하기' 버튼)로 통일
+    if auth.current_user(request):
         return RedirectResponse("/me", status_code=303)
-    form = (_google_btn("구글로 로그인")
-            + "<a href='/login/kakao' class='block text-center mb-4 py-3 rounded-xl font-bold' "
-            "style='background:#FEE500;color:#191600'>💬 카카오로 로그인</a>"
-            "<form method=post action='/login' class='space-y-3'>"
-            "<input name=email type=email placeholder='이메일' required class='w-full border rounded-xl p-3'>"
-            "<input name=pw type=password placeholder='비밀번호' required class='w-full border rounded-xl p-3'>"
-            "<button class='w-full bg-indigo-600 text-white font-bold py-3 rounded-xl'>로그인</button></form>")
-    return _auth_page("로그인", form)
+    return RedirectResponse("/", status_code=303)
 
 
 @app.post("/login")

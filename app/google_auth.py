@@ -48,7 +48,7 @@ def make_router() -> APIRouter:
             return _instant_signup("구글회원")   # 키 없으면 버튼 한 번에 즉시 가입
         q = {"client_id": os.environ["GOOGLE_CLIENT_ID"], "redirect_uri": _redirect_uri(),
              "response_type": "code", "scope": "openid email profile",
-             "access_type": "online", "prompt": "select_account"}
+             "access_type": "online"}   # prompt 제거 → 이미 구글 로그인돼 있으면 재선택 없이 바로 통과
         return RedirectResponse(AUTHORIZE + "?" + urlencode(q))
 
     @r.get("/login/google/callback")
