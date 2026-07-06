@@ -2160,8 +2160,10 @@ def _upload_form_html(tenant, token: str) -> str:
       <div><label class='{lb}'>3. 어떤 장사인가요?</label>{biz_toggle}</div>
       <div><label class='{lb}'>4. 목적 <span class='text-slate-400 font-normal text-xs'>(선택)</span></label>
         <div class='flex flex-wrap gap-2'>{chips}</div></div>
-      <details class='text-sm'><summary class='cursor-pointer text-slate-500 select-none'>✏️ 강조할 점 추가 <span class='text-slate-400'>(선택)</span></summary>
-        <input name=note placeholder='예: 겨울 프로모션 꼭 강조해주세요' class='{inp} mt-2'></details>
+      <div><label class='{lb}'>5. 사진 설명·요청 <span class='text-slate-400 font-normal text-xs'>(선택 · AI가 더 정확해져요)</span></label>
+        <input name=photo_desc maxlength=120 placeholder='이 사진은? (예: 겨울 열차단 썬팅, 시공 완료된 검은 SUV)' class='{inp} mb-2'>
+        <input name=note maxlength=50 oninput="var c=document.getElementById('reqc');if(c)c.textContent=this.value.length+'/50';" placeholder='꼭 반영할 요청 (예: 급매 강조 / 차분한 톤)' class='{inp}'>
+        <div class='text-right text-xs text-slate-400 mt-1'><span id=reqc>0/50</span></div></div>
       <button class='w-full py-4 rounded-2xl text-white font-extrabold text-lg shadow-xl shadow-indigo-500/30 hover:shadow-indigo-500/50 transition' style='background:linear-gradient(120deg,#6366f1,#8b5cf6,#ec4899)'>✨ 5채널 콘텐츠 생성하기</button>
       <p class='text-center text-xs text-slate-400'>인스타·네이버·유튜브·X + 영상을 AI가 자동 생성 (20~40초)</p></form>"""
     js = ("<script>"
@@ -2212,7 +2214,7 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
                  purpose: str = Form(""), target: str = Form(""), extra: str = Form(""),
                  request: str = Form(""), s_name: str = Form(""), s_industry: str = Form(""),
                  s_biz: str = Form(""), s_region: str = Form(""), s_tel: str = Form(""),
-                 s_buy: str = Form(""), s_address: str = Form("")):
+                 s_buy: str = Form(""), s_address: str = Form(""), photo_desc: str = Form("")):
     tenant, _ = db.get_tenant_by_token(token)
     if not tenant:
         return HTMLResponse("<p>잘못된 링크입니다.</p>", status_code=404)
@@ -2238,16 +2240,20 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
     files = [(await ph.read(), ph.filename or "photo.jpg") for ph in photos if ph.filename]
     if not files:
         return HTMLResponse("<p>사진을 한 장 이상 올려주세요.</p>", status_code=400)
-    # 목적/타겟/추가정보를 메모에 합쳐 생성기 프롬프트가 모두 활용
-    full_note = note
+    # 사진 설명·목적·요청(최대 50자)을 메모에 합쳐 AI 생성 품질↑
+    parts = []
+    if photo_desc.strip():
+        parts.append(f"[사진 설명] {photo_desc.strip()[:120]}")   # AI가 사진 내용을 정확히 이해
     if purpose:
-        full_note += f" | 콘텐츠 목적: {purpose}"
+        parts.append(f"[콘텐츠 목적] {purpose}")
     if target:
-        full_note += f" | 타겟 고객: {target}"
+        parts.append(f"[타겟 고객] {target}")
     if extra:
-        full_note += f" | 추가 정보: {extra}"
-    if request.strip():           # 요청사항 = 최우선 지시(맨 앞)
-        full_note = f"[반드시 반영할 요청] {request.strip()}\n" + full_note
+        parts.append(f"[추가 정보] {extra}")
+    full_note = "\n".join(parts)
+    req = (note or request or "").strip()[:50]   # 사용자 요청 = 최대 50자, 최우선 반영
+    if req:
+        full_note = f"[반드시 반영할 요청] {req}\n" + full_note
     try:
         made = ingest_upload(tenant, files, full_note)
         if not made:                               # 0개 생성(예: AI 크레딧 부족)
