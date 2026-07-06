@@ -2306,9 +2306,9 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
     if extra:
         parts.append(f"[추가 정보] {extra}")
     full_note = "\n".join(parts)
-    req = (note or request or "").strip()[:50]   # 사용자 요청 = 최대 50자, 최우선 반영
-    if req:
-        full_note = f"[반드시 반영할 요청] {req}\n" + full_note
+    user_req = (note or request or "").strip()[:50]   # 사용자 요청 = 최대 50자, 최우선 반영 (req=Request 파라미터와 충돌 금지)
+    if user_req:
+        full_note = f"[반드시 반영할 요청] {user_req}\n" + full_note
     # 생성은 시간이 오래 걸려(전략가→3채널→SEO편집) 요청을 붙잡으면 서버 타임아웃(500).
     # → 백그라운드 스레드에서 생성하고 요청은 즉시 반환. 완료되면 대시보드에 자동 표시.
     _ind = s_industry.strip()
