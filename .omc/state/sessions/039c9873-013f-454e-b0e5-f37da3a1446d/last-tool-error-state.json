@@ -1,7 +1,7 @@
 {
   "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"cd ~/Desktop/shopcast\\npython3 -c \\\"import py_compile; py_compile.compile('app/main.py',doraise=True); py_compile.compile('app/landing.py',doraise=True); print('✅ 컴파일 OK')\\\"\\nSHOPCAST_DB=/...",
-  "error": "Exit code 1\n✅ 컴파일 OK\n/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/requests/__init__.py:113: RequestsDependencyWarning: urllib3 (2.6.3) or chardet (7.3.0)/charset_normalizer (3.4.6) doesn't match a supported version!\n  warnings.warn(\n랜딩: 구글로 가입: True | 구글로 로그인 제거: True | 로그인 링크: True\nTraceback (most recent call last):\n  File \"<stdin>\", line 13, in <module>\nAttributeError: 'str' object has no attribute 'body'",
-  "timestamp": "2026-07-03T04:11:02.421Z",
+  "tool_input_preview": "{\"command\":\"cd ~/Desktop/shopcast\\necho \\\"deploy.sh 키 존재:\\\"; grep -oE \\\"ANTHROPIC_API_KEY=|GEMINI_API_KEY=|SHOPCAST_SECRET=\\\" deploy.sh\\n# 실제 키를 export (값은 출력 안 함)\\nset -a; source deploy.sh 2>/dev/nul...",
+  "error": "Exit code 1\ndeploy.sh 키 존재:\nSHOPCAST_SECRET=\nANTHROPIC_API_KEY=\nGEMINI_API_KEY=",
+  "timestamp": "2026-07-06T05:06:13.715Z",
   "retry_count": 1
 }

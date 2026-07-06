@@ -606,7 +606,7 @@ def _perf_report(tenant_id: str) -> str:
 
 
 @app.get("/me", response_class=HTMLResponse)
-def my_dashboard(request: Request, ok: str = "", err: str = ""):
+def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
     u = auth.current_user(request)
     if not u:
         return RedirectResponse("/login", status_code=303)
@@ -618,6 +618,15 @@ def my_dashboard(request: Request, ok: str = "", err: str = ""):
         banner = f"<div class='bg-emerald-50 text-emerald-700 p-3 rounded-xl mb-4 text-sm'>✅ {esc(ok)}</div>"
     if err:
         banner = f"<div class='bg-rose-50 text-rose-600 p-3 rounded-xl mb-4 text-sm'>⚠️ {esc(err)}</div>"
+    if gen:   # 생성 중 — 스피너 + 완료되면 자동 새로고침(폴링)
+        _base_n = len(db.list_sets(tenant_id=t.id))
+        banner = ("<div class='bg-indigo-50 border border-indigo-100 text-indigo-700 p-4 rounded-2xl mb-4 flex items-center gap-3'>"
+                  "<div class='w-6 h-6 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin flex-shrink-0'></div>"
+                  "<div><div class='font-bold text-sm'>✨ AI 전문가팀이 콘텐츠를 만들고 있어요</div>"
+                  "<div class='text-xs text-indigo-500'>20~60초 걸려요 · 완료되면 자동으로 나타나요 (이 화면 유지)</div></div></div>"
+                  f"<script>(function(){{var base={_base_n},n=0;var iv=setInterval(async function(){{n++;if(n>40){{clearInterval(iv);location.reload();return;}}"
+                  "try{var r=await fetch('/me/sets/count');var d=await r.json();if(d.n>base){clearInterval(iv);location.href='/me?ok='+encodeURIComponent('✨ 콘텐츠가 완성됐어요! 아래에서 확인하세요');}}catch(e){}"
+                  "}},3000);})();</script>")
     # ① 가게/스토어 설정
     bopts = "".join(f"<option value='{k}'{' selected' if (t.biz_type or 'local') == k else ''}>{lab}</option>"
                     for k, lab in [("local", "🏪 동네 매장(방문 유도)"), ("seller", "📦 온라인 셀러(구매 유도)"),
@@ -842,7 +851,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = ""):
              "<span class='text-xs text-slate-400 font-normal'>· 소식·리뷰·제휴링크</span></summary>"
              "<div class='mt-2'>" + place_section + review_section + link_section + "</div></details>")
     return _subscriber_page(f"{esc(t.name)} · 내 작업실",
-                            greeting + perf + upload_section + content + tools + settings)
+                            banner + greeting + perf + upload_section + content + tools + settings)
 
 
 @app.post("/me/store")
@@ -958,6 +967,16 @@ def my_link_create(request: Request, target: str = Form(""), label: str = Form("
     if target.strip():
         db.create_link(t.id, target.strip(), label.strip())
     return RedirectResponse("/me?ok=추적 링크를 만들었어요", status_code=303)
+
+
+@app.get("/me/sets/count")
+def my_sets_count(request: Request):
+    """생성 중 폴링용 — 내 콘텐츠 세트 개수(늘어나면 완료)."""
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"n": 0})
+    t = _ensure_user_tenant(u)
+    return JSONResponse({"n": len(db.list_sets(tenant_id=t.id))})
 
 
 @app.post("/me/set/{asset_id}/delete")
@@ -2267,10 +2286,7 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
         _bz = s_biz.strip() if s_biz.strip() in ("local", "seller", "hybrid") else (tenant.biz_type or "local")
         db.update_tenant_classification(tenant.id, _bz, tenant.marketplace, s_buy.strip() or tenant.buy_url,
                                         tenant.search_kw, tenant.brand_name)
-        if (s_industry.strip()):
-            from app.industries import ensure_profile
-            ensure_profile(s_industry.strip())
-        tenant, _ = db.get_tenant_by_token(token)   # 갱신본 재로드
+        tenant, _ = db.get_tenant_by_token(token)   # 갱신본 재로드 (업종 프로필 생성은 백그라운드에서)
     # 플랜별 쿼터(셀프서비스 가게만; 운영자/대행 tenant는 owner 없음 → 무제한)
     owner = db.get_user_by_tenant(tenant.id)
     block = _quota_block(owner)
@@ -2293,28 +2309,31 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
     req = (note or request or "").strip()[:50]   # 사용자 요청 = 최대 50자, 최우선 반영
     if req:
         full_note = f"[반드시 반영할 요청] {req}\n" + full_note
-    try:
-        made = ingest_upload(tenant, files, full_note)
-        if not made:                               # 0개 생성(예: AI 크레딧 부족)
-            raise RuntimeError("no pieces generated")
-    except Exception:                              # 사용자에겐 500 대신 친절 안내
-        import logging
-        logging.exception("[upload] 생성 실패 tenant=%s", tenant.id)
-        err = ("<div class='bg-white rounded-xl shadow-sm p-6 text-center max-w-md mx-auto'>"
-               "<div class='text-4xl mb-2'>😢</div>"
-               "<h1 class='text-xl font-bold mb-1'>생성 중 문제가 생겼어요</h1>"
-               "<p class='text-slate-500 text-sm mb-4'>잠시 후 다시 시도해 주세요. 계속되면 우측 하단 카톡으로 알려주세요.</p>"
-               f"<a href='/u/{token}' class='inline-block bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl'>다시 시도</a></div>")
-        return page("생성 오류", err)             # 실패 시 사용량 차감 안 함
-    _record_usage(owner)                          # 플랜별 사용량 차감
-    if auth.current_user(req):                     # 로그인 회원 → 대시보드로 복귀(한 화면)
-        return RedirectResponse("/me?ok=콘텐츠를 만들었어요! 아래 목록에서 확인하세요", status_code=303)
+    # 생성은 시간이 오래 걸려(전략가→3채널→SEO편집) 요청을 붙잡으면 서버 타임아웃(500).
+    # → 백그라운드 스레드에서 생성하고 요청은 즉시 반환. 완료되면 대시보드에 자동 표시.
+    _ind = s_industry.strip()
+
+    def _bg_generate():
+        try:
+            if _ind:
+                from app.industries import ensure_profile
+                ensure_profile(_ind)
+            made = ingest_upload(tenant, files, full_note)
+            if made:
+                _record_usage(owner)               # 성공 시에만 사용량 차감
+        except Exception:
+            import logging
+            logging.exception("[upload-bg] 생성 실패 tenant=%s", tenant.id)
+    import threading
+    threading.Thread(target=_bg_generate, daemon=True).start()
+    if auth.current_user(req):                     # 로그인 회원 → 대시보드(생성 중 표시)
+        return RedirectResponse("/me?gen=1", status_code=303)
     body = ("<div class='bg-white rounded-xl shadow-sm p-6 text-center'>"
-            "<div class='text-4xl mb-2'>✅</div>"
-            "<h1 class='text-xl font-bold mb-1'>접수됐어요!</h1>"
-            "<p class='text-slate-500 text-sm'>콘텐츠를 만들어 검토 후 올려드릴게요.</p>"
-            f"<a href='/me' class='inline-block mt-4 text-indigo-600 text-sm font-semibold'>내 작업실에서 보기 →</a></div>")
-    return page("접수 완료", body)
+            "<div class='text-4xl mb-2'>✨</div>"
+            "<h1 class='text-xl font-bold mb-1'>만드는 중이에요!</h1>"
+            "<p class='text-slate-500 text-sm'>20~60초 뒤 내 작업실에 자동으로 나타나요.</p>"
+            f"<a href='/me' class='inline-block mt-4 text-indigo-600 text-sm font-semibold'>내 작업실로 가기 →</a></div>")
+    return page("생성 중", body)
 
 
 # ── 검수 (채널/종류별) ───────────────────────────────────
