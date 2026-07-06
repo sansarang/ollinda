@@ -139,6 +139,12 @@ def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: di
     reel.payload["ranking_audit"] = seo.quality_audit(reel.channel.value, reel.kind.value, reel.payload)
     reel.payload["reach"] = reach.estimate(reel.channel.value, reel.kind.value, reel.payload)
     db.save_piece(reel)
+    # 𝕏 X에도 같은 숏폼 영상 첨부(글 + 영상)
+    xp = next((p for p in saved if p.kind == ContentKind.X_POST), None)
+    if xp:
+        xp.payload["video_path"] = short.payload.get("video_path")
+        xp.payload["image_paths"] = short.payload.get("image_paths", [])
+        db.save_piece(xp)
     try:
         from app.generators.carousel import build_carousel
         blog = next((p for p in saved if p.kind == ContentKind.BLOG), None)

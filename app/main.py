@@ -1125,12 +1125,14 @@ def kit(request: Request, asset_id: str):
                       + f"<div class='flex flex-wrap gap-2'>{_cp('c_bt', title, '제목만')}{_cp('c_bb', plain, '본문만')}{pack_btn(p.id, False)}</div></div></div>")
         elif k == "x_post":
             xt = pl.get("text", "")
+            xvid = (f"<video src='{vurl}' controls playsinline class='w-full rounded-xl mt-2 bg-black' style='max-height:360px'></video>" if vurl else "")
             cards += (_hd("𝕏 X") + f"<div class='{wrap} p-4'>"
                       "<div class='flex items-center gap-2 mb-2'>" + _av()
                       + f"<div><div class='font-bold text-sm leading-tight'>{esc(sname)}</div><div class='text-slate-400 text-xs'>@{handle} · now</div></div><div class='ml-auto text-lg font-bold'>𝕏</div></div>"
                       + f"<div class='text-sm whitespace-pre-wrap leading-relaxed text-slate-800'>{esc(xt)}</div>"
+                      + xvid
                       + "<div class='flex items-center gap-10 text-slate-400 mt-3 text-sm'><span>💬</span><span>🔁</span><span>♡</span><span>📊</span></div>"
-                      + f"<div class='mt-3 flex gap-2'>{_cp('c_x', xt, '복사')}</div></div>")
+                      + f"<div class='mt-3 flex gap-2'>{_cp('c_x', xt, '복사')}{pack_btn(p.id, has_video) if has_video else ''}</div></div>")
         elif k == "short" and p.channel.value in ("youtube", "instagram"):
             title = pl.get("title", "") or (pl.get("text", "")[:30])
             desc = pl.get("narration", "") or pl.get("text", "")
@@ -2175,14 +2177,10 @@ def _upload_form_html(tenant, token: str) -> str:
           <input id=lk_q placeholder='초량 루마썬팅 · https://스토어링크' class='{inp} flex-1'>
           <button type=button onclick='lookupStore()' class='px-5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-sm whitespace-nowrap transition'>자동 인식</button></div>
         <div id=lk_result class='text-xs mt-2 text-slate-400'>입력하면 업종·주소가 자동으로 채워져요 (없어도 OK)</div></div>
-      <div><label class='{lb}'>2. 사진 <span class='text-slate-400 font-normal text-xs'>(‹ › 순서변경 · × 삭제)</span></label>
-        <div id=up_preview class='grid grid-cols-3 sm:grid-cols-4 gap-2 mb-2'></div>
-        <label class='block border-2 border-dashed border-slate-200 rounded-2xl p-4 cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/40 transition text-center'>
-          <div class='text-2xl'>📷</div>
-          <div id=up_droptxt class='font-semibold text-slate-700 text-sm'>사진 올리기</div>
-          <div class='text-xs text-slate-400 mt-0.5'>여러 장 가능 · 계속 추가돼요</div>
-          <input type=file name=photos id=up_photos accept='image/*' multiple required class='hidden'></label>
-        <p class='text-xs text-slate-400 mt-1.5'>💡 올린 <b class='text-slate-500'>순서 그대로</b> 영상 장면·블로그 사진이 배치돼요</p></div>
+      <div><label class='{lb}'>2. 사진 <span class='text-slate-400 font-normal text-xs'>(끌어서 순서 변경 · × 삭제)</span></label>
+        <div id=up_preview class='grid grid-cols-3 sm:grid-cols-4 gap-2'></div>
+        <input type=file name=photos id=up_photos accept='image/*' multiple required class='hidden'>
+        <p class='text-xs text-slate-400 mt-1.5'>💡 <b class='text-slate-500'>끌어서</b> 순서 변경 · <b class='text-slate-500'>＋</b> 로 여러 장 추가 · 올린 순서대로 영상·블로그에 배치돼요</p></div>
       <div><label class='{lb}'>3. 어떤 장사인가요?</label>{biz_toggle}</div>
       <div><label class='{lb}'>4. 목적 <span class='text-slate-400 font-normal text-xs'>(선택)</span></label>
         <div class='flex flex-wrap gap-2'>{chips}</div></div>
@@ -2193,20 +2191,27 @@ def _upload_form_html(tenant, token: str) -> str:
       <button class='w-full py-4 rounded-2xl text-white font-extrabold text-lg shadow-xl shadow-indigo-500/30 hover:shadow-indigo-500/50 transition' style='background:linear-gradient(120deg,#6366f1,#8b5cf6,#ec4899)'>✨ 5채널 콘텐츠 생성하기</button>
       <p class='text-center text-xs text-slate-400'>인스타·네이버·유튜브·X + 영상을 AI가 자동 생성 (20~40초)</p></form>"""
     js = ("<script>"
-          "var PM={f:[]};"
+          "var PM={f:[],drag:-1};"
           "function pmSync(){var dt=new DataTransfer();PM.f.forEach(function(x){dt.items.add(x);});document.getElementById('up_photos').files=dt.files;}"
           "function pmDel(i){PM.f.splice(i,1);pmRender();}"
-          "function pmMove(i,d){var j=i+d;if(j<0||j>=PM.f.length)return;var t=PM.f[i];PM.f[i]=PM.f[j];PM.f[j]=t;pmRender();}"
+          "function pmAdd(){document.getElementById('up_photos').click();}"
+          "function pmDrop(target){if(PM.drag<0)return;var it=PM.f.splice(PM.drag,1)[0];if(target>PM.f.length)target=PM.f.length;if(target<0)target=0;PM.f.splice(target,0,it);PM.drag=-1;pmRender();}"
           "function pmRender(){var pv=document.getElementById('up_preview');pv.innerHTML='';"
-          "PM.f.forEach(function(x,i){var d=document.createElement('div');d.className='relative aspect-square';"
-          "var im=document.createElement('img');im.src=URL.createObjectURL(x);im.className='w-full h-full object-cover rounded-xl border border-slate-100';d.appendChild(im);"
+          "PM.f.forEach(function(x,i){var d=document.createElement('div');d.className='relative aspect-square cursor-move';d.draggable=true;"
+          "d.ondragstart=function(e){PM.drag=i;e.dataTransfer.effectAllowed='move';};"
+          "d.ondragover=function(e){e.preventDefault();d.classList.add('ring-2','ring-indigo-400');};"
+          "d.ondragleave=function(){d.classList.remove('ring-2','ring-indigo-400');};"
+          "d.ondrop=function(e){e.preventDefault();d.classList.remove('ring-2','ring-indigo-400');pmDrop(i);};"
+          "var im=document.createElement('img');im.src=URL.createObjectURL(x);im.className='w-full h-full object-cover rounded-xl border border-slate-100 pointer-events-none';d.appendChild(im);"
           "d.insertAdjacentHTML('beforeend',"
-          "\"<div class='absolute top-1 left-1 w-5 h-5 rounded-full bg-black/60 text-white text-[10px] font-bold flex items-center justify-center'>\"+(i+1)+\"</div>\"+"
-          "\"<button type=button onclick='pmDel(\"+i+\")' class='absolute top-1 right-1 w-5 h-5 rounded-full bg-rose-500 text-white text-xs leading-none flex items-center justify-center'>&times;</button>\"+"
-          "\"<div class='absolute bottom-1 inset-x-1 flex justify-between'><button type=button onclick='pmMove(\"+i+\",-1)' class='w-6 h-5 rounded bg-black/55 text-white text-xs leading-none'>&lsaquo;</button><button type=button onclick='pmMove(\"+i+\",1)' class='w-6 h-5 rounded bg-black/55 text-white text-xs leading-none'>&rsaquo;</button></div>\");"
+          "\"<div class='absolute top-1 left-1 w-5 h-5 rounded-full bg-black/60 text-white text-[10px] font-bold flex items-center justify-center pointer-events-none'>\"+(i+1)+\"</div>\"+"
+          "\"<button type=button onclick='pmDel(\"+i+\")' class='absolute top-1 right-1 w-5 h-5 rounded-full bg-rose-500 text-white text-xs leading-none flex items-center justify-center'>&times;</button>\");"
           "pv.appendChild(d);});"
-          "document.getElementById('up_droptxt').textContent=PM.f.length?('사진 '+PM.f.length+'장 · 더 추가하려면 탭'):'사진 올리기';pmSync();}"
-          "(function(){var inp=document.getElementById('up_photos');if(inp)inp.addEventListener('change',function(){Array.from(inp.files||[]).forEach(function(x){PM.f.push(x);});pmRender();});})();"
+          "var add=document.createElement('button');add.type='button';add.onclick=pmAdd;"
+          "add.className='aspect-square rounded-xl border-2 border-dashed border-slate-300 text-slate-400 hover:border-indigo-400 hover:text-indigo-500 flex flex-col items-center justify-center transition';"
+          "add.ondragover=function(e){e.preventDefault();};add.ondrop=function(e){e.preventDefault();pmDrop(PM.f.length);};"
+          "add.innerHTML=\"<span class='text-2xl leading-none'>＋</span><span class='text-[10px] mt-0.5'>사진 추가</span>\";pv.appendChild(add);pmSync();}"
+          "(function(){var inp=document.getElementById('up_photos');if(inp){inp.addEventListener('change',function(){Array.from(inp.files||[]).forEach(function(x){PM.f.push(x);});pmRender();});pmRender();}})();"
           "async function lookupStore(){var q=document.getElementById('lk_q').value.trim();if(!q)return;"
           "var b=document.getElementById('lk_result');b.innerHTML='<span class=\"text-slate-400\">인식 중…</span>';"
           "try{var r=await fetch('/api/lookup?q='+encodeURIComponent(q));var d=await r.json();"
