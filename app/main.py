@@ -1027,7 +1027,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
     sname = (tenant.name if tenant else "내 가게")
     handle = (_re.sub(r"[^a-zA-Z0-9]", "", sname) or "mystore").lower()[:15]
     first_img = next((f"/dl/{asset_id}/{os.path.basename(im)}" for im in imgs if im and os.path.exists(im)), "")
-    wrap = "max-w-md mx-auto bg-white rounded-2xl border border-slate-200 shadow-sm mb-5"
+    wrap = "bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg transition-shadow"
 
     def _av():
         return ("<div class='w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0' "
@@ -1075,62 +1075,69 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
         return "".join(parts)
 
     def _hd(label):
-        return f"<div class='text-xs font-bold text-slate-400 mb-1.5 max-w-md mx-auto'>{label} — 이렇게 올라가요</div>"
+        return f"<div class='text-xs font-bold text-slate-400 mb-2'>{label}</div>"
+    naver_btn = (f"<a href='/kit/{asset_id}/naver' target='_blank' class='block text-center py-3 rounded-xl text-white text-sm font-extrabold "
+                 "shadow-md hover:brightness-110 active:scale-[.99] transition' style='background:#03c75a'>🟢 네이버 블로그에 올리기 →</a>")
     cards = ""
     for p in pieces:
         k, pl = p.kind.value, p.payload
         has_video = bool(pl.get("video_path"))
         vurl = f"/dl/{asset_id}/{os.path.basename(pl.get('video_path',''))}" if (has_video and os.path.exists(pl.get("video_path", ""))) else ""
+        block = ""
         if k == "caption":
             cap = pl.get("text", "")
             media = (f"<img src='{first_img}' class='w-full aspect-square object-cover'>" if first_img
                      else "<div class='w-full aspect-square bg-slate-100 flex items-center justify-center text-5xl text-slate-300'>📷</div>")
-            cards += (_hd("📷 인스타그램") + f"<div class='{wrap} overflow-hidden'>"
-                      "<div class='flex items-center gap-2 px-3 py-2.5'>" + _av()
-                      + f"<div class='font-semibold text-sm'>{esc(sname)}</div><div class='ml-auto text-slate-400'>⋯</div></div>" + media
-                      + "<div class='px-3 pt-2.5 flex items-center gap-4 text-2xl'><span>♡</span><span>💬</span><span>➤</span><span class='ml-auto'>🔖</span></div>"
-                      + f"<div class='px-3 py-2 text-sm whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto'><b>{esc(sname)}</b> {esc(cap)}</div>"
-                      + f"<div class='px-3 pb-3 flex gap-2'>{_cp('c_cap', cap, '캡션 복사')}{pack_btn(p.id, has_video)}</div></div>")
+            block = (_hd("📷 인스타그램") + f"<div class='{wrap} overflow-hidden'>"
+                     "<div class='flex items-center gap-2 px-3.5 py-3'>" + _av()
+                     + f"<div class='font-semibold text-sm'>{esc(sname)}</div><div class='ml-auto text-slate-400'>⋯</div></div>" + media
+                     + "<div class='px-3.5 pt-3 flex items-center gap-4 text-2xl'><span>♡</span><span>💬</span><span>➤</span><span class='ml-auto'>🔖</span></div>"
+                     + f"<div class='px-3.5 py-2 text-sm whitespace-pre-wrap leading-relaxed max-h-44 overflow-y-auto'><b>{esc(sname)}</b> {esc(cap)}</div>"
+                     + f"<div class='px-3.5 pb-3.5 flex gap-2'>{pack_btn(p.id, has_video)}{_cp('c_cap', cap, '캡션')}</div></div>")
         elif k == "blog":
             title = pl.get("title", "")
             blog_copy = title + "\n\n" + _re.sub(r"\[사진(\d+)\]", r"⬇⬇ 여기에 사진\1 올리기 ⬇⬇", pl.get("body", "")).strip()
-            cards += (_hd("📝 네이버 블로그") + f"<div class='{wrap} p-5'>"
-                      f"<div class='text-lg font-extrabold text-slate-900 leading-snug mb-2'>{esc(title)}</div>"
-                      "<div class='flex items-center gap-2 text-xs text-slate-400 border-b border-slate-100 pb-2 mb-3'>" + _av()
-                      + f"<span>{esc(sname)} 블로그 · 방금 전</span></div>"
-                      + f"<div class='max-h-80 overflow-y-auto'>{_blog_body(pl.get('body',''))}</div>"
-                      + f"<textarea id='c_blog' class='hidden'>{esc(blog_copy)}</textarea>"
-                      + "<div class='mt-4 space-y-2'>"
-                      + "<button type=button onclick=\"cp('c_blog',this)\" class='w-full py-3 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-extrabold rounded-xl'>📋 글 복사 (사진 위치 표시 포함)</button>"
-                      + "<p class='text-[11px] text-slate-400 leading-relaxed bg-amber-50 rounded-lg p-2'>💡 네이버는 사진 붙여넣기를 지원하지 않아요. ①글 붙여넣기 → ②아래 <b>통째로 받기</b>로 사진 다운 → ③<b>‘여기에 사진N’ 위치</b>에 네이버 사진버튼으로 순서대로 올리기</p>"
-                      + f"<div class='flex gap-2'>{pack_btn(p.id, False)}</div></div></div>")
+            block = (_hd("📝 네이버 블로그") + f"<div class='{wrap} p-5'>"
+                     f"<div class='text-lg font-extrabold text-slate-900 leading-snug mb-2'>{esc(title)}</div>"
+                     "<div class='flex items-center gap-2 text-xs text-slate-400 border-b border-slate-100 pb-2 mb-3'>" + _av()
+                     + f"<span>{esc(sname)} 블로그 · 방금 전</span></div>"
+                     + f"<div class='max-h-72 overflow-y-auto'>{_blog_body(pl.get('body',''))}</div>"
+                     + f"<textarea id='c_blog' class='hidden'>{esc(blog_copy)}</textarea>"
+                     + f"<div class='mt-4 space-y-2'>{naver_btn}"
+                     + f"<div class='flex gap-2'>{pack_btn(p.id, False)}{_cp('c_blogb', blog_copy, '글 복사')}</div></div></div>")
         elif k == "x_post":
             xt = pl.get("text", "")
-            xvid = (f"<video src='{vurl}' controls playsinline class='w-full rounded-xl mt-2 bg-black' style='max-height:360px'></video>" if vurl else "")
-            cards += (_hd("𝕏 X") + f"<div class='{wrap} p-4'>"
-                      "<div class='flex items-center gap-2 mb-2'>" + _av()
-                      + f"<div><div class='font-bold text-sm leading-tight'>{esc(sname)}</div><div class='text-slate-400 text-xs'>@{handle} · now</div></div><div class='ml-auto text-lg font-bold'>𝕏</div></div>"
-                      + f"<div class='text-sm whitespace-pre-wrap leading-relaxed text-slate-800'>{esc(xt)}</div>"
-                      + xvid
-                      + "<div class='flex items-center gap-10 text-slate-400 mt-3 text-sm'><span>💬</span><span>🔁</span><span>♡</span><span>📊</span></div>"
-                      + f"<div class='mt-3 flex gap-2'>{_cp('c_x', xt, '복사')}{pack_btn(p.id, has_video) if has_video else ''}</div></div>")
+            xvid = (f"<video src='{vurl}' controls playsinline preload='metadata' poster='{first_img}' class='w-full rounded-xl mt-2 bg-black' style='max-height:360px'></video>" if vurl else "")
+            block = (_hd("𝕏 X") + f"<div class='{wrap} p-4'>"
+                     "<div class='flex items-center gap-2 mb-2'>" + _av()
+                     + f"<div><div class='font-bold text-sm leading-tight'>{esc(sname)}</div><div class='text-slate-400 text-xs'>@{handle} · now</div></div><div class='ml-auto text-lg font-bold'>𝕏</div></div>"
+                     + f"<div class='text-sm whitespace-pre-wrap leading-relaxed text-slate-800'>{esc(xt)}</div>"
+                     + xvid
+                     + "<div class='flex items-center gap-10 text-slate-400 mt-3 text-sm'><span>💬</span><span>🔁</span><span>♡</span><span>📊</span></div>"
+                     + f"<div class='mt-3 flex gap-2'>{(pack_btn(p.id, has_video)) if has_video else ''}{_cp('c_x', xt, '복사')}</div></div>")
         elif k == "short" and p.channel.value in ("youtube", "instagram"):
             title = pl.get("title", "") or (pl.get("text", "")[:30])
             desc = pl.get("narration", "") or pl.get("text", "")
             lab = "▶️ 유튜브 쇼츠" if p.channel.value == "youtube" else "🎬 인스타 릴스"
+            dur = int(pl.get("duration_sec") or 0)
+            durb = (f"<div class='absolute top-2 right-2 bg-black/70 text-white text-[11px] font-bold px-1.5 py-0.5 rounded'>{dur // 60}:{dur % 60:02d}</div>" if dur else "")
             if vurl:
-                player = f"<video src='{vurl}' controls playsinline class='w-full max-h-[520px] bg-black'></video>"
+                player = (f"<div class='relative'><video src='{vurl}' controls playsinline preload='metadata' poster='{first_img}' "
+                          f"class='w-full max-h-[520px] bg-black'></video>{durb}</div>")
             elif first_img:
                 player = ("<div class='relative bg-black'>"
-                          f"<img src='{first_img}' class='w-full max-h-[420px] object-contain opacity-70'>"
-                          "<div class='absolute inset-0 flex flex-col items-center justify-center text-white'>"
-                          "<span class='text-4xl'>▶️</span><span class='text-xs mt-1'>영상은 ‘통째로 받기’에 포함</span></div></div>")
+                          f"<img src='{first_img}' class='w-full max-h-[440px] object-cover opacity-85'>"
+                          "<div class='absolute inset-0 flex flex-col items-center justify-center'>"
+                          "<div class='w-14 h-14 rounded-full bg-white/90 flex items-center justify-center text-indigo-600 text-2xl shadow-lg'>▶</div>"
+                          f"<span class='text-white text-xs mt-2'>영상은 ‘통째로 받기’에 포함</span></div>{durb}</div>")
             else:
                 player = "<div class='w-full aspect-video bg-black flex items-center justify-center text-white text-3xl'>▶️</div>"
-            cards += (_hd(lab) + f"<div class='{wrap} overflow-hidden'>{player}"
-                      f"<div class='p-3'><div class='font-bold text-sm mb-1'>{esc(title)}</div>"
-                      f"<div class='text-xs text-slate-500 whitespace-pre-wrap max-h-24 overflow-y-auto'>{esc(desc)}</div>"
-                      f"<div class='mt-3 flex gap-2'>{_cp('c_v' + p.id[:5], title, '제목')}{pack_btn(p.id, has_video)}</div></div></div>")
+            block = (_hd(lab) + f"<div class='{wrap} overflow-hidden'>{player}"
+                     f"<div class='p-4'><div class='font-bold text-sm mb-1'>{esc(title)}</div>"
+                     f"<div class='text-xs text-slate-500 whitespace-pre-wrap max-h-24 overflow-y-auto'>{esc(desc)}</div>"
+                     f"<div class='mt-3 flex gap-2'>{pack_btn(p.id, has_video)}{_cp('c_v' + p.id[:5], title, '제목')}</div></div></div>")
+        if block:
+            cards += "<div class='break-inside-avoid mb-6'>" + block + "</div>"
     js = ("<script>function cp(id,btn){var t=document.getElementById(id);var o=btn.textContent;"
           "navigator.clipboard.writeText(t.value);btn.textContent='✅ 복사됨';setTimeout(function(){btn.textContent=o;},1500);}"
           "async function copyRich(id,btn){var el=document.getElementById(id);var o=btn.textContent;"
@@ -1152,10 +1159,14 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
     photos_strip = (("<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-4 mb-4'>"
                      "<div class='font-bold text-sm mb-2'>📷 내가 올린 사진</div>"
                      f"<div class='flex gap-2 flex-wrap'>{thumbs}</div></div>") if thumbs else "")
+    store_hd = (f"<div class='text-sm text-indigo-500 font-bold'>🏪 {esc(sname)}</div>"
+                if sname and sname not in ("내 가게", "카카오회원", "구글회원") else "")
     body = (f"<a href='{back_href}' class='inline-block text-sm text-slate-500 font-bold mb-2'>{back_label}</a>"
-            "<h2 class='text-xl font-extrabold text-slate-900 mb-1'>발행 소재</h2>"
-            "<p class='text-slate-400 text-sm mb-4'>각 앱에 올리면 <b class='text-slate-600'>이렇게</b> 보여요. 글은 복사, 사진·영상은 다운로드하세요.</p>"
-            + pipeline + all_btn + cards + js)
+            + store_hd
+            + "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>발행 소재</h2>"
+            "<p class='text-slate-400 text-sm mb-5'>각 앱에 올리면 <b class='text-slate-600'>이렇게</b> 보여요. 글은 복사, 사진·영상은 다운로드하세요.</p>"
+            + pipeline + all_btn
+            + "<div class='sm:columns-2 gap-6'>" + cards + "</div>" + js)
     return body
 
 
@@ -1170,6 +1181,60 @@ def kit(request: Request, asset_id: str):
         return HTMLResponse(_subscriber_page("접근 불가",
             "<div class='bg-rose-50 text-rose-600 p-4 rounded-2xl'>내 콘텐츠가 아니거나 없는 세트예요.</div>"))
     return HTMLResponse(_subscriber_page("발행 소재", body))
+
+
+@app.get("/kit/{asset_id}/naver", response_class=HTMLResponse)
+def kit_naver(request: Request, asset_id: str):
+    """네이버 블로그 붙여넣기 전용 화면 — 제목/본문(사진 위치 표시)/사진 순서대로 다운."""
+    import re as _re
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    pieces = _owned_pieces(u, asset_id)
+    if not pieces:
+        return HTMLResponse(_subscriber_page("접근 불가", "<p>내 콘텐츠가 아니에요.</p>"))
+    blog = next((p for p in pieces if p.kind.value == "blog"), None)
+    if not blog:
+        return HTMLResponse(_subscriber_page("네이버 블로그", "<p>블로그 글이 없어요.</p>"))
+    imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
+    tenant = db.get_tenant(pieces[0].tenant_id)
+    sname = tenant.name if tenant else "내 가게"
+    title = blog.payload.get("title", "")
+    body_marked = _re.sub(r"\[사진(\d+)\]", r"\n\n[📷 사진\1 위치]\n\n", blog.payload.get("body", "")).strip()
+    photos = [im for im in imgs if im and os.path.exists(im)]
+    photo_cells = "".join(
+        f"<div class='relative'><img src='/dl/{asset_id}/{os.path.basename(im)}' class='w-full aspect-square object-cover rounded-xl border border-slate-200'>"
+        f"<div class='absolute top-2 left-2 w-7 h-7 rounded-full bg-black/75 text-white text-sm font-bold flex items-center justify-center'>{i+1}</div>"
+        f"<a href='/dl/{asset_id}/{os.path.basename(im)}' download class='absolute bottom-2 right-2 bg-white/95 text-slate-700 text-xs font-bold px-2 py-1 rounded-lg shadow hover:bg-white'>⬇ 저장</a></div>"
+        for i, im in enumerate(photos))
+    sec = "bg-white rounded-2xl border border-slate-200 shadow-sm p-5 mb-5"
+    cbtn = "px-4 py-2.5 rounded-xl text-white text-sm font-bold transition active:scale-[.98]"
+    body = (
+        "<a href='javascript:history.back()' class='inline-block text-sm text-slate-500 font-bold mb-2'>← 결과로</a>"
+        f"<div class='text-sm text-emerald-600 font-bold'>🏪 {esc(sname)}</div>"
+        "<h1 class='text-2xl font-extrabold text-slate-900 mb-1'>네이버 블로그에 올리기</h1>"
+        "<p class='text-slate-400 text-sm mb-5'>① 제목·본문 복사해서 붙여넣기 → ② 사진을 순서대로 저장 → ③ 본문 <b>[📷 사진N 위치]</b>에 네이버 사진버튼으로 올리기</p>"
+        # 제목
+        f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>1. 제목</div>"
+        f"<div class='text-lg font-extrabold text-slate-900 mb-3'>{esc(title)}</div>"
+        f"<textarea id='nvT' class='hidden'>{esc(title)}</textarea>"
+        f"<button onclick=\"nvcp('nvT',this)\" class='{cbtn} bg-slate-900 hover:bg-slate-800'>📋 제목 복사</button></div>"
+        # 본문
+        f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>2. 본문 <span class='text-emerald-600'>(사진 위치 표시 포함)</span></div>"
+        f"<div class='bg-slate-50 rounded-xl p-4 text-sm text-slate-700 whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto mb-3'>{esc(body_marked)}</div>"
+        f"<textarea id='nvB' class='hidden'>{esc(body_marked)}</textarea>"
+        f"<button onclick=\"nvcp('nvB',this)\" class='{cbtn} bg-emerald-500 hover:bg-emerald-600 w-full'>📋 전체 본문 복사</button></div>"
+        # 사진
+        + (f"<div class='{sec}'><div class='flex items-center justify-between mb-3'>"
+           "<div class='text-xs font-bold text-slate-400'>3. 사진 <span class='text-slate-500'>(순서대로)</span></div>"
+           f"<a href='/kit/{asset_id}/pack/{blog.id}' class='text-xs font-bold text-indigo-600'>⬇ 전체 ZIP 받기</a></div>"
+           f"<div class='grid grid-cols-3 sm:grid-cols-4 gap-3'>{photo_cells}</div></div>" if photos else "")
+        # 토스트
+        + "<div id='nvToast' class='fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-sm font-bold px-5 py-3 rounded-xl shadow-xl opacity-0 pointer-events-none transition-opacity'>✅ 복사됨</div>"
+        + "<script>function nvcp(id,btn){var t=document.getElementById(id);navigator.clipboard.writeText(t.value);"
+        "var o=btn.textContent;btn.textContent='✅ 복사됨';var tt=document.getElementById('nvToast');tt.style.opacity='1';"
+        "setTimeout(function(){btn.textContent=o;tt.style.opacity='0';},1600);}</script>")
+    return HTMLResponse(_subscriber_page("네이버 블로그", body))
 
 
 @app.get("/dl/{asset_id}/{fname}")
