@@ -589,18 +589,32 @@ def _perf_report(tenant_id: str) -> str:
                 if k and k not in kws:
                     kws.append(k)
     avg = round(sum(scores) / len(scores)) if scores else 0
-    chips = "".join(f"<span class='inline-block bg-indigo-50 text-indigo-600 text-xs px-2 py-1 rounded-full mr-1 mb-1'>{esc(k)}</span>"
-                    for k in kws[:12])
-    cards = ("<div class='grid grid-cols-3 gap-3 mb-3'>"
-             + stat_card("만든 세트", len(sets), "indigo")
-             + stat_card("채널 발행물", n_pieces, "emerald")
-             + stat_card("평균 상위노출점수", f"{avg}", "amber") + "</div>")
-    return ("<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-4'>"
-            "<h2 class='font-bold mb-1'>📈 성과 리포트</h2>"
-            "<p class='text-xs text-slate-400 mb-3'>내 콘텐츠가 상위노출 요인을 얼마나 갖췄는지 · 노리는 키워드</p>"
-            + cards
-            + (f"<div class='text-sm font-semibold text-slate-600 mb-1'>🎯 노리는 키워드</div>{chips}" if chips else "")
-            + "<div class='mt-3'><button onclick='checkRank()' class='px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg'>🔎 키워드 순위 조회 (참고)</button>"
+
+    def _stat(icon, num, label, tone):
+        return (f"<div class='rounded-2xl border border-slate-100 bg-gradient-to-br {tone} p-4'>"
+                f"<div class='text-xl mb-1.5'>{icon}</div>"
+                f"<div class='text-4xl sm:text-5xl font-extrabold text-slate-900 leading-none tracking-tight'>{num}</div>"
+                f"<div class='text-xs text-slate-500 mt-2 font-semibold'>{label}</div></div>")
+    stats = ("<div class='grid grid-cols-3 gap-3 mb-5'>"
+             + _stat("📦", len(sets), "만든 세트", "from-indigo-50 to-white")
+             + _stat("📡", n_pieces, "채널 발행물", "from-emerald-50 to-white")
+             + _stat("🎯", avg, "평균 노출점수", "from-amber-50 to-white") + "</div>")
+    kw_html = ""
+    if kws:
+        def _chip(k):
+            return f"<span class='inline-block bg-slate-100 text-slate-600 text-xs px-2.5 py-1 rounded-full mr-1 mb-1'>{esc(k)}</span>"
+        head = "".join(_chip(k) for k in kws[:6])
+        rest = "".join(_chip(k) for k in kws[6:])
+        more_n = len(kws) - 6
+        more_btn = (f"<button type=button onclick=\"var m=document.getElementById('kwmore');m.classList.toggle('hidden');this.textContent=m.classList.contains('hidden')?'더보기 +{more_n}':'접기';\" "
+                    f"class='inline-block text-xs font-bold text-indigo-600 ml-1 align-middle'>더보기 +{more_n}</button>" if more_n > 0 else "")
+        kw_html = ("<div class='mb-2'><div class='text-sm font-bold text-slate-600 mb-2'>🎯 노리는 키워드 "
+                   f"<span class='text-xs text-slate-400 font-normal'>({len(kws)}개)</span></div>"
+                   f"<div class='max-h-24 overflow-hidden'>{head}<span id='kwmore' class='hidden'>{rest}</span>{more_btn}</div></div>")
+    return ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow p-5 sm:p-6 mb-5'>"
+            "<h2 class='font-extrabold text-slate-900 mb-4 text-base'>📈 성과 리포트</h2>"
+            + stats + kw_html
+            + "<div class='mt-2'><button onclick='checkRank()' class='px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl transition'>🔎 키워드 순위 조회</button>"
             + "<div id='rankbox' class='mt-2'></div></div>"
             + "<script>async function checkRank(){var b=document.getElementById('rankbox');"
               "b.innerHTML='<span class=\"text-slate-400 text-xs\">조회 중…</span>';"
@@ -791,7 +805,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                  f"<div class='font-bold'>{_pn} · {_usage}</div></div>{_upbtn}</div>")
     _sname = t.name if (t.name and t.name not in ("카카오회원", "구글회원", "회원", "내 가게")) else ""
     greeting = ("<div class='mb-6'>"
-                + (f"<div class='text-sm text-slate-400 font-semibold mb-1'>{esc(_sname)}</div>" if _sname else "")
+                + (f"<div class='inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-700 text-sm font-bold px-3 py-1.5 rounded-full mb-3'>🏪 {esc(_sname)}</div>" if _sname else "")
                 + "<div class='text-2xl sm:text-3xl font-extrabold text-slate-900 leading-tight'>사진만 올리면 "
                 "<span style='background:linear-gradient(120deg,#6366f1,#ec4899);-webkit-background-clip:text;background-clip:text;color:transparent'>5채널 콘텐츠</span>가 완성돼요</div></div>")
     steps = ""   # 3단계 가이드 제거(간결화)
@@ -800,7 +814,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                       "<div class='mb-5'><div class='text-lg font-extrabold text-slate-900'>✨ 콘텐츠 만들기</div>"
                       "<div class='text-sm text-slate-400'>가게 이름·사진만 있으면 끝</div></div>"
                       + _upload_form_html(t, tok) + "</div>")
-    content = ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5'>"
+    content = ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow p-5'>"
                "<h2 class='font-bold text-slate-900 mb-1'>📋 내 콘텐츠</h2>"
                "<p class='text-xs text-slate-400 mb-3'>‘보기’를 누르면 결과가 나와요.</p>" + hist + "</div>")
     settings = ("<details class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6'>"
@@ -814,7 +828,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         right = "<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5 sm:p-6'>" + result_html + "</div>"
     else:
         right = upload_section
-    two = ("<div class='grid lg:grid-cols-[340px_1fr] gap-5 items-start'>"
+    two = ("<div class='grid lg:grid-cols-[340px_1fr] gap-6 items-start'>"
            f"<div class='order-2 lg:order-1'>{content}</div>"
            f"<div class='order-1 lg:order-2'>{right}</div></div>")
     return _subscriber_page("", banner + greeting + perf + two, wide=True)
