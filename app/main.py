@@ -806,72 +806,14 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
     settings = ("<details class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6'>"
                 "<summary class='font-bold cursor-pointer text-slate-600 select-none'>⚙️ 가게 정보 수정 (검색으로 자동입력)</summary>"
                 "<div class='mt-3'>" + search_box + store_form + place_js + "</div></details>")
-    # 📢 플레이스 소식 + ⭐ 리뷰 유도 (매장/하이브리드) — 플레이스 상위노출 직접 도움
-    _biz = (t.biz_type or "local")
-    place_section = ""
-    if _biz in ("local", "hybrid"):     # 📢 플레이스 소식 = 매장만 (플레이스 상위노출)
-        news = db.list_place_news(t.id, 6)
-        nitems = "".join(
-            "<div class='bg-slate-50 rounded-xl p-3 mb-2'>"
-            f"<textarea id='pn{i}' class='hidden'>{esc(n['text'])}</textarea>"
-            f"<div class='text-sm text-slate-700 whitespace-pre-wrap'>{esc(n['text'])}</div>"
-            f"<button onclick=\"navigator.clipboard.writeText(document.getElementById('pn{i}').value);this.textContent='✅ 복사됨'\" "
-            "class='mt-2 px-3 py-1 bg-indigo-600 text-white text-xs font-bold rounded-lg'>📋 복사</button></div>"
-            for i, n in enumerate(news)) or "<p class='text-slate-400 text-sm'>아직 소식이 없어요. 버튼으로 만들어보세요.</p>"
-        place_section = (
-            "<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-4'>"
-            "<h2 class='font-bold mb-1'>📢 플레이스 소식 <span class='text-xs text-emerald-600 font-normal'>(상위노출에 직접 도움)</span></h2>"
-            "<p class='text-xs text-slate-400 mb-3'>주 2~3회 스마트플레이스 ‘소식’에 올리면 신선도 점수↑. 복사해서 붙여넣기만.</p>"
-            "<form method=post action='/me/place-news'><button class='w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2.5 rounded-xl mb-3'>✨ 소식 3개 자동 생성</button></form>"
-            + nitems + "</div>")
-    # ⭐ 리뷰(매장)/상품평(셀러) 유도 — 자동인식된 가게 기준으로 문구 자동 생성
-    from app import seo as _seo
-    rq = _seo.review_request(_sname or "저희 가게", t.region, t.industry)   # 기본 닉네임 대신 깨끗한 가게명
-    _rvlabel = "⭐ 상품평 유도" if _biz == "seller" else "⭐ 리뷰 요청"
-    _rvsub = ("(별점·후기 = 판매 상위노출 핵심)" if _biz == "seller" else "(진짜 방문자 리뷰 = 최강 순위요인)")
-    _rvhint = ("구매 고객에게 문구를 보내 상품평을 유도하세요." if _biz == "seller"
-               else "방문 손님에게 문구를 보내거나, 카드를 출력해 카운터에 두세요.")
-    review_section = (
-        "<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-4'>"
-        f"<h2 class='font-bold mb-1'>{_rvlabel} <span class='text-xs text-emerald-600 font-normal'>{_rvsub}</span></h2>"
-        f"<p class='text-xs text-slate-400 mb-3'>{_rvhint}</p>"
-        f"<textarea id='rvq' class='hidden'>{esc(rq)}</textarea>"
-        f"<div class='bg-slate-50 rounded-xl p-3 text-sm text-slate-700 whitespace-pre-wrap mb-2'>{esc(rq)}</div>"
-        "<div class='flex gap-2'>"
-        "<button onclick=\"navigator.clipboard.writeText(document.getElementById('rvq').value);this.textContent='✅ 복사됨'\" class='px-3 py-2 bg-indigo-600 text-white text-sm font-bold rounded-lg'>📋 문구 복사</button>"
-        "<a href='/me/review-card.png' download class='px-3 py-2 bg-slate-800 text-white text-sm font-bold rounded-lg'>⬇ 요청 카드</a></div></div>")
-    # 🔗 제휴·추적 링크 (모든 회원)
-    _base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
-    _links = db.list_links(t.id)
-    litems = "".join(
-        "<div class='flex items-center justify-between bg-slate-50 rounded-xl p-2.5 mb-2 text-sm'>"
-        f"<div class='min-w-0 truncate'><b>{esc(l.get('label') or '링크')}</b> "
-        f"<span class='text-slate-400 text-xs'>{_base}/r/{l['code']}</span></div>"
-        f"<div class='flex items-center gap-2 flex-shrink-0'><span class='text-xs text-emerald-600 font-bold'>👆 {l.get('clicks') or 0}회</span>"
-        f"<button onclick=\"navigator.clipboard.writeText('{_base}/r/{l['code']}');this.textContent='✅'\" class='px-2 py-1 bg-indigo-600 text-white text-xs rounded-lg'>복사</button></div></div>"
-        for l in _links)
-    link_section = (
-        "<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-4'>"
-        "<h2 class='font-bold mb-1'>🔗 제휴·추적 링크</h2>"
-        "<p class='text-xs text-slate-400 mb-3'>제휴/스토어/예약 링크를 넣으면 짧은 링크를 만들어드려요. 글·프로필에 넣으면 <b>클릭 수가 집계</b>됩니다.</p>"
-        "<form method=post action='/me/link' class='flex gap-2 mb-3'>"
-        f"<input name=label placeholder='이름(예:쿠팡)' class='{inp} w-28'>"
-        f"<input name=target placeholder='https://...' required class='{inp} flex-1'>"
-        "<button class='px-4 bg-indigo-600 text-white font-bold rounded-xl text-sm whitespace-nowrap'>만들기</button></form>"
-        + (litems or "<p class='text-slate-400 text-sm'>아직 링크가 없어요.</p>") + "</div>")
-    perf = _perf_report(t.id)   # 성과 요약
-    _toollabel = "상품 상위노출·상품평·링크" if _biz == "seller" else "플레이스 소식·리뷰·링크"
-    tools = ("<details class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5 mt-5'>"
-             f"<summary class='font-bold text-slate-900 cursor-pointer select-none'>🚀 상위노출 도구 "
-             f"<span class='text-xs text-slate-400 font-normal'>· {_toollabel} (자동)</span></summary>"
-             "<div class='mt-3'>" + place_section + review_section + link_section + "</div></details>")
-    # 오른쪽 = 결과(보기 클릭 시) 또는 생성카드 + 상위노출 도구
+    perf = _perf_report(t.id)   # 성과 요약 (플레이스·리뷰·제휴링크 도구는 전부 삭제)
+    # 오른쪽 = 결과(보기 클릭 시) 또는 생성카드
     view = (request.query_params.get("view") or "").strip()
     result_html = _result_html(u, view, back_href="/me", back_label="◀ 새로 만들기") if view else None
     if result_html:
         right = "<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5 sm:p-6'>" + result_html + "</div>"
     else:
-        right = upload_section + tools
+        right = upload_section
     two = ("<div class='grid lg:grid-cols-[340px_1fr] gap-5 items-start'>"
            f"<div class='order-2 lg:order-1'>{content}</div>"
            f"<div class='order-1 lg:order-2'>{right}</div></div>")
@@ -2057,6 +1999,39 @@ def admin_demo_reset(ip: str = ""):
     return {"ok": True, "scope": ip.strip() or "전체", "message": "무료 체험 사용량을 초기화했어요"}
 
 
+@app.api_route("/admin/cleanup", methods=["GET", "POST"])
+def admin_cleanup():
+    """디스크 확보 — 데모 테넌트의 저장 파일(영상·이미지) + DB 레코드 삭제."""
+    import shutil
+    import subprocess
+    base = os.environ.get("SHOPCAST_STORAGE", "storage")
+    with db._conn() as c:
+        demo_ids = [r["id"] for r in c.execute("SELECT id FROM tenants WHERE is_demo=1").fetchall()]
+    freed, removed = 0, 0
+    for tid in demo_ids:
+        p = os.path.join(base, tid)
+        if os.path.isdir(p):
+            for root, _dirs, fnames in os.walk(p):
+                for fn in fnames:
+                    try:
+                        freed += os.path.getsize(os.path.join(root, fn))
+                    except Exception:
+                        pass
+            shutil.rmtree(p, ignore_errors=True)
+            removed += 1
+    try:
+        with db._conn() as c:
+            c.execute("DELETE FROM content_pieces WHERE tenant_id IN (SELECT id FROM tenants WHERE is_demo=1)")
+            c.execute("DELETE FROM tenants WHERE is_demo=1")
+    except Exception:
+        pass
+    try:
+        df = subprocess.run(["df", "-h", base], capture_output=True, text=True, timeout=8).stdout
+    except Exception:
+        df = ""
+    return {"removed_demo_folders": removed, "freed_mb": round(freed / 1e6, 1), "df": df}
+
+
 @app.post("/admin/shops/{tid}/autonomy")
 def shop_autonomy(tid: str, level: int = Form(0)):
     db.set_autonomy(tid, level)
@@ -2212,7 +2187,7 @@ def _upload_form_html(tenant, token: str) -> str:
     def _bz(val, emoji, label):
         return ("<label class='cursor-pointer'>"
                 f"<input type=radio name=biztype value='{val}'{' checked' if bt == val else ''} "
-                f"onclick=\"document.getElementById('s_biz').value='{val}'\" class='peer sr-only'>"
+                f"onclick=\"document.getElementById('s_biz').value='{val}';bizFields('{val}')\" class='peer sr-only'>"
                 "<div class='rounded-2xl border-2 border-slate-200 p-3.5 text-center transition "
                 f"peer-checked:border-indigo-600 peer-checked:bg-indigo-50 peer-checked:text-indigo-700'>"
                 f"<div class='text-2xl'>{emoji}</div><div class='font-bold text-sm mt-0.5'>{label}</div></div></label>")
@@ -2220,14 +2195,22 @@ def _upload_form_html(tenant, token: str) -> str:
                   + _bz("seller", "📦", "온라인 셀러") + "</div>")
     lb = "block text-sm font-bold text-slate-800 mb-2"
     form = f"""<form method=post action='/u/{token}/upload' enctype='multipart/form-data' onsubmit='return showGen()' class='space-y-5'>
-      <input type=hidden name=s_name id=s_name><input type=hidden name=s_industry id=s_industry>
-      <input type=hidden name=s_biz id=s_biz value='{bt}'><input type=hidden name=s_region id=s_region>
-      <input type=hidden name=s_tel id=s_tel><input type=hidden name=s_buy id=s_buy><input type=hidden name=s_address id=s_address>
+      <input type=hidden name=s_name id=s_name><input type=hidden name=s_industry id=s_industry><input type=hidden name=s_biz id=s_biz value='{bt}'>
       <div><label class='{lb}'>1. 가게 이름 또는 상품 링크</label>
         <div class='flex gap-2'>
           <input id=lk_q placeholder='가게 이름 또는 상품/스토어 링크' class='{inp} flex-1'>
           <button type=button onclick='lookupStore()' class='px-5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-sm whitespace-nowrap transition'>자동 인식</button></div>
-        <div id=lk_result class='text-xs mt-2 text-slate-400'>입력하면 업종·주소가 자동으로 채워져요 (없어도 OK)</div></div>
+        <div id=lk_result class='text-xs mt-2 mb-2 text-slate-400'>입력하면 업종·주소가 자동으로 채워져요 (없어도 OK)</div>
+        <div id=sf_local class='grid grid-cols-2 gap-2'>
+          <input name=s_region id=s_region placeholder='지역 (예: 부산 동구)' class='{inp}'>
+          <input name=s_tel id=s_tel placeholder='전화번호' class='{inp}'>
+          <input name=s_address id=s_address placeholder='주소' class='{inp} col-span-2'>
+          <input name=s_map id=s_map placeholder='네이버 플레이스 URL (선택)' class='{inp} col-span-2'></div>
+        <div id=sf_seller class='grid grid-cols-2 gap-2 hidden'>
+          <input name=s_market id=s_market placeholder='마켓 (예: 쿠팡)' class='{inp}'>
+          <input name=s_brand id=s_brand placeholder='브랜드명' class='{inp}'>
+          <input name=s_search id=s_search placeholder='검색어 유도 (예: 폴딩박스)' class='{inp}'>
+          <input name=s_buy id=s_buy placeholder='상세페이지/스토어 링크' class='{inp}'></div></div>
       <div><label class='{lb}'>2. 사진 <span class='text-slate-400 font-normal text-xs'>(끌어서 순서 변경 · × 삭제)</span></label>
         <div id=up_preview class='grid grid-cols-3 sm:grid-cols-4 gap-2'></div>
         <input type=file name=photos id=up_photos accept='image/*' multiple required class='hidden'>
@@ -2242,6 +2225,7 @@ def _upload_form_html(tenant, token: str) -> str:
       <button class='w-full py-4 rounded-2xl text-white font-extrabold text-lg shadow-xl shadow-indigo-500/30 hover:shadow-indigo-500/50 transition' style='background:linear-gradient(120deg,#6366f1,#8b5cf6,#ec4899)'>✨ 5채널 콘텐츠 생성하기</button>
       <p class='text-center text-xs text-slate-400'>인스타·네이버·유튜브·X + 영상을 AI가 자동 생성 (20~40초)</p></form>"""
     js = ("<script>"
+          "function bizFields(v){var l=document.getElementById('sf_local'),s=document.getElementById('sf_seller');if(!l||!s)return;if(v==='seller'){l.classList.add('hidden');s.classList.remove('hidden');}else{s.classList.add('hidden');l.classList.remove('hidden');}}"
           "var PM={f:[],drag:-1};"
           "function pmSync(){var dt=new DataTransfer();PM.f.forEach(function(x){dt.items.add(x);});document.getElementById('up_photos').files=dt.files;}"
           "function pmDel(i){PM.f.splice(i,1);pmRender();}"
@@ -2262,13 +2246,13 @@ def _upload_form_html(tenant, token: str) -> str:
           "add.className='aspect-square rounded-xl border-2 border-dashed border-slate-300 text-slate-400 hover:border-indigo-400 hover:text-indigo-500 flex flex-col items-center justify-center transition';"
           "add.ondragover=function(e){e.preventDefault();};add.ondrop=function(e){e.preventDefault();pmDrop(PM.f.length);};"
           "add.innerHTML=\"<span class='text-2xl leading-none'>＋</span><span class='text-[10px] mt-0.5'>사진 추가</span>\";pv.appendChild(add);pmSync();}"
-          "(function(){var inp=document.getElementById('up_photos');if(inp){inp.addEventListener('change',function(){Array.from(inp.files||[]).forEach(function(x){PM.f.push(x);});pmRender();});pmRender();}})();"
+          "(function(){var inp=document.getElementById('up_photos');if(inp){inp.addEventListener('change',function(){Array.from(inp.files||[]).forEach(function(x){PM.f.push(x);});pmRender();});pmRender();}bizFields((document.getElementById('s_biz')||{}).value||'local');})();"
           "async function lookupStore(){var q=document.getElementById('lk_q').value.trim();if(!q)return;"
           "var b=document.getElementById('lk_result');b.innerHTML='<span class=\"text-slate-400\">인식 중…</span>';"
           "try{var r=await fetch('/api/lookup?q='+encodeURIComponent(q));var d=await r.json();"
           "if(d.type==='none'){b.innerHTML='<span class=\"text-slate-400\">못 찾았어요 — 그냥 사진 올리고 만들어도 돼요</span>';return;}"
           "document.getElementById('s_name').value=d.name||'';document.getElementById('s_industry').value=d.industry||'';"
-          "var bz=(d.type==='seller')?'seller':'local';document.getElementById('s_biz').value=bz;"
+          "var bz=(d.type==='seller')?'seller':'local';document.getElementById('s_biz').value=bz;bizFields(bz);"
           "document.getElementById('s_region').value=d.region||'';document.getElementById('s_tel').value=d.tel||'';document.getElementById('s_buy').value=d.buy_url||'';"
           "document.getElementById('s_address').value=d.address||'';"
           "var rb=document.querySelector('input[name=biztype][value=\"'+bz+'\"]');if(rb)rb.checked=true;"
@@ -2304,21 +2288,25 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
                  purpose: str = Form(""), target: str = Form(""), extra: str = Form(""),
                  request: str = Form(""), s_name: str = Form(""), s_industry: str = Form(""),
                  s_biz: str = Form(""), s_region: str = Form(""), s_tel: str = Form(""),
-                 s_buy: str = Form(""), s_address: str = Form(""), photo_desc: str = Form("")):
+                 s_buy: str = Form(""), s_address: str = Form(""), photo_desc: str = Form(""),
+                 s_map: str = Form(""), s_market: str = Form(""), s_brand: str = Form(""),
+                 s_search: str = Form("")):
     tenant, _ = db.get_tenant_by_token(token)
     if not tenant:
         return HTMLResponse("<p>잘못된 링크입니다.</p>", status_code=404)
-    # 자동 인식(가게 이름/링크) 정보가 오면 tenant에 반영 후 생성 → 별도 설정 불필요
+    # 가게명/업종 자동인식 + 동적 가게정보(매장:지역·전화·주소·플레이스 / 셀러:마켓·브랜드·검색어·링크) 저장
     if s_name.strip() or s_industry.strip():
         db.rename_tenant(tenant.id, s_name.strip() or tenant.name,
                          s_industry.strip() or tenant.industry, s_region.strip() or tenant.region)
-        if s_tel.strip() or s_address.strip():   # 전체주소=address(지도블록), 짧은 지역=region(키워드)
-            db.update_tenant_profile(tenant.id, s_tel.strip() or tenant.phone,
-                                     s_address.strip() or tenant.address, tenant.hours, tenant.map_url)
-        _bz = s_biz.strip() if s_biz.strip() in ("local", "seller", "hybrid") else (tenant.biz_type or "local")
-        db.update_tenant_classification(tenant.id, _bz, tenant.marketplace, s_buy.strip() or tenant.buy_url,
-                                        tenant.search_kw, tenant.brand_name)
-        tenant, _ = db.get_tenant_by_token(token)   # 갱신본 재로드 (업종 프로필 생성은 백그라운드에서)
+    if any(x.strip() for x in (s_tel, s_address, s_map, s_region)):
+        db.update_tenant_profile(tenant.id, s_tel.strip() or tenant.phone,
+                                 s_address.strip() or tenant.address, tenant.hours, s_map.strip() or tenant.map_url)
+    _bz = s_biz.strip() if s_biz.strip() in ("local", "seller", "hybrid") else (tenant.biz_type or "local")
+    if _bz != (tenant.biz_type or "local") or any(x.strip() for x in (s_market, s_buy, s_search, s_brand)):
+        db.update_tenant_classification(tenant.id, _bz, s_market.strip() or tenant.marketplace,
+                                        s_buy.strip() or tenant.buy_url, s_search.strip() or tenant.search_kw,
+                                        s_brand.strip() or tenant.brand_name)
+    tenant, _ = db.get_tenant_by_token(token)   # 갱신본 재로드 (업종 프로필 생성은 백그라운드에서)
     # 플랜별 쿼터(셀프서비스 가게만; 운영자/대행 tenant는 owner 없음 → 무제한)
     owner = db.get_user_by_tenant(tenant.id)
     block = _quota_block(owner)
