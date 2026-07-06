@@ -540,13 +540,15 @@ def welcome(request: Request):
     return _auth_page("환영합니다", inner)
 
 
-def _subscriber_page(title: str, inner: str) -> str:
+def _subscriber_page(title: str, inner: str, wide: bool = False) -> str:
     from app import landing
-    return (landing._HEAD + "<div class='max-w-3xl mx-auto px-5 py-10'>"
-            f"<div class='flex items-center justify-between mb-6'>"
+    mw = "max-w-6xl" if wide else "max-w-3xl"
+    head = f"<h1 class='text-2xl font-extrabold mb-4'>{esc(title)}</h1>" if title else ""
+    return (landing._HEAD + f"<div class='{mw} mx-auto px-5 py-10'>"
+            "<div class='flex items-center justify-between mb-6'>"
             f"<a href='/' class='font-extrabold text-xl flex items-center gap-2'>{landing.LOGO}<span>올린다</span></a>"
-            f"<a href='/logout' class='text-sm text-slate-400'>로그아웃</a></div>"
-            f"<h1 class='text-2xl font-extrabold mb-4'>{esc(title)}</h1>{inner}</div>" + landing._FOOT)
+            "<a href='/logout' class='text-sm text-slate-400'>로그아웃</a></div>"
+            + head + inner + "</div>" + landing._FOOT)
 
 
 def _ensure_user_tenant(u: dict):
@@ -555,8 +557,7 @@ def _ensure_user_tenant(u: dict):
     t = db.get_tenant(tid) if tid else None
     if t:
         return t
-    name = (u.get("name") or (u.get("email") or "내 가게").split("@")[0])
-    t = db.create_tenant(name=name, industry="", region="", biz_type="local")
+    t = db.create_tenant(name="내 가게", industry="", region="", biz_type="local")  # 중립 기본명(닉네임 노출 방지)
     db.set_user_tenant(u["id"], t.id)
     return t
 
@@ -749,10 +750,10 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 + thumb_html
                 + f"<div class='flex-1 min-w-0'><div class='font-bold text-sm text-slate-800'>{esc(s['created'])}</div>"
                 + f"<div class='flex items-center gap-1.5 mt-1 text-base'>{badges}<span class='text-xs text-slate-400 ml-1 font-medium'>{s['n']}채널</span></div></div>"
-                + f"<a href='/kit/{s['asset_id']}' class='px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl'>보기</a>"
+                + f"<a href='/me?view={s['asset_id']}' class='px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl'>보기</a>"
                 + f"<form method=post action='/me/set/{s['asset_id']}/delete' onsubmit=\"return confirm('이 콘텐츠를 삭제할까요?')\">"
                 + "<button class='px-2 py-2 text-slate-300 hover:text-rose-500 text-lg transition' title='삭제'>🗑</button></form></div>")
-        hist = "<div class='grid sm:grid-cols-2 gap-3'>" + "".join(_cards) + "</div>"
+        hist = "<div class='space-y-2.5'>" + "".join(_cards) + "</div>"
     else:
         hist = "<p class='text-slate-400 text-sm py-6 text-center'>아직 만든 콘텐츠가 없어요. 위에서 사진 올려 만들어보세요.</p>"
     # ── 최초 1회 온보딩 vs 작동 대시보드 ──
@@ -781,26 +782,27 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                  "style='background:linear-gradient(120deg,#334155,#4338ca)'>"
                  f"<div><div class='text-xs text-white/70'>내 플랜</div>"
                  f"<div class='font-bold'>{_pn} · {_usage}</div></div>{_upbtn}</div>")
-    greeting = ("<div class='flex items-center justify-between mb-5'>"
-                f"<div><div class='text-2xl font-extrabold text-slate-900'>{esc(t.name)}</div>"
-                "<div class='text-slate-400 text-sm'>사진만 올리면 5채널 콘텐츠가 완성돼요</div></div>"
-                "<div class='text-right'><div class='text-[11px] text-slate-400'>내 플랜</div>"
-                f"<div class='font-bold text-indigo-600 text-sm'>{_pn}</div></div></div>")
+    _sname = t.name if (t.name and t.name not in ("카카오회원", "구글회원", "회원", "내 가게")) else ""
+    greeting = ("<div class='mb-6'>"
+                + (f"<div class='text-sm text-slate-400 font-semibold mb-1'>{esc(_sname)}</div>" if _sname else "")
+                + "<div class='text-2xl sm:text-3xl font-extrabold text-slate-900 leading-tight'>사진만 올리면 "
+                "<span style='background:linear-gradient(120deg,#6366f1,#ec4899);-webkit-background-clip:text;background-clip:text;color:transparent'>5채널 콘텐츠</span>가 완성돼요</div></div>")
     steps = ""   # 3단계 가이드 제거(간결화)
     # ✨ 생성 카드 — 깔끔한 화이트 카드
     upload_section = ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6 sm:p-7 mb-5'>"
                       "<div class='mb-5'><div class='text-lg font-extrabold text-slate-900'>✨ 콘텐츠 만들기</div>"
                       "<div class='text-sm text-slate-400'>가게 이름·사진만 있으면 끝</div></div>"
                       + _upload_form_html(t, tok) + "</div>")
-    content = ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6 mb-5'>"
+    content = ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5'>"
                "<h2 class='font-bold text-slate-900 mb-1'>📋 내 콘텐츠</h2>"
-               "<p class='text-xs text-slate-400 mb-3'>항목을 누르면 발행 소재(복사·다운로드)로 이동해요.</p>" + hist + "</div>")
+               "<p class='text-xs text-slate-400 mb-3'>‘보기’를 누르면 결과가 나와요.</p>" + hist + "</div>")
     settings = ("<details class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6'>"
                 "<summary class='font-bold cursor-pointer text-slate-600 select-none'>⚙️ 가게 정보 수정 (검색으로 자동입력)</summary>"
                 "<div class='mt-3'>" + search_box + store_form + place_js + "</div></details>")
     # 📢 플레이스 소식 + ⭐ 리뷰 유도 (매장/하이브리드) — 플레이스 상위노출 직접 도움
-    place_section = review_section = ""
-    if (t.biz_type or "local") in ("local", "hybrid"):
+    _biz = (t.biz_type or "local")
+    place_section = ""
+    if _biz in ("local", "hybrid"):     # 📢 플레이스 소식 = 매장만 (플레이스 상위노출)
         news = db.list_place_news(t.id, 6)
         nitems = "".join(
             "<div class='bg-slate-50 rounded-xl p-3 mb-2'>"
@@ -815,17 +817,22 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             "<p class='text-xs text-slate-400 mb-3'>주 2~3회 스마트플레이스 ‘소식’에 올리면 신선도 점수↑. 복사해서 붙여넣기만.</p>"
             "<form method=post action='/me/place-news'><button class='w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2.5 rounded-xl mb-3'>✨ 소식 3개 자동 생성</button></form>"
             + nitems + "</div>")
-        from app import seo as _seo
-        rq = _seo.review_request(t.name, t.region, t.industry)
-        review_section = (
-            "<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-4'>"
-            "<h2 class='font-bold mb-1'>⭐ 리뷰 요청 <span class='text-xs text-emerald-600 font-normal'>(진짜 방문자 리뷰 = 최강 순위요인)</span></h2>"
-            "<p class='text-xs text-slate-400 mb-3'>방문 손님에게 문구를 보내거나, 카드를 출력해 카운터에 두세요.</p>"
-            f"<textarea id='rvq' class='hidden'>{esc(rq)}</textarea>"
-            f"<div class='bg-slate-50 rounded-xl p-3 text-sm text-slate-700 whitespace-pre-wrap mb-2'>{esc(rq)}</div>"
-            "<div class='flex gap-2'>"
-            "<button onclick=\"navigator.clipboard.writeText(document.getElementById('rvq').value);this.textContent='✅ 복사됨'\" class='px-3 py-2 bg-indigo-600 text-white text-sm font-bold rounded-lg'>📋 문구 복사</button>"
-            "<a href='/me/review-card.png' download class='px-3 py-2 bg-slate-800 text-white text-sm font-bold rounded-lg'>⬇ 리뷰 요청 카드</a></div></div>")
+    # ⭐ 리뷰(매장)/상품평(셀러) 유도 — 자동인식된 가게 기준으로 문구 자동 생성
+    from app import seo as _seo
+    rq = _seo.review_request(_sname or "저희 가게", t.region, t.industry)   # 기본 닉네임 대신 깨끗한 가게명
+    _rvlabel = "⭐ 상품평 유도" if _biz == "seller" else "⭐ 리뷰 요청"
+    _rvsub = ("(별점·후기 = 판매 상위노출 핵심)" if _biz == "seller" else "(진짜 방문자 리뷰 = 최강 순위요인)")
+    _rvhint = ("구매 고객에게 문구를 보내 상품평을 유도하세요." if _biz == "seller"
+               else "방문 손님에게 문구를 보내거나, 카드를 출력해 카운터에 두세요.")
+    review_section = (
+        "<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-4'>"
+        f"<h2 class='font-bold mb-1'>{_rvlabel} <span class='text-xs text-emerald-600 font-normal'>{_rvsub}</span></h2>"
+        f"<p class='text-xs text-slate-400 mb-3'>{_rvhint}</p>"
+        f"<textarea id='rvq' class='hidden'>{esc(rq)}</textarea>"
+        f"<div class='bg-slate-50 rounded-xl p-3 text-sm text-slate-700 whitespace-pre-wrap mb-2'>{esc(rq)}</div>"
+        "<div class='flex gap-2'>"
+        "<button onclick=\"navigator.clipboard.writeText(document.getElementById('rvq').value);this.textContent='✅ 복사됨'\" class='px-3 py-2 bg-indigo-600 text-white text-sm font-bold rounded-lg'>📋 문구 복사</button>"
+        "<a href='/me/review-card.png' download class='px-3 py-2 bg-slate-800 text-white text-sm font-bold rounded-lg'>⬇ 요청 카드</a></div></div>")
     # 🔗 제휴·추적 링크 (모든 회원)
     _base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
     _links = db.list_links(t.id)
@@ -845,13 +852,23 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         f"<input name=target placeholder='https://...' required class='{inp} flex-1'>"
         "<button class='px-4 bg-indigo-600 text-white font-bold rounded-xl text-sm whitespace-nowrap'>만들기</button></form>"
         + (litems or "<p class='text-slate-400 text-sm'>아직 링크가 없어요.</p>") + "</div>")
-    perf = _perf_report(t.id)   # 성과 요약 — 상단에 바로 노출
-    tools = ("<details class='mb-5'>"
-             "<summary class='font-bold text-slate-900 cursor-pointer select-none py-2'>🚀 상위노출 도구 "
-             "<span class='text-xs text-slate-400 font-normal'>· 소식·리뷰·제휴링크</span></summary>"
-             "<div class='mt-2'>" + place_section + review_section + link_section + "</div></details>")
-    return _subscriber_page(f"{esc(t.name)} · 내 작업실",
-                            banner + greeting + perf + upload_section + content + tools + settings)
+    perf = _perf_report(t.id)   # 성과 요약
+    _toollabel = "상품 상위노출·상품평·링크" if _biz == "seller" else "플레이스 소식·리뷰·링크"
+    tools = ("<details class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5 mt-5'>"
+             f"<summary class='font-bold text-slate-900 cursor-pointer select-none'>🚀 상위노출 도구 "
+             f"<span class='text-xs text-slate-400 font-normal'>· {_toollabel} (자동)</span></summary>"
+             "<div class='mt-3'>" + place_section + review_section + link_section + "</div></details>")
+    # 오른쪽 = 결과(보기 클릭 시) 또는 생성카드 + 상위노출 도구
+    view = (request.query_params.get("view") or "").strip()
+    result_html = _result_html(u, view, back_href="/me", back_label="◀ 새로 만들기") if view else None
+    if result_html:
+        right = "<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5 sm:p-6'>" + result_html + "</div>"
+    else:
+        right = upload_section + tools
+    two = ("<div class='grid lg:grid-cols-[340px_1fr] gap-5 items-start'>"
+           f"<div class='order-2 lg:order-1'>{content}</div>"
+           f"<div class='order-1 lg:order-2'>{right}</div></div>")
+    return _subscriber_page("", banner + greeting + perf + two, wide=True)
 
 
 @app.post("/me/store")
@@ -1032,17 +1049,12 @@ def _kit_card(title, inner):
             f"<div class='font-bold mb-2'>{title}</div>{inner}</div>")
 
 
-@app.get("/kit/{asset_id}", response_class=HTMLResponse)
-def kit(request: Request, asset_id: str):
-    """발행 소재(반자동) — 글 복사 + 사진/영상 다운로드해서 각 앱에 붙여넣기/업로드."""
+def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "← 내 작업실"):
+    """발행 소재 결과 HTML — 대시보드 인라인/독립 페이지 공용. 소유 아니면 None."""
     import re as _re
-    u = auth.current_user(request)
-    if not u:
-        return RedirectResponse("/login", status_code=303)
     pieces = _owned_pieces(u, asset_id)
     if pieces is None:
-        return HTMLResponse(_subscriber_page("접근 불가",
-            "<div class='bg-rose-50 text-rose-600 p-4 rounded-2xl'>내 콘텐츠가 아니거나 없는 세트예요.</div>"))
+        return None
 
     def dl(path):
         return f"/dl/{asset_id}/{os.path.basename(path)}" if (path and os.path.exists(path)) else ""
@@ -1188,10 +1200,23 @@ def kit(request: Request, asset_id: str):
     photos_strip = (("<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-4 mb-4'>"
                      "<div class='font-bold text-sm mb-2'>📷 내가 올린 사진</div>"
                      f"<div class='flex gap-2 flex-wrap'>{thumbs}</div></div>") if thumbs else "")
-    body = ("<a href='/me' class='text-sm text-slate-400'>← 내 작업실</a>"
-            "<h1 class='text-2xl font-extrabold text-slate-900 mt-2 mb-1'>발행 소재</h1>"
-            "<p class='text-slate-400 text-sm mb-5'>각 앱에 올리면 <b class='text-slate-600'>이렇게</b> 보여요. 글은 복사, 사진·영상은 다운로드하세요.</p>"
+    body = (f"<a href='{back_href}' class='inline-block text-sm text-slate-500 font-bold mb-2'>{back_label}</a>"
+            "<h2 class='text-xl font-extrabold text-slate-900 mb-1'>발행 소재</h2>"
+            "<p class='text-slate-400 text-sm mb-4'>각 앱에 올리면 <b class='text-slate-600'>이렇게</b> 보여요. 글은 복사, 사진·영상은 다운로드하세요.</p>"
             + pipeline + all_btn + cards + js)
+    return body
+
+
+@app.get("/kit/{asset_id}", response_class=HTMLResponse)
+def kit(request: Request, asset_id: str):
+    """발행 소재 독립 페이지(공유·직접링크)."""
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    body = _result_html(u, asset_id)
+    if body is None:
+        return HTMLResponse(_subscriber_page("접근 불가",
+            "<div class='bg-rose-50 text-rose-600 p-4 rounded-2xl'>내 콘텐츠가 아니거나 없는 세트예요.</div>"))
     return HTMLResponse(_subscriber_page("발행 소재", body))
 
 
