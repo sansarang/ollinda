@@ -590,15 +590,15 @@ def _perf_report(tenant_id: str) -> str:
                     kws.append(k)
     avg = round(sum(scores) / len(scores)) if scores else 0
 
-    def _stat(icon, num, label, tone):
-        return (f"<div class='rounded-2xl border border-slate-100 bg-gradient-to-br {tone} p-4'>"
-                f"<div class='text-xl mb-1.5'>{icon}</div>"
+    def _stat(icon, num, chip, label):
+        return (f"<div class='rounded-2xl bg-white border border-slate-100 shadow-sm p-4'>"
+                f"<div class='w-8 h-8 rounded-xl flex items-center justify-center text-base mb-2.5 {chip}'>{icon}</div>"
                 f"<div class='text-4xl sm:text-5xl font-extrabold text-slate-900 leading-none tracking-tight'>{num}</div>"
-                f"<div class='text-xs text-slate-500 mt-2 font-semibold'>{label}</div></div>")
+                f"<div class='text-[11px] text-slate-400 mt-2 font-bold'>{label}</div></div>")
     stats = ("<div class='grid grid-cols-3 gap-3 mb-5'>"
-             + _stat("📦", len(sets), "만든 세트", "from-indigo-50 to-white")
-             + _stat("📡", n_pieces, "채널 발행물", "from-emerald-50 to-white")
-             + _stat("🎯", avg, "평균 노출점수", "from-amber-50 to-white") + "</div>")
+             + _stat("📦", len(sets), "bg-indigo-50 text-indigo-600", "만든 세트")
+             + _stat("📡", n_pieces, "bg-violet-50 text-violet-600", "채널 발행물")
+             + _stat("⭐", avg, "bg-sky-50 text-sky-600", "평균 점수") + "</div>")
     kw_html = ""
     if kws:
         def _chip(k):
@@ -764,16 +764,16 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 if ic not in seen:
                     seen.add(ic)
                     badges += f"<span>{ic}</span>"
-            thumb_html = (f"<img src='{thumb}' class='w-16 h-16 rounded-xl object-cover flex-shrink-0'>" if thumb
-                          else "<div class='w-16 h-16 rounded-xl bg-gradient-to-br from-indigo-100 to-pink-100 flex items-center justify-center text-2xl flex-shrink-0'>✨</div>")
+            thumb_html = (f"<img src='{thumb}' class='w-14 h-14 rounded-xl object-cover flex-shrink-0'>" if thumb
+                          else "<div class='w-14 h-14 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center text-2xl text-white flex-shrink-0'>✨</div>")
             _cards.append(
-                "<div class='flex items-center gap-3 p-3 rounded-2xl border border-slate-100 hover:shadow-md hover:border-indigo-200 transition'>"
+                "<div class='group flex items-center gap-3 p-2.5 rounded-2xl border border-slate-100 bg-white hover:shadow-md hover:border-indigo-200 hover:-translate-y-0.5 transition-all'>"
                 + thumb_html
-                + f"<div class='flex-1 min-w-0'><div class='font-bold text-sm text-slate-800'>{esc(s['created'])}</div>"
-                + f"<div class='flex items-center gap-1.5 mt-1 text-base'>{badges}<span class='text-xs text-slate-400 ml-1 font-medium'>{s['n']}채널</span></div></div>"
-                + f"<a href='/me?view={s['asset_id']}' class='px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl'>보기</a>"
+                + f"<div class='flex-1 min-w-0'><div class='flex items-center gap-1 text-base leading-none mb-1.5'>{badges}</div>"
+                + f"<div class='text-xs text-slate-400 font-medium'>{esc(s['created'])} · {s['n']}채널</div></div>"
+                + f"<a href='/me?view={s['asset_id']}' class='px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-[.98] text-white text-xs font-bold rounded-xl transition'>보기</a>"
                 + f"<form method=post action='/me/set/{s['asset_id']}/delete' onsubmit=\"return confirm('이 콘텐츠를 삭제할까요?')\">"
-                + "<button class='px-2 py-2 text-slate-300 hover:text-rose-500 text-lg transition' title='삭제'>🗑</button></form></div>")
+                + "<button class='px-1.5 py-2 text-slate-300 hover:text-rose-500 text-base transition' title='삭제'>🗑</button></form></div>")
         hist = "<div class='space-y-2.5'>" + "".join(_cards) + "</div>"
     else:
         hist = "<p class='text-slate-400 text-sm py-6 text-center'>아직 만든 콘텐츠가 없어요. 위에서 사진 올려 만들어보세요.</p>"
@@ -2307,7 +2307,7 @@ def _upload_form_html(tenant, token: str) -> str:
     biz_toggle = ("<div class='grid grid-cols-2 gap-2.5'>" + _bz("local", "🏪", "동네 매장")
                   + _bz("seller", "📦", "온라인 셀러") + "</div>")
     lb = "block text-sm font-bold text-slate-800 mb-2"
-    form = f"""<form method=post action='/u/{token}/upload' enctype='multipart/form-data' onsubmit='return showGen()' class='space-y-5'>
+    form = f"""<form method=post action='/u/{token}/upload' enctype='multipart/form-data' onsubmit='return showGen()' class='space-y-6'>
       <input type=hidden name=s_name id=s_name><input type=hidden name=s_industry id=s_industry><input type=hidden name=s_biz id=s_biz value='{bt}'>
       <div><label class='{lb}'>1. 가게 이름 또는 상품 링크</label>
         <div class='flex gap-2'>
