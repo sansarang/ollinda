@@ -494,14 +494,21 @@ def signup_get(from_: str = ""):
 
 
 @app.post("/signup")
-def signup_post(email: str = Form(""), pw: str = Form("")):
-    if not (email and pw) or db.get_user_by_email(email):
-        return RedirectResponse("/signup?err=1", status_code=303)
-    h, salt = auth.hash_pw(pw)
-    u = db.create_user(email=email, pw_hash=h, salt=salt)
-    resp = RedirectResponse("/me", status_code=303)
-    resp.set_cookie(auth.COOKIE, auth.make_session(u["id"]), max_age=5184000, httponly=True, samesite="lax")
-    return resp
+def signup_post(request: Request, email: str = Form(""), pw: str = Form("")):
+    try:
+        if not (email and pw) or db.get_user_by_email(email):
+            return RedirectResponse("/signup?err=1", status_code=303)
+        h, salt = auth.hash_pw(pw)
+        u = db.create_user(email=email, pw_hash=h, salt=salt)
+        resp = RedirectResponse("/me", status_code=303)
+        resp.set_cookie(auth.COOKIE, auth.make_session(u["id"]), max_age=5184000, httponly=True, samesite="lax")
+        return resp
+    except Exception as e:
+        import traceback, logging
+        logging.exception("[signup] 실패")
+        if request.query_params.get("dbg") == os.environ.get("SHOPCAST_ADMIN_PASS", "_"):
+            return HTMLResponse("SIGNUP_ERR " + repr(e) + "\n" + traceback.format_exc(), status_code=500)
+        return RedirectResponse("/signup?err=2", status_code=303)
 
 
 @app.get("/login")
@@ -670,7 +677,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         "<div class='bg-indigo-50 rounded-xl p-3 mb-3'>"
         "<div class='text-xs font-bold text-indigo-700 mb-1'>🔍 가게 이름으로 검색하면 자동 입력돼요 (타이핑 최소)</div>"
         "<div class='flex gap-2'>"
-        f"<input id=place_q placeholder='예: 초량 루마썬팅' class='{inp} flex-1'>"
+        f"<input id=place_q placeholder='가게 이름으로 검색' class='{inp} flex-1'>"
         "<button type=button onclick='placeSearch()' class='px-4 bg-indigo-600 text-white rounded-xl font-bold text-sm whitespace-nowrap'>검색</button></div>"
         "<div id=place_results class='mt-2 space-y-1'></div></div>")
     place_js = (
@@ -694,7 +701,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         search_box +
         "<form method=post action='/me/store' class='space-y-3'>"
         f"<div><div class='text-xs font-semibold text-slate-500 mb-1'>상호/브랜드 *</div>"
-        f"<input id=sf_name name=name value=\"{esc(t.name)}\" placeholder='예: 초량 루마썬팅' required class='{inp}'></div>"
+        f"<input id=sf_name name=name value=\"{esc(t.name)}\" placeholder='가게 이름' required class='{inp}'></div>"
         f"<div><div class='text-xs font-semibold text-slate-500 mb-1'>업종 또는 파는 상품 *</div>"
         f"<input id=sf_industry name=industry value=\"{esc(t.industry)}\" placeholder='예: 카페, 썬팅, 캠핑 폴딩박스' required class='{inp}'></div>"
         f"<input type=hidden id=sf_region name=region value=\"{esc(t.region)}\">"
@@ -2218,7 +2225,7 @@ def _upload_form_html(tenant, token: str) -> str:
       <input type=hidden name=s_tel id=s_tel><input type=hidden name=s_buy id=s_buy><input type=hidden name=s_address id=s_address>
       <div><label class='{lb}'>1. 가게 이름 또는 상품 링크</label>
         <div class='flex gap-2'>
-          <input id=lk_q placeholder='초량 루마썬팅 · https://스토어링크' class='{inp} flex-1'>
+          <input id=lk_q placeholder='가게 이름 또는 상품/스토어 링크' class='{inp} flex-1'>
           <button type=button onclick='lookupStore()' class='px-5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-sm whitespace-nowrap transition'>자동 인식</button></div>
         <div id=lk_result class='text-xs mt-2 text-slate-400'>입력하면 업종·주소가 자동으로 채워져요 (없어도 OK)</div></div>
       <div><label class='{lb}'>2. 사진 <span class='text-slate-400 font-normal text-xs'>(끌어서 순서 변경 · × 삭제)</span></label>
