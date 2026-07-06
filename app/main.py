@@ -1074,6 +1074,26 @@ def kit(request: Request, asset_id: str):
                         out.append(f"<p class='mb-2 leading-relaxed text-slate-700 text-sm'>{esc(s)}</p>")
         return "".join(out)
 
+    def _blog_rich(title, body):
+        """네이버에 '한 번에 붙여넣기'용 리치 HTML — 사진은 순서대로 base64 내장(외부링크 X)."""
+        parts = [f"<h2 style='font-size:20px;font-weight:800;margin:0 0 14px'>{esc(title)}</h2>"]
+        for seg in _re.split(r"(\[사진\d+\])", body or ""):
+            m = _re.fullmatch(r"\[사진(\d+)\]", seg or "")
+            if m:
+                i = int(m.group(1)) - 1
+                if 0 <= i < len(imgs) and imgs[i] and os.path.exists(imgs[i]):
+                    uri = _img_thumb_data_uri(imgs[i], 900)
+                    if uri:
+                        parts.append(f"<img src='{uri}' style='max-width:100%;border-radius:8px;margin:14px 0'>")
+            else:
+                for ln in (seg or "").split("\n"):
+                    s = ln.strip()
+                    if s.startswith("#"):
+                        parts.append(f"<h3 style='font-size:16px;font-weight:700;margin:18px 0 6px'>{esc(s.lstrip('# '))}</h3>")
+                    elif s:
+                        parts.append(f"<p style='margin:0 0 11px;line-height:1.75'>{esc(s)}</p>")
+        return "".join(parts)
+
     def _hd(label):
         return f"<div class='text-xs font-bold text-slate-400 mb-1.5 max-w-md mx-auto'>{label} — 이렇게 올라가요</div>"
     cards = ""
@@ -1099,7 +1119,10 @@ def kit(request: Request, asset_id: str):
                       "<div class='flex items-center gap-2 text-xs text-slate-400 border-b border-slate-100 pb-2 mb-3'>" + _av()
                       + f"<span>{esc(sname)} 블로그 · 방금 전</span></div>"
                       + f"<div class='max-h-80 overflow-y-auto'>{_blog_body(pl.get('body',''))}</div>"
-                      + f"<div class='mt-4 flex flex-wrap gap-2'>{_cp('c_bt', title, '제목 복사')}{_cp('c_bb', plain, '본문 복사')}{pack_btn(p.id, False)}</div></div>")
+                      + f"<div id='blogrich' style='display:none'>{_blog_rich(title, pl.get('body',''))}</div>"
+                      + "<div class='mt-4 space-y-2'>"
+                      + "<button type=button onclick=\"copyRich('blogrich',this)\" class='w-full py-3 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-extrabold rounded-xl'>📋 글+사진 통째로 복사 → 네이버 글쓰기에 붙여넣기</button>"
+                      + f"<div class='flex flex-wrap gap-2'>{_cp('c_bt', title, '제목만')}{_cp('c_bb', plain, '본문만')}{pack_btn(p.id, False)}</div></div></div>")
         elif k == "x_post":
             xt = pl.get("text", "")
             cards += (_hd("𝕏 X") + f"<div class='{wrap} p-4'>"
@@ -1126,7 +1149,11 @@ def kit(request: Request, asset_id: str):
                       f"<div class='text-xs text-slate-500 whitespace-pre-wrap max-h-24 overflow-y-auto'>{esc(desc)}</div>"
                       f"<div class='mt-3 flex gap-2'>{_cp('c_v' + p.id[:5], title, '제목')}{pack_btn(p.id, has_video)}</div></div></div>")
     js = ("<script>function cp(id,btn){var t=document.getElementById(id);var o=btn.textContent;"
-          "navigator.clipboard.writeText(t.value);btn.textContent='✅ 복사됨';setTimeout(function(){btn.textContent=o;},1500);}</script>")
+          "navigator.clipboard.writeText(t.value);btn.textContent='✅ 복사됨';setTimeout(function(){btn.textContent=o;},1500);}"
+          "async function copyRich(id,btn){var el=document.getElementById(id);var o=btn.textContent;"
+          "try{await navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([el.innerHTML],{type:'text/html'}),'text/plain':new Blob([el.innerText],{type:'text/plain'})})]);btn.textContent='✅ 복사됨! 네이버 글쓰기에 붙여넣기(Ctrl+V)';}"
+          "catch(e){try{await navigator.clipboard.writeText(el.innerText);btn.textContent='✅ 글 복사됨(사진은 아래로 따로)';}catch(e2){btn.textContent='복사 실패 — 다시';}}"
+          "setTimeout(function(){btn.textContent=o;},2600);}</script>")
     brief = next((p.payload.get("brief") for p in pieces if p.payload.get("brief")), None)
     pipeline = ("<div class='bg-indigo-50 border border-indigo-100 rounded-2xl p-4 mb-4'>"
                 "<div class='text-sm font-bold text-indigo-700 mb-1'>🤖 AI 전문가 팀이 제작했어요</div>"
@@ -2148,15 +2175,14 @@ def _upload_form_html(tenant, token: str) -> str:
           <input id=lk_q placeholder='초량 루마썬팅 · https://스토어링크' class='{inp} flex-1'>
           <button type=button onclick='lookupStore()' class='px-5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-sm whitespace-nowrap transition'>자동 인식</button></div>
         <div id=lk_result class='text-xs mt-2 text-slate-400'>입력하면 업종·주소가 자동으로 채워져요 (없어도 OK)</div></div>
-      <div><label class='{lb}'>2. 사진</label>
-        <label class='block border-2 border-dashed border-slate-200 rounded-2xl p-4 cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/40 transition'>
-          <div id=up_placeholder class='py-6 text-center'>
-            <div class='text-3xl mb-1'>📷</div>
-            <div class='font-semibold text-slate-700 text-sm'>사진 올리기</div>
-            <div class='text-xs text-slate-400 mt-0.5'>여러 장 가능 · 밝고 또렷할수록 좋아요</div></div>
-          <div id=up_preview class='hidden grid grid-cols-3 sm:grid-cols-4 gap-2'></div>
-          <div id=up_more class='hidden text-center text-xs text-indigo-500 mt-2 font-medium'>+ 다시 선택하려면 눌러주세요</div>
-          <input type=file name=photos id=up_photos accept='image/*' multiple required class='hidden'></label></div>
+      <div><label class='{lb}'>2. 사진 <span class='text-slate-400 font-normal text-xs'>(‹ › 순서변경 · × 삭제)</span></label>
+        <div id=up_preview class='grid grid-cols-3 sm:grid-cols-4 gap-2 mb-2'></div>
+        <label class='block border-2 border-dashed border-slate-200 rounded-2xl p-4 cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/40 transition text-center'>
+          <div class='text-2xl'>📷</div>
+          <div id=up_droptxt class='font-semibold text-slate-700 text-sm'>사진 올리기</div>
+          <div class='text-xs text-slate-400 mt-0.5'>여러 장 가능 · 계속 추가돼요</div>
+          <input type=file name=photos id=up_photos accept='image/*' multiple required class='hidden'></label>
+        <p class='text-xs text-slate-400 mt-1.5'>💡 올린 <b class='text-slate-500'>순서 그대로</b> 영상 장면·블로그 사진이 배치돼요</p></div>
       <div><label class='{lb}'>3. 어떤 장사인가요?</label>{biz_toggle}</div>
       <div><label class='{lb}'>4. 목적 <span class='text-slate-400 font-normal text-xs'>(선택)</span></label>
         <div class='flex flex-wrap gap-2'>{chips}</div></div>
@@ -2167,12 +2193,20 @@ def _upload_form_html(tenant, token: str) -> str:
       <button class='w-full py-4 rounded-2xl text-white font-extrabold text-lg shadow-xl shadow-indigo-500/30 hover:shadow-indigo-500/50 transition' style='background:linear-gradient(120deg,#6366f1,#8b5cf6,#ec4899)'>✨ 5채널 콘텐츠 생성하기</button>
       <p class='text-center text-xs text-slate-400'>인스타·네이버·유튜브·X + 영상을 AI가 자동 생성 (20~40초)</p></form>"""
     js = ("<script>"
-          "(function(){var f=document.getElementById('up_photos');if(f)f.addEventListener('change',function(){"
-          "var pv=document.getElementById('up_preview'),ph=document.getElementById('up_placeholder'),mo=document.getElementById('up_more');pv.innerHTML='';"
-          "var files=Array.from(f.files||[]);if(files.length){ph.classList.add('hidden');pv.classList.remove('hidden');mo.classList.remove('hidden');"
-          "files.slice(0,9).forEach(function(x){var im=document.createElement('img');im.src=URL.createObjectURL(x);"
-          "im.className='w-full aspect-square object-cover rounded-xl border border-slate-100';pv.appendChild(im);});"
-          "}else{ph.classList.remove('hidden');pv.classList.add('hidden');mo.classList.add('hidden');}});})();"
+          "var PM={f:[]};"
+          "function pmSync(){var dt=new DataTransfer();PM.f.forEach(function(x){dt.items.add(x);});document.getElementById('up_photos').files=dt.files;}"
+          "function pmDel(i){PM.f.splice(i,1);pmRender();}"
+          "function pmMove(i,d){var j=i+d;if(j<0||j>=PM.f.length)return;var t=PM.f[i];PM.f[i]=PM.f[j];PM.f[j]=t;pmRender();}"
+          "function pmRender(){var pv=document.getElementById('up_preview');pv.innerHTML='';"
+          "PM.f.forEach(function(x,i){var d=document.createElement('div');d.className='relative aspect-square';"
+          "var im=document.createElement('img');im.src=URL.createObjectURL(x);im.className='w-full h-full object-cover rounded-xl border border-slate-100';d.appendChild(im);"
+          "d.insertAdjacentHTML('beforeend',"
+          "\"<div class='absolute top-1 left-1 w-5 h-5 rounded-full bg-black/60 text-white text-[10px] font-bold flex items-center justify-center'>\"+(i+1)+\"</div>\"+"
+          "\"<button type=button onclick='pmDel(\"+i+\")' class='absolute top-1 right-1 w-5 h-5 rounded-full bg-rose-500 text-white text-xs leading-none flex items-center justify-center'>&times;</button>\"+"
+          "\"<div class='absolute bottom-1 inset-x-1 flex justify-between'><button type=button onclick='pmMove(\"+i+\",-1)' class='w-6 h-5 rounded bg-black/55 text-white text-xs leading-none'>&lsaquo;</button><button type=button onclick='pmMove(\"+i+\",1)' class='w-6 h-5 rounded bg-black/55 text-white text-xs leading-none'>&rsaquo;</button></div>\");"
+          "pv.appendChild(d);});"
+          "document.getElementById('up_droptxt').textContent=PM.f.length?('사진 '+PM.f.length+'장 · 더 추가하려면 탭'):'사진 올리기';pmSync();}"
+          "(function(){var inp=document.getElementById('up_photos');if(inp)inp.addEventListener('change',function(){Array.from(inp.files||[]).forEach(function(x){PM.f.push(x);});pmRender();});})();"
           "async function lookupStore(){var q=document.getElementById('lk_q').value.trim();if(!q)return;"
           "var b=document.getElementById('lk_result');b.innerHTML='<span class=\"text-slate-400\">인식 중…</span>';"
           "try{var r=await fetch('/api/lookup?q='+encodeURIComponent(q));var d=await r.json();"
