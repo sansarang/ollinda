@@ -38,6 +38,7 @@ def search(query: str, limit: int = 5) -> list[dict]:
                 "name": name,
                 "category": (cats[-1].strip() if cats else ""),
                 "address": (it.get("roadAddress") or it.get("address") or "").strip(),
+                "jibun": (it.get("address") or "").strip(),   # 지번(동 포함) — 짧은 지역 추출용
                 "tel": (it.get("telephone") or "").strip(),
             })
         return out

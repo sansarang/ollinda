@@ -34,11 +34,26 @@ def run_teaser(industry: str, biz_type: str, note: str,
     asset.note = asset.note + brief_to_directive(brief)
     brief_pub = {k: v for k, v in brief.items() if not k.startswith("_")}
 
-    # 텍스트 3채널만(빠름·안정). 영상은 무료 컨테이너에서 타임아웃 → 가입 후 생성으로.
+    # 텍스트 3채널은 즉시(빠름), 영상(SHORT)은 백그라운드로 → 타임아웃 없이 가입자와 동일하게 제공
     kinds = [ContentKind.CAPTION, ContentKind.BLOG, ContentKind.X_POST]
     pieces = generate_for(t, asset, kinds, images=(paths or None))   # ✍️ 카피
     for p in pieces:
         p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value, p.payload)
         p.payload["brief"] = brief_pub
         db.save_piece(p)
+    _spawn_video(t, asset, paths)                                    # 🎬 영상(비동기)
     return t.id, asset.id, pieces, brief_pub
+
+
+def _spawn_video(t, asset, paths):
+    """영상(SHORT)을 별도 스레드에서 생성·저장 — 요청을 막지 않음(폴링으로 표시)."""
+    import threading
+
+    def _run():
+        try:
+            from app.services.generate import generate_for
+            for p in generate_for(t, asset, [ContentKind.SHORT], images=(paths or None)):
+                db.save_piece(p)
+        except Exception:
+            pass
+    threading.Thread(target=_run, daemon=True).start()

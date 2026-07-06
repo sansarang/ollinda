@@ -96,26 +96,50 @@
   "hotPaths": [
     {
       "path": "app/main.py",
-      "accessCount": 19,
-      "lastAccessed": 1783064148447,
+      "accessCount": 121,
+      "lastAccessed": 1783310218517,
       "type": "file"
     },
     {
       "path": "app/landing.py",
-      "accessCount": 10,
-      "lastAccessed": 1783064207021,
+      "accessCount": 40,
+      "lastAccessed": 1783291632877,
       "type": "file"
     },
     {
       "path": "app/db.py",
-      "accessCount": 3,
-      "lastAccessed": 1783052078472,
+      "accessCount": 11,
+      "lastAccessed": 1783291686172,
+      "type": "file"
+    },
+    {
+      "path": "app/generators/video.py",
+      "accessCount": 6,
+      "lastAccessed": 1783290945590,
+      "type": "file"
+    },
+    {
+      "path": "app/services/teaser.py",
+      "accessCount": 6,
+      "lastAccessed": 1783310174237,
       "type": "file"
     },
     {
       "path": "app/services/ingest.py",
-      "accessCount": 2,
-      "lastAccessed": 1783034399439,
+      "accessCount": 6,
+      "lastAccessed": 1783310359704,
+      "type": "file"
+    },
+    {
+      "path": "app/services/place.py",
+      "accessCount": 5,
+      "lastAccessed": 1783309958674,
+      "type": "file"
+    },
+    {
+      "path": "app/generators/text_claude.py",
+      "accessCount": 3,
+      "lastAccessed": 1783291666303,
       "type": "file"
     },
     {
@@ -125,9 +149,15 @@
       "type": "file"
     },
     {
-      "path": "app/generators/text_claude.py",
-      "accessCount": 1,
-      "lastAccessed": 1783034242498,
+      "path": "app/kakao.py",
+      "accessCount": 2,
+      "lastAccessed": 1783291602365,
+      "type": "file"
+    },
+    {
+      "path": "app/google_auth.py",
+      "accessCount": 2,
+      "lastAccessed": 1783291621018,
       "type": "file"
     },
     {
@@ -152,6 +182,18 @@
       "path": "app/services/demo.py",
       "accessCount": 1,
       "lastAccessed": 1783052099521,
+      "type": "file"
+    },
+    {
+      "path": "app/services/place_news.py",
+      "accessCount": 1,
+      "lastAccessed": 1783151692472,
+      "type": "file"
+    },
+    {
+      "path": "app/services/lookup.py",
+      "accessCount": 1,
+      "lastAccessed": 1783214579134,
       "type": "file"
     }
   ],

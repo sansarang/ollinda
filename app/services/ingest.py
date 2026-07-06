@@ -17,7 +17,8 @@ from app.strategies import resolve_strategy, ordered_kinds, kind_rank
 def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
                   kinds: list[ContentKind] | None = None) -> list[ContentPiece]:
     """files: [(bytes, filename), ...] 여러 장. 1소스(여러 사진) → 멀티채널 생성."""
-    kinds = kinds or [ContentKind.CAPTION, ContentKind.BLOG, ContentKind.SHORT, ContentKind.X_POST]
+    # 텍스트는 즉시(빠름), 영상(SHORT)+릴스+캐러셀은 비동기 → 요청이 타임아웃 없이 바로 끝남
+    kinds = kinds or [ContentKind.CAPTION, ContentKind.BLOG, ContentKind.X_POST]
     # 사업형태 전략에 따라 생성 순서 정렬 (셀러=영상 우선, 소상공인=블로그 우선)
     strat = resolve_strategy(tenant)
     kinds = ordered_kinds(strat, kinds)
@@ -53,43 +54,8 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
             ex.append("🔍 SEO편집장")
         p.payload["experts"] = ex
         db.save_piece(p)
-    # 인스타 릴스: 숏 영상을 인스타 채널로도 발행(캐러셀 + 릴스 둘 다)
-    short = next((p for p in pieces if p.kind == ContentKind.SHORT
-                  and p.channel == Channel.YOUTUBE and p.payload.get("video_path")), None)
-    if short:
-        caption = next((p for p in pieces if p.kind == ContentKind.CAPTION), None)
-        reel = ContentPiece(
-            id=str(uuid.uuid4()), tenant_id=tenant.id, asset_id=asset.id,
-            channel=Channel.INSTAGRAM, kind=ContentKind.SHORT,
-            payload={"text": (caption.payload.get("text") if caption else short.payload.get("title", "")),
-                     "title": short.payload.get("title", ""),
-                     "video_path": short.payload.get("video_path"),
-                     "image_path": short.payload.get("image_path"),
-                     "image_paths": short.payload.get("image_paths", []),
-                     "duration_sec": short.payload.get("duration_sec", 0), "is_reel": True,
-                     "target_keywords": short.payload.get("target_keywords", [])},
-            status=ContentStatus.DRAFT)
-        reel.payload["ranking_audit"] = seo.quality_audit(reel.channel.value, reel.kind.value, reel.payload)
-        reel.payload["reach"] = reach.estimate(reel.channel.value, reel.kind.value, reel.payload)
-        db.save_piece(reel)
-        pieces.append(reel)
-    # 인스타 캐러셀(정보 슬라이드) — 사진 1장 → 여러 장 카드 (#2)
-    try:
-        from app.generators.carousel import build_carousel
-        cap_piece = next((p for p in pieces if p.kind == ContentKind.CAPTION), None)
-        short_piece = next((p for p in pieces if p.kind == ContentKind.SHORT
-                            and p.channel == Channel.YOUTUBE), None)
-        blog_piece = next((p for p in pieces if p.kind == ContentKind.BLOG), None)
-        pts = (short_piece.payload.get("scene_texts") if short_piece else None) or []
-        title = ((blog_piece.payload.get("title") if blog_piece else None)
-                 or (short_piece.payload.get("title") if short_piece else None) or tenant.name)
-        if cap_piece and pts:
-            cdir = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), tenant.id, "carousel")
-            cap_piece.payload["carousel_paths"] = build_carousel(
-                tenant, title, pts, getattr(tenant, "biz_type", "local") or "local", cdir)
-            db.save_piece(cap_piece)
-    except Exception:
-        pass
+    # 🎬 영상(SHORT)+릴스+캐러셀 = 백그라운드에서 생성(요청 막지 않음, /kit·폴링으로 표시)
+    _spawn_video_bundle(tenant, asset, paths, brief_public)
     # 네이버 플레이스 연동 — 매장(local/hybrid)이면 블로그에 플레이스 키워드 + 리뷰요청 문구 첨부 (#플레이스전략)
     try:
         if (getattr(tenant, "biz_type", "local") or "local") in ("local", "hybrid"):
@@ -128,3 +94,60 @@ def _autopilot(tenant: Tenant, pieces: list[ContentPiece]) -> None:
         db.set_piece_status(p.id, ContentStatus.APPROVED)
         p.status = ContentStatus.APPROVED
         publish_and_record(p)
+
+
+def _spawn_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: dict) -> None:
+    """영상(SHORT)+릴스+캐러셀을 별도 스레드에서 생성·저장 — 요청을 막지 않음(폴링/새로고침으로 표시)."""
+    import threading
+
+    def _run():
+        try:
+            _make_video_bundle(tenant, asset, paths, brief_public)
+        except Exception:
+            import logging
+            logging.exception("[ingest] 비동기 영상 번들 실패 tenant=%s", tenant.id)
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: dict) -> None:
+    shorts = generate_for(tenant, asset, [ContentKind.SHORT], images=paths)   # 🎬 영상감독
+    for p in shorts:
+        p.payload.setdefault("image_path", paths[0])
+        p.payload.setdefault("biz_type", getattr(tenant, "biz_type", "local") or "local")
+        p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value, p.payload)
+        p.payload["reach"] = reach.estimate(p.channel.value, p.kind.value, p.payload)
+        p.payload["brief"] = brief_public
+        p.payload["experts"] = ["🎯 전략가", "✍️ 카피라이터", "🎬 영상감독"]
+        db.save_piece(p)
+    short = next((p for p in shorts if p.kind == ContentKind.SHORT
+                  and p.channel == Channel.YOUTUBE and p.payload.get("video_path")), None)
+    if not short:
+        return
+    saved = db.get_set_pieces(asset.id)
+    caption = next((p for p in saved if p.kind == ContentKind.CAPTION), None)
+    reel = ContentPiece(
+        id=str(uuid.uuid4()), tenant_id=tenant.id, asset_id=asset.id,
+        channel=Channel.INSTAGRAM, kind=ContentKind.SHORT,
+        payload={"text": (caption.payload.get("text") if caption else short.payload.get("title", "")),
+                 "title": short.payload.get("title", ""),
+                 "video_path": short.payload.get("video_path"),
+                 "image_path": short.payload.get("image_path"),
+                 "image_paths": short.payload.get("image_paths", []),
+                 "duration_sec": short.payload.get("duration_sec", 0), "is_reel": True,
+                 "target_keywords": short.payload.get("target_keywords", [])},
+        status=ContentStatus.DRAFT)
+    reel.payload["ranking_audit"] = seo.quality_audit(reel.channel.value, reel.kind.value, reel.payload)
+    reel.payload["reach"] = reach.estimate(reel.channel.value, reel.kind.value, reel.payload)
+    db.save_piece(reel)
+    try:
+        from app.generators.carousel import build_carousel
+        blog = next((p for p in saved if p.kind == ContentKind.BLOG), None)
+        pts = short.payload.get("scene_texts") or []
+        title = ((blog.payload.get("title") if blog else None) or short.payload.get("title") or tenant.name)
+        if caption and pts:
+            cdir = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), tenant.id, "carousel")
+            caption.payload["carousel_paths"] = build_carousel(
+                tenant, title, pts, getattr(tenant, "biz_type", "local") or "local", cdir)
+            db.save_piece(caption)
+    except Exception:
+        pass

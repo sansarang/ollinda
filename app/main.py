@@ -298,8 +298,16 @@ def _teaser_html(pieces, brief, asset_id, remaining: int = 0) -> str:
             f"<video src='{v}' controls autoplay muted loop playsinline class='w-full rounded-xl bg-black' style='max-height:440px'></video>"
             f"<a href='{v}' download class='inline-block mt-2 px-3 py-1.5 bg-emerald-500 text-white text-xs font-bold rounded-lg'>⬇ 영상 다운로드</a>"))
     else:
-        cards.append(card("▶️ 유튜브 쇼츠 · 릴스",
-            "<div class='text-slate-500 text-sm'>🎬 영상은 지금 생성이 붐벼 잠깐 뒤 완성돼요. 위 글 채널은 바로 쓰세요!</div>"))
+        cards.append(card("▶️ 유튜브 쇼츠 · 릴스 <span class='text-xs text-emerald-600'>(내 사진으로 만든 영상)</span>",
+            f"<div id='tvid' data-a='{asset_id}'>"
+            "<div class='text-slate-500 text-sm py-6 text-center'>🎬 영상 만드는 중… <span class='text-slate-400'>(30~60초, 자동으로 나타나요)</span>"
+            "<div class='w-full h-1.5 bg-slate-100 rounded-full overflow-hidden mt-3'><div class='h-full bg-emerald-400' style='width:100%;animation:tvp 1.4s ease-in-out infinite'></div></div></div></div>"
+            "<style>@keyframes tvp{0%,100%{opacity:.35}50%{opacity:1}}</style>"
+            "<script>(function(){var el=document.getElementById('tvid');if(!el||el._p)return;el._p=1;var a=el.dataset.a,n=0;"
+            "var iv=setInterval(async function(){n++;if(n>45){clearInterval(iv);el.innerHTML=\"<div class='text-slate-500 text-sm py-4 text-center'>영상은 가입 후 '내 작업실'에서 받을 수 있어요</div>\";return;}"
+            "try{var r=await fetch('/api/demo/video/'+a);var d=await r.json();if(d.ready){clearInterval(iv);"
+            "el.innerHTML='<video src=\"'+d.url+'\" controls autoplay muted loop playsinline class=\"w-full rounded-xl bg-black\" style=\"max-height:440px\"></video>'"
+            "+'<a href=\"'+d.url+'\" download class=\"inline-block mt-2 px-3 py-1.5 bg-emerald-500 text-white text-xs font-bold rounded-lg\">⬇ 영상 다운로드</a>';}}catch(e){}},3000);})();</script>"))
 
     grid = "<div class='grid md:grid-cols-2 gap-3 mb-4'>" + "".join(cards) + "</div>"
     zip_btn = f"<a href='/d/{asset_id}.zip' class='block text-center bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-xl mb-3'>⬇ 전체 다운로드 (글+사진+영상 ZIP)</a>"
@@ -314,6 +322,18 @@ def _teaser_html(pieces, brief, asset_id, remaining: int = 0) -> str:
             "<div class='text-center text-white font-extrabold text-lg mb-1'>✨ 방금 만든 결과 (전체 공개)</div>"
             "<div class='text-center text-slate-300 text-xs mb-3'>글은 복사, 사진·영상은 다운로드해서 바로 쓰세요</div>"
             + photos + grid + zip_btn + cta + "</div>")
+
+
+@app.get("/api/demo/video/{asset_id}")
+def demo_video_status(asset_id: str):
+    """미가입 데모 영상 폴링 — 백그라운드 렌더 완료되면 URL 반환."""
+    if not db.asset_is_demo(asset_id):
+        return JSONResponse({"ready": False})
+    for p in db.get_set_pieces(asset_id):
+        vp = p.payload.get("video_path")
+        if p.kind.value == "short" and vp and os.path.exists(vp):
+            return JSONResponse({"ready": True, "url": f"/d/{asset_id}/f/{os.path.basename(vp)}"})
+    return JSONResponse({"ready": False})
 
 
 @app.get("/d/{asset_id}/f/{fname}")
@@ -359,6 +379,25 @@ def place_search(q: str = ""):
     return JSONResponse({"items": place.search(q), "configured": place.configured()})
 
 
+def _short_region(addr: str) -> str:
+    """전체 주소 → '부산 동구' / '부산 동구 초량동'처럼 짧은 지역(키워드용)."""
+    toks = (addr or "").split()
+    if not toks:
+        return ""
+    sido = toks[0]
+    for suf in ("특별자치도", "특별자치시", "광역시", "특별시", "자치도", "도", "시"):
+        if sido.endswith(suf) and len(sido) > len(suf):
+            sido = sido[:-len(suf)]
+            break
+    parts = [sido]
+    if len(toks) > 1:
+        parts.append(toks[1])                       # 구/군/시
+    dong = next((t for t in toks[2:5] if t.endswith(("동", "읍", "면", "가", "리"))), "")
+    if dong:
+        parts.append(dong)
+    return " ".join(parts)
+
+
 @app.get("/api/lookup")
 def api_lookup(q: str = ""):
     """가게 이름/상품 링크 하나로 자동 판별·입력.
@@ -378,8 +417,9 @@ def api_lookup(q: str = ""):
     local = place.search(q)
     if local:
         it = local[0]
+        region = _short_region(it.get("jibun") or it["address"])   # 시/구/동만 (키워드 오염 방지)
         return JSONResponse({"type": "local", "name": it["name"], "industry": it["category"],
-                             "region": it["address"], "tel": it["tel"], "address": it["address"]})
+                             "region": region, "tel": it["tel"], "address": it["address"]})
     # B) 지역 없음 → 쇼핑검색(셀러)
     shop = place.shop_search(q)
     if shop:
@@ -465,7 +505,9 @@ def signup_post(email: str = Form(""), pw: str = Form("")):
 
 
 @app.get("/login", response_class=HTMLResponse)
-def login_get():
+def login_get(request: Request):
+    if auth.current_user(request):          # 이미 로그인 → 재로그인 없이 바로 작업실
+        return RedirectResponse("/me", status_code=303)
     form = (_google_btn("구글로 로그인")
             + "<a href='/login/kakao' class='block text-center mb-4 py-3 rounded-xl font-bold' "
             "style='background:#FEE500;color:#191600'>💬 카카오로 로그인</a>"
@@ -680,17 +722,36 @@ def my_dashboard(request: Request, ok: str = "", err: str = ""):
                 "네이버는 공식 API가 없어 글을 완성해 드리면 직접 발행(반자동).</p>" + rows + "</div>")
     # ③ 콘텐츠 이력(세트 단위) → 각 항목 = 발행 소재(/kit)
     sets = db.list_sets(tenant_id=t.id, limit=50)
+    _chan_icon = {"instagram": "📷", "naver_blog": "📝", "x": "𝕏", "youtube": "▶️", "facebook": "👍"}
     if sets:
-        hist = "".join(
-            "<div class='flex items-center gap-3 py-3 border-b border-slate-100 last:border-0'>"
-            f"<div class='flex-1 min-w-0'><div class='font-semibold text-sm text-slate-800'>{esc(s['created'])}</div>"
-            f"<div class='text-xs text-slate-400'>{s['n']}개 채널</div></div>"
-            f"<a href='/kit/{s['asset_id']}' class='px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg'>보기</a>"
-            f"<form method=post action='/me/set/{s['asset_id']}/delete' onsubmit=\"return confirm('이 콘텐츠를 삭제할까요?')\">"
-            "<button class='px-2.5 py-1.5 bg-slate-100 text-slate-500 text-xs rounded-lg hover:bg-rose-100 hover:text-rose-600 transition'>삭제</button></form></div>"
-            for s in sets)
+        _cards = []
+        for s in sets:
+            ps = db.get_set_pieces(s["asset_id"])
+            thumb = ""
+            for p in ps:
+                ips = p.payload.get("image_paths") or ([p.payload.get("image_path")] if p.payload.get("image_path") else [])
+                thumb = next((f"/dl/{s['asset_id']}/{os.path.basename(im)}" for im in ips if im and os.path.exists(im)), "")
+                if thumb:
+                    break
+            seen, badges = set(), ""
+            for p in ps:
+                ic = _chan_icon.get(p.channel.value, "•")
+                if ic not in seen:
+                    seen.add(ic)
+                    badges += f"<span>{ic}</span>"
+            thumb_html = (f"<img src='{thumb}' class='w-16 h-16 rounded-xl object-cover flex-shrink-0'>" if thumb
+                          else "<div class='w-16 h-16 rounded-xl bg-gradient-to-br from-indigo-100 to-pink-100 flex items-center justify-center text-2xl flex-shrink-0'>✨</div>")
+            _cards.append(
+                "<div class='flex items-center gap-3 p-3 rounded-2xl border border-slate-100 hover:shadow-md hover:border-indigo-200 transition'>"
+                + thumb_html
+                + f"<div class='flex-1 min-w-0'><div class='font-bold text-sm text-slate-800'>{esc(s['created'])}</div>"
+                + f"<div class='flex items-center gap-1.5 mt-1 text-base'>{badges}<span class='text-xs text-slate-400 ml-1 font-medium'>{s['n']}채널</span></div></div>"
+                + f"<a href='/kit/{s['asset_id']}' class='px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl'>보기</a>"
+                + f"<form method=post action='/me/set/{s['asset_id']}/delete' onsubmit=\"return confirm('이 콘텐츠를 삭제할까요?')\">"
+                + "<button class='px-2 py-2 text-slate-300 hover:text-rose-500 text-lg transition' title='삭제'>🗑</button></form></div>")
+        hist = "<div class='grid sm:grid-cols-2 gap-3'>" + "".join(_cards) + "</div>"
     else:
-        hist = "<p class='text-slate-400 text-sm py-4 text-center'>아직 만든 콘텐츠가 없어요. 위에서 사진 올려 만들어보세요.</p>"
+        hist = "<p class='text-slate-400 text-sm py-6 text-center'>아직 만든 콘텐츠가 없어요. 위에서 사진 올려 만들어보세요.</p>"
     # ── 최초 1회 온보딩 vs 작동 대시보드 ──
     onboarded = bool((t.industry or "").strip())
     if not onboarded:
@@ -2087,7 +2148,7 @@ def _upload_form_html(tenant, token: str) -> str:
     form = f"""<form method=post action='/u/{token}/upload' enctype='multipart/form-data' onsubmit='return showGen()' class='space-y-5'>
       <input type=hidden name=s_name id=s_name><input type=hidden name=s_industry id=s_industry>
       <input type=hidden name=s_biz id=s_biz value='{bt}'><input type=hidden name=s_region id=s_region>
-      <input type=hidden name=s_tel id=s_tel><input type=hidden name=s_buy id=s_buy>
+      <input type=hidden name=s_tel id=s_tel><input type=hidden name=s_buy id=s_buy><input type=hidden name=s_address id=s_address>
       <div><label class='{lb}'>1. 가게 이름 또는 상품 링크</label>
         <div class='flex gap-2'>
           <input id=lk_q placeholder='초량 루마썬팅 · https://스토어링크' class='{inp} flex-1'>
@@ -2123,6 +2184,7 @@ def _upload_form_html(tenant, token: str) -> str:
           "document.getElementById('s_name').value=d.name||'';document.getElementById('s_industry').value=d.industry||'';"
           "var bz=(d.type==='seller')?'seller':'local';document.getElementById('s_biz').value=bz;"
           "document.getElementById('s_region').value=d.region||'';document.getElementById('s_tel').value=d.tel||'';document.getElementById('s_buy').value=d.buy_url||'';"
+          "document.getElementById('s_address').value=d.address||'';"
           "var rb=document.querySelector('input[name=biztype][value=\"'+bz+'\"]');if(rb)rb.checked=true;"
           "var kind=(bz==='seller')?'📦 온라인 셀러':'🏪 동네 매장';"
           "b.innerHTML='<span class=\"text-emerald-600 font-semibold\">✓ '+(d.name||'')+' · '+(d.industry||'')+' · '+kind+' 자동 인식됨</span>';"
@@ -2156,7 +2218,7 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
                  purpose: str = Form(""), target: str = Form(""), extra: str = Form(""),
                  request: str = Form(""), s_name: str = Form(""), s_industry: str = Form(""),
                  s_biz: str = Form(""), s_region: str = Form(""), s_tel: str = Form(""),
-                 s_buy: str = Form("")):
+                 s_buy: str = Form(""), s_address: str = Form("")):
     tenant, _ = db.get_tenant_by_token(token)
     if not tenant:
         return HTMLResponse("<p>잘못된 링크입니다.</p>", status_code=404)
@@ -2164,8 +2226,9 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
     if s_name.strip() or s_industry.strip():
         db.rename_tenant(tenant.id, s_name.strip() or tenant.name,
                          s_industry.strip() or tenant.industry, s_region.strip() or tenant.region)
-        if s_tel.strip():
-            db.update_tenant_profile(tenant.id, s_tel.strip(), s_region.strip() or tenant.address, tenant.hours, tenant.map_url)
+        if s_tel.strip() or s_address.strip():   # 전체주소=address(지도블록), 짧은 지역=region(키워드)
+            db.update_tenant_profile(tenant.id, s_tel.strip() or tenant.phone,
+                                     s_address.strip() or tenant.address, tenant.hours, tenant.map_url)
         _bz = s_biz.strip() if s_biz.strip() in ("local", "seller", "hybrid") else (tenant.biz_type or "local")
         db.update_tenant_classification(tenant.id, _bz, tenant.marketplace, s_buy.strip() or tenant.buy_url,
                                         tenant.search_kw, tenant.brand_name)
