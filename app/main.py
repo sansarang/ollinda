@@ -2001,35 +2001,41 @@ def admin_demo_reset(ip: str = ""):
 
 @app.api_route("/admin/cleanup", methods=["GET", "POST"])
 def admin_cleanup():
-    """디스크 확보 — 데모 테넌트의 저장 파일(영상·이미지) + DB 레코드 삭제."""
+    """디스크 확보 — 사장님(OWNER) 소유 tenant만 남기고 데모·테스트 저장폴더+DB 전부 삭제."""
     import shutil
     import subprocess
-    base = os.environ.get("SHOPCAST_STORAGE", "storage")
+    from app.storage import STORAGE_DIR
+    keep = set()
     with db._conn() as c:
-        demo_ids = [r["id"] for r in c.execute("SELECT id FROM tenants WHERE is_demo=1").fetchall()]
+        for r in c.execute("SELECT tenant_id, email FROM users").fetchall():
+            if (r["email"] or "").lower() in OWNER_EMAILS and r["tenant_id"]:
+                keep.add(r["tenant_id"])
     freed, removed = 0, 0
-    for tid in demo_ids:
-        p = os.path.join(base, tid)
-        if os.path.isdir(p):
-            for root, _dirs, fnames in os.walk(p):
-                for fn in fnames:
-                    try:
-                        freed += os.path.getsize(os.path.join(root, fn))
-                    except Exception:
-                        pass
-            shutil.rmtree(p, ignore_errors=True)
-            removed += 1
+    if os.path.isdir(STORAGE_DIR):
+        for name in list(os.listdir(STORAGE_DIR)):
+            p = os.path.join(STORAGE_DIR, name)
+            if os.path.isdir(p) and name not in keep:
+                for root, _d, fs in os.walk(p):
+                    for fn in fs:
+                        try:
+                            freed += os.path.getsize(os.path.join(root, fn))
+                        except Exception:
+                            pass
+                shutil.rmtree(p, ignore_errors=True)
+                removed += 1
     try:
         with db._conn() as c:
-            c.execute("DELETE FROM content_pieces WHERE tenant_id IN (SELECT id FROM tenants WHERE is_demo=1)")
-            c.execute("DELETE FROM tenants WHERE is_demo=1")
+            if keep:
+                ph = ",".join("?" * len(keep))
+                c.execute(f"DELETE FROM content_pieces WHERE tenant_id NOT IN ({ph})", tuple(keep))
+                c.execute(f"DELETE FROM tenants WHERE id NOT IN ({ph})", tuple(keep))
     except Exception:
         pass
     try:
-        df = subprocess.run(["df", "-h", base], capture_output=True, text=True, timeout=8).stdout
+        df = subprocess.run(["df", "-h", STORAGE_DIR], capture_output=True, text=True, timeout=8).stdout
     except Exception:
         df = ""
-    return {"removed_demo_folders": removed, "freed_mb": round(freed / 1e6, 1), "df": df}
+    return {"kept_tenants": len(keep), "removed_folders": removed, "freed_mb": round(freed / 1e6, 1), "df": df}
 
 
 @app.api_route("/admin/testgen", methods=["GET", "POST"])
