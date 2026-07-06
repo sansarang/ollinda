@@ -1031,7 +1031,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
     def pack_btn(pid, has_video):
         what = "글+사진+영상" if has_video else "글+사진"
         return (f"<a href='/kit/{asset_id}/pack/{pid}' class='flex-1 flex items-center justify-center gap-1 px-4 py-2.5 "
-                f"bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold rounded-xl transition'>⬇ 이 채널 통째로 받기 ({what})</a>")
+                f"bg-emerald-500 hover:bg-emerald-600 active:scale-[.98] text-white text-sm font-bold rounded-xl transition'>⬇ 이 채널 통째로 받기 ({what})</a>")
 
     def eb(pl):
         ex = pl.get("experts") or []
@@ -1049,7 +1049,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
 
     def _cp(cid, text, label):
         return (f"<textarea id='{cid}' class='hidden'>{esc(text)}</textarea>"
-                f"<button type=button onclick=\"cp('{cid}',this)\" class='px-3 py-1.5 bg-slate-900 text-white text-xs font-bold rounded-lg'>📋 {label}</button>")
+                f"<button type=button onclick=\"cp('{cid}',this)\" class='px-3.5 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-slate-300 active:scale-[.98] text-xs font-bold rounded-xl transition'>📋 {label}</button>")
 
     def _blog_body(body):
         out = []
@@ -1135,6 +1135,8 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
             lab = "▶️ 유튜브 쇼츠" if p.channel.value == "youtube" else "🎬 인스타 릴스"
             dur = int(pl.get("duration_sec") or 0)
             durb = (f"<div class='absolute top-2 right-2 bg-black/70 text-white text-[11px] font-bold px-1.5 py-0.5 rounded'>{dur // 60}:{dur % 60:02d}</div>" if dur else "")
+            durb += ("<div class='absolute top-2 left-2 bg-black/70 text-white text-[11px] font-bold px-1.5 py-0.5 rounded'>"
+                     + ("▶️ 쇼츠" if p.channel.value == "youtube" else "🎬 릴스") + "</div>")
             if vurl:
                 player = (f"<div class='relative'><video src='{vurl}' controls playsinline preload='metadata' poster='{first_img}' "
                           f"class='w-full max-h-[520px] bg-black'></video>{durb}</div>")
