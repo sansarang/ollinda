@@ -2032,6 +2032,25 @@ def admin_cleanup():
     return {"removed_demo_folders": removed, "freed_mb": round(freed / 1e6, 1), "df": df}
 
 
+@app.api_route("/admin/testgen", methods=["GET", "POST"])
+def admin_testgen():
+    """진단용 — ingest_upload 동기 실행해 실제 에러/결과 반환."""
+    import traceback
+    import io
+    from PIL import Image
+    t = next((x for x in db.list_tenants() if (x.industry or "").strip() and not getattr(x, "is_demo", 0)), None)
+    if not t:
+        return {"err": "no onboarded tenant"}
+    b = io.BytesIO()
+    Image.new("RGB", (600, 400), (120, 140, 90)).save(b, "JPEG")
+    try:
+        from app.services.ingest import ingest_upload
+        made = ingest_upload(t, [(b.getvalue(), "test.jpg")], "[진단테스트]")
+        return {"ok": True, "made": len(made), "tenant": t.name}
+    except Exception as e:
+        return {"err": repr(e), "tb": traceback.format_exc()[-1500:]}
+
+
 @app.post("/admin/shops/{tid}/autonomy")
 def shop_autonomy(tid: str, level: int = Form(0)):
     db.set_autonomy(tid, level)
