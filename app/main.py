@@ -789,7 +789,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 + f"<a href='/me?view={s['asset_id']}' class='px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-[.98] text-white text-xs font-bold rounded-xl transition'>보기</a>"
                 + f"<form method=post action='/me/set/{s['asset_id']}/delete' onsubmit=\"return confirm('이 콘텐츠를 삭제할까요?')\">"
                 + "<button class='px-1.5 py-2 text-slate-300 hover:text-rose-500 text-base transition' title='삭제'>🗑</button></form></div>")
-        hist = "<div class='space-y-2.5'>" + "".join(_cards) + "</div>"
+        hist = "<div class='grid sm:grid-cols-2 gap-3'>" + "".join(_cards) + "</div>"
     else:
         hist = "<p class='text-slate-400 text-sm py-6 text-center'>아직 만든 콘텐츠가 없어요. 위에서 사진 올려 만들어보세요.</p>"
     # ── 최초 1회 온보딩 vs 작동 대시보드 ──
@@ -859,28 +859,48 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                    "<h2 class='font-bold text-slate-900 mb-1'>📊 성과 리포트 · 최근 키워드</h2>"
                    f"<p class='text-xs text-slate-400 mb-3'>노리는 키워드 {len(_kws2)}개</p>{_chips}</div>")
     view = (request.query_params.get("view") or "").strip()
-    result_html = _result_html(u, view, back_href="/me", back_label="◀ 새로 만들기") if view else None
-    right = (("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5 sm:p-6'>" + result_html + "</div>")
-             if result_html else upload_section)
-    two = ("<div class='grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] gap-6 items-start'>"
-           f"<div class='space-y-6'>{content}{kw_card}</div>"
-           f"<div id='createForm'>{right}</div></div>")
-    # 사이드바 + 회색 배경 페이지 (레퍼런스 레이아웃)
+    tab = (request.query_params.get("tab") or "").strip()
+    result_html = _result_html(u, view, back_href="/me?tab=content", back_label="◀ 내 콘텐츠") if view else None
+    _sbadge = (f"<div class='inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-700 text-sm font-bold px-3 py-1.5 rounded-full mb-4'>🏪 {esc(_sname)}</div>" if _sname else "")
+    _fw = "bg-white rounded-3xl border border-slate-100 shadow-sm p-6 sm:p-8"
+    # 사이드바 클릭 = 전체 폭 단일 패널 전환 (내 콘텐츠 / 리포트 / 결과 / 만들기)
+    if result_html:                                        # 콘텐츠 결과 (전체 폭)
+        active = "content"
+        main_inner = _sbadge + f"<div class='{_fw}'>{result_html}</div>"
+    elif tab == "content":                                # 📋 내 콘텐츠 (전체 폭)
+        active = "content"
+        main_inner = (_sbadge + f"<div class='{_fw}'>"
+                      "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>📋 내 콘텐츠</h2>"
+                      "<p class='text-sm text-slate-400 mb-5'>‘보기’를 누르면 결과가 크게 나와요.</p>" + hist + "</div>")
+    elif tab == "report":                                 # 📊 성과 리포트 · 최근 키워드 (전체 폭)
+        active = "report"
+        _kwbox = ((f"<div class='{_fw}'><h2 class='text-2xl font-extrabold text-slate-900 mb-1'>📊 성과 리포트 · 최근 키워드</h2>"
+                   f"<p class='text-sm text-slate-400 mb-5'>노리는 키워드 {len(_kws2)}개</p>{_chips}</div>") if _kws2 else "")
+        main_inner = _sbadge + stats_row + _kwbox
+    else:                                                 # ✨ 만들기 (기본)
+        active = "create"
+        main_inner = greeting + stats_row + f"<div class='max-w-3xl'>{upload_section}</div>"
     from app import landing
-    _navitems = [("🏠", "홈", "/me"), ("📄", "내 콘텐츠", "#myContent"),
-                 ("✨", "만들기", "#createForm"), ("📊", "리포트", "#perfCard")]
+    _navitems = [("🏠", "홈", "/me", "create"), ("📄", "내 콘텐츠", "/me?tab=content", "content"),
+                 ("📊", "리포트", "/me?tab=report", "report")]
+
+    def _navlink(i, l, h, key):
+        cls = ("bg-indigo-50 text-indigo-700" if key == active
+               else "text-slate-500 hover:bg-slate-50 hover:text-slate-900")
+        return (f"<a href='{h}' class='flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold {cls} transition'>"
+                f"<span class='text-base'>{i}</span>{l}</a>")
     sidebar = ("<aside class='hidden lg:flex flex-col w-56 flex-shrink-0 border-r border-slate-100 bg-white p-4 sticky top-0 h-screen'>"
                f"<a href='/' class='flex items-center gap-2 font-extrabold text-lg mb-8 px-2'>{landing.LOGO}<span>올린다</span></a>"
-               "<nav class='space-y-1'>"
-               + "".join(f"<a href='{h}' class='flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition'><span class='text-base'>{i}</span>{l}</a>"
-                         for i, l, h in _navitems)
+               "<nav class='space-y-1'>" + "".join(_navlink(*n) for n in _navitems)
                + f"</nav><div class='mt-auto px-3 pt-4 border-t border-slate-100'><div class='text-xs text-slate-400 mb-1'>{_pn}</div>"
                "<a href='/logout' class='text-sm font-semibold text-slate-400 hover:text-slate-700'>↩ 로그아웃</a></div></aside>")
+    _mobnav = ("<div class='flex lg:hidden items-center gap-2 mb-4 overflow-x-auto'>"
+               + "".join(_navlink(*n) for n in _navitems)
+               + "<a href='/logout' class='ml-auto text-sm text-slate-400 whitespace-nowrap'>로그아웃</a></div>")
     page = (landing._HEAD
             + "<div class='flex min-h-screen bg-slate-100'>" + sidebar
-            + "<main class='flex-1 min-w-0 px-5 sm:px-8 py-8'>"
-            + "<div class='flex justify-end mb-2 lg:hidden'><a href='/logout' class='text-sm text-slate-400'>로그아웃</a></div>"
-            + "<div class='max-w-[1400px]'>" + banner + greeting + stats_row + two + "</div></main></div>"
+            + "<main class='flex-1 min-w-0 px-5 sm:px-8 py-8'>" + _mobnav
+            + "<div class='max-w-[1400px]'>" + banner + main_inner + "</div></main></div>"
             + landing._FOOT)
     return HTMLResponse(page)
 
