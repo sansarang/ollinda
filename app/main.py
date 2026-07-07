@@ -808,30 +808,66 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 + (f"<div class='inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-700 text-sm font-bold px-3 py-1.5 rounded-full mb-3'>🏪 {esc(_sname)}</div>" if _sname else "")
                 + "<div class='text-2xl sm:text-3xl font-extrabold text-slate-900 leading-tight'>사진만 올리면 "
                 "<span style='background:linear-gradient(120deg,#6366f1,#ec4899);-webkit-background-clip:text;background-clip:text;color:transparent'>5채널 콘텐츠</span>가 완성돼요</div></div>")
-    steps = ""   # 3단계 가이드 제거(간결화)
-    # ✨ 생성 카드 — 깔끔한 화이트 카드
-    upload_section = ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6 sm:p-7 mb-5'>"
+    upload_section = ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6 sm:p-7'>"
                       "<div class='mb-5'><div class='text-lg font-extrabold text-slate-900'>✨ 콘텐츠 만들기</div>"
                       "<div class='text-sm text-slate-400'>가게 이름·사진만 있으면 끝</div></div>"
                       + _upload_form_html(t, tok) + "</div>")
-    content = ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow p-5'>"
+    content = ("<div id='myContent' class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5'>"
                "<h2 class='font-bold text-slate-900 mb-1'>📋 내 콘텐츠</h2>"
                "<p class='text-xs text-slate-400 mb-3'>‘보기’를 누르면 결과가 나와요.</p>" + hist + "</div>")
-    settings = ("<details class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6'>"
-                "<summary class='font-bold cursor-pointer text-slate-600 select-none'>⚙️ 가게 정보 수정 (검색으로 자동입력)</summary>"
-                "<div class='mt-3'>" + search_box + store_form + place_js + "</div></details>")
-    perf = _perf_report(t.id)   # 성과 요약 (플레이스·리뷰·제휴링크 도구는 전부 삭제)
-    # 오른쪽 = 결과(보기 클릭 시) 또는 생성카드
+    # 성과 데이터(통계 카드 + 최근 키워드)
+    _sets2, _scores, _kws2, _np = db.list_sets(tenant_id=t.id, limit=200), [], [], 0
+    for s in _sets2:
+        for p in db.get_set_pieces(s["asset_id"]):
+            _np += 1
+            sc = (p.payload.get("ranking_audit") or {}).get("score")
+            if isinstance(sc, (int, float)):
+                _scores.append(sc)
+            for k in (p.payload.get("target_keywords") or []):
+                if k and k not in _kws2:
+                    _kws2.append(k)
+    _avg = round(sum(_scores) / len(_scores)) if _scores else 0
+
+    def _statc(icon, chip, num, label):
+        return (f"<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex items-center gap-4'>"
+                f"<div class='w-12 h-12 rounded-2xl flex items-center justify-center text-2xl {chip} flex-shrink-0'>{icon}</div>"
+                f"<div class='min-w-0'><div class='text-3xl font-extrabold text-slate-900 leading-none'>{num}</div>"
+                f"<div class='text-xs text-slate-400 font-semibold mt-1'>{label}</div></div></div>")
+    stats_row = (("<div class='grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6'>"
+                  + _statc("📦", "bg-emerald-100 text-emerald-600", len(_sets2), "만든 세트")
+                  + _statc("🔍", "bg-amber-100 text-amber-600", _np, "채널 발행물")
+                  + _statc("⭐", "bg-violet-100 text-violet-600", _avg, "평균 노출점수") + "</div>") if _sets2 else "")
+    kw_card = ""
+    if _kws2:
+        _chips = "".join(f"<span class='inline-block bg-slate-100 text-slate-600 text-xs px-3 py-1.5 rounded-full mr-1.5 mb-1.5'>{esc(k)}</span>" for k in _kws2[:9])
+        kw_card = ("<div id='perfCard' class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5'>"
+                   "<h2 class='font-bold text-slate-900 mb-1'>📊 성과 리포트 · 최근 키워드</h2>"
+                   f"<p class='text-xs text-slate-400 mb-3'>노리는 키워드 {len(_kws2)}개</p>{_chips}</div>")
     view = (request.query_params.get("view") or "").strip()
     result_html = _result_html(u, view, back_href="/me", back_label="◀ 새로 만들기") if view else None
-    if result_html:
-        right = "<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5 sm:p-6'>" + result_html + "</div>"
-    else:
-        right = upload_section
-    two = ("<div class='grid lg:grid-cols-[340px_1fr] gap-6 items-start'>"
-           f"<div class='order-2 lg:order-1'>{content}</div>"
-           f"<div class='order-1 lg:order-2'>{right}</div></div>")
-    return _subscriber_page("", banner + greeting + perf + two, wide=True)
+    right = (("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5 sm:p-6'>" + result_html + "</div>")
+             if result_html else upload_section)
+    two = ("<div class='grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] gap-6 items-start'>"
+           f"<div class='space-y-6'>{content}{kw_card}</div>"
+           f"<div id='createForm'>{right}</div></div>")
+    # 사이드바 + 회색 배경 페이지 (레퍼런스 레이아웃)
+    from app import landing
+    _navitems = [("🏠", "홈", "/me"), ("📄", "내 콘텐츠", "#myContent"),
+                 ("✨", "만들기", "#createForm"), ("📊", "리포트", "#perfCard")]
+    sidebar = ("<aside class='hidden lg:flex flex-col w-56 flex-shrink-0 border-r border-slate-100 bg-white p-4 sticky top-0 h-screen'>"
+               f"<a href='/' class='flex items-center gap-2 font-extrabold text-lg mb-8 px-2'>{landing.LOGO}<span>올린다</span></a>"
+               "<nav class='space-y-1'>"
+               + "".join(f"<a href='{h}' class='flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition'><span class='text-base'>{i}</span>{l}</a>"
+                         for i, l, h in _navitems)
+               + f"</nav><div class='mt-auto px-3 pt-4 border-t border-slate-100'><div class='text-xs text-slate-400 mb-1'>{_pn}</div>"
+               "<a href='/logout' class='text-sm font-semibold text-slate-400 hover:text-slate-700'>↩ 로그아웃</a></div></aside>")
+    page = (landing._HEAD
+            + "<div class='flex min-h-screen bg-slate-50'>" + sidebar
+            + "<main class='flex-1 min-w-0 px-5 sm:px-8 py-8'>"
+            + "<div class='flex justify-end mb-2 lg:hidden'><a href='/logout' class='text-sm text-slate-400'>로그아웃</a></div>"
+            + "<div class='max-w-6xl'>" + banner + greeting + stats_row + two + "</div></main></div>"
+            + landing._FOOT)
+    return HTMLResponse(page)
 
 
 @app.post("/me/store")
