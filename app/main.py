@@ -2213,11 +2213,30 @@ def admin_cleanup():
     # 사장님(보존) tenant의 오래된 영상도 정리 (keep_recent=2로 강하게)
     for tid in keep:
         freed += _prune_old_media(tid, keep_recent=2)
+    # ★ DB 추적 여부와 무관하게 — 저장소 전체에서 오래된 영상(mp4)을 직접 삭제(고아 파일 포함)
+    mp4s = []
+    for root, _d, fs in os.walk(STORAGE_DIR):
+        for fn in fs:
+            if fn.lower().endswith(".mp4"):
+                fp = os.path.join(root, fn)
+                try:
+                    mp4s.append((os.path.getmtime(fp), os.path.getsize(fp), fp))
+                except Exception:
+                    pass
+    mp4s.sort(reverse=True)                    # 최신 먼저
+    mp4_total = sum(m[1] for m in mp4s)
+    for _mt, sz, fp in mp4s[6:]:               # 최근 6개만 남기고 삭제
+        try:
+            os.remove(fp)
+            freed += sz
+        except Exception:
+            pass
     try:
         df = subprocess.run(["df", "-h", STORAGE_DIR], capture_output=True, text=True, timeout=8).stdout
     except Exception:
         df = ""
-    return {"kept_tenants": len(keep), "removed_folders": removed, "freed_mb": round(freed / 1e6, 1), "df": df}
+    return {"kept_tenants": len(keep), "removed_folders": removed, "freed_mb": round(freed / 1e6, 1),
+            "mp4_count": len(mp4s), "mp4_total_mb": round(mp4_total / 1e6, 1), "df": df}
 
 
 @app.api_route("/admin/testgen", methods=["GET", "POST"])
