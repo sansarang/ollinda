@@ -398,6 +398,21 @@ def _short_region(addr: str) -> str:
     return " ".join(parts)
 
 
+def _clean_kw(k: str) -> str:
+    """주소범벅 키워드를 짧게 — '부산광역시 동구 …274번길 7-7 1층 105호 썬팅업체 추천' → '부산 동구 썬팅업체 추천'."""
+    import re as _re
+    if not _re.search(r"[0-9]|번길|[0-9]층|[0-9]호|대로|번지", k or ""):
+        return k                               # 주소 안 낀 정상 키워드는 그대로
+    region = _short_region(k)                  # 부산 동구 (+동)
+    rset = set(region.split())
+    tail = [t for t in (k or "").split()
+            if t not in rset
+            and not _re.search(r"[0-9]|번길|대로|^.+로$|^.+길$|광역시|특별시|특별자치|자치도|^.+도$", t)
+            and t not in ("시", "군", "구", "읍", "면")]
+    out = (region + " " + " ".join(tail)).strip()
+    return out or region
+
+
 @app.get("/api/lookup")
 def api_lookup(q: str = ""):
     """가게 이름/상품 링크 하나로 자동 판별·입력.
@@ -839,7 +854,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                   + _statc("⭐", "bg-violet-100 text-violet-600", _avg, "평균 노출점수") + "</div>") if _sets2 else "")
     kw_card = ""
     if _kws2:
-        _chips = "".join(f"<span class='inline-block bg-slate-100 text-slate-600 text-xs px-3 py-1.5 rounded-full mr-1.5 mb-1.5'>{esc(k)}</span>" for k in _kws2[:9])
+        _chips = "".join(f"<span class='inline-block bg-slate-100 text-slate-600 text-xs px-3 py-1.5 rounded-full mr-1.5 mb-1.5'>{esc(_clean_kw(k))}</span>" for k in _kws2[:9])
         kw_card = ("<div id='perfCard' class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5'>"
                    "<h2 class='font-bold text-slate-900 mb-1'>📊 성과 리포트 · 최근 키워드</h2>"
                    f"<p class='text-xs text-slate-400 mb-3'>노리는 키워드 {len(_kws2)}개</p>{_chips}</div>")
