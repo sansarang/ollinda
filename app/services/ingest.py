@@ -157,3 +157,9 @@ def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: di
             db.save_piece(caption)
     except Exception:
         pass
+    # ☁ 생성된 영상을 R2에 미러(설정 시) — 로컬 자동정리 후에도 영구 서빙
+    try:
+        from app import storage as _st
+        _st.mirror_to_r2(short.payload.get("video_path"))
+    except Exception:
+        pass

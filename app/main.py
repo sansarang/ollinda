@@ -347,7 +347,9 @@ def demo_media(asset_id: str, fname: str):
         return HTMLResponse(status_code=404)
     path = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), pieces[0].tenant_id, fname)
     if not os.path.exists(path):
-        return HTMLResponse(status_code=404)
+        from app import storage as _st
+        r2 = _st.r2_media_url(pieces[0].tenant_id, fname)   # 로컬 정리됨 → R2에서 서빙
+        return RedirectResponse(r2, status_code=302) if r2 else HTMLResponse(status_code=404)
     ext = fname.rsplit(".", 1)[-1].lower()
     mt = {"mp4": "video/mp4", "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png"}.get(ext, "application/octet-stream")
     return FileResponse(path, media_type=mt, filename=fname)
@@ -1333,7 +1335,9 @@ def dl_media(request: Request, asset_id: str, fname: str):
         return HTMLResponse(status_code=404)
     path = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), pieces[0].tenant_id, fname)
     if not os.path.exists(path):
-        return HTMLResponse(status_code=404)
+        from app import storage as _st
+        r2 = _st.r2_media_url(pieces[0].tenant_id, fname)   # 로컬 정리됨 → R2에서 서빙
+        return RedirectResponse(r2, status_code=302) if r2 else HTMLResponse(status_code=404)
     ext = fname.rsplit(".", 1)[-1].lower()
     mt = {"mp4": "video/mp4", "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png"}.get(ext, "application/octet-stream")
     return FileResponse(path, media_type=mt, filename=fname)
