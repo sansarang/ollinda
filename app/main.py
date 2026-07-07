@@ -2358,7 +2358,7 @@ def _upload_form_html(tenant, token: str) -> str:
     biz_toggle = ("<div class='grid grid-cols-2 gap-2.5'>" + _bz("local", "🏪", "동네 매장")
                   + _bz("seller", "📦", "온라인 셀러") + "</div>")
     lb = "block text-sm font-bold text-slate-800 mb-2"
-    form = f"""<form method=post action='/u/{token}/upload' enctype='multipart/form-data' onsubmit='return showGen()' class='space-y-6'>
+    form = f"""<form method=post action='/u/{token}/upload' enctype='multipart/form-data' onsubmit='return showGen(event)' class='space-y-6'>
       <input type=hidden name=s_name id=s_name><input type=hidden name=s_industry id=s_industry><input type=hidden name=s_biz id=s_biz value='{bt}'>
       <div><label class='{lb}'>1. 가게 이름 또는 상품 링크</label>
         <div class='flex gap-2'>
@@ -2423,16 +2423,24 @@ def _upload_form_html(tenant, token: str) -> str:
           "var kind=(bz==='seller')?'📦 온라인 셀러':'🏪 동네 매장';"
           "b.innerHTML='<span class=\"text-emerald-600 font-semibold\">✓ '+(d.name||'')+' · '+(d.industry||'')+' · '+kind+' 자동 인식됨</span>';"
           "}catch(e){b.innerHTML='<span class=\"text-rose-400\">인식 실패</span>';}}"
-          "function showGen(){var o=document.getElementById('genOverlay');o.classList.remove('hidden');o.classList.add('flex');"
+          "async function showGen(e){if(e&&e.preventDefault)e.preventDefault();var f=(e&&e.target)?e.target:document.querySelector('form[action*=\"/upload\"]');"
+          "var o=document.getElementById('genOverlay');o.classList.remove('hidden');o.classList.add('flex');"
           "var st=[[0,'🎯 마케팅 전략가가 분석 중…'],[25,'✍️ 카피라이터가 글 쓰는 중…'],[55,'🔍 SEO 편집장이 다듬는 중…'],[80,'🎬 영상 감독이 마무리 중…']];"
-          "var p=0;setInterval(function(){p=Math.min(p+(p<70?1.5:0.4),96);var b=document.getElementById('gBar');if(!b)return;b.style.width=p+'%';document.getElementById('gPct').textContent=Math.round(p)+'%';var l=st[0][1];st.forEach(function(s){if(p>=s[0])l=s[1];});document.getElementById('gLabel').textContent=l;},500);return true;}"
+          "var p=0;var tick=setInterval(function(){p=Math.min(p+(p<70?1.2:0.35),95);var b=document.getElementById('gBar');if(!b)return;b.style.width=p+'%';document.getElementById('gPct').textContent=Math.round(p)+'%';var l=st[0][1];st.forEach(function(s){if(p>=s[0])l=s[1];});document.getElementById('gLabel').textContent=l;},500);"
+          "var base=0;try{base=(await (await fetch('/me/sets/count')).json()).n;}catch(_){}"
+          "try{await fetch(f.action,{method:'POST',body:new FormData(f)});}catch(_){}"
+          "var n=0;var iv=setInterval(async function(){n++;if(n>80){clearInterval(iv);clearInterval(tick);location.href='/me';return;}"
+          "try{var d=await (await fetch('/me/sets/count')).json();if(d.n>base){clearInterval(iv);clearInterval(tick);var b=document.getElementById('gBar');if(b)b.style.width='100%';"
+          "document.getElementById('gPct').textContent='100%';document.getElementById('gLabel').textContent='✅ 완성!';"
+          "setTimeout(function(){location.href='/me?ok='+encodeURIComponent('✨ 콘텐츠가 완성됐어요!');},500);}}catch(_){}"
+          "},3000);return false;}"
           "</script>")
-    gen_overlay = ("<div id='genOverlay' class='fixed inset-0 z-50 hidden items-center justify-center' style='background:rgba(15,23,42,.92)'>"
-                   "<div class='bg-white rounded-3xl p-7 w-80 max-w-[90vw] text-center shadow-2xl'>"
-                   "<div id='gLabel' class='font-bold mb-3'>🎯 마케팅 전략가가 분석 중…</div>"
-                   "<div class='w-full h-2.5 bg-slate-100 rounded-full overflow-hidden'><div id='gBar' class='h-full' style='width:0%;transition:width .4s;background:linear-gradient(90deg,#6366f1,#ec4899)'></div></div>"
-                   "<div id='gPct' class='text-slate-400 text-xs mt-1'>0%</div>"
-                   "<p class='text-xs text-slate-400 mt-3'>AI 전문가팀이 5채널을 만드는 중… (20~40초)</p></div></div>")
+    gen_overlay = ("<div id='genOverlay' class='fixed inset-0 z-50 hidden items-center justify-center' style='background:rgba(15,23,42,.45);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)'>"
+                   "<div class='bg-white rounded-2xl p-6 w-72 max-w-[85vw] text-center shadow-2xl'>"
+                   "<div id='gLabel' class='font-bold text-sm mb-3'>🎯 마케팅 전략가가 분석 중…</div>"
+                   "<div class='w-full h-2 bg-slate-100 rounded-full overflow-hidden'><div id='gBar' class='h-full' style='width:0%;transition:width .4s;background:linear-gradient(90deg,#6366f1,#ec4899)'></div></div>"
+                   "<div id='gPct' class='text-slate-400 text-xs mt-1.5'>0%</div>"
+                   "<p class='text-xs text-slate-400 mt-3'>AI 전문가팀이 만드는 중… (20~60초)</p></div></div>")
     return form + js + gen_overlay
 
 
