@@ -2158,9 +2158,29 @@ def admin_demo_reset(ip: str = ""):
     return {"ok": True, "scope": ip.strip() or "전체", "message": "무료 체험 사용량을 초기화했어요"}
 
 
+def _prune_old_media(tenant_id: str, keep_recent: int = 4) -> int:
+    """오래된 세트의 영상·캐러셀 파일 삭제(디스크 확보). 텍스트·사진·최근 세트는 유지."""
+    freed = 0
+    try:
+        sets = db.list_sets(tenant_id=tenant_id, limit=500)   # 최신순
+    except Exception:
+        return 0
+    for s in sets[keep_recent:]:                              # 최근 keep_recent개 이후(오래된 것)
+        for p in db.get_set_pieces(s["asset_id"]):
+            targets = [p.payload.get("video_path")] + list(p.payload.get("carousel_paths") or [])
+            for fp in targets:
+                if fp and os.path.exists(fp):
+                    try:
+                        freed += os.path.getsize(fp)
+                        os.remove(fp)
+                    except Exception:
+                        pass
+    return freed
+
+
 @app.api_route("/admin/cleanup", methods=["GET", "POST"])
 def admin_cleanup():
-    """디스크 확보 — 사장님(OWNER) 소유 tenant만 남기고 데모·테스트 저장폴더+DB 전부 삭제."""
+    """디스크 확보 — 사장님(OWNER) 소유 tenant만 남기고 데모·테스트 저장폴더+DB 전부 삭제 + 사장님 오래된 영상 정리."""
     import shutil
     import subprocess
     from app.storage import STORAGE_DIR
@@ -2190,6 +2210,9 @@ def admin_cleanup():
                 c.execute(f"DELETE FROM tenants WHERE id NOT IN ({ph})", tuple(keep))
     except Exception:
         pass
+    # 사장님(보존) tenant의 오래된 영상도 정리 (keep_recent=2로 강하게)
+    for tid in keep:
+        freed += _prune_old_media(tid, keep_recent=2)
     try:
         df = subprocess.run(["df", "-h", STORAGE_DIR], capture_output=True, text=True, timeout=8).stdout
     except Exception:
@@ -2527,6 +2550,7 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
 
     def _bg_generate():
         try:
+            _prune_old_media(tenant.id, keep_recent=5)   # 생성 전 오래된 영상 정리(디스크 확보)
             if _ind:
                 from app.industries import ensure_profile
                 ensure_profile(_ind)
