@@ -877,9 +877,9 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         _kwbox = ((f"<div class='{_fw}'><h2 class='text-2xl font-extrabold text-slate-900 mb-1'>📊 성과 리포트 · 최근 키워드</h2>"
                    f"<p class='text-sm text-slate-400 mb-5'>노리는 키워드 {len(_kws2)}개</p>{_chips}</div>") if _kws2 else "")
         main_inner = _sbadge + stats_row + _kwbox
-    else:                                                 # ✨ 만들기 (기본)
+    else:                                                 # ✨ 만들기 (기본) — 통계·내콘텐츠 없이 폼만 전체폭 크게
         active = "create"
-        main_inner = greeting + stats_row + f"<div class='max-w-3xl'>{upload_section}</div>"
+        main_inner = greeting + upload_section
     from app import landing
     _navitems = [("🏠", "홈", "/me", "create"), ("📄", "내 콘텐츠", "/me?tab=content", "content"),
                  ("📊", "리포트", "/me?tab=report", "report")]
