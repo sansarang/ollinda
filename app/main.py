@@ -829,10 +829,10 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
     _avg = round(sum(_scores) / len(_scores)) if _scores else 0
 
     def _statc(icon, chip, num, label):
-        return (f"<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex items-center gap-4'>"
-                f"<div class='w-12 h-12 rounded-2xl flex items-center justify-center text-2xl {chip} flex-shrink-0'>{icon}</div>"
-                f"<div class='min-w-0'><div class='text-3xl font-extrabold text-slate-900 leading-none'>{num}</div>"
-                f"<div class='text-xs text-slate-400 font-semibold mt-1'>{label}</div></div></div>")
+        return (f"<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6 flex items-center gap-5'>"
+                f"<div class='w-16 h-16 rounded-2xl flex items-center justify-center text-3xl {chip} flex-shrink-0'>{icon}</div>"
+                f"<div class='min-w-0'><div class='text-4xl sm:text-5xl font-extrabold text-slate-900 leading-none tracking-tight'>{num}</div>"
+                f"<div class='text-sm text-slate-400 font-semibold mt-1.5'>{label}</div></div></div>")
     stats_row = (("<div class='grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6'>"
                   + _statc("📦", "bg-emerald-100 text-emerald-600", len(_sets2), "만든 세트")
                   + _statc("🔍", "bg-amber-100 text-amber-600", _np, "채널 발행물")
@@ -862,10 +862,10 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                + f"</nav><div class='mt-auto px-3 pt-4 border-t border-slate-100'><div class='text-xs text-slate-400 mb-1'>{_pn}</div>"
                "<a href='/logout' class='text-sm font-semibold text-slate-400 hover:text-slate-700'>↩ 로그아웃</a></div></aside>")
     page = (landing._HEAD
-            + "<div class='flex min-h-screen bg-slate-50'>" + sidebar
+            + "<div class='flex min-h-screen bg-slate-100'>" + sidebar
             + "<main class='flex-1 min-w-0 px-5 sm:px-8 py-8'>"
             + "<div class='flex justify-end mb-2 lg:hidden'><a href='/logout' class='text-sm text-slate-400'>로그아웃</a></div>"
-            + "<div class='max-w-6xl'>" + banner + greeting + stats_row + two + "</div></main></div>"
+            + "<div class='max-w-[1400px]'>" + banner + greeting + stats_row + two + "</div></main></div>"
             + landing._FOOT)
     return HTMLResponse(page)
 
