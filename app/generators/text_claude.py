@@ -16,6 +16,41 @@ from app import seo
 MODEL = "claude-opus-4-8"
 
 
+def _pick_title(cands: list[str], kw0: str) -> str:
+    """제목 3안 중 상위노출 최적 1개 자동 선택 — 키워드 맨앞·적정길이·숫자 가점."""
+    import re
+    best, best_score = "", -1
+    for c in cands:
+        c = c.strip()
+        if not c or len(c) < 8:
+            continue
+        s = 0
+        if kw0 and c.startswith(kw0):
+            s += 5                                   # 핵심키워드 맨 앞(네이버 제목 가중치)
+        elif kw0 and kw0 in c:
+            s += 2
+        s += 3 if 22 <= len(c) <= 35 else (1 if 18 <= len(c) <= 40 else 0)  # 롱테일 적정길이
+        if re.search(r"\d", c):
+            s += 2                                   # 숫자 → 클릭률
+        if re.search(r"추천|후기|방법|비교|가격|정리|총정리|BEST|베스트", c):
+            s += 1                                   # 검색의도 단어
+        if s > best_score:
+            best, best_score = c, s
+    return best
+
+
+def _kw_density(body: str, kw: str) -> dict:
+    """핵심키워드 밀도 검증 — 네이버 최적 1~2%, 3%+는 저품질 위험."""
+    import re
+    if not (body and kw):
+        return {"count": 0, "pct": 0.0, "status": "none"}
+    words = max(1, len(re.findall(r"[가-힣A-Za-z0-9]+", body)))
+    count = body.count(kw)
+    pct = round(count / words * 100, 2)
+    status = ("low" if count < 2 else "over" if pct > 3.0 or count > 8 else "ok")
+    return {"count": count, "pct": pct, "status": status}
+
+
 class CaptionGenerator(Generator):
     """인스타 캡션 + 해시태그 (페르소나 강하게)."""
     kind = ContentKind.CAPTION
@@ -93,20 +128,28 @@ class BlogDraftGenerator(Generator):
             f"[가게] {tenant.name} (업종: {prof.name}, 지역: {tenant.region})\n"
             f"[사업형태] {strat.label} — {strat.goal}\n"
             f"[페르소나] {prof.persona}\n[업종 톤] {prof.tone}\n"
-            f"[입력 정보] {asset.note}\n[사진 {len(imgs)}장]\n"
+            f"[입력 정보(실제 사진 분석 포함)] {asset.note}\n[사진 {len(imgs)}장]\n"
             f"{seo.keywords_line(kws)}\n{closing}\n\n"
             f"{seo.BLOG_DIRECTIVES}\n"
+            "[실경험 강화 · D.I.A.+ 핵심] 위 '사진 분석'의 구체 사실(색·질감·전후 변화·차종/제품·수치)을 "
+            "1인칭 경험담('직접 해보니','만져보니','시공하고 나니')으로 녹여라. 추상적 미사여구·일반론 금지, 손에 잡히듯 구체적으로.\n"
+            "[필수 섹션] ① '## 자주 묻는 질문'(Q&A 정확히 3쌍) ② 가격대/영업시간/찾아오는길을 마크다운 표(| 항목 | 내용 |) 1개.\n"
+            f"[키워드 밀도] 핵심키워드 '{kw0}'는 본문에 정확히 3~5회만(남발=저품질 추락). 첫 문장에 반드시 1회.\n"
             f"사진 {len(imgs)}장 → 본문 문단 사이에 [사진1]..[사진{len(imgs)}]를 순서대로 한 번씩(한 줄 단독) 배치.\n\n"
             "아래 형식 그대로(대괄호 머리표 유지) 출력:\n"
-            f"[제목]\n('{kw0}'를 맨 앞에 넣어 25~35자 롱테일, 숫자/혜택으로 클릭 유도)\n"
+            f"[제목후보]\n(3줄. 각 줄 '{kw0}'를 맨 앞에 + 서로 다른 각도(후기형/정보형/혜택형), 22~35자 롱테일, 숫자·혜택으로 클릭 유도)\n"
             "[메타설명]\n(150자 내외, 클릭 유도)\n"
-            f"[본문]\n(첫 문장에 '{kw0}' 포함, ## 소제목 3~5개 + '## 자주 묻는 질문'(Q&A 2~3쌍), "
-            "1200~1800자, [사진N] 마커 배치)\n"
+            f"[본문]\n(첫 문장에 '{kw0}' 포함, ## 소제목 3~5개 + 마크다운 표 1개 + '## 자주 묻는 질문'(Q&A 3쌍), "
+            "1500~2200자, [사진N] 마커 배치)\n"
             "[이미지배치]\n(- 각 사진을 어디에 왜)\n"
             "[키워드]\n(쉼표로 5~8개, 타겟 키워드 우선)"
         )
-        raw = _call_llm(prompt, self.model, 3000)
-        d = _parse_sections(raw, ["제목", "메타설명", "본문", "이미지배치", "키워드"])
+        raw = _call_llm(prompt, self.model, 3600)
+        d = _parse_sections(raw, ["제목후보", "제목", "메타설명", "본문", "이미지배치", "키워드"])
+        # ① 제목 3안 → 상위노출 최적 1개 자동 선택 ([제목]으로 준 경우도 흡수)
+        title_cands = [t.strip().lstrip("-*·0123456789.) ").strip()
+                       for t in ((d.get("제목후보") or d.get("제목") or "")).split("\n") if t.strip()]
+        title = _pick_title(title_cands, kw0) or (title_cands[0] if title_cands else (d.get("제목") or "제목 [기입필요]"))
         parsed = [k.strip().lstrip("#") for k in (d.get("키워드", "")).replace("\n", ",").split(",") if k.strip()]
         # 파싱된 키워드 + 타겟 키워드 병합(중복 제거)
         tags = list(dict.fromkeys(parsed + kws))[:10]
@@ -127,16 +170,28 @@ class BlogDraftGenerator(Generator):
             if getattr(tenant, "map_url", ""):
                 cb.append(f"🗺 {tenant.map_url}")
             body = body.rstrip() + "\n\n" + "\n".join(cb)
+        # ③ FAQ 섹션 누락 대비 최소 보강(스마트블록·체류 신호)
+        if "자주 묻는 질문" not in body and "자주묻는" not in body:
+            body = body.rstrip() + (
+                "\n\n## 자주 묻는 질문\n"
+                f"Q. {kw0} 예약이나 문의는 어떻게 하나요?\n"
+                f"A. 네이버에서 '{tenant.name}' 검색 후 플레이스에서 예약·문의하시면 가장 빠릅니다.\n"
+                f"Q. {prof.name} 상담도 가능한가요?\n"
+                "A. 네, 방문 전 연락 주시면 상황에 맞게 안내해 드립니다.")
+        # ④ 키워드 밀도 검증
+        kdens = _kw_density(body, kw0)
         markers = [{"marker": f"[사진{i+1}]", "image_index": i, "image_path": p}
                    for i, p in enumerate(imgs)]
         return ContentPiece(
             id=str(uuid.uuid4()), tenant_id=tenant.id, asset_id=asset.id,
             channel=Channel.NAVER_BLOG, kind=self.kind,
-            payload={"title": d.get("제목") or "제목 [기입필요]",
+            payload={"title": title,
+                     "title_options": title_cands,
                      "meta_description": d.get("메타설명", ""),
                      "body": body, "photo_markers": markers,
                      "recommended_image_placement": d.get("이미지배치", ""),
                      "tags": tags, "seo_keywords": tags, "target_keywords": kws,
+                     "keyword_density": kdens,
                      "biz_type": strat.key, "closing": strat.closing, "buy_block": buy,
                      "raw": raw, "image_path": imgs[0], "image_paths": imgs},
             status=ContentStatus.DRAFT)

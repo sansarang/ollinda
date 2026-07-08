@@ -125,6 +125,12 @@
       "type": "file"
     },
     {
+      "path": "app/generators/text_claude.py",
+      "accessCount": 9,
+      "lastAccessed": 1783474195787,
+      "type": "file"
+    },
+    {
       "path": "app/services/teaser.py",
       "accessCount": 6,
       "lastAccessed": 1783310174237,
@@ -143,15 +149,15 @@
       "type": "file"
     },
     {
-      "path": "app/generators/text_claude.py",
-      "accessCount": 3,
-      "lastAccessed": 1783291666303,
-      "type": "file"
-    },
-    {
       "path": "app/seo.py",
       "accessCount": 3,
       "lastAccessed": 1783470440465,
+      "type": "file"
+    },
+    {
+      "path": "app/generators/editor.py",
+      "accessCount": 3,
+      "lastAccessed": 1783474184053,
       "type": "file"
     },
     {
@@ -182,12 +188,6 @@
       "path": "app/generators/strategist.py",
       "accessCount": 1,
       "lastAccessed": 1783034334421,
-      "type": "file"
-    },
-    {
-      "path": "app/generators/editor.py",
-      "accessCount": 1,
-      "lastAccessed": 1783034365581,
       "type": "file"
     },
     {
