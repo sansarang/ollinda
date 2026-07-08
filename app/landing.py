@@ -425,7 +425,7 @@ def _sticky_cta() -> str:
             'style="padding-bottom:max(12px,env(safe-area-inset-bottom))">'
             '<a href="/login/kakao" onclick="trackEv(\'sticky_cta\',{})" '
             'class="block text-center py-3.5 rounded-xl font-extrabold text-white" '
-            'style="background:linear-gradient(120deg,#6366f1,#8b5cf6,#ec4899)">✨ 무료로 시작하기 · 2회 무료</a></div>')
+            'style="background:linear-gradient(120deg,#6366f1,#8b5cf6,#ec4899)">✨ 무료로 시작하기</a></div>')
 
 
 def render() -> str:
