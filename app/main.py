@@ -435,8 +435,13 @@ def api_lookup(q: str = ""):
     if local:
         it = local[0]
         region = _short_region(it.get("jibun") or it["address"])   # 시/구/동만 (키워드 오염 방지)
+        from urllib.parse import quote as _q
+        # 플레이스 URL 자동 생성(best-effort) — 네이버 지도 검색링크(지역+상호로 정확도↑)
+        map_q = (region.split()[-1] + " " + it["name"]).strip() if region else it["name"]
+        map_url = "https://map.naver.com/p/search/" + _q(map_q)
         return JSONResponse({"type": "local", "name": it["name"], "industry": it["category"],
-                             "region": region, "tel": it["tel"], "address": it["address"]})
+                             "region": region, "tel": it["tel"], "address": it["address"],
+                             "map_url": map_url})
     # B) 지역 없음 → 쇼핑검색(셀러)
     shop = place.shop_search(q)
     if shop:
@@ -2506,6 +2511,7 @@ def _upload_form_html(tenant, token: str) -> str:
           "var bz=(d.type==='seller')?'seller':'local';document.getElementById('s_biz').value=bz;bizFields(bz);"
           "document.getElementById('s_region').value=d.region||'';document.getElementById('s_tel').value=d.tel||'';document.getElementById('s_buy').value=d.buy_url||'';"
           "document.getElementById('s_address').value=d.address||'';"
+          "var mp=document.getElementById('s_map');if(mp)mp.value=d.map_url||'';"
           "var rb=document.querySelector('input[name=biztype][value=\"'+bz+'\"]');if(rb)rb.checked=true;"
           "var kind=(bz==='seller')?'📦 온라인 셀러':'🏪 동네 매장';"
           "b.innerHTML='<span class=\"text-emerald-600 font-semibold\">✓ '+(d.name||'')+' · '+(d.industry||'')+' · '+kind+' 자동 인식됨</span>';"
