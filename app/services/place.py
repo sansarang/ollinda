@@ -71,6 +71,8 @@ def shop_search(query: str, limit: int = 5) -> list[dict]:
                 "image": it.get("image", ""),
                 "price": it.get("lprice", ""),
                 "mall": it.get("mallName", ""),
+                "brand": (it.get("brand") or it.get("maker") or "").strip(),
+                "link": (it.get("link") or "").strip(),      # 상품 상세 링크
             })
         return out
     except Exception:

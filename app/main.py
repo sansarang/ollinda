@@ -427,6 +427,39 @@ def _clean_kw(k: str) -> str:
     return out or region
 
 
+def _detect_market(text: str) -> str:
+    """URL/몰이름 → 마켓 코드(폼 마켓칸 자동 선택)."""
+    t = (text or "").lower()
+    if "coupang" in t or "쿠팡" in t:
+        return "coupang"
+    if "smartstore" in t or "스마트스토어" in t:
+        return "smartstore"
+    if "11st" in t or "11번가" in t or "elevenst" in t:
+        return "11st"
+    if "gmarket" in t or "지마켓" in t:
+        return "gmarket"
+    return ""
+
+
+_KW_COLORS = {"그레이", "블랙", "화이트", "네이비", "베이지", "브라운", "핑크", "레드", "블루",
+              "카키", "와인", "아이보리", "차콜", "옐로우", "그린", "퍼플", "오렌지", "민트"}
+_KW_JUNK = {"정품", "무료배송", "당일발송", "신상", "특가", "선택", "옵션", "공용", "남녀공용",
+            "freesize", "free", "세트", "택1", "단품"}
+
+
+def _seller_search_kw(name: str, brand: str = "") -> str:
+    """상품명 → '검색어 유도' 핵심 키워드(브랜드·괄호·색상·옵션 제거, 상품종류 위주)."""
+    import re as _r
+    n = _r.sub(r"\([^)]*\)|\[[^\]]*\]", " ", name or "")   # 괄호·대괄호 제거
+    if brand:
+        n = n.replace(brand, " ")
+    n = _r.sub(r"[^0-9A-Za-z가-힣 ]", " ", n)
+    words = [w for w in n.split() if len(w) >= 2 and w.lower() not in _KW_JUNK]
+    while words and (words[-1] in _KW_COLORS or words[-1].lower() in _KW_JUNK):   # 뒤 색상·잡토큰 제거
+        words.pop()
+    return " ".join(words[-2:]) if len(words) >= 2 else (words[-1] if words else "")
+
+
 @app.get("/api/lookup")
 def api_lookup(q: str = ""):
     """가게 이름/상품 링크 하나로 자동 판별·입력.
@@ -435,12 +468,13 @@ def api_lookup(q: str = ""):
     q = (q or "").strip()
     if not q:
         return JSONResponse({"type": "none"})
-    # A) URL 붙여넣기 → 셀러(상품 파싱)
+    # A) URL 붙여넣기 → 셀러(상품 파싱 + 마켓 자동감지 + 검색어 자동생성)
     if q.startswith(("http://", "https://")):
         p = lookup.parse_url(q)
-        name = (p.get("name") or "")[:40]
+        name = (p.get("name") or "")[:60]
         return JSONResponse({"type": "seller", "name": name, "industry": name[:20],
                              "image": p.get("image", ""), "buy_url": q,
+                             "market": _detect_market(q), "search_kw": _seller_search_kw(name),
                              "desc": (p.get("description") or "")[:120]})
     # 이름 → 지역검색(매장)
     local = place.search(q, limit=5)
@@ -468,12 +502,23 @@ def api_lookup(q: str = ""):
         if len(cands) > 1:                       # 동명·유사 업체 여러 곳 → 사용자가 선택
             resp["candidates"] = cands
         return JSONResponse(resp)
-    # B) 지역 없음 → 쇼핑검색(셀러)
-    shop = place.shop_search(q)
+    # B) 지역 없음 → 쇼핑검색(셀러) — 마켓·브랜드·가격·검색어 자동 채움 + 여러 상품 후보
+    shop = place.shop_search(q, limit=5)
     if shop:
-        it = shop[0]
-        return JSONResponse({"type": "seller", "name": q, "industry": it["category"] or q,
-                             "image": it["image"], "buy_url": "", "mall": it["mall"]})
+        def _scand(it):
+            brand = it.get("brand", "")
+            return {"name": it["name"], "industry": it.get("category") or "",
+                    "image": it.get("image", ""), "price": it.get("price", ""),
+                    "mall": it.get("mall", ""), "brand": brand,
+                    "market": _detect_market(it.get("mall", "")),
+                    "search_kw": _seller_search_kw(it["name"], brand),
+                    "buy_url": it.get("link", "")}
+        scands = [_scand(it) for it in shop]
+        resp = dict(scands[0])
+        resp["type"] = "seller"
+        if len(scands) > 1:                        # 여러 상품 → 내 상품 선택
+            resp["candidates"] = scands
+        return JSONResponse(resp)
     return JSONResponse({"type": "none", "configured": place.configured()})
 
 
@@ -2879,17 +2924,19 @@ def _upload_form_html(tenant, token: str) -> str:
           "document.getElementById('s_region').value=d.region||'';document.getElementById('s_tel').value=d.tel||'';document.getElementById('s_buy').value=d.buy_url||'';"
           "document.getElementById('s_address').value=d.address||'';"
           "var mp=document.getElementById('s_map');if(mp)mp.value=d.map_url||'';document.getElementById('lk_q').value=d.name||document.getElementById('lk_q').value;"
+          "var mk=document.getElementById('s_market');if(mk&&d.market)mk.value=d.market;var br=document.getElementById('s_brand');if(br&&d.brand)br.value=d.brand;var sk=document.getElementById('s_search');if(sk&&d.search_kw)sk.value=d.search_kw;"
           "var rb=document.querySelector('input[name=biztype][value=\"'+bz+'\"]');if(rb)rb.checked=true;"
           "var kind=(bz==='seller')?'📦 온라인 셀러':'🏪 동네 매장';"
           "document.getElementById('lk_result').innerHTML='<span class=\"text-emerald-600 font-semibold\">✓ '+(d.name||'')+' · '+(d.industry||'')+(d.region?(' · '+d.region):'')+' 선택됨 (저장)</span>';"
-          "try{if(d.name){var fd2=new FormData();fd2.append('name',d.name||'');fd2.append('industry',d.industry||'');fd2.append('region',d.region||'');fd2.append('biz_type',bz);fd2.append('phone',d.tel||'');fd2.append('address',d.address||'');fd2.append('map_url',d.map_url||'');if(d.buy_url)fd2.append('buy_url',d.buy_url);if(d.lat)fd2.append('lat',d.lat);if(d.lon)fd2.append('lon',d.lon);fetch('/me/store',{method:'POST',body:fd2});}}catch(_){}}"
+          "try{if(d.name){var fd2=new FormData();fd2.append('name',d.name||'');fd2.append('industry',d.industry||'');fd2.append('region',d.region||'');fd2.append('biz_type',bz);fd2.append('phone',d.tel||'');fd2.append('address',d.address||'');fd2.append('map_url',d.map_url||'');if(d.buy_url)fd2.append('buy_url',d.buy_url);if(d.lat)fd2.append('lat',d.lat);if(d.lon)fd2.append('lon',d.lon);if(d.market)fd2.append('marketplace',d.market);if(d.brand)fd2.append('brand_name',d.brand);if(d.search_kw)fd2.append('search_kw',d.search_kw);fetch('/me/store',{method:'POST',body:fd2});}}catch(_){}}"
           "function pickCand(i){var c=(window.__cands||[])[i];if(c){c.type='local';fillStore(c);}}"
           "async function lookupStore(){var q=document.getElementById('lk_q').value.trim();if(!q)return;"
           "var b=document.getElementById('lk_result');b.innerHTML='<span class=\"text-slate-400\">인식 중…</span>';"
           "try{var r=await fetch('/api/lookup?q='+encodeURIComponent(q));var d=await r.json();"
           "if(d.type==='none'){b.innerHTML='<span class=\"text-slate-400\">못 찾았어요 — 그냥 사진 올리고 만들어도 돼요</span>';return;}"
           "if(d.candidates&&d.candidates.length>1){window.__cands=d.candidates;"
-          "b.innerHTML='<div class=\"text-amber-600 font-semibold mb-1\">⚠️ 같은/비슷한 이름이 여러 곳이에요. 내 가게를 선택하세요:</div>'+d.candidates.map(function(c,i){return '<button type=button onclick=\"pickCand('+i+')\" class=\"block w-full text-left bg-white border border-slate-200 rounded-lg p-2 mb-1 text-xs hover:bg-indigo-50\"><b>'+c.name+'</b> <span class=\"text-slate-400\">'+(c.industry||'')+'</span><br><span class=\"text-slate-400\">'+(c.address||'')+'</span></button>';}).join('');return;}"
+          "var _isS=(d.candidates[0].mall!==undefined||d.candidates[0].price);"
+          "b.innerHTML='<div class=\"text-amber-600 font-semibold mb-1\">⚠️ 여러 개가 있어요. 내 '+(_isS?'상품':'가게')+'을(를) 선택하세요:</div>'+d.candidates.map(function(c,i){var meta=(c.mall||c.industry||'');var sub=(c.price?(Number(c.price).toLocaleString()+'원'):(c.address||''));return '<button type=button onclick=\"pickCand('+i+')\" class=\"block w-full text-left bg-white border border-slate-200 rounded-lg p-2 mb-1 text-xs hover:bg-indigo-50\"><b>'+c.name+'</b> <span class=\"text-slate-400\">'+meta+'</span><br><span class=\"text-slate-400\">'+sub+'</span></button>';}).join('');return;}"
           "fillStore(d);"
           "}catch(e){b.innerHTML='<span class=\"text-rose-400\">인식 실패</span>';}}"
           "async function showGen(e){if(e&&e.preventDefault)e.preventDefault();var f=(e&&e.target)?e.target:document.querySelector('form[action*=\"/upload\"]');"
