@@ -2797,13 +2797,14 @@ def _upload_form_html(tenant, token: str) -> str:
           "var base=0;try{base=(await (await fetch('/me/sets/count')).json()).n;}catch(_){}"
           "var fd=new FormData(f);try{if(window.PM&&PM.f&&PM.f.length){fd.delete('photos');PM.f.forEach(function(x){fd.append('photos',x);});}}catch(_){}"
           "try{await fetch(f.action,{method:'POST',body:fd});}catch(_){}"
+          "var DONEURL='/me?tab=content&ok='+encodeURIComponent('✨ 콘텐츠가 완성돼 내 콘텐츠에 저장됐어요! 보기를 눌러 확인하세요');"
           "function done(url){clearInterval(iv);clearInterval(tick);location.href=url;}"
-          "var n=0;var iv=setInterval(async function(){n++;if(n>120){done(aid?('/me?view='+aid):'/me');return;}"
+          "var n=0;var iv=setInterval(async function(){n++;if(n>120){done(DONEURL);return;}"
           "try{"
           "if(!aid){var d=await (await fetch('/me/sets/count')).json();if(d.n>base){aid=d.latest;if(p<62)p=62;setBar(p);}return;}"
           "var pj=await (await fetch('/me/asset/'+aid+'/pieces')).json();"
-          "if(pj.n>=5){clearInterval(iv);clearInterval(tick);setBar(100);var gl=document.getElementById('gLabel');if(gl)gl.textContent='✅ 5채널 완성!';setTimeout(function(){location.href='/me?view='+aid;},700);}"
-          "else if(n>70){done('/me?view='+aid);}"        # 영상이 너무 오래 걸리면 결과로(폴링 배너가 이어받음)
+          "if(pj.n>=5){clearInterval(iv);clearInterval(tick);setBar(100);var gl=document.getElementById('gLabel');if(gl)gl.textContent='✅ 5채널 완성!';setTimeout(function(){location.href=DONEURL;},700);}"
+          "else if(n>70){done(DONEURL);}"        # 영상이 너무 오래 걸리면 저장된 내 콘텐츠로(폴링은 보기에서 이어받음)
           "}catch(_){}"
           "},3000);return false;}"
           "</script>")
