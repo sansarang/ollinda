@@ -96,14 +96,14 @@
   "hotPaths": [
     {
       "path": "app/main.py",
-      "accessCount": 272,
-      "lastAccessed": 1783477665331,
+      "accessCount": 273,
+      "lastAccessed": 1783478330190,
       "type": "file"
     },
     {
       "path": "app/landing.py",
-      "accessCount": 56,
-      "lastAccessed": 1783478043659,
+      "accessCount": 58,
+      "lastAccessed": 1783478442821,
       "type": "file"
     },
     {
@@ -224,6 +224,18 @@
       "path": "app/media/photo_boost.py",
       "accessCount": 1,
       "lastAccessed": 1783477115839,
+      "type": "file"
+    },
+    {
+      "path": "app/static/demo/food-before.jpg",
+      "accessCount": 1,
+      "lastAccessed": 1783478373817,
+      "type": "file"
+    },
+    {
+      "path": "app/static/demo/food-after.jpg",
+      "accessCount": 1,
+      "lastAccessed": 1783478379009,
       "type": "file"
     }
   ],

@@ -45,6 +45,8 @@ body{font-family:'Pretendard','Apple SD Gothic Neo',system-ui,sans-serif;-webkit
 .upfloat{animation:upfloat 1.6s ease-in-out infinite}@keyframes upfloat{0%,100%{transform:translateY(0);opacity:.7}50%{transform:translateY(-5px);opacity:1}}
 .baimg{animation:bapulse 4s ease-in-out infinite}@keyframes bapulse{0%,100%{filter:saturate(.55) brightness(.9) contrast(.9)}50%{filter:saturate(1.4) brightness(1.08) contrast(1.12)}}
 .qrpulse{animation:qrp 2.4s ease-in-out infinite}@keyframes qrp{0%,100%{box-shadow:0 0 0 0 rgba(129,140,248,.5)}50%{box-shadow:0 0 0 10px rgba(129,140,248,0)}}
+.baclip{animation:baclip 5s ease-in-out infinite}@keyframes baclip{0%,14%{clip-path:inset(0 0 0 0)}50%,64%{clip-path:inset(0 100% 0 0)}100%{clip-path:inset(0 0 0 0)}}
+.badiv{animation:badiv 5s ease-in-out infinite}@keyframes badiv{0%,14%{left:100%}50%,64%{left:0}100%{left:100%}}
 </style>"""
 
 _HEAD = """<!doctype html><html lang=ko><head><meta charset=utf-8>
@@ -285,8 +287,13 @@ def _results() -> str:
           "<div class='text-slate-400 text-sm'>이 콘텐츠 보고 온 손님</div></div></div>"
           "<p class='text-slate-400 text-sm mt-3'>QR·링크로 <b class='text-white'>실제 유입이 숫자로</b> 잡혀요.</p></div>")
     c4 = ("<div class='reveal glass rounded-3xl p-6 flex flex-col'>"
-          "<div class='text-xs font-bold text-emerald-300 mb-3'>사진 자동 보정</div>"
-          "<div class='flex-1 rounded-2xl flex items-center justify-center text-6xl baimg' style='background:linear-gradient(135deg,#f59e0b,#ef4444)'>🍜</div>"
+          "<div class='text-xs font-bold text-emerald-300 mb-3'>사진 자동 보정 · 실제 전/후</div>"
+          "<div class='relative flex-1 rounded-2xl overflow-hidden select-none' style='aspect-ratio:1/1'>"
+          "<img src='/demo/food-after.jpg' class='absolute inset-0 w-full h-full object-cover' alt='보정 후'>"
+          "<img src='/demo/food-before.jpg' class='baclip absolute inset-0 w-full h-full object-cover' alt='보정 전'>"
+          "<div class='badiv absolute top-0 bottom-0 w-0.5 bg-white/90 shadow'></div>"
+          "<span class='absolute bottom-2 left-2 bg-black/55 text-white text-[10px] font-bold px-2 py-0.5 rounded'>📱 폰 사진</span>"
+          "<span class='absolute bottom-2 right-2 bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded'>✨ 올린다 보정</span></div>"
           "<p class='text-slate-400 text-sm mt-3'>폰으로 대충 찍어도 <b class='text-white'>전문가 톤·먹음직</b>하게 자동 보정.</p></div>")
     c5 = ("<div class='reveal glass rounded-3xl p-6 flex flex-col justify-center'>"
           "<div class='text-xs font-bold text-indigo-300 mb-3'>능동 코칭</div>"
