@@ -96,8 +96,8 @@
   "hotPaths": [
     {
       "path": "app/main.py",
-      "accessCount": 232,
-      "lastAccessed": 1783465507422,
+      "accessCount": 237,
+      "lastAccessed": 1783469248438,
       "type": "file"
     },
     {
@@ -164,6 +164,12 @@
       "path": "app/storage.py",
       "accessCount": 2,
       "lastAccessed": 1783465463735,
+      "type": "file"
+    },
+    {
+      "path": "deploy.sh",
+      "accessCount": 2,
+      "lastAccessed": 1783467997514,
       "type": "file"
     },
     {
