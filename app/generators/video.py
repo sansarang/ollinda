@@ -291,10 +291,21 @@ class ShortVideoGenerator(Generator):
                 if v and aw:
                     ass_scenes.append((t, sdur, text))
                     vclips.append(v); awavs.append(aw); t += sdur
-            # 2) 아웃트로 CTA 카드(무음)
+            # 2) 아웃트로 CTA 카드(무음) — 셀러는 판매 QR(추적링크) 삽입 → 스캔 시 성과 집계
+            qr_url = ""
+            if strat.key == "seller":
+                dest = getattr(tenant, "buy_url", "") or getattr(tenant, "map_url", "")
+                if dest:
+                    try:
+                        from app import db as _db
+                        _base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
+                        _tl = _db.ensure_track_link(tenant.id, dest, "스토어")
+                        qr_url = (_base + "/r/" + _tl["code"]) if _tl else dest
+                    except Exception:
+                        qr_url = dest
             outro_png = os.path.join(work, "outro.png")
             self._card_png(outro_png, big=outro_cta, small=tenant.name,
-                           accent=strat.key, kind="outro")
+                           accent=strat.key, kind="outro", qr_url=qr_url)
             odur = 2.8
             v = self._scene_card_video(outro_png, odur, os.path.join(work, "v_outro.mp4"))
             aw = self._audio_segment(None, odur, os.path.join(work, "a_outro.wav"))
@@ -447,8 +458,8 @@ class ShortVideoGenerator(Generator):
             runs.append((cur, curm))
         return runs
 
-    def _card_png(self, out: str, big: str, small: str, accent: str, kind: str) -> None:
-        """훅/아웃트로 풀스크린 카드(그라데이션 + 큰 문구)."""
+    def _card_png(self, out: str, big: str, small: str, accent: str, kind: str, qr_url: str = "") -> None:
+        """훅/아웃트로 풀스크린 카드(그라데이션 + 큰 문구 + 셀러 판매 QR)."""
         from PIL import Image, ImageDraw
         c1, c2 = ((18, 18, 30), (60, 30, 110)) if kind == "hook" else ((60, 30, 110), (12, 14, 22))
         if accent == "seller":
@@ -475,6 +486,23 @@ class ShortVideoGenerator(Generator):
             fs = _pil_font(50, "SemiBold")
             d.text(((W - d.textlength(small, font=fs)) / 2, y + 40), small,
                    font=fs, fill=(200, 205, 230))
+            y += 100
+        # 셀러 판매 QR — 영상 끝에서 손님이 폰으로 스캔 → 바로 스토어
+        if qr_url and kind == "outro":
+            try:
+                import qrcode
+                qsz = 340
+                qr = qrcode.make(qr_url).convert("RGB").resize((qsz, qsz))
+                pad = Image.new("RGB", (qsz + 44, qsz + 44), "white")
+                pad.paste(qr, (22, 22))
+                qx, qy = (W - qsz - 44) // 2, y + 120
+                img.paste(pad, (qx, qy))
+                fq = _pil_font(46, "ExtraBold")
+                cap = "스캔하면 바로 구매 →"
+                d.text(((W - d.textlength(cap, font=fq)) / 2, qy + qsz + 70), cap,
+                       font=fq, fill=(255, 224, 77))
+            except Exception:
+                pass
         img.save(out)
 
     def _wrap_lines(self, d, text, font, maxw):
