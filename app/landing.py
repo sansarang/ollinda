@@ -39,6 +39,12 @@ body{font-family:'Pretendard','Apple SD Gothic Neo',system-ui,sans-serif;-webkit
 .kakao-float{position:fixed;right:20px;bottom:20px;z-index:50;width:60px;height:60px;border-radius:9999px;
  background:#FEE500;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 30px -8px rgba(0,0,0,.4);font-weight:800;color:#191600;font-size:13px}
 @media(max-width:640px){.kakao-float{bottom:86px}}
+.rise{animation:rise 3s ease-in-out infinite}@keyframes rise{0%,100%{height:28%}50%{height:92%}}
+.rise2{animation:rise 3s ease-in-out .4s infinite}
+.rise3{animation:rise 3s ease-in-out .8s infinite}
+.upfloat{animation:upfloat 1.6s ease-in-out infinite}@keyframes upfloat{0%,100%{transform:translateY(0);opacity:.7}50%{transform:translateY(-5px);opacity:1}}
+.baimg{animation:bapulse 4s ease-in-out infinite}@keyframes bapulse{0%,100%{filter:saturate(.55) brightness(.9) contrast(.9)}50%{filter:saturate(1.4) brightness(1.08) contrast(1.12)}}
+.qrpulse{animation:qrp 2.4s ease-in-out infinite}@keyframes qrp{0%,100%{box-shadow:0 0 0 0 rgba(129,140,248,.5)}50%{box-shadow:0 0 0 10px rgba(129,140,248,0)}}
 </style>"""
 
 _HEAD = """<!doctype html><html lang=ko><head><meta charset=utf-8>
@@ -132,6 +138,7 @@ def _nav() -> str:
   <a href="/" class="flex items-center gap-2 font-extrabold text-xl">{LOGO}<span class="grad-text">올린다</span></a>
   <nav class="hidden md:flex items-center gap-6 text-sm text-slate-500 font-medium">
    <a href="#video" class="hover:text-slate-900">작동 영상</a>
+   <a href="#results" class="hover:text-slate-900">성과</a>
    <a href="#features" class="hover:text-slate-900">기능</a>
    <a href="#pricing" class="hover:text-slate-900">요금</a>
    <a href="#contact" class="hover:text-slate-900">문의</a></nav>
@@ -243,6 +250,64 @@ def _problem() -> str:
     return f"<section class='bg-slate-50 py-20'><div class='max-w-5xl mx-auto px-5'><h2 class='reveal text-3xl sm:text-4xl font-extrabold text-center mb-3'>마케팅, 이래서 못 하셨죠?</h2><p class='reveal text-center text-slate-500 mb-12'>사장님 99%가 겪는 문제 — 올린다가 해결합니다.</p><div class='grid sm:grid-cols-3 gap-6'>{cards}</div></div></section>"
 
 
+def _results() -> str:
+    """성과가 '눈에 보이는' 킬러 기능 쇼케이스 — 광고형 애니메이션 목업(순위상승·경쟁추월·성과QR·사진보정·코칭)."""
+    qr = ("<svg width='84' height='84' viewBox='0 0 88 88' class='rounded-lg'>"
+          "<rect width='88' height='88' fill='#fff'/>"
+          "<rect x='10' y='10' width='20' height='20' fill='none' stroke='#1e1b4b' stroke-width='4'/><rect x='16' y='16' width='8' height='8' fill='#1e1b4b'/>"
+          "<rect x='58' y='10' width='20' height='20' fill='none' stroke='#1e1b4b' stroke-width='4'/><rect x='64' y='16' width='8' height='8' fill='#1e1b4b'/>"
+          "<rect x='10' y='58' width='20' height='20' fill='none' stroke='#1e1b4b' stroke-width='4'/><rect x='16' y='64' width='8' height='8' fill='#1e1b4b'/>"
+          "<g fill='#4338ca'><rect x='40' y='12' width='6' height='6'/><rect x='50' y='20' width='6' height='6'/><rect x='40' y='40' width='6' height='6'/>"
+          "<rect x='52' y='46' width='6' height='6'/><rect x='62' y='44' width='6' height='6'/><rect x='44' y='60' width='6' height='6'/>"
+          "<rect x='60' y='64' width='6' height='6'/><rect x='70' y='54' width='6' height='6'/><rect x='40' y='72' width='6' height='6'/></g></svg>")
+    # 순위 성장 미니 바차트
+    bars = ("<div class='flex items-end gap-2 h-24 mb-3'>"
+            "<div class='w-5 rounded-t bg-indigo-400/30 rise'></div>"
+            "<div class='w-5 rounded-t bg-indigo-400/50 rise2'></div>"
+            "<div class='w-5 rounded-t bg-gradient-to-t from-indigo-500 to-fuchsia-400 rise3'></div>"
+            "<div class='flex-1'></div><span class='text-4xl upfloat'>⬆️</span></div>")
+    c1 = ("<div class='reveal glass rounded-3xl p-6'>"
+          "<div class='text-xs font-bold text-indigo-300 mb-2'>순위 성장 추적</div>" + bars +
+          "<div class='flex items-center justify-between'><span class='font-semibold'>부산 동구 썬팅</span>"
+          "<span class='text-emerald-400 font-extrabold text-sm'>네이버 2위 ⬆️ 3계단</span></div>"
+          "<p class='text-slate-400 text-sm mt-2'>내 순위가 <b class='text-white'>오르는 게 매주 숫자로</b> 보여요.</p></div>")
+    c2 = ("<div class='reveal glass rounded-3xl p-6'>"
+          "<div class='text-xs font-bold text-amber-300 mb-3'>경쟁 추월</div>"
+          "<div class='space-y-2'>"
+          "<div class='flex items-center gap-2 text-sm text-slate-400'><span class='w-6 text-center'>1</span>A썬팅</div>"
+          "<div class='flex items-center gap-2 text-sm bg-amber-400/10 border border-amber-400/30 rounded-lg px-2 py-1.5'><span class='w-6 text-center text-amber-300 font-bold'>2</span><b class='text-white'>내 가게</b><span class='ml-auto text-amber-300 text-xs font-bold'>🎯 하나만 더!</span></div>"
+          "<div class='flex items-center gap-2 text-sm text-slate-400'><span class='w-6 text-center'>3</span>B카센터</div></div>"
+          "<p class='text-slate-400 text-sm mt-3'><b class='text-white'>“A썬팅만 넘으면 1위”</b> — 추월 타깃을 콕 집어줘요.</p></div>")
+    c3 = ("<div class='reveal glass rounded-3xl p-6'>"
+          "<div class='text-xs font-bold text-fuchsia-300 mb-3'>성과 실측 · 내 손님 추적</div>"
+          "<div class='flex items-center gap-4'><div class='qrpulse rounded-lg'>" + qr + "</div>"
+          "<div><div class='text-4xl font-extrabold grad-text'><span data-count='37'>0</span>회</div>"
+          "<div class='text-slate-400 text-sm'>이 콘텐츠 보고 온 손님</div></div></div>"
+          "<p class='text-slate-400 text-sm mt-3'>QR·링크로 <b class='text-white'>실제 유입이 숫자로</b> 잡혀요.</p></div>")
+    c4 = ("<div class='reveal glass rounded-3xl p-6 flex flex-col'>"
+          "<div class='text-xs font-bold text-emerald-300 mb-3'>사진 자동 보정</div>"
+          "<div class='flex-1 rounded-2xl flex items-center justify-center text-6xl baimg' style='background:linear-gradient(135deg,#f59e0b,#ef4444)'>🍜</div>"
+          "<p class='text-slate-400 text-sm mt-3'>폰으로 대충 찍어도 <b class='text-white'>전문가 톤·먹음직</b>하게 자동 보정.</p></div>")
+    c5 = ("<div class='reveal glass rounded-3xl p-6 flex flex-col justify-center'>"
+          "<div class='text-xs font-bold text-indigo-300 mb-3'>능동 코칭</div>"
+          "<div class='flex items-center gap-3 bg-white/5 border border-white/10 rounded-2xl p-4'>"
+          "<span class='text-2xl'>📈</span><div class='flex-1'><div class='text-[11px] font-bold text-indigo-300'>오늘의 액션</div>"
+          "<div class='text-sm text-white font-medium'>순위 오르는 중! 하나 더 올리면 1위 각이에요.</div></div></div>"
+          "<p class='text-slate-400 text-sm mt-3'>뭘 할지 <b class='text-white'>앱이 먼저 알려줘요</b> — 직원처럼.</p></div>")
+    return ("<section id='results' class='bg-slate-950 text-white py-24 relative overflow-hidden'>"
+            "<div class='blob' style='width:340px;height:340px;background:#6d28d9;top:0;right:-80px'></div>"
+            "<div class='max-w-6xl mx-auto px-5 relative'>"
+            "<div class='reveal text-center mb-4'>"
+            "<span class='inline-flex items-center gap-2 px-4 py-1.5 rounded-full glass text-xs font-semibold'>✨ 글만 뽑는 툴과 다른 점</span>"
+            "<h2 class='text-3xl sm:text-5xl font-extrabold mt-5 leading-tight'>만드는 건 기본.<br>올린다는 <span class='grad-text'>성과가 눈에 보입니다.</span></h2>"
+            "<p class='text-slate-400 mt-4 max-w-2xl mx-auto'>순위가 오르고, 손님이 오는 게 <b class='text-white'>숫자로</b> 보여요. 그래서 한 번 쓰면 못 끊습니다.</p></div>"
+            "<div class='grid lg:grid-cols-3 gap-5 mt-12'>" + c1 + c2 + c3 + "</div>"
+            "<div class='grid sm:grid-cols-2 gap-5 mt-5'>" + c4 + c5 + "</div>"
+            "<div class='reveal text-center mt-12'>"
+            "<a href='/login/kakao' class='grad-btn inline-block text-white font-extrabold px-8 py-4 rounded-2xl text-lg'>내 가게 순위 올리기 →</a></div>"
+            "</div></section>")
+
+
 def _modes() -> str:
     """두 종류 고객(소상공인 vs 온라인 셀러)에 맞춰 결과물이 자동으로 달라짐을 설명."""
     local = [("🎯 목표", "동네 손님을 <b>매장 방문·전화·예약</b>으로"),
@@ -277,7 +342,11 @@ def _features() -> str:
              ("🏪📦", "소상공인·셀러 자동분기", "매장은 지도·방문, 셀러는 구매링크·검색어로 자동 전환."),
              ("🎯", "검색 상위노출 + 점수", "C-Rank·D.I.A·릴스 알고리즘 반영, 100점 점검."),
              ("🏷️", "업종 무제한 자동", "어떤 업종이든 AI가 맞춤 톤 자동 생성."),
-             ("🔗", "계정 1회 연결 자동발행", "비번 없이 연결, 발행 누르면 끝.")]
+             ("🔗", "계정 1회 연결 자동발행", "비번 없이 연결, 발행 누르면 끝."),
+             ("📈", "순위 성장 추적", "네이버 순위가 오르는 걸 매주 ‘5위→2위 ⬆️’로 확인."),
+             ("🎯", "경쟁 추월 + 성과 실측", "옆집 대비 순위 + QR·링크로 실제 유입 손님 집계."),
+             ("✨", "사진 자동 보정", "폰 사진을 전문가 톤으로. 음식은 먹음직하게 자동."),
+             ("🧠", "쓸수록 똑똑해짐", "순위 오른 키워드를 학습해 다음 콘텐츠를 더 강하게.")]
     cards = "".join(f"<div class='reveal card-hover bg-white rounded-3xl border border-slate-100 p-6'>"
                     f"<div class='w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-100 to-fuchsia-100 flex items-center justify-center text-2xl mb-4'>{e}</div>"
                     f"<div class='font-bold text-lg mb-1.5'>{t}</div><p class='text-slate-500 text-sm'>{d}</p></div>" for e, t, d in feats)
@@ -432,7 +501,7 @@ def _sticky_cta() -> str:
 
 def render() -> str:
     return (_HEAD + _ga() + _seo_jsonld() + _nav() + _hero() + _video() + _demo_widget() + _stats() + _problem()
-            + _modes() + _features() + _pricing() + _faq() + _contact() + _cta() + _footer()
+            + _results() + _modes() + _features() + _pricing() + _faq() + _contact() + _cta() + _footer()
             + _kakao_float() + _sticky_cta() + _FOOT)
 
 
