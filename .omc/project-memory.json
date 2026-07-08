@@ -96,8 +96,8 @@
   "hotPaths": [
     {
       "path": "app/main.py",
-      "accessCount": 342,
-      "lastAccessed": 1783490616293,
+      "accessCount": 347,
+      "lastAccessed": 1783491820868,
       "type": "file"
     },
     {
@@ -108,8 +108,8 @@
     },
     {
       "path": "app/db.py",
-      "accessCount": 26,
-      "lastAccessed": 1783490528033,
+      "accessCount": 27,
+      "lastAccessed": 1783491785766,
       "type": "file"
     },
     {
@@ -242,6 +242,12 @@
       "path": "app/static/demo/food-after.jpg",
       "accessCount": 1,
       "lastAccessed": 1783478379009,
+      "type": "file"
+    },
+    {
+      "path": "app/services/pay_paddle.py",
+      "accessCount": 1,
+      "lastAccessed": 1783491751922,
       "type": "file"
     }
   ],

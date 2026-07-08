@@ -2296,13 +2296,31 @@ def adpack_zip(tid: str):
 # ── 결제(토스페이먼츠 정기결제) ─────────────────────────────
 @app.get("/billing", response_class=HTMLResponse)
 def billing(request: Request, plan: str = "self"):
-    from app.services import pay
+    from app.services import pay, pay_paddle
     u = auth.current_user(request)
     if not u:
         return RedirectResponse("/login", status_code=303)
     plan = plan if plan in pay.PLANS else "self"
     info = pay.PLANS[plan]
     base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
+    # 패들(Paddle) 우선 — 설정돼 있으면 오버레이 체크아웃
+    if pay_paddle.configured():
+        token = pay_paddle.client_token()
+        pid = pay_paddle.price_id(plan)
+        envset = "Paddle.Environment.set('sandbox');" if pay_paddle.env() == "sandbox" else ""
+        email = esc((u.get("email") or "").replace("'", ""))
+        inner = (
+            "<div class='bg-white rounded-2xl border p-6 max-w-md mx-auto text-center'>"
+            f"<div class='text-lg font-bold mb-1'>{esc(info['name'])}</div>"
+            f"<div class='text-3xl font-extrabold my-2'>월 {info['price']:,}원</div>"
+            "<p class='text-slate-500 text-sm mb-5'>카드로 매월 자동 결제. 언제든 해지 가능. (세금계산서·영수증 자동)</p>"
+            "<button onclick='subscribe()' class='w-full bg-indigo-600 text-white font-bold py-3 rounded-xl'>구독 시작하기</button></div>"
+            "<script src='https://cdn.paddle.com/paddle/v2/paddle.js'></script>"
+            f"<script>{envset}Paddle.Initialize({{token:'{token}'}});function subscribe(){{Paddle.Checkout.open({{"
+            f"items:[{{priceId:'{pid}',quantity:1}}],customer:{{email:'{email}'}},"
+            f"customData:{{user_id:'{u['id']}',plan:'{plan}'}},"
+            f"settings:{{successUrl:'{base}/me?ok='+encodeURIComponent('결제 완료! 곧 플랜이 활성화돼요 🎉')}}}});}}</script>")
+        return HTMLResponse(_subscriber_page(f"{info['name']} 구독", inner))
     if not pay.configured():
         return HTMLResponse(_subscriber_page("결제 준비 중",
             "<div class='bg-amber-50 text-amber-700 p-5 rounded-2xl text-sm'>결제(토스페이먼츠)가 아직 연결되지 않았어요. "
@@ -2354,6 +2372,39 @@ def billing_fail(message: str = ""):
     return HTMLResponse(_subscriber_page("결제 취소",
         f"<div class='bg-rose-50 text-rose-600 p-5 rounded-2xl'>결제가 완료되지 않았어요. {esc(message)} "
         "<a href='/billing?plan=self' class='underline font-semibold'>다시 시도</a></div>"))
+
+
+@app.post("/webhook/paddle")
+async def paddle_webhook(request: Request):
+    """패들 구독 이벤트 웹훅 — 서명 검증 후 플랜 활성/해지. custom_data.user_id로 사용자 매칭."""
+    import json
+    from app.services import pay_paddle
+    raw = (await request.body()).decode("utf-8", "ignore")
+    sig = request.headers.get("Paddle-Signature", "")
+    if not pay_paddle.verify_webhook(sig, raw):
+        return JSONResponse({"error": "invalid signature"}, status_code=401)
+    try:
+        ev = json.loads(raw)
+    except Exception:
+        return JSONResponse({"error": "bad json"}, status_code=400)
+    etype = ev.get("event_type", "")
+    data = ev.get("data", {}) or {}
+    cd = data.get("custom_data") or {}
+    uid = cd.get("user_id")
+    plan = cd.get("plan", "self")
+    if uid and db.get_user(uid):
+        from datetime import datetime, timedelta
+        if etype in ("subscription.activated", "subscription.created", "transaction.completed"):
+            db.set_user_plan(uid, plan)
+            exp = (datetime.utcnow() + timedelta(days=32)).isoformat()
+            try:
+                db.upsert_subscription(uid, plan, "active", billing_key=str(data.get("id", "")),
+                                       customer_key=str(data.get("customer_id", "")), expires_at=exp)
+            except Exception:
+                pass
+        elif etype in ("subscription.canceled", "subscription.paused", "subscription.past_due"):
+            db.set_user_plan(uid, "free")
+    return JSONResponse({"ok": True})
 
 
 @app.post("/admin/billing/charge-due")
