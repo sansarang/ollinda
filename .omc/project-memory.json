@@ -96,8 +96,8 @@
   "hotPaths": [
     {
       "path": "app/main.py",
-      "accessCount": 241,
-      "lastAccessed": 1783469807518,
+      "accessCount": 243,
+      "lastAccessed": 1783470466640,
       "type": "file"
     },
     {
@@ -149,6 +149,12 @@
       "type": "file"
     },
     {
+      "path": "app/seo.py",
+      "accessCount": 3,
+      "lastAccessed": 1783470440465,
+      "type": "file"
+    },
+    {
       "path": "app/services/generate.py",
       "accessCount": 2,
       "lastAccessed": 1783052528358,
@@ -170,12 +176,6 @@
       "path": "deploy.sh",
       "accessCount": 2,
       "lastAccessed": 1783467997514,
-      "type": "file"
-    },
-    {
-      "path": "app/seo.py",
-      "accessCount": 1,
-      "lastAccessed": 1783034297785,
       "type": "file"
     },
     {

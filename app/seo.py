@@ -47,9 +47,20 @@ def target_keywords(industry_name: str, region: str, note: str = "", limit: int 
     reg = (region or "").strip()
     ind = (industry_name or "").strip()
     if reg and ind:
-        kws.append(f"{reg} {ind}")
-        for it in _INTENTS:
-            kws.append(f"{reg} {ind} {it}")
+        # 지역 다중 granularity — 검색자마다 '동/구/시+구'로 다르게 검색하므로 변형별 키워드 생성
+        toks = reg.split()
+        variants = [reg]                                          # 부산 동구 초량동
+        if len(toks) >= 2:
+            variants.append(" ".join(toks[:2]))                  # 부산 동구
+        dong = next((t for t in toks if t.endswith(("동", "읍", "면", "가", "리"))), "")
+        if dong:
+            variants.append(dong)                                # 초량동
+        variants = list(dict.fromkeys(variants))
+        for v in variants:
+            kws.append(f"{v} {ind}")                              # 각 변형 기본
+        for v in variants[:2]:                                    # 대표 변형에 의도 결합
+            for it in _INTENTS[:4]:
+                kws.append(f"{v} {ind} {it}")
     if ind:
         kws += [f"{ind} 추천", f"{ind} 가격"]
     # 메모에서 핵심 명사 추출(신메뉴/차종/시술명 등)

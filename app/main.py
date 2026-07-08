@@ -879,11 +879,25 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         main_inner = (_sbadge + f"<div class='{_fw}'>"
                       "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>📋 내 콘텐츠</h2>"
                       "<p class='text-sm text-slate-400 mb-5'>‘보기’를 누르면 결과가 크게 나와요.</p>" + hist + "</div>")
-    elif tab == "report":                                 # 📊 성과 리포트 · 최근 키워드 (전체 폭)
+    elif tab == "report":                                 # 📊 성과 리포트 · 최근 키워드 + 순위(자동) (전체 폭)
         active = "report"
         _kwbox = ((f"<div class='{_fw}'><h2 class='text-2xl font-extrabold text-slate-900 mb-1'>📊 성과 리포트 · 최근 키워드</h2>"
                    f"<p class='text-sm text-slate-400 mb-5'>노리는 키워드 {len(_kws2)}개</p>{_chips}</div>") if _kws2 else "")
-        main_inner = _sbadge + stats_row + _kwbox
+        # 🔎 키워드 순위 — 페이지 열면 자동 조회(네이버 지역검색)
+        _rankbox = (f"<div class='{_fw} mt-5'>"
+                    "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>🔎 키워드 순위</h2>"
+                    "<p class='text-sm text-slate-400 mb-4'>네이버 지역검색 기준 · 참고용(위치·기기별 차이)</p>"
+                    "<div id='rankbox' class='text-sm'><div class='flex items-center gap-2 text-slate-400'>"
+                    "<div class='w-4 h-4 border-2 border-slate-200 border-t-indigo-500 rounded-full animate-spin'></div>조회 중…</div></div>"
+                    "<script>(async function(){var b=document.getElementById('rankbox');if(!b)return;"
+                    "try{var d=await (await fetch('/me/rank')).json();"
+                    "if(!d.configured){b.innerHTML='<span class=\"text-slate-400\">네이버 키가 설정되면 순위가 표시됩니다.</span>';return;}"
+                    "if(!d.items||!d.items.length){b.innerHTML='<span class=\"text-slate-400\">아직 타겟 키워드가 없어요. 콘텐츠를 만들면 채워져요.</span>';return;}"
+                    "b.innerHTML=d.items.map(function(it){var r=it.rank;var s=(r===null)?'<span class=\"text-slate-400\">조회불가</span>':"
+                    "(r>=1?('<span class=\"text-emerald-600 font-bold\">네이버 지역 '+r+'위 ✅</span>'):'<span class=\"text-slate-400\">상위 5위 밖</span>');"
+                    "return '<div class=\"flex items-center justify-between border-b border-slate-100 py-2.5\"><span class=\"text-slate-700 font-medium\">'+it.kw+'</span>'+s+'</div>';}).join('');"
+                    "}catch(e){b.innerHTML='<span class=\"text-rose-400\">조회 실패</span>';}})();</script></div>")
+        main_inner = _sbadge + stats_row + _kwbox + _rankbox
     else:                                                 # ✨ 만들기 (기본) — 통계·내콘텐츠 없이 폼만 전체폭 크게
         active = "create"
         main_inner = greeting + upload_section
