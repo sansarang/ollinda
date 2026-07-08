@@ -581,14 +581,37 @@ def _subscriber_page(title: str, inner: str, wide: bool = False) -> str:
 
 
 def _ensure_user_tenant(u: dict):
-    """구독자(user)에게 본인 가게(tenant)가 없으면 생성·연결."""
+    """구독자(user)에게 본인 가게(tenant)가 없으면 생성·연결. 활성 가게는 소유목록에도 등록."""
     tid = u.get("tenant_id")
     t = db.get_tenant(tid) if tid else None
     if t:
+        db.link_store(u["id"], t.id)                # 기존 단일 가게도 다중가게 목록에 등록(마이그레이션)
         return t
     t = db.create_tenant(name="내 가게", industry="", region="", biz_type="local")  # 중립 기본명(닉네임 노출 방지)
     db.set_user_tenant(u["id"], t.id)
+    db.link_store(u["id"], t.id)
     return t
+
+
+@app.post("/me/store/add")
+def store_add(request: Request):
+    """새 가게 추가 등록 후 그 가게로 전환."""
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    _ensure_user_tenant(u)                          # 현재 가게 먼저 목록 등록
+    db.add_store(u["id"])
+    return RedirectResponse("/me?ok=새 가게를 추가했어요 — 가게 이름을 입력하고 자동 인식하세요", status_code=303)
+
+
+@app.post("/me/store/switch")
+def store_switch(request: Request, tenant_id: str = Form("")):
+    """활성 가게 전환."""
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    db.switch_store(u["id"], tenant_id.strip())
+    return RedirectResponse("/me", status_code=303)
 
 
 def _perf_report(tenant_id: str) -> str:
@@ -650,12 +673,15 @@ def _perf_report(tenant_id: str) -> str:
 
 
 def _ensure_track_link(t):
-    """가게 대표 목적지(플레이스/스토어)로 가는 추적 링크. 클릭 집계용."""
+    """가게 대표 목적지(플레이스/스토어)로 가는 추적 링크. 클릭 집계용. 목적지 없으면 상호 지도검색으로 폴백."""
     biz = getattr(t, "biz_type", "local") or "local"
     if biz == "seller":
         target, label = (getattr(t, "buy_url", "") or getattr(t, "map_url", "")), "스토어"
     else:
         target, label = (getattr(t, "map_url", "") or getattr(t, "buy_url", "")), "네이버 플레이스"
+    if not target and getattr(t, "name", ""):        # 폴백: 상호로 네이버 지도 검색
+        from urllib.parse import quote as _q
+        target, label = "https://map.naver.com/p/search/" + _q(t.name), "네이버 지도"
     return db.ensure_track_link(t.id, target, label)
 
 
@@ -836,7 +862,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             thumb = ""
             for p in ps:
                 ips = p.payload.get("image_paths") or ([p.payload.get("image_path")] if p.payload.get("image_path") else [])
-                thumb = next((f"/dl/{s['asset_id']}/{os.path.basename(im)}" for im in ips if im and os.path.exists(im)), "")
+                thumb = next((f"/dl/{s['asset_id']}/{os.path.basename(im)}" for im in ips if im), "")
                 if thumb:
                     break
             seen, badges = set(), ""
@@ -997,9 +1023,26 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                else "text-slate-500 hover:bg-slate-50 hover:text-slate-900")
         return (f"<a href='{h}' class='flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold {cls} transition'>"
                 f"<span class='text-base'>{i}</span>{l}</a>")
+
+    # 🏪 다중 가게 전환기 + 가게 추가
+    _stores = db.list_user_stores(u["id"])
+
+    def _storeitem(st):
+        on = (st.id == t.id)
+        nm = esc(st.name) if getattr(st, "name", "") and st.name not in ("내 가게", "카카오회원", "구글회원") else "내 가게"
+        cls = "bg-indigo-600 text-white" if on else "bg-slate-50 text-slate-600 hover:bg-slate-100"
+        chk = "<span class='ml-auto text-xs'>✓</span>" if on else ""
+        return (f"<form method=post action='/me/store/switch'><input type=hidden name=tenant_id value='{st.id}'>"
+                f"<button class='w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold {cls} transition text-left'>"
+                f"<span>🏪</span><span class='truncate'>{nm}</span>{chk}</button></form>")
+    _storebox = ("<div class='mb-5'><div class='text-[11px] font-bold text-slate-400 px-2 mb-1.5'>내 가게</div>"
+                 "<div class='space-y-1'>" + "".join(_storeitem(s) for s in _stores) + "</div>"
+                 "<form method=post action='/me/store/add'>"
+                 "<button class='w-full mt-1.5 flex items-center justify-center gap-1 px-3 py-2 rounded-xl text-sm font-bold text-indigo-600 border border-dashed border-indigo-200 hover:bg-indigo-50 transition'>＋ 가게 추가</button></form></div>")
     sidebar = ("<aside class='hidden lg:flex flex-col w-56 flex-shrink-0 border-r border-slate-100 bg-white p-4 sticky top-0 h-screen'>"
-               f"<a href='/' class='flex items-center gap-2 font-extrabold text-lg mb-8 px-2'>{landing.LOGO}<span>올린다</span></a>"
-               "<nav class='space-y-1'>" + "".join(_navlink(*n) for n in _navitems)
+               f"<a href='/' class='flex items-center gap-2 font-extrabold text-lg mb-6 px-2'>{landing.LOGO}<span>올린다</span></a>"
+               + _storebox
+               + "<nav class='space-y-1'>" + "".join(_navlink(*n) for n in _navitems)
                + f"</nav><div class='mt-auto px-3 pt-4 border-t border-slate-100'><div class='text-xs text-slate-400 mb-1'>{_pn}</div>"
                "<a href='/logout' class='text-sm font-semibold text-slate-400 hover:text-slate-700'>↩ 로그아웃</a></div></aside>")
     _mobnav = ("<div class='flex lg:hidden items-center gap-2 mb-4 overflow-x-auto'>"
@@ -1007,7 +1050,8 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                + "<a href='/logout' class='ml-auto text-sm text-slate-400 whitespace-nowrap'>로그아웃</a></div>")
     page = (landing._HEAD
             + "<div class='flex min-h-screen bg-slate-100'>" + sidebar
-            + "<main class='flex-1 min-w-0 px-5 sm:px-8 py-8'>" + _mobnav
+            + "<main class='flex-1 min-w-0 px-5 sm:px-8 py-8'>"
+            + "<div class='lg:hidden mb-3'>" + _storebox + "</div>" + _mobnav
             + "<div class='max-w-[1400px]'>" + banner + main_inner + "</div></main></div>"
             + landing._FOOT)
     return HTMLResponse(page)
@@ -2566,18 +2610,26 @@ def _upload_form_html(tenant, token: str) -> str:
     biz_toggle = ("<div class='grid grid-cols-2 gap-2.5'>" + _bz("local", "🏪", "동네 매장")
                   + _bz("seller", "📦", "온라인 셀러") + "</div>")
     lb = "block text-sm font-bold text-slate-800 mb-2"
+    # 저장된 가게정보로 미리 채움(한번 인식되면 계속) — 기본명은 비움
+    _nm = esc(tenant.name) if getattr(tenant, "name", "") and tenant.name not in ("내 가게", "카카오회원", "구글회원") else ""
+    _ind0 = esc(getattr(tenant, "industry", "") or "")
+    _rg = esc(getattr(tenant, "region", "") or "")
+    _tel0 = esc(getattr(tenant, "phone", "") or "")
+    _addr = esc(getattr(tenant, "address", "") or "")
+    _map0 = esc(getattr(tenant, "map_url", "") or "")
+    _hint = (f"<span class='text-emerald-600 font-semibold'>✓ {_nm} · {_ind0} 저장됨 (수정 가능)</span>" if _nm else "입력하면 업종·주소가 자동으로 채워져요 (없어도 OK)")
     form = f"""<form method=post action='/u/{token}/upload' enctype='multipart/form-data' onsubmit='return showGen(event)' class='space-y-6'>
-      <input type=hidden name=s_name id=s_name><input type=hidden name=s_industry id=s_industry><input type=hidden name=s_biz id=s_biz value='{bt}'>
+      <input type=hidden name=s_name id=s_name value="{_nm}"><input type=hidden name=s_industry id=s_industry value="{_ind0}"><input type=hidden name=s_biz id=s_biz value='{bt}'>
       <div><label class='{lb}'>1. 가게 이름 또는 상품 링크</label>
         <div class='flex gap-2'>
-          <input id=lk_q placeholder='가게 이름 또는 상품/스토어 링크' class='{inp} flex-1'>
+          <input id=lk_q value="{_nm}" placeholder='가게 이름 또는 상품/스토어 링크' class='{inp} flex-1'>
           <button type=button onclick='lookupStore()' class='px-5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-sm whitespace-nowrap transition'>자동 인식</button></div>
-        <div id=lk_result class='text-xs mt-2 mb-2 text-slate-400'>입력하면 업종·주소가 자동으로 채워져요 (없어도 OK)</div>
+        <div id=lk_result class='text-xs mt-2 mb-2 text-slate-400'>{_hint}</div>
         <div id=sf_local class='grid grid-cols-2 gap-2'>
-          <input name=s_region id=s_region placeholder='지역 (예: 부산 동구)' class='{inp}'>
-          <input name=s_tel id=s_tel placeholder='전화번호' class='{inp}'>
-          <input name=s_address id=s_address placeholder='주소' class='{inp} col-span-2'>
-          <input name=s_map id=s_map placeholder='네이버 플레이스 URL (선택)' class='{inp} col-span-2'></div>
+          <input name=s_region id=s_region value="{_rg}" placeholder='지역 (예: 부산 동구)' class='{inp}'>
+          <input name=s_tel id=s_tel value="{_tel0}" placeholder='전화번호' class='{inp}'>
+          <input name=s_address id=s_address value="{_addr}" placeholder='주소' class='{inp} col-span-2'>
+          <input name=s_map id=s_map value="{_map0}" placeholder='네이버 플레이스 URL (선택)' class='{inp} col-span-2'></div>
         <div id=sf_seller class='grid grid-cols-2 gap-2 hidden'>
           <input name=s_market id=s_market placeholder='마켓 (예: 쿠팡)' class='{inp}'>
           <input name=s_brand id=s_brand placeholder='브랜드명' class='{inp}'>
@@ -2631,7 +2683,8 @@ def _upload_form_html(tenant, token: str) -> str:
           "var mp=document.getElementById('s_map');if(mp)mp.value=d.map_url||'';"
           "var rb=document.querySelector('input[name=biztype][value=\"'+bz+'\"]');if(rb)rb.checked=true;"
           "var kind=(bz==='seller')?'📦 온라인 셀러':'🏪 동네 매장';"
-          "b.innerHTML='<span class=\"text-emerald-600 font-semibold\">✓ '+(d.name||'')+' · '+(d.industry||'')+' · '+kind+' 자동 인식됨</span>';"
+          "b.innerHTML='<span class=\"text-emerald-600 font-semibold\">✓ '+(d.name||'')+' · '+(d.industry||'')+' · '+kind+' 자동 인식됨 (저장됨)</span>';"
+          "try{if(d.name){var fd2=new FormData();fd2.append('name',d.name||'');fd2.append('industry',d.industry||'');fd2.append('region',d.region||'');fd2.append('biz_type',bz);fd2.append('phone',d.tel||'');fd2.append('address',d.address||'');fd2.append('map_url',d.map_url||'');if(d.buy_url)fd2.append('buy_url',d.buy_url);fetch('/me/store',{method:'POST',body:fd2});}}catch(_){}"
           "}catch(e){b.innerHTML='<span class=\"text-rose-400\">인식 실패</span>';}}"
           "async function showGen(e){if(e&&e.preventDefault)e.preventDefault();var f=(e&&e.target)?e.target:document.querySelector('form[action*=\"/upload\"]');"
           "var o=document.getElementById('genOverlay');o.classList.remove('hidden');o.classList.add('flex');"

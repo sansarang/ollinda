@@ -96,8 +96,8 @@
   "hotPaths": [
     {
       "path": "app/main.py",
-      "accessCount": 273,
-      "lastAccessed": 1783478330190,
+      "accessCount": 286,
+      "lastAccessed": 1783479741257,
       "type": "file"
     },
     {
@@ -108,8 +108,8 @@
     },
     {
       "path": "app/db.py",
-      "accessCount": 18,
-      "lastAccessed": 1783477625410,
+      "accessCount": 20,
+      "lastAccessed": 1783479603709,
       "type": "file"
     },
     {

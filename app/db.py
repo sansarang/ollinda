@@ -74,6 +74,9 @@ def init_db() -> None:
                   "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, keyword TEXT, "
                   "rank INTEGER, checked_at TEXT)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_rank_tk ON rank_snapshots(tenant_id, keyword, checked_at)")
+        # 다중 가게 — 한 사용자가 여러 가게(tenant)를 등록·전환
+        c.execute("CREATE TABLE IF NOT EXISTS user_stores("
+                  "user_id TEXT, tenant_id TEXT, created_at TEXT, PRIMARY KEY(user_id, tenant_id))")
         # 마이그레이션: users.tenant_id (구독자 ↔ 본인 가게), free_used (무료 생성 횟수)
         for col, ddl in [("tenant_id", "TEXT"), ("free_used", "INTEGER DEFAULT 0"),
                          ("usage_month", "TEXT"), ("month_used", "INTEGER DEFAULT 0")]:
@@ -249,6 +252,50 @@ def get_user_by_kakao(kakao_id: str) -> Optional[dict]:
 def set_user_plan(uid: str, plan: str) -> None:
     with _conn() as c:
         c.execute("UPDATE users SET plan=? WHERE id=?", (plan, uid))
+
+
+def link_store(user_id: str, tenant_id: str) -> None:
+    """가게(tenant)를 사용자 소유 목록에 등록(중복 무시)."""
+    if not (user_id and tenant_id):
+        return
+    with _conn() as c:
+        try:
+            c.execute("INSERT INTO user_stores(user_id,tenant_id,created_at) VALUES(?,?,?)",
+                      (user_id, tenant_id, _now()))
+        except sqlite3.IntegrityError:
+            pass
+
+
+def list_user_stores(user_id: str) -> list:
+    """사용자가 등록한 모든 가게(Tenant) 목록(등록순)."""
+    with _conn() as c:
+        rows = c.execute("SELECT tenant_id FROM user_stores WHERE user_id=? ORDER BY created_at ASC",
+                         (user_id,)).fetchall()
+    out = []
+    for r in rows:
+        t = get_tenant(r["tenant_id"])
+        if t:
+            out.append(t)
+    return out
+
+
+def add_store(user_id: str):
+    """새 가게 생성 + 소유 등록 + 활성으로 전환. 생성된 Tenant 반환."""
+    t = create_tenant(name="새 가게", industry="", region="", biz_type="local")
+    link_store(user_id, t.id)
+    set_user_tenant(user_id, t.id)
+    return t
+
+
+def switch_store(user_id: str, tenant_id: str) -> bool:
+    """활성 가게 전환 — 본인 소유일 때만."""
+    with _conn() as c:
+        r = c.execute("SELECT 1 FROM user_stores WHERE user_id=? AND tenant_id=?",
+                      (user_id, tenant_id)).fetchone()
+    if r:
+        set_user_tenant(user_id, tenant_id)
+        return True
+    return False
 
 
 def set_user_tenant(uid: str, tid: str) -> None:
