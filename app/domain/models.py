@@ -17,6 +17,7 @@ class Channel(str, enum.Enum):
     NAVER_BLOG = "naver_blog"  # Playwright 자동 or 반자동(초안 export)
     X = "x"                   # X(Twitter) API v2
     KAKAO_ALIMTALK = "kakao_alimtalk"  # 비즈메시지(정보성 자동/광고성 동의)
+    MARKETPLACE = "marketplace"  # 셀러 판매 플랫폼(쿠팡·스마트스토어·11번가)
 
 
 class AssetType(str, enum.Enum):
@@ -30,6 +31,7 @@ class ContentKind(str, enum.Enum):
     BLOG = "blog"              # 네이버 블로그 초안
     X_POST = "x_post"          # X(트위터) 단문
     ALIMTALK = "alimtalk"      # 카카오 메시지
+    MARKETPLACE = "marketplace"  # 셀러 판매 플랫폼(상품명·상세페이지·태그)
 
 
 class ContentStatus(str, enum.Enum):

@@ -942,7 +942,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 "네이버는 공식 API가 없어 글을 완성해 드리면 직접 발행(반자동).</p>" + rows + "</div>")
     # ③ 콘텐츠 이력(세트 단위) → 각 항목 = 발행 소재(/kit)
     sets = db.list_sets(tenant_id=t.id, limit=50)
-    _chan_icon = {"instagram": "📷", "naver_blog": "📝", "x": "𝕏", "youtube": "▶️", "facebook": "👍"}
+    _chan_icon = {"instagram": "📷", "naver_blog": "📝", "x": "𝕏", "youtube": "▶️", "facebook": "👍", "marketplace": "🛒"}
     if sets:
         _cards = []
         for s in sets:
@@ -1507,6 +1507,22 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                      f"<div class='p-4'><div class='font-bold text-sm mb-1'>{esc(title)}</div>"
                      f"<div class='text-xs text-slate-500 whitespace-pre-wrap max-h-24 overflow-y-auto'>{esc(desc)}</div>"
                      f"<div class='mt-3 flex gap-2'>{pack_btn(p.id, has_video)}{_cp('c_v' + p.id[:5], title, '제목')}</div></div></div>")
+        elif k == "marketplace":
+            mk = pl.get("market", "마켓")
+            names = pl.get("product_names") or []
+            detail = pl.get("detail_body", "")
+            tags = pl.get("tags") or []
+            names_html = "".join(
+                f"<div class='flex items-start gap-2 mb-1.5'><span class='text-slate-300 text-xs mt-1'>{i+1}</span>"
+                f"<div class='flex-1 text-sm text-slate-800'>{esc(n)}</div>{_cp('c_mn' + str(i) + p.id[:4], n, '복사')}</div>"
+                for i, n in enumerate(names[:3]))
+            tags_html = "".join(f"<span class='inline-block bg-slate-100 text-slate-600 text-xs px-2 py-1 rounded-full mr-1 mb-1'>{esc(tg)}</span>" for tg in tags)
+            block = (_hd(f"🛒 {esc(mk)} 판매 콘텐츠") + f"<div class='{wrap} p-4'>"
+                     "<div class='text-xs font-bold text-slate-400 mb-1.5'>상품명 (검색 최적화 · 3안)</div>" + names_html
+                     + "<div class='text-xs font-bold text-slate-400 mt-3 mb-1'>상세페이지</div>"
+                     + f"<div class='text-xs text-slate-600 whitespace-pre-wrap max-h-40 overflow-y-auto border border-slate-100 rounded-lg p-2'>{esc(detail)}</div>"
+                     + (f"<div class='text-xs font-bold text-slate-400 mt-3 mb-1'>검색 태그</div><div>{tags_html}</div>" if tags_html else "")
+                     + f"<div class='mt-3 flex gap-2'>{_cp('c_md' + p.id[:5], detail, '상세 복사')}{pack_btn(p.id, False)}</div></div>")
         if block:
             cards += "<div class='break-inside-avoid mb-6'>" + block + "</div>"
     js = ("<script>"
@@ -1649,7 +1665,7 @@ def dl_media(request: Request, asset_id: str, fname: str):
     return FileResponse(path, media_type=mt, filename=fname)
 
 
-CHKO = {"blog": "네이버블로그", "caption": "인스타그램", "x_post": "X"}
+CHKO = {"blog": "네이버블로그", "caption": "인스타그램", "x_post": "X", "marketplace": "판매콘텐츠"}
 
 
 def _ch_folder(piece) -> str:
@@ -1690,6 +1706,15 @@ def _piece_pack_entries(piece, imgs, prefix=""):
             add("인스타릴스_영상.mp4", pl["video_path"])
     elif k == "x_post":
         add("X_글.txt", ("text", pl.get("text", "")))
+    elif k == "marketplace":
+        pn = pl.get("product_names") or []
+        txt = ("[상품명 후보 3안]\n" + "\n".join(f"{i + 1}. {n}" for i, n in enumerate(pn))
+               + "\n\n[상세페이지]\n" + pl.get("detail_body", "")
+               + (("\n\n[검색 태그]\n" + ", ".join(pl.get("tags") or [])) if pl.get("tags") else "")
+               + (("\n\n[내 스토어 링크]\n" + pl["buy_url"]) if pl.get("buy_url") else ""))
+        add(f"{pl.get('market', '마켓')}_판매콘텐츠.txt", ("text", txt))
+        for i, im in enumerate(imgs, 1):
+            add(f"{_kwbase}_{i}{os.path.splitext(im)[1] or '.jpg'}", im)
     return ent
 
 

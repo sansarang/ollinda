@@ -261,3 +261,47 @@ def _call_llm(prompt: str, model: str = MODEL, max_tokens: int = 1200) -> str:
         messages=[{"role": "user", "content": prompt}],
     )
     return next((b.text for b in resp.content if b.type == "text"), "")
+
+
+class MarketplaceGenerator(Generator):
+    """셀러 판매 플랫폼 콘텐츠 — 마켓 상품명(3안) + 상세페이지 + 검색 태그. 셀러 전용."""
+    kind = ContentKind.MARKETPLACE
+
+    def __init__(self, model: str = MODEL):
+        self.model = model
+
+    def generate(self, tenant: Tenant, asset: Asset,
+                 images: list[str] | None = None) -> ContentPiece:
+        imgs = images or [asset.path]
+        prof = resolve_industry(tenant.industry)
+        market_map = {"coupang": "쿠팡", "smartstore": "스마트스토어", "11st": "11번가",
+                      "gmarket": "지마켓", "self": "자사몰"}
+        mk = market_map.get(getattr(tenant, "marketplace", "") or "", "스마트스토어")
+        brand = getattr(tenant, "brand_name", "") or tenant.name
+        prompt = (
+            f"[상품] {tenant.name} (브랜드: {brand}, 판매 마켓: {mk}, 카테고리: {prof.name})\n"
+            f"[정보(사진 분석 포함)] {asset.note}\n\n"
+            f"너는 오픈마켓({mk}) 상품명·상세페이지 SEO 최적화 전문가다. 아래를 만들어라. "
+            "과장·허위 효능·최저가/100%/보장 같은 금지표현 쓰지 말고, 실제 정보 기반으로.\n\n"
+            "아래 형식 그대로(대괄호 머리표 유지) 출력:\n"
+            "[상품명]\n(3줄. 각 줄 서로 다른 조합 — [브랜드]+핵심키워드+특징+용도 순, "
+            "검색 키워드를 앞쪽에, 40~50자, 특수문자·중복 남발 금지)\n"
+            "[상세페이지]\n(구매를 부르는 상세설명. ## 핵심 셀링포인트 3가지 · ## 이런 분께 추천 · "
+            "## 상세 스펙(가능하면 표) · ## 자주 묻는 질문(Q&A 2~3) · 마지막 구매 유도 한 줄. 900~1400자)\n"
+            "[태그]\n(쉼표로 10개, 마켓 검색 노출용 키워드 — 상품종류·용도·타겟·시즌 등)"
+        )
+        raw = _call_llm(prompt, self.model, 2600)
+        d = _parse_sections(raw, ["상품명", "상세페이지", "태그"])
+        names = [n.strip().lstrip("-*·0123456789.) ").strip()
+                 for n in (d.get("상품명", "")).split("\n") if n.strip()][:3]
+        tags = [t.strip().lstrip("#") for t in (d.get("태그", "")).replace("\n", ",").split(",") if t.strip()][:10]
+        return ContentPiece(
+            id=str(uuid.uuid4()), tenant_id=tenant.id, asset_id=asset.id,
+            channel=Channel.MARKETPLACE, kind=self.kind,
+            payload={"product_names": names or [tenant.name],
+                     "detail_body": d.get("상세페이지", "") or raw,
+                     "tags": tags, "market": mk, "brand": brand,
+                     "buy_url": getattr(tenant, "buy_url", "") or "",
+                     "search_kw": getattr(tenant, "search_kw", "") or "",
+                     "raw": raw, "image_path": imgs[0], "image_paths": imgs},
+            status=ContentStatus.DRAFT)

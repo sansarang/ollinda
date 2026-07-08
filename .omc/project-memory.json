@@ -96,8 +96,8 @@
   "hotPaths": [
     {
       "path": "app/main.py",
-      "accessCount": 372,
-      "lastAccessed": 1783550788467,
+      "accessCount": 379,
+      "lastAccessed": 1783551326516,
       "type": "file"
     },
     {
@@ -114,8 +114,8 @@
     },
     {
       "path": "app/services/ingest.py",
-      "accessCount": 17,
-      "lastAccessed": 1783490274255,
+      "accessCount": 19,
+      "lastAccessed": 1783551212496,
       "type": "file"
     },
     {
@@ -155,6 +155,12 @@
       "type": "file"
     },
     {
+      "path": "app/domain/models.py",
+      "accessCount": 5,
+      "lastAccessed": 1783551110752,
+      "type": "file"
+    },
+    {
       "path": "app/media/photo_boost.py",
       "accessCount": 4,
       "lastAccessed": 1783490251839,
@@ -167,9 +173,9 @@
       "type": "file"
     },
     {
-      "path": "app/domain/models.py",
+      "path": "app/registry.py",
       "accessCount": 3,
-      "lastAccessed": 1783490511136,
+      "lastAccessed": 1783551188781,
       "type": "file"
     },
     {

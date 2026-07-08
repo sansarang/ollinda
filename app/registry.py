@@ -12,7 +12,7 @@ from app.adapters.x_twitter import XPublisher
 from app.adapters.youtube import YouTubePublisher
 from app.domain.models import Channel, ContentKind
 from app.generators.base import Generator
-from app.generators.text_claude import BlogDraftGenerator, CaptionGenerator
+from app.generators.text_claude import BlogDraftGenerator, CaptionGenerator, MarketplaceGenerator
 from app.generators.video import ShortVideoGenerator
 from app.generators.x_text import XPostGenerator
 
@@ -29,6 +29,7 @@ GENERATORS: dict[ContentKind, Generator] = {
     ContentKind.BLOG: BlogDraftGenerator(),      # 네이버
     ContentKind.SHORT: ShortVideoGenerator(),    # 유튜브 숏/인스타 릴스
     ContentKind.X_POST: XPostGenerator(),        # X(트위터)
+    ContentKind.MARKETPLACE: MarketplaceGenerator(),  # 셀러 판매 플랫폼(상품명·상세페이지·태그)
     # ContentKind.ALIMTALK: AlimtalkGenerator(),   # Phase 3
 }
 

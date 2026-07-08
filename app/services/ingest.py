@@ -21,6 +21,9 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
     kinds = kinds or [ContentKind.CAPTION, ContentKind.BLOG, ContentKind.X_POST]
     # 사업형태 전략에 따라 생성 순서 정렬 (셀러=영상 우선, 소상공인=블로그 우선)
     strat = resolve_strategy(tenant)
+    # 셀러 → 판매 플랫폼 콘텐츠(상품명·상세페이지·태그) 추가 생성
+    if strat.key == "seller" and ContentKind.MARKETPLACE not in kinds:
+        kinds = kinds + [ContentKind.MARKETPLACE]
     kinds = ordered_kinds(strat, kinds)
     if not files:
         return []
