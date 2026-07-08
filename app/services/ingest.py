@@ -46,6 +46,15 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
     from app.generators.editor import polish
     brief = build_brief(tenant, asset)
     asset.note = asset.note + brief_to_directive(brief)
+    # 📈 성과 학습 루프 — 지난 콘텐츠로 순위가 오른 키워드를 다음 생성에 강화 반영(쓸수록 똑똑해짐)
+    try:
+        learn = db.improving_keywords(tenant.id)
+        if learn:
+            kwlist = ", ".join(f"'{x['keyword']}'" for x in learn[:4])
+            asset.note += (f"\n[성과 학습 — 효과 검증된 키워드] 아래 키워드는 실제로 순위가 오른 키워드다. "
+                           f"제목·첫문장·본문에 자연스럽게 더 강하게 반영하라: {kwlist}")
+    except Exception:
+        pass
     brief_public = {k: v for k, v in brief.items() if not k.startswith("_")}
     pieces = generate_for(tenant, asset, kinds, images=paths)   # ✍️ 카피라이터·🎬 영상감독
     for p in pieces:

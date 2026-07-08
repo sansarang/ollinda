@@ -13,3 +13,4 @@ Pillow
 # Pillow                        # 이미지 처리(선택)
 
 boto3                          # Cloudflare R2(S3 호환) 미디어 스토리지
+qrcode[pil]                    # 추적 링크 QR 생성(성과 실측)

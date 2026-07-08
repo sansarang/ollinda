@@ -97,6 +97,26 @@ def get_prev_rank(tenant_id: str, keyword: str) -> "int | None":
     return (r["rank"] if r else None)
 
 
+def improving_keywords(tenant_id: str, limit: int = 5) -> list[dict]:
+    """순위가 개선된(또는 진입한) 키워드 — 학습 루프용. [{keyword, first, last, gain}]."""
+    out = []
+    with _conn() as c:
+        kws = c.execute("SELECT DISTINCT keyword FROM rank_snapshots WHERE tenant_id=?", (tenant_id,)).fetchall()
+        for kr in kws:
+            k = kr["keyword"]
+            rows = c.execute("SELECT rank, checked_at FROM rank_snapshots WHERE tenant_id=? AND keyword=? "
+                             "ORDER BY checked_at ASC", (tenant_id, k)).fetchall()
+            if len(rows) < 2:
+                continue
+            first = rows[0]["rank"] if rows[0]["rank"] else 6      # 0(밖)=6로 취급
+            last = rows[-1]["rank"] if rows[-1]["rank"] else 6
+            gain = first - last                                    # +면 순위 상승(숫자 작아짐)
+            if gain > 0:
+                out.append({"keyword": k, "first": rows[0]["rank"], "last": rows[-1]["rank"], "gain": gain})
+    out.sort(key=lambda x: -x["gain"])
+    return out[:limit]
+
+
 def save_rank_snapshot(tenant_id: str, keyword: str, rank: "int | None") -> None:
     """순위 스냅샷 기록(하루 1개로 제한 — 같은 날 재조회는 갱신)."""
     if rank is None:
@@ -332,6 +352,16 @@ def create_link(tenant_id: str, target: str, label: str = "") -> str:
         c.execute("INSERT INTO links(code,tenant_id,target,label,clicks,created_at) VALUES(?,?,?,?,0,?)",
                   (code, tenant_id, target, label, _now()))
     return code
+
+
+def ensure_track_link(tenant_id: str, target: str, label: str = "") -> Optional[dict]:
+    """목적지(target)로 가는 추적 링크 get-or-create(중복 방지). 성과 실측용."""
+    if not (target or "").strip():
+        return None
+    for l in list_links(tenant_id, 50):
+        if l.get("target") == target:
+            return l
+    return get_link(create_link(tenant_id, target, label))
 
 
 def get_link(code: str) -> Optional[dict]:

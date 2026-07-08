@@ -96,8 +96,8 @@
   "hotPaths": [
     {
       "path": "app/main.py",
-      "accessCount": 264,
-      "lastAccessed": 1783477173709,
+      "accessCount": 272,
+      "lastAccessed": 1783477665331,
       "type": "file"
     },
     {
@@ -108,14 +108,14 @@
     },
     {
       "path": "app/db.py",
-      "accessCount": 15,
-      "lastAccessed": 1783476870570,
+      "accessCount": 18,
+      "lastAccessed": 1783477625410,
       "type": "file"
     },
     {
       "path": "app/services/ingest.py",
-      "accessCount": 13,
-      "lastAccessed": 1783477137566,
+      "accessCount": 15,
+      "lastAccessed": 1783477500641,
       "type": "file"
     },
     {

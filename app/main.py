@@ -649,6 +649,65 @@ def _perf_report(tenant_id: str) -> str:
             + "<p class='text-xs text-slate-400 mt-3'>※ 순위는 참고용(위치·기기별로 달라요). 실시간 자동추적은 로드맵.</p></div>")
 
 
+def _ensure_track_link(t):
+    """가게 대표 목적지(플레이스/스토어)로 가는 추적 링크. 클릭 집계용."""
+    biz = getattr(t, "biz_type", "local") or "local"
+    if biz == "seller":
+        target, label = (getattr(t, "buy_url", "") or getattr(t, "map_url", "")), "스토어"
+    else:
+        target, label = (getattr(t, "map_url", "") or getattr(t, "buy_url", "")), "네이버 플레이스"
+    return db.ensure_track_link(t.id, target, label)
+
+
+@app.get("/me/qr/{code}.png")
+def link_qr(code: str):
+    """추적 링크 QR(오프라인→온라인 유입 측정)."""
+    import io
+    import qrcode
+    from starlette.responses import Response as _Resp
+    base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
+    img = qrcode.make(f"{base}/r/{code}")
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return _Resp(content=buf.getvalue(), media_type="image/png")
+
+
+def _daily_action(t) -> dict:
+    """능동 코칭 — '오늘의 액션 1개'. DB만 사용(빠름). 상태 기반 우선순위."""
+    import datetime
+    sets = db.list_sets(tenant_id=t.id, limit=50)
+    links = db.list_links(t.id)
+    clicks = sum(int(l.get("clicks") or 0) for l in links)
+    improving = []
+    try:
+        improving = db.improving_keywords(t.id)
+    except Exception:
+        pass
+    if not sets:
+        return {"emoji": "🚀", "text": "첫 콘텐츠를 만들어보세요! 사진 한 장이면 5채널이 완성돼요.",
+                "cta": "지금 만들기", "href": "/me"}
+    # 마지막 콘텐츠 이후 경과일
+    days = 0
+    try:
+        last = (sets[0].get("created") or "")[:10]
+        d0 = datetime.date.fromisoformat(last)
+        days = (datetime.date.today() - d0).days
+    except Exception:
+        pass
+    if days >= 3:
+        return {"emoji": "📅", "text": f"{days}일째 새 콘텐츠가 없어요. 꾸준함이 상위노출의 1순위예요 — 오늘 하나 올려요!",
+                "cta": "새 콘텐츠 만들기", "href": "/me"}
+    if improving:
+        k = improving[0]["keyword"]
+        return {"emoji": "📈", "text": f"‘{esc(k)}’ 순위가 오르고 있어요! 이 기세로 하나 더 올리면 상위 굳히기 각이에요.",
+                "cta": "이어서 만들기", "href": "/me"}
+    if clicks > 0:
+        return {"emoji": "🎯", "text": f"추적 링크 클릭 {clicks}회 — 콘텐츠가 실제 손님을 부르고 있어요. 계속 올려요!",
+                "cta": "성과 보기", "href": "/me?tab=report"}
+    return {"emoji": "✨", "text": "오늘 콘텐츠 하나로 노출을 늘려보세요. 매주 2~3개가 상위노출의 정석이에요.",
+            "cta": "만들기", "href": "/me"}
+
+
 @app.get("/me", response_class=HTMLResponse)
 def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
     u = auth.current_user(request)
@@ -898,10 +957,37 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                     "function riv(it){if(it.rank===1)return '<div class=\"text-xs text-emerald-600 mt-1 font-semibold\">👑 이 키워드 1위!</div>';if(it.rank>1&&it.rival)return '<div class=\"text-xs text-amber-600 mt-1\">🎯 <b>'+it.rival+'</b>만 넘으면 '+(it.rank-1)+'위</div>';if((it.rank===0)&&it.leader)return '<div class=\"text-xs text-slate-400 mt-1\">현재 1위: '+it.leader+' — 콘텐츠 꾸준히 올리면 진입해요</div>';return '';}"
                     "b.innerHTML=d.items.map(function(it){return '<div class=\"border-b border-slate-100 py-2.5\"><div class=\"flex items-center justify-between\"><span class=\"text-slate-700 font-medium\">'+it.kw+'</span><span class=\"whitespace-nowrap\">'+st(it)+chg(it)+'</span></div>'+riv(it)+'</div>';}).join('');"
                     "}catch(e){b.innerHTML='<span class=\"text-rose-400\">조회 실패</span>';}})();</script></div>")
-        main_inner = _sbadge + stats_row + _kwbox + _rankbox
+        # 🎯 성과 실측 — 추적 링크/QR로 '이 콘텐츠 보고 온 손님' 집계
+        _tl = _ensure_track_link(t)
+        _clicks = sum(int(l.get("clicks") or 0) for l in db.list_links(t.id))
+        _trackbox = ""
+        if _tl:
+            _base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
+            _short = f"{_base}/r/{_tl['code']}"
+            _trackbox = (
+                f"<div class='{_fw} mt-5'>"
+                "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>🎯 성과 실측 · 내 손님 추적</h2>"
+                "<p class='text-sm text-slate-400 mb-4'>이 링크·QR을 <b>인스타 프로필·명함·매장</b>에 넣으면, 여기로 온 손님 수가 집계돼요.</p>"
+                "<div class='flex items-center gap-5 flex-wrap'>"
+                f"<img src='/me/qr/{_tl['code']}.png' class='w-28 h-28 rounded-xl border border-slate-100 p-1 bg-white' alt='추적 QR'>"
+                "<div class='flex-1 min-w-[220px]'>"
+                f"<div class='text-4xl font-extrabold text-indigo-600'>{_clicks}<span class='text-base text-slate-400 font-bold ml-1'>회 유입</span></div>"
+                "<div class='mt-2 flex items-center gap-2'>"
+                f"<input readonly value='{_short}' id='trkurl' class='flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600'>"
+                "<button type=button onclick=\"omCopy(document.getElementById('trkurl').value);this.textContent='✅'\" class='flex-shrink-0 bg-indigo-600 text-white text-sm font-bold px-3 py-2 rounded-lg'>복사</button></div>"
+                f"<div class='text-xs text-slate-400 mt-1.5'>→ {esc(_tl.get('label',''))}(으)로 연결돼요</div>"
+                f"<a href='/me/qr/{_tl['code']}.png' download='ollinda-qr.png' class='inline-block mt-2 text-xs font-bold text-indigo-500'>⬇ QR 이미지 저장</a>"
+                "</div></div></div>")
+        main_inner = _sbadge + stats_row + _trackbox + _rankbox + _kwbox
     else:                                                 # ✨ 만들기 (기본) — 통계·내콘텐츠 없이 폼만 전체폭 크게
         active = "create"
-        main_inner = greeting + upload_section
+        _act = _daily_action(t)
+        _coach = ("<div class='flex items-center gap-3 bg-gradient-to-r from-indigo-50 to-violet-50 border border-indigo-100 rounded-2xl p-4 mb-5'>"
+                  f"<div class='text-2xl'>{_act['emoji']}</div>"
+                  "<div class='flex-1 min-w-0'><div class='text-xs font-bold text-indigo-500 mb-0.5'>오늘의 액션</div>"
+                  f"<div class='text-sm text-slate-700 font-medium'>{_act['text']}</div></div>"
+                  f"<a href='{_act['href']}' class='flex-shrink-0 bg-indigo-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-indigo-700 transition'>{_act['cta']}</a></div>")
+        main_inner = greeting + _coach + upload_section
     from app import landing
     _navitems = [("🏠", "홈", "/me", "create"), ("📄", "내 콘텐츠", "/me?tab=content", "content"),
                  ("📊", "리포트", "/me?tab=report", "report")]
