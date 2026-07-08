@@ -461,8 +461,8 @@ def _seller_search_kw(name: str, brand: str = "") -> str:
 
 
 @app.get("/api/lookup")
-def api_lookup(q: str = ""):
-    """가게 이름/상품 링크 하나로 자동 판별·입력.
+def api_lookup(q: str = "", biz: str = ""):
+    """가게 이름/상품 링크 하나로 자동 판별·입력. biz='seller'면 지역검색 건너뛰고 쇼핑검색.
     URL→셀러(상품 파싱) / 이름→지역검색(매장) / 없으면 쇼핑검색(셀러)."""
     from app.services import place, lookup
     q = (q or "").strip()
@@ -476,8 +476,8 @@ def api_lookup(q: str = ""):
                              "image": p.get("image", ""), "buy_url": q,
                              "market": _detect_market(q), "search_kw": _seller_search_kw(name),
                              "desc": (p.get("description") or "")[:120]})
-    # 이름 → 지역검색(매장)
-    local = place.search(q, limit=5)
+    # 이름 → 지역검색(매장) — 단, 셀러로 선택했으면 건너뛰고 쇼핑검색으로
+    local = place.search(q, limit=5) if biz != "seller" else []
     if local:
         from urllib.parse import quote as _q
 
@@ -519,6 +519,10 @@ def api_lookup(q: str = ""):
         if len(scands) > 1:                        # 여러 상품 → 내 상품 선택
             resp["candidates"] = scands
         return JSONResponse(resp)
+    # 셀러로 선택했는데 쇼핑검색도 없으면 → 상품명만이라도 셀러로 채움
+    if biz == "seller":
+        return JSONResponse({"type": "seller", "name": q, "industry": q[:20],
+                             "search_kw": _seller_search_kw(q)})
     return JSONResponse({"type": "none", "configured": place.configured()})
 
 
@@ -2932,7 +2936,8 @@ def _upload_form_html(tenant, token: str) -> str:
           "function pickCand(i){var c=(window.__cands||[])[i];if(c){c.type='local';fillStore(c);}}"
           "async function lookupStore(){var q=document.getElementById('lk_q').value.trim();if(!q)return;"
           "var b=document.getElementById('lk_result');b.innerHTML='<span class=\"text-slate-400\">인식 중…</span>';"
-          "try{var r=await fetch('/api/lookup?q='+encodeURIComponent(q));var d=await r.json();"
+          "var _bz=((document.querySelector('input[name=biztype]:checked')||{}).value)||(document.getElementById('s_biz')||{}).value||'';"
+          "try{var r=await fetch('/api/lookup?q='+encodeURIComponent(q)+(_bz?('&biz='+_bz):''));var d=await r.json();"
           "if(d.type==='none'){b.innerHTML='<span class=\"text-slate-400\">못 찾았어요 — 그냥 사진 올리고 만들어도 돼요</span>';return;}"
           "if(d.candidates&&d.candidates.length>1){window.__cands=d.candidates;"
           "var _isS=(d.candidates[0].mall!==undefined||d.candidates[0].price);"
