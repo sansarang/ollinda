@@ -157,9 +157,26 @@ def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: di
             db.save_piece(caption)
     except Exception:
         pass
-    # ☁ 생성된 영상을 R2에 미러(설정 시) — 로컬 자동정리 후에도 영구 서빙
+    # ☁ 생성물을 R2에 미러 + 로컬 미디어 삭제(볼륨 확보). R2 설정 시에만 삭제, 미설정이면 미러만(no-op).
     try:
         from app import storage as _st
         _st.mirror_to_r2(short.payload.get("video_path"))
+        for cp in (caption.payload.get("carousel_paths") or []) if caption else []:
+            _st.mirror_to_r2(cp)
+        if _st.r2_configured():
+            paths = set()
+            for pc in db.get_set_pieces(asset.id):     # 사진은 save_upload가 이미 R2 미러함
+                paths.add(pc.payload.get("video_path"))
+                paths.add(pc.payload.get("image_path"))
+                for ip in (pc.payload.get("image_paths") or []):
+                    paths.add(ip)
+                for cp2 in (pc.payload.get("carousel_paths") or []):
+                    paths.add(cp2)
+            for fp in paths:
+                if fp and os.path.exists(fp):
+                    try:
+                        os.remove(fp)              # 서빙은 R2 리다이렉트로 계속 됨
+                    except Exception:
+                        pass
     except Exception:
         pass

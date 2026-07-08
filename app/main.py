@@ -2257,30 +2257,35 @@ def admin_cleanup():
     # 사장님(보존) tenant의 오래된 영상도 정리 (keep_recent=2로 강하게)
     for tid in keep:
         freed += _prune_old_media(tid, keep_recent=2)
-    # ★ DB 추적 여부와 무관하게 — 저장소 전체에서 오래된 영상(mp4)을 직접 삭제(고아 파일 포함)
-    mp4s = []
+    # ★ 저장소 전체 — 모든 확장자(사진·영상·캐러셀·ffmpeg 임시) 오래된 파일 삭제, 최근 40개만 유지
+    from collections import defaultdict
+    allf, by_ext = [], defaultdict(lambda: [0, 0])
     for root, _d, fs in os.walk(STORAGE_DIR):
         for fn in fs:
-            if fn.lower().endswith(".mp4"):
-                fp = os.path.join(root, fn)
-                try:
-                    mp4s.append((os.path.getmtime(fp), os.path.getsize(fp), fp))
-                except Exception:
-                    pass
-    mp4s.sort(reverse=True)                    # 최신 먼저
-    mp4_total = sum(m[1] for m in mp4s)
-    for _mt, sz, fp in mp4s[6:]:               # 최근 6개만 남기고 삭제
+            fp = os.path.join(root, fn)
+            try:
+                sz = os.path.getsize(fp)
+                allf.append((os.path.getmtime(fp), sz, fp))
+                e = fp.rsplit(".", 1)[-1].lower()[:6]
+                by_ext[e][0] += 1
+                by_ext[e][1] += sz
+            except Exception:
+                pass
+    allf.sort(reverse=True)                    # 최신 먼저
+    for _mt, sz, fp in allf[40:]:              # 최근 40개만 남기고 전부 삭제(R2에 사본 있음)
         try:
             os.remove(fp)
             freed += sz
         except Exception:
             pass
+    breakdown = {e: {"n": v[0], "mb": round(v[1] / 1e6, 1)}
+                 for e, v in sorted(by_ext.items(), key=lambda x: -x[1][1])[:8]}
     try:
         df = subprocess.run(["df", "-h", STORAGE_DIR], capture_output=True, text=True, timeout=8).stdout
     except Exception:
         df = ""
     return {"kept_tenants": len(keep), "removed_folders": removed, "freed_mb": round(freed / 1e6, 1),
-            "mp4_count": len(mp4s), "mp4_total_mb": round(mp4_total / 1e6, 1), "df": df}
+            "file_types": breakdown, "df": df}
 
 
 @app.api_route("/admin/testgen", methods=["GET", "POST"])
