@@ -614,6 +614,19 @@ def store_switch(request: Request, tenant_id: str = Form("")):
     return RedirectResponse("/me", status_code=303)
 
 
+@app.post("/me/store/cancel")
+def store_cancel(request: Request):
+    """가게 추가를 잘못 눌렀을 때 — 비어있는 새 가게면 삭제하고 이전 가게로 되돌림."""
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    t = _ensure_user_tenant(u)
+    if db.list_sets(tenant_id=t.id):                 # 콘텐츠가 있으면 실수 아님 → 그냥 전환만
+        return RedirectResponse("/me?tab=content", status_code=303)
+    db.delete_store(u["id"], t.id)                   # 비어있으면 삭제 + 이전 가게로
+    return RedirectResponse("/me?ok=이전 가게로 돌아왔어요", status_code=303)
+
+
 def _perf_report(tenant_id: str) -> str:
     """생성 콘텐츠 성과 요약 — 세트/채널 발행물/평균 상위노출 점수/타겟 키워드."""
     sets = db.list_sets(tenant_id=tenant_id, limit=200)
@@ -887,11 +900,17 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
     # ── 최초 1회 온보딩 vs 작동 대시보드 ──
     onboarded = bool((t.industry or "").strip())
     if not onboarded:
-        intro = ("<div class='bg-indigo-50 text-indigo-700 p-4 rounded-2xl mb-4 text-sm'>"
-                 "🎉 가입 완료! 시작하려면 <b>딱 3가지</b>만 알려주세요. (30초)</div>")
+        _multi = len(db.list_user_stores(u["id"])) > 1
+        # 실수로 '가게 추가'를 눌렀을 때 되돌리기 — 다른 가게가 있을 때만
+        back_btn = (("<form method=post action='/me/store/cancel' class='mb-3'>"
+                     "<button class='inline-flex items-center gap-1 text-sm font-bold text-slate-500 hover:text-slate-900 bg-white border border-slate-200 rounded-xl px-4 py-2 hover:bg-slate-50 transition'>"
+                     "← 뒤로가기 <span class='text-slate-400 font-normal'>(실수로 추가했다면)</span></button></form>") if _multi else "")
+        intro = ((f"<div class='bg-indigo-50 text-indigo-700 p-4 rounded-2xl mb-4 text-sm'>"
+                  + ("🆕 <b>새 가게</b>를 추가했어요. <b>딱 3가지</b>만 알려주세요. (30초)</div>" if _multi
+                     else "🎉 가입 완료! 시작하려면 <b>딱 3가지</b>만 알려주세요. (30초)</div>")))
         card = ("<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-5'>"
                 "<h2 class='font-bold mb-3'>내 가게/상품 정보</h2>" + store_form_min + "</div>")
-        return _subscriber_page(f"{esc(t.name)} · 시작 설정", banner + intro + card)
+        return _subscriber_page(f"{esc(t.name)} · 시작 설정", banner + back_btn + intro + card)
     # 온보딩 완료 → 사진 올려 생성이 메인
     from app.services import pay as _pay
     _plan = u.get("plan") or "free"
@@ -1014,6 +1033,13 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                   f"<div class='text-sm text-slate-700 font-medium'>{_act['text']}</div></div>"
                   f"<a href='{_act['href']}' class='flex-shrink-0 bg-indigo-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-indigo-700 transition'>{_act['cta']}</a></div>")
         main_inner = greeting + _coach + upload_section
+    # 🆕 새로 추가한 '빈 새 가게'면 실수 대비 '뒤로가기(취소)' 배너
+    if t.name == "새 가게" and len(db.list_user_stores(u["id"])) > 1 and not db.list_sets(tenant_id=t.id):
+        _backban = ("<div class='flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-5'>"
+                    "<span class='text-xl'>🆕</span>"
+                    "<div class='flex-1 text-sm text-amber-800'><b>새 가게</b>를 추가했어요. 가게 이름을 넣고 자동 인식하세요. 잘못 누르셨나요?</div>"
+                    "<form method=post action='/me/store/cancel'><button class='bg-white border border-amber-300 text-amber-700 text-sm font-bold px-4 py-2 rounded-xl hover:bg-amber-100 transition whitespace-nowrap'>← 뒤로가기</button></form></div>")
+        main_inner = _backban + main_inner
     from app import landing
     _navitems = [("🏠", "홈", "/me", "create"), ("📄", "내 콘텐츠", "/me?tab=content", "content"),
                  ("📊", "리포트", "/me?tab=report", "report")]

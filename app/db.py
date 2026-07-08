@@ -298,6 +298,21 @@ def switch_store(user_id: str, tenant_id: str) -> bool:
     return False
 
 
+def delete_store(user_id: str, tenant_id: str) -> bool:
+    """가게 삭제(본인 소유·마지막 1개 아님) 후 다른 가게로 전환. 실수 추가 취소용."""
+    stores = list_user_stores(user_id)
+    if len(stores) <= 1 or tenant_id not in [s.id for s in stores]:
+        return False
+    with _conn() as c:
+        c.execute("DELETE FROM user_stores WHERE user_id=? AND tenant_id=?", (user_id, tenant_id))
+        c.execute("DELETE FROM content_pieces WHERE tenant_id=?", (tenant_id,))
+        c.execute("DELETE FROM tenants WHERE id=?", (tenant_id,))
+    other = [s for s in stores if s.id != tenant_id]
+    if other:
+        set_user_tenant(user_id, other[-1].id)      # 직전(마지막) 가게로 복귀
+    return True
+
+
 def set_user_tenant(uid: str, tid: str) -> None:
     with _conn() as c:
         c.execute("UPDATE users SET tenant_id=? WHERE id=?", (tid, uid))
