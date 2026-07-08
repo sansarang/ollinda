@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "lastScanned": 1783033417371,
+  "lastScanned": 1783472559368,
   "projectRoot": "/Users/youngjinjung/Desktop/shopcast",
   "techStack": {
     "languages": [
@@ -46,7 +46,7 @@
       "path": "app",
       "purpose": "Application code",
       "fileCount": 16,
-      "lastAccessed": 1783033417358,
+      "lastAccessed": 1783472559350,
       "keyFiles": [
         "__init__.py",
         "auth.py",
@@ -59,14 +59,14 @@
       "path": "assets",
       "purpose": "Static assets",
       "fileCount": 0,
-      "lastAccessed": 1783033417359,
+      "lastAccessed": 1783472559350,
       "keyFiles": []
     },
     "data": {
       "path": "data",
       "purpose": "Data files",
       "fileCount": 1,
-      "lastAccessed": 1783033417359,
+      "lastAccessed": 1783472559351,
       "keyFiles": [
         "shopcast.sqlite"
       ]
@@ -75,35 +75,35 @@
       "path": "docs",
       "purpose": "Documentation",
       "fileCount": 0,
-      "lastAccessed": 1783033417359,
+      "lastAccessed": 1783472559351,
       "keyFiles": []
     },
     "references": {
       "path": "references",
       "purpose": null,
       "fileCount": 0,
-      "lastAccessed": 1783033417359,
+      "lastAccessed": 1783472559351,
       "keyFiles": []
     },
     "app/assets": {
       "path": "app/assets",
       "purpose": "Static assets",
       "fileCount": 0,
-      "lastAccessed": 1783033417360,
+      "lastAccessed": 1783472559352,
       "keyFiles": []
     }
   },
   "hotPaths": [
     {
       "path": "app/main.py",
-      "accessCount": 248,
-      "lastAccessed": 1783472360615,
+      "accessCount": 257,
+      "lastAccessed": 1783473428327,
       "type": "file"
     },
     {
       "path": "app/landing.py",
-      "accessCount": 46,
-      "lastAccessed": 1783472444355,
+      "accessCount": 48,
+      "lastAccessed": 1783473411462,
       "type": "file"
     },
     {

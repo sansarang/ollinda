@@ -267,7 +267,7 @@ def _teaser_html(pieces, brief, asset_id, remaining: int = 0) -> str:
 
     def copy_btn(cid, text):
         return (f"<textarea id='{cid}' class='hidden'>{esc(text)}</textarea>"
-                f"<button type=button onclick=\"navigator.clipboard.writeText(document.getElementById('{cid}').value);this.textContent='✅ 복사됨'\" "
+                f"<button type=button onclick=\"omCopy(document.getElementById('{cid}').value);this.textContent='✅ 복사됨'\" "
                 "class='mt-2 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg'>📋 복사</button>")
 
     def card(label, inner):
@@ -1257,11 +1257,14 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                      f"<div class='mt-3 flex gap-2'>{pack_btn(p.id, has_video)}{_cp('c_v' + p.id[:5], title, '제목')}</div></div></div>")
         if block:
             cards += "<div class='break-inside-avoid mb-6'>" + block + "</div>"
-    js = ("<script>function cp(id,btn){var t=document.getElementById(id);var o=btn.textContent;"
-          "navigator.clipboard.writeText(t.value);btn.textContent='✅ 복사됨';setTimeout(function(){btn.textContent=o;},1500);}"
+    js = ("<script>"
+          "function omCopy(text){if(navigator.clipboard&&navigator.clipboard.writeText){return navigator.clipboard.writeText(text);}"
+          "return new Promise(function(res,rej){var ta=document.createElement('textarea');ta.value=text;ta.setAttribute('readonly','');ta.style.position='fixed';ta.style.top='0';ta.style.opacity='0';document.body.appendChild(ta);ta.focus();ta.select();ta.setSelectionRange(0,text.length);var ok=false;try{ok=document.execCommand('copy');}catch(e){}document.body.removeChild(ta);ok?res():rej();});}"
+          "function cp(id,btn){var t=document.getElementById(id);var o=btn.textContent;"
+          "omCopy(t.value).then(function(){btn.textContent='✅ 복사됨';}).catch(function(){btn.textContent='길게 눌러 복사';});setTimeout(function(){btn.textContent=o;},1500);}"
           "async function copyRich(id,btn){var el=document.getElementById(id);var o=btn.textContent;"
-          "try{await navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([el.innerHTML],{type:'text/html'}),'text/plain':new Blob([el.innerText],{type:'text/plain'})})]);btn.textContent='✅ 복사됨! 네이버 글쓰기에 붙여넣기(Ctrl+V)';}"
-          "catch(e){try{await navigator.clipboard.writeText(el.innerText);btn.textContent='✅ 글 복사됨(사진은 아래로 따로)';}catch(e2){btn.textContent='복사 실패 — 다시';}}"
+          "try{await navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([el.innerHTML],{type:'text/html'}),'text/plain':new Blob([el.innerText],{type:'text/plain'})})]);btn.textContent='✅ 복사됨! 네이버 글쓰기에 붙여넣기';}"
+          "catch(e){try{await omCopy(el.innerText);btn.textContent='✅ 글 복사됨(사진은 아래로 따로)';}catch(e2){btn.textContent='길게 눌러 복사';}}"
           "setTimeout(function(){btn.textContent=o;},2600);}</script>")
     brief = next((p.payload.get("brief") for p in pieces if p.payload.get("brief")), None)
     pipeline = ("<div class='bg-indigo-50 border border-indigo-100 rounded-2xl p-4 mb-4'>"
@@ -1360,7 +1363,7 @@ def kit_naver(request: Request, asset_id: str):
            f"<div class='grid grid-cols-3 sm:grid-cols-4 gap-3'>{photo_cells}</div></div>" if photos else "")
         # 토스트
         + "<div id='nvToast' class='fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-sm font-bold px-5 py-3 rounded-xl shadow-xl opacity-0 pointer-events-none transition-opacity'>✅ 복사됨</div>"
-        + "<script>function nvcp(id,btn){var t=document.getElementById(id);navigator.clipboard.writeText(t.value);"
+        + "<script>function nvcp(id,btn){var t=document.getElementById(id);omCopy(t.value);"
         "var o=btn.textContent;btn.textContent='✅ 복사됨';var tt=document.getElementById('nvToast');tt.style.opacity='1';"
         "setTimeout(function(){btn.textContent=o;tt.style.opacity='0';},1600);}</script>")
     return HTMLResponse(_subscriber_page("네이버 블로그", body))
@@ -2540,7 +2543,8 @@ def _upload_form_html(tenant, token: str) -> str:
           "var st=[[0,'🎯 마케팅 전략가가 분석 중…'],[25,'✍️ 카피라이터가 글 쓰는 중…'],[55,'🔍 SEO 편집장이 다듬는 중…'],[80,'🎬 영상 감독이 마무리 중…']];"
           "var p=0;var tick=setInterval(function(){p=Math.min(p+(p<70?1.2:0.35),95);var b=document.getElementById('gBar');if(!b)return;b.style.width=p+'%';document.getElementById('gPct').textContent=Math.round(p)+'%';var l=st[0][1];st.forEach(function(s){if(p>=s[0])l=s[1];});document.getElementById('gLabel').textContent=l;},500);"
           "var base=0;try{base=(await (await fetch('/me/sets/count')).json()).n;}catch(_){}"
-          "try{await fetch(f.action,{method:'POST',body:new FormData(f)});}catch(_){}"
+          "var fd=new FormData(f);try{if(window.PM&&PM.f&&PM.f.length){fd.delete('photos');PM.f.forEach(function(x){fd.append('photos',x);});}}catch(_){}"
+          "try{await fetch(f.action,{method:'POST',body:fd});}catch(_){}"
           "var n=0;var iv=setInterval(async function(){n++;if(n>80){clearInterval(iv);clearInterval(tick);location.href='/me';return;}"
           "try{var d=await (await fetch('/me/sets/count')).json();if(d.n>base){clearInterval(iv);clearInterval(tick);var b=document.getElementById('gBar');if(b)b.style.width='100%';"
           "document.getElementById('gPct').textContent='100%';document.getElementById('gLabel').textContent='✅ 완성!';"
