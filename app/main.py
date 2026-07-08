@@ -512,7 +512,7 @@ def api_lookup(q: str = "", biz: str = ""):
                     "mall": it.get("mall", ""), "brand": brand,
                     "market": _detect_market(it.get("mall", "")),
                     "search_kw": _seller_search_kw(it["name"], brand),
-                    "buy_url": it.get("link", "")}
+                    "buy_url": ""}    # 검색결과 링크는 남의 것 → 셀러가 자기 링크 직접 입력(URL 붙여넣기로만 자동)
         scands = [_scand(it) for it in shop]
         resp = dict(scands[0])
         resp["type"] = "seller"
@@ -2867,13 +2867,15 @@ def _upload_form_html(tenant, token: str) -> str:
     _hint = (f"<span class='text-emerald-600 font-semibold'>✓ {_nm} · {_ind0} 저장됨 (수정 가능)</span>" if _nm else "입력하면 업종·주소가 자동으로 채워져요 (없어도 OK)")
     # 이미 저장된 가게(이름+업종)면 입력필드를 접어서 대시보드처럼 깔끔하게(펼치면 수정)
     _store_open = "" if (_nm and _ind0) else "open"
-    _store_summary = (f"🏪 <b>{_nm}</b> · {_ind0} <span class='ml-1 text-indigo-500 font-bold'>✏️ 가게 정보 수정 ▾</span>"
-                      if _nm else "1. 가게 이름 또는 상품 링크")
+    _store_summary = (f"🏪 <b>{_nm}</b> · {_ind0} <span class='ml-1 text-indigo-500 font-bold'>✏️ 정보 수정 ▾</span>"
+                      if _nm else "2. 내 가게 / 상품 정보")
     form = f"""<form method=post action='/u/{token}/upload' enctype='multipart/form-data' onsubmit='return showGen(event)' class='space-y-6'>
       <input type=hidden name=s_name id=s_name value="{_nm}"><input type=hidden name=s_industry id=s_industry value="{_ind0}"><input type=hidden name=s_biz id=s_biz value='{bt}'>
-      <details {_store_open} class='rounded-2xl border border-slate-100 bg-slate-50/50 p-4'><summary class='{lb} mb-0 cursor-pointer select-none'>{_store_summary}</summary>
-        <div class='mt-3 flex gap-2'>
-          <input id=lk_q value="{_nm}" placeholder='가게 이름 또는 상품/스토어 링크' class='{inp} flex-1'>
+      <div><label class='{lb}'>1. 어떤 장사인가요?</label>{biz_toggle}</div>
+      <details {_store_open} class='rounded-2xl border border-slate-100 bg-slate-50/50 p-4'><summary id=storeSummary class='{lb} mb-0 cursor-pointer select-none'>{_store_summary}</summary>
+        <div id=lk_hint2 class='text-xs text-indigo-500 font-semibold mt-3 mb-1.5'></div>
+        <div class='flex gap-2'>
+          <input id=lk_q value="{_nm}" placeholder='가게 이름 (자동 인식)' class='{inp} flex-1'>
           <button type=button onclick='lookupStore()' class='px-5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-sm whitespace-nowrap transition'>자동 인식</button></div>
         <div id=lk_result class='text-xs mt-2 mb-2 text-slate-400'>{_hint}</div>
         <div id=sf_local class='grid grid-cols-2 gap-2'>
@@ -2882,16 +2884,15 @@ def _upload_form_html(tenant, token: str) -> str:
           <input name=s_address id=s_address value="{_addr}" placeholder='주소' class='{inp} col-span-2'>
           <input name=s_map id=s_map value="{_map0}" placeholder='네이버 플레이스 URL (선택)' class='{inp} col-span-2'></div>
         <div id=sf_seller class='grid grid-cols-2 gap-2 hidden'>
-          <input name=s_market id=s_market placeholder='마켓 (예: 쿠팡)' class='{inp}'>
-          <input name=s_brand id=s_brand placeholder='브랜드명' class='{inp}'>
-          <input name=s_search id=s_search placeholder='검색어 유도 (예: 폴딩박스)' class='{inp}'>
-          <input name=s_buy id=s_buy placeholder='상세페이지/스토어 링크' class='{inp}'></div></details>
-      <div><label class='{lb}'>2. 사진 <span class='text-slate-400 font-normal text-xs'>(끌어서 순서 변경 · × 삭제)</span>
+          <input name=s_buy id=s_buy value="{esc(getattr(tenant,'buy_url','') or '')}" placeholder='🔗 내 스토어/상품 링크 (손님이 갈 곳) *필수' class='{inp} col-span-2'>
+          <input name=s_market id=s_market value="{esc(getattr(tenant,'marketplace','') or '')}" placeholder='마켓 (쿠팡·스마트스토어·11번가)' class='{inp}'>
+          <input name=s_brand id=s_brand value="{esc(getattr(tenant,'brand_name','') or '')}" placeholder='브랜드명' class='{inp}'>
+          <input name=s_search id=s_search value="{esc(getattr(tenant,'search_kw','') or '')}" placeholder='검색어 유도 (예: 폴딩박스)' class='{inp} col-span-2'></div></details>
+      <div><label class='{lb}'>3. 사진 <span class='text-slate-400 font-normal text-xs'>(끌어서 순서 변경 · × 삭제)</span>
         <span class='inline-block ml-1 bg-indigo-50 text-indigo-600 text-[11px] font-bold px-2 py-0.5 rounded-full'>✨ 자동 전문가 보정</span></label>
         <div id=up_preview class='grid grid-cols-3 sm:grid-cols-4 gap-2'></div>
         <input type=file name=photos id=up_photos accept='image/*' multiple required class='hidden'>
         <p class='text-xs text-slate-400 mt-1.5'>💡 <b class='text-slate-500'>끌어서</b> 순서 변경 · <b class='text-slate-500'>＋</b> 로 여러 장 추가 · 올린 순서대로 영상·블로그에 배치돼요</p></div>
-      <div><label class='{lb}'>3. 어떤 장사인가요?</label>{biz_toggle}</div>
       <div><label class='{lb}'>4. 목적 <span class='text-slate-400 font-normal text-xs'>(선택)</span></label>
         <div class='flex flex-wrap gap-2'>{chips}</div></div>
       <div><label class='{lb}'>5. 사진 설명·요청 <span class='text-slate-400 font-normal text-xs'>(선택 · AI가 더 정확해져요)</span></label>
@@ -2901,7 +2902,10 @@ def _upload_form_html(tenant, token: str) -> str:
       <button class='w-full py-4 rounded-2xl text-white font-extrabold text-lg shadow-xl shadow-indigo-500/30 hover:shadow-indigo-500/50 transition' style='background:linear-gradient(120deg,#6366f1,#8b5cf6,#ec4899)'>✨ 5채널 콘텐츠 생성하기</button>
       <p class='text-center text-xs text-slate-400'>인스타·네이버·유튜브·X + 영상을 AI가 자동 생성 (20~40초)</p></form>"""
     js = ("<script>"
-          "function bizFields(v){var l=document.getElementById('sf_local'),s=document.getElementById('sf_seller');if(!l||!s)return;if(v==='seller'){l.classList.add('hidden');s.classList.remove('hidden');}else{s.classList.add('hidden');l.classList.remove('hidden');}}"
+          "function bizFields(v){var l=document.getElementById('sf_local'),s=document.getElementById('sf_seller');if(l&&s){if(v==='seller'){l.classList.add('hidden');s.classList.remove('hidden');}else{s.classList.add('hidden');l.classList.remove('hidden');}}"
+          "var q=document.getElementById('lk_q'),h=document.getElementById('lk_hint2');"
+          "if(v==='seller'){if(q)q.placeholder='🔗 내 상품/스토어 링크 붙여넣기 (또는 상품명)';if(h)h.innerHTML='💡 내 상품 링크를 붙이면 그게 손님이 갈 <b>판매 링크</b>가 돼요. 링크 없으면 상품명으로 검색(정보만) 후 <b>내 링크는 직접 입력</b>.';}"
+          "else{if(q)q.placeholder='가게 이름 (자동 인식)';if(h)h.innerHTML='';}}"
           "var PM={f:[],drag:-1};"
           "function pmSync(){var dt=new DataTransfer();PM.f.forEach(function(x){dt.items.add(x);});document.getElementById('up_photos').files=dt.files;}"
           "function pmDel(i){PM.f.splice(i,1);pmRender();}"
@@ -2925,7 +2929,7 @@ def _upload_form_html(tenant, token: str) -> str:
           "(function(){var inp=document.getElementById('up_photos');if(inp){inp.addEventListener('change',function(){Array.from(inp.files||[]).forEach(function(x){PM.f.push(x);});pmRender();});pmRender();}bizFields((document.getElementById('s_biz')||{}).value||'local');})();"
           "function fillStore(d){document.getElementById('s_name').value=d.name||'';document.getElementById('s_industry').value=d.industry||'';"
           "var bz=(d.type==='seller')?'seller':'local';document.getElementById('s_biz').value=bz;bizFields(bz);"
-          "document.getElementById('s_region').value=d.region||'';document.getElementById('s_tel').value=d.tel||'';document.getElementById('s_buy').value=d.buy_url||'';"
+          "document.getElementById('s_region').value=d.region||'';document.getElementById('s_tel').value=d.tel||'';if(d.buy_url){document.getElementById('s_buy').value=d.buy_url;}"
           "document.getElementById('s_address').value=d.address||'';"
           "var mp=document.getElementById('s_map');if(mp)mp.value=d.map_url||'';document.getElementById('lk_q').value=d.name||document.getElementById('lk_q').value;"
           "var mk=document.getElementById('s_market');if(mk&&d.market)mk.value=d.market;var br=document.getElementById('s_brand');if(br&&d.brand)br.value=d.brand;var sk=document.getElementById('s_search');if(sk&&d.search_kw)sk.value=d.search_kw;"
