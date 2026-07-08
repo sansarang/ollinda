@@ -119,15 +119,15 @@
       "type": "file"
     },
     {
-      "path": "app/generators/video.py",
-      "accessCount": 9,
-      "lastAccessed": 1783471317577,
+      "path": "app/generators/text_claude.py",
+      "accessCount": 11,
+      "lastAccessed": 1783475129170,
       "type": "file"
     },
     {
-      "path": "app/generators/text_claude.py",
-      "accessCount": 9,
-      "lastAccessed": 1783474195787,
+      "path": "app/generators/video.py",
+      "accessCount": 11,
+      "lastAccessed": 1783475143176,
       "type": "file"
     },
     {
@@ -143,15 +143,15 @@
       "type": "file"
     },
     {
-      "path": "app/google_auth.py",
-      "accessCount": 4,
-      "lastAccessed": 1783311410997,
+      "path": "app/seo.py",
+      "accessCount": 5,
+      "lastAccessed": 1783475096208,
       "type": "file"
     },
     {
-      "path": "app/seo.py",
-      "accessCount": 3,
-      "lastAccessed": 1783470440465,
+      "path": "app/google_auth.py",
+      "accessCount": 4,
+      "lastAccessed": 1783311410997,
       "type": "file"
     },
     {
@@ -182,6 +182,12 @@
       "path": "deploy.sh",
       "accessCount": 2,
       "lastAccessed": 1783467997514,
+      "type": "file"
+    },
+    {
+      "path": "app/strategies.py",
+      "accessCount": 2,
+      "lastAccessed": 1783475109004,
       "type": "file"
     },
     {

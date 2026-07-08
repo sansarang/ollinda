@@ -40,7 +40,7 @@ LOCAL = ChannelStrategy(
 SELLER = ChannelStrategy(
     key="seller", label="온라인 셀러(쿠팡·11번가·스토어)",
     goal="검색·SNS에서 만난 손님을 '상품 상세페이지'로 데려와 구매시킨다",
-    cta=("상품 '구매'를 유도하라. 광고 티 내지 말고 실사용 후기처럼. "
+    cta=("상품 '구매'를 유도하라. 판매자가 직접 보여주는 상품 시연·사용법으로(고객 후기 사칭 금지, 광고 티는 줄이되 정직하게). "
          "마지막에 구매처(스토어/검색어)로 자연스럽게 연결하고 찜·후기를 권하라."),
     closing="buy", keyword_axis="product",
     channel_priority=["instagram", "youtube", "naver_blog", "x"],
