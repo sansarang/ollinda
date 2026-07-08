@@ -71,7 +71,7 @@ _HEAD = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <link rel=canonical href="__BASE__/">
 <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css" rel=stylesheet>
 <script src="https://cdn.tailwindcss.com"></script>
-<script type=application/ld+json>{"@context":"https://schema.org","@type":"SoftwareApplication","name":"올린다","applicationCategory":"BusinessApplication","offers":{"@type":"Offer","price":"39900","priceCurrency":"KRW"}}</script>
+<script type=application/ld+json>{"@context":"https://schema.org","@type":"SoftwareApplication","name":"올린다","applicationCategory":"BusinessApplication","offers":{"@type":"Offer","price":"39000","priceCurrency":"KRW"}}</script>
 """.replace("__BASE__", BASE) + _STYLE + """</head><body class="bg-white text-slate-800 overflow-x-hidden pb-20 sm:pb-0">"""
 
 _FOOT = """
@@ -361,22 +361,30 @@ def _features() -> str:
 
 
 def _pricing() -> str:
-    plans = [("셀프", "월 39,900원", ["사진만 올리면 5채널 생성", "상위노출 최적화·점수", "검수·발행·다운로드", "구독자 대시보드·이력"], False),
-             ("대행", "월 299,000원", ["올린다 팀이 운영까지 대행", "주 3회+ 정기 발행", "성과 리포트", "카톡 1:1 관리"], True),
-             ("건당", "6,500원", ["구독 없이 1건만", "필요할 때만 결제", "콘텐츠 1세트(5채널)"], False)]
+    plans = [("베이직", "월 39,000원", "월 8건 · 처음 시작용",
+              ["사진만 올리면 5채널 생성", "검색 상위노출 최적화", "사진 자동 보정 + 이미지 SEO", "복사·통째로 다운로드"],
+              "basic", False),
+             ("프로", "월 79,000원", "무제한 · 성과까지",
+              ["콘텐츠 무제한 생성", "⭐ 순위 성장 추적 + 경쟁 추월", "⭐ 성과 실측(QR·유입 집계)", "영상 BGM · 셀러 판매 QR", "우선 생성 · 다중 가게"],
+              "pro", True),
+             ("대행", "문의", "맡기고 싶다면",
+              ["올린다 팀이 운영까지 대행", "정기 발행 · 성과 리포트", "카톡 1:1 관리"],
+              "agency", False)]
     cards = ""
-    for name, price, feats, hot in plans:
+    for name, price, sub, feats, key, hot in plans:
         wrap = "relative ring-2 ring-indigo-500 shadow-2xl scale-[1.04]" if hot else "border border-slate-100"
         tag = "<div class='absolute -top-3 left-1/2 -translate-x-1/2 grad-btn text-white text-xs font-bold px-3 py-1 rounded-full'>가장 인기</div>" if hot else ""
         lis = "".join(f"<li class='flex gap-2 items-start'><span class='text-indigo-500 mt-0.5'>✓</span><span>{f}</span></li>" for f in feats)
         btn = "grad-btn text-white" if hot else "bg-slate-100 hover:bg-slate-200"
-        href = {"셀프": "/billing?plan=self", "대행": "#contact", "건당": "/billing?plan=self"}.get(name, "/signup")
-        cta = {"셀프": "구독 시작", "대행": "도입 문의", "건당": "시작하기"}.get(name, "시작하기")
+        href = "#contact" if key == "agency" else f"/billing?plan={key}"
+        cta = "도입 문의" if key == "agency" else "구독 시작"
         cards += (f"<div class='reveal card-hover {wrap} bg-white rounded-3xl p-8 flex flex-col'>{tag}"
-                  f"<div class='font-bold text-lg text-slate-500'>{name}</div><div class='text-3xl font-extrabold my-3'>{price}</div>"
+                  f"<div class='font-bold text-lg text-slate-500'>{name}</div>"
+                  f"<div class='text-3xl font-extrabold mt-3 mb-1'>{price}</div>"
+                  f"<div class='text-xs text-slate-400 mb-3'>{sub}</div>"
                   f"<ul class='space-y-2.5 text-sm text-slate-600 flex-1 mt-2'>{lis}</ul>"
                   f"<a href='{href}' class='{btn} mt-7 text-center px-4 py-3.5 rounded-2xl font-bold'>{cta}</a></div>")
-    return f"<section id='pricing' class='bg-slate-50 py-20'><div class='max-w-5xl mx-auto px-5'><h2 class='reveal text-3xl sm:text-4xl font-extrabold text-center mb-3'>합리적인 요금</h2><p class='reveal text-center text-slate-500 mb-14'>대행사 1/3 가격으로, 결과는 더 확실하게.</p><div class='grid sm:grid-cols-3 gap-6 items-stretch pt-3'>{cards}</div></div></section>"
+    return f"<section id='pricing' class='bg-slate-50 py-20'><div class='max-w-5xl mx-auto px-5'><h2 class='reveal text-3xl sm:text-4xl font-extrabold text-center mb-3'>합리적인 요금</h2><p class='reveal text-center text-slate-500 mb-14'>대행사 1/5 가격 — 손님 2~3명만 더 와도 본전.</p><div class='grid sm:grid-cols-3 gap-6 items-stretch pt-3'>{cards}</div></div></section>"
 
 
 _QA = [("정말 사진만 올리면 되나요?", "네. 사진과 한 줄 설명만 주시면 AI가 5채널 콘텐츠를 만듭니다. 사진 1장만 있어도 자막·음성이 들어간 세로 숏폼까지 자동 생성됩니다."),

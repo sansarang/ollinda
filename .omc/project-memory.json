@@ -96,14 +96,14 @@
   "hotPaths": [
     {
       "path": "app/main.py",
-      "accessCount": 347,
-      "lastAccessed": 1783491820868,
+      "accessCount": 355,
+      "lastAccessed": 1783492377847,
       "type": "file"
     },
     {
       "path": "app/landing.py",
-      "accessCount": 58,
-      "lastAccessed": 1783478442821,
+      "accessCount": 62,
+      "lastAccessed": 1783492350839,
       "type": "file"
     },
     {
@@ -200,6 +200,12 @@
       "path": "app/strategies.py",
       "accessCount": 2,
       "lastAccessed": 1783475109004,
+      "type": "file"
+    },
+    {
+      "path": "app/services/pay.py",
+      "accessCount": 2,
+      "lastAccessed": 1783492212713,
       "type": "file"
     },
     {

@@ -70,12 +70,12 @@ def _quota_block(owner: dict | None):
     up = ("<div class='bg-white rounded-2xl shadow-sm p-7 text-center max-w-md mx-auto'>"
           "<div class='text-4xl mb-2'>🎁</div>{t}"
           "<p class='text-slate-500 text-sm mb-4'>{m}</p>"
-          "<a href='/billing?plan=self' class='inline-block bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl'>"
-          "셀프 플랜 시작 (월 39,900)</a></div>")
+          "<a href='/#pricing' class='inline-block bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl'>"
+          "요금제 보기 (베이직 39,000 · 프로 79,000)</a></div>")
     if plan == "free":
         if (owner.get("free_used") or 0) >= FREE_LIMIT:
             return up.format(t=f"<h1 class='text-xl font-bold mb-1'>무료 {FREE_LIMIT}회를 모두 사용했어요</h1>",
-                             m="셀프 플랜을 시작하면 매달 넉넉히 만들 수 있어요.")
+                             m="프로는 무제한, 베이직도 매달 넉넉히 만들 수 있어요.")
         return None
     # 유료 플랜(self): 구독 활성 + 월 한도
     from app.services import pay
@@ -940,12 +940,12 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
     # 온보딩 완료 → 사진 올려 생성이 메인
     from app.services import pay as _pay
     _plan = u.get("plan") or "free"
-    _pn = {"free": "무료", "self": "셀프", "agency": "대행"}.get(_plan, _plan)
+    _pn = {"free": "무료", "basic": "베이직", "pro": "프로", "self": "프로", "agency": "대행"}.get(_plan, _plan)
     if _is_owner(u):
         _pn, _usage, _upbtn = "👑 사장님", "무제한 · 영구 라이선스", ""
     elif _plan == "free":
         _usage = f"무료 {u.get('free_used') or 0}/{FREE_LIMIT}회"
-        _upbtn = ("<a href='/billing?plan=self' class='ml-auto bg-white text-indigo-700 text-sm font-bold "
+        _upbtn = ("<a href='/billing?plan=pro' class='ml-auto bg-white text-indigo-700 text-sm font-bold "
                   "px-4 py-2 rounded-xl'>업그레이드</a>")
     else:
         _cap = _pay.PLANS.get(_plan, {}).get("monthly", 0)
@@ -2295,12 +2295,12 @@ def adpack_zip(tid: str):
 
 # ── 결제(토스페이먼츠 정기결제) ─────────────────────────────
 @app.get("/billing", response_class=HTMLResponse)
-def billing(request: Request, plan: str = "self"):
+def billing(request: Request, plan: str = "pro"):
     from app.services import pay, pay_paddle
     u = auth.current_user(request)
     if not u:
         return RedirectResponse("/login", status_code=303)
-    plan = plan if plan in pay.PLANS else "self"
+    plan = plan if plan in pay.PLANS else "pro"
     info = pay.PLANS[plan]
     base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
     # 패들(Paddle) 우선 — 설정돼 있으면 오버레이 체크아웃
@@ -2340,7 +2340,7 @@ def billing(request: Request, plan: str = "self"):
 
 
 @app.get("/billing/success")
-def billing_success(request: Request, plan: str = "self", customerKey: str = "", authKey: str = ""):
+def billing_success(request: Request, plan: str = "pro", customerKey: str = "", authKey: str = ""):
     from app.services import pay
     from datetime import datetime, timedelta
     import uuid as _uuid
@@ -2353,14 +2353,14 @@ def billing_success(request: Request, plan: str = "self", customerKey: str = "",
     if issued.get("error") or not issued.get("billingKey"):
         return HTMLResponse(_subscriber_page("결제 등록 실패",
             f"<div class='bg-rose-50 text-rose-600 p-5 rounded-2xl'>카드 등록 실패: {esc(issued.get('error',''))} "
-            "<a href='/billing?plan=self' class='underline'>다시 시도</a></div>"))
-    plan = plan if plan in pay.PLANS else "self"
+            "<a href='/billing?plan=pro' class='underline'>다시 시도</a></div>"))
+    plan = plan if plan in pay.PLANS else "pro"
     info = pay.PLANS[plan]
     paid = pay.charge(issued["billingKey"], customerKey, info["price"], "ord_" + _uuid.uuid4().hex[:20], info["name"])
     if paid.get("error"):
         return HTMLResponse(_subscriber_page("결제 실패",
             f"<div class='bg-rose-50 text-rose-600 p-5 rounded-2xl'>결제 실패: {esc(paid.get('error',''))} "
-            "<a href='/billing?plan=self' class='underline'>다시 시도</a></div>"))
+            "<a href='/billing?plan=pro' class='underline'>다시 시도</a></div>"))
     expires = (datetime.utcnow() + timedelta(days=30)).isoformat()
     db.upsert_subscription(u["id"], plan, "active", issued["billingKey"], customerKey, info["price"], expires)
     db.set_user_plan(u["id"], plan)
@@ -2371,7 +2371,7 @@ def billing_success(request: Request, plan: str = "self", customerKey: str = "",
 def billing_fail(message: str = ""):
     return HTMLResponse(_subscriber_page("결제 취소",
         f"<div class='bg-rose-50 text-rose-600 p-5 rounded-2xl'>결제가 완료되지 않았어요. {esc(message)} "
-        "<a href='/billing?plan=self' class='underline font-semibold'>다시 시도</a></div>"))
+        "<a href='/billing?plan=pro' class='underline font-semibold'>다시 시도</a></div>"))
 
 
 @app.post("/webhook/paddle")
@@ -2391,7 +2391,7 @@ async def paddle_webhook(request: Request):
     data = ev.get("data", {}) or {}
     cd = data.get("custom_data") or {}
     uid = cd.get("user_id")
-    plan = cd.get("plan", "self")
+    plan = cd.get("plan", "pro")
     if uid and db.get_user(uid):
         from datetime import datetime, timedelta
         if etype in ("subscription.activated", "subscription.created", "transaction.completed"):
@@ -2481,7 +2481,7 @@ def admin_users(ok: str = "", err: str = ""):
 @app.post("/admin/users/{uid}/plan")
 def admin_user_plan(uid: str, plan: str = Form("free")):
     db.set_user_plan(uid, plan)
-    if plan in ("self", "agency"):   # 운영자 수동 활성화(결제 없이 30일)
+    if plan in ("basic", "pro", "self", "agency"):   # 운영자 수동 활성화(결제 없이 30일)
         from datetime import datetime, timedelta
         db.upsert_subscription(uid, plan, "active", "", "", 0,
                                (datetime.utcnow() + timedelta(days=30)).isoformat())

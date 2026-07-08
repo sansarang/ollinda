@@ -14,8 +14,11 @@ import requests
 API = "https://api.tosspayments.com"
 
 PLANS = {
-    "self":   {"name": "셀프 플랜", "price": 39900, "monthly": 60},   # 월 60건
-    "agency": {"name": "대행 플랜", "price": 299000, "monthly": 0},   # 0=무제한(운영자 관리)
+    "basic":  {"name": "베이직", "price": 39000, "monthly": 8},      # 진입용 · 월 8건
+    "pro":    {"name": "프로", "price": 79000, "monthly": 0},        # 메인 · 무제한 + 성과기능
+    "agency": {"name": "대행(문의)", "price": 0, "monthly": 0},      # 커스텀 · 문의
+    # (구) self 플랜 하위호환 — 기존 참조 방어
+    "self":   {"name": "프로", "price": 79000, "monthly": 0},
 }
 
 
