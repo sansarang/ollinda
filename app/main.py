@@ -442,17 +442,23 @@ def api_lookup(q: str = ""):
                              "image": p.get("image", ""), "buy_url": q,
                              "desc": (p.get("description") or "")[:120]})
     # 이름 → 지역검색(매장)
-    local = place.search(q)
+    local = place.search(q, limit=5)
     if local:
-        it = local[0]
-        region = _short_region(it.get("jibun") or it["address"])   # 시/구/동만 (키워드 오염 방지)
         from urllib.parse import quote as _q
-        # 플레이스 URL 자동 생성(best-effort) — 네이버 지도 검색링크(지역+상호로 정확도↑)
-        map_q = (region.split()[-1] + " " + it["name"]).strip() if region else it["name"]
-        map_url = "https://map.naver.com/p/search/" + _q(map_q)
-        return JSONResponse({"type": "local", "name": it["name"], "industry": it["category"],
-                             "region": region, "tel": it["tel"], "address": it["address"],
-                             "map_url": map_url})
+
+        def _cand(it):
+            region = _short_region(it.get("jibun") or it["address"])   # 시/구/동만
+            # 플레이스 URL(best-effort) — 지역+상호로 검색해 정확한 곳으로 유도(동명업체 구분)
+            map_q = ((region + " " + it["name"]).strip()) if region else it["name"]
+            return {"name": it["name"], "industry": it["category"], "region": region,
+                    "tel": it["tel"], "address": it["address"],
+                    "map_url": "https://map.naver.com/p/search/" + _q(map_q)}
+        cands = [_cand(it) for it in local]
+        resp = dict(cands[0])
+        resp["type"] = "local"
+        if len(cands) > 1:                       # 동명·유사 업체 여러 곳 → 사용자가 선택
+            resp["candidates"] = cands
+        return JSONResponse(resp)
     # B) 지역 없음 → 쇼핑검색(셀러)
     shop = place.shop_search(q)
     if shop:
@@ -2765,19 +2771,23 @@ def _upload_form_html(tenant, token: str) -> str:
           "add.ondragover=function(e){e.preventDefault();};add.ondrop=function(e){e.preventDefault();pmDrop(PM.f.length);};"
           "add.innerHTML=\"<span class='text-2xl leading-none'>＋</span><span class='text-[10px] mt-0.5'>사진 추가</span>\";pv.appendChild(add);pmSync();}"
           "(function(){var inp=document.getElementById('up_photos');if(inp){inp.addEventListener('change',function(){Array.from(inp.files||[]).forEach(function(x){PM.f.push(x);});pmRender();});pmRender();}bizFields((document.getElementById('s_biz')||{}).value||'local');})();"
+          "function fillStore(d){document.getElementById('s_name').value=d.name||'';document.getElementById('s_industry').value=d.industry||'';"
+          "var bz=(d.type==='seller')?'seller':'local';document.getElementById('s_biz').value=bz;bizFields(bz);"
+          "document.getElementById('s_region').value=d.region||'';document.getElementById('s_tel').value=d.tel||'';document.getElementById('s_buy').value=d.buy_url||'';"
+          "document.getElementById('s_address').value=d.address||'';"
+          "var mp=document.getElementById('s_map');if(mp)mp.value=d.map_url||'';document.getElementById('lk_q').value=d.name||document.getElementById('lk_q').value;"
+          "var rb=document.querySelector('input[name=biztype][value=\"'+bz+'\"]');if(rb)rb.checked=true;"
+          "var kind=(bz==='seller')?'📦 온라인 셀러':'🏪 동네 매장';"
+          "document.getElementById('lk_result').innerHTML='<span class=\"text-emerald-600 font-semibold\">✓ '+(d.name||'')+' · '+(d.industry||'')+(d.region?(' · '+d.region):'')+' 선택됨 (저장)</span>';"
+          "try{if(d.name){var fd2=new FormData();fd2.append('name',d.name||'');fd2.append('industry',d.industry||'');fd2.append('region',d.region||'');fd2.append('biz_type',bz);fd2.append('phone',d.tel||'');fd2.append('address',d.address||'');fd2.append('map_url',d.map_url||'');if(d.buy_url)fd2.append('buy_url',d.buy_url);fetch('/me/store',{method:'POST',body:fd2});}}catch(_){}}"
+          "function pickCand(i){var c=(window.__cands||[])[i];if(c){c.type='local';fillStore(c);}}"
           "async function lookupStore(){var q=document.getElementById('lk_q').value.trim();if(!q)return;"
           "var b=document.getElementById('lk_result');b.innerHTML='<span class=\"text-slate-400\">인식 중…</span>';"
           "try{var r=await fetch('/api/lookup?q='+encodeURIComponent(q));var d=await r.json();"
           "if(d.type==='none'){b.innerHTML='<span class=\"text-slate-400\">못 찾았어요 — 그냥 사진 올리고 만들어도 돼요</span>';return;}"
-          "document.getElementById('s_name').value=d.name||'';document.getElementById('s_industry').value=d.industry||'';"
-          "var bz=(d.type==='seller')?'seller':'local';document.getElementById('s_biz').value=bz;bizFields(bz);"
-          "document.getElementById('s_region').value=d.region||'';document.getElementById('s_tel').value=d.tel||'';document.getElementById('s_buy').value=d.buy_url||'';"
-          "document.getElementById('s_address').value=d.address||'';"
-          "var mp=document.getElementById('s_map');if(mp)mp.value=d.map_url||'';"
-          "var rb=document.querySelector('input[name=biztype][value=\"'+bz+'\"]');if(rb)rb.checked=true;"
-          "var kind=(bz==='seller')?'📦 온라인 셀러':'🏪 동네 매장';"
-          "b.innerHTML='<span class=\"text-emerald-600 font-semibold\">✓ '+(d.name||'')+' · '+(d.industry||'')+' · '+kind+' 자동 인식됨 (저장됨)</span>';"
-          "try{if(d.name){var fd2=new FormData();fd2.append('name',d.name||'');fd2.append('industry',d.industry||'');fd2.append('region',d.region||'');fd2.append('biz_type',bz);fd2.append('phone',d.tel||'');fd2.append('address',d.address||'');fd2.append('map_url',d.map_url||'');if(d.buy_url)fd2.append('buy_url',d.buy_url);fetch('/me/store',{method:'POST',body:fd2});}}catch(_){}"
+          "if(d.candidates&&d.candidates.length>1){window.__cands=d.candidates;"
+          "b.innerHTML='<div class=\"text-amber-600 font-semibold mb-1\">⚠️ 같은/비슷한 이름이 여러 곳이에요. 내 가게를 선택하세요:</div>'+d.candidates.map(function(c,i){return '<button type=button onclick=\"pickCand('+i+')\" class=\"block w-full text-left bg-white border border-slate-200 rounded-lg p-2 mb-1 text-xs hover:bg-indigo-50\"><b>'+c.name+'</b> <span class=\"text-slate-400\">'+(c.industry||'')+'</span><br><span class=\"text-slate-400\">'+(c.address||'')+'</span></button>';}).join('');return;}"
+          "fillStore(d);"
           "}catch(e){b.innerHTML='<span class=\"text-rose-400\">인식 실패</span>';}}"
           "async function showGen(e){if(e&&e.preventDefault)e.preventDefault();var f=(e&&e.target)?e.target:document.querySelector('form[action*=\"/upload\"]');"
           "var o=document.getElementById('genOverlay');o.classList.remove('hidden');o.classList.add('flex');"
