@@ -1041,15 +1041,24 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 f"<a href='/me/qr/{_tl['code']}.png' download='ollinda-qr.png' class='inline-block mt-2 text-xs font-bold text-indigo-500'>⬇ QR 이미지 저장</a>"
                 "</div></div></div>")
         main_inner = _sbadge + stats_row + _trackbox + _rankbox + _kwbox
-    else:                                                 # ✨ 만들기 (기본) — 통계·내콘텐츠 없이 폼만 전체폭 크게
+    else:                                                 # ✨ 만들기 (기본) — 완성되면 여기(만들기 대시보드)에 결과 표시
         active = "create"
-        _act = _daily_action(t)
-        _coach = ("<div class='flex items-center gap-3 bg-gradient-to-r from-indigo-50 to-violet-50 border border-indigo-100 rounded-2xl p-4 mb-5'>"
-                  f"<div class='text-2xl'>{_act['emoji']}</div>"
-                  "<div class='flex-1 min-w-0'><div class='text-xs font-bold text-indigo-500 mb-0.5'>오늘의 액션</div>"
-                  f"<div class='text-sm text-slate-700 font-medium'>{_act['text']}</div></div>"
-                  f"<a href='{_act['href']}' class='flex-shrink-0 bg-indigo-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-indigo-700 transition'>{_act['cta']}</a></div>")
-        main_inner = greeting + _coach + upload_section
+        _made = (request.query_params.get("made") or "").strip()
+        _made_html = ""
+        if _made:                                         # 방금 생성 완료 → 만들기 화면에 결과 인라인 표시(내콘텐츠엔 이미 저장됨)
+            _rh = _result_html(u, _made, back_href="/me", back_label="＋ 새로 만들기 ↓")
+            if _rh:
+                _made_html = f"<div class='{_fw} mb-6'>{_rh}</div>"
+        if _made_html:
+            main_inner = _made_html + upload_section
+        else:
+            _act = _daily_action(t)
+            _coach = ("<div class='flex items-center gap-3 bg-gradient-to-r from-indigo-50 to-violet-50 border border-indigo-100 rounded-2xl p-4 mb-5'>"
+                      f"<div class='text-2xl'>{_act['emoji']}</div>"
+                      "<div class='flex-1 min-w-0'><div class='text-xs font-bold text-indigo-500 mb-0.5'>오늘의 액션</div>"
+                      f"<div class='text-sm text-slate-700 font-medium'>{_act['text']}</div></div>"
+                      f"<a href='{_act['href']}' class='flex-shrink-0 bg-indigo-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-indigo-700 transition'>{_act['cta']}</a></div>")
+            main_inner = greeting + _coach + upload_section
     # 🆕 새로 추가한 '빈 새 가게'면 실수 대비 '뒤로가기(취소)' 배너
     if t.name == "새 가게" and len(db.list_user_stores(u["id"])) > 1 and not db.list_sets(tenant_id=t.id):
         _backban = ("<div class='flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-5'>"
@@ -1381,7 +1390,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
     for p in pieces:
         k, pl = p.kind.value, p.payload
         has_video = bool(pl.get("video_path"))
-        vurl = f"/dl/{asset_id}/{os.path.basename(pl.get('video_path',''))}" if (has_video and os.path.exists(pl.get("video_path", ""))) else ""
+        vurl = f"/dl/{asset_id}/{os.path.basename(pl.get('video_path',''))}" if has_video else ""  # /dl이 R2로 서빙
         block = ""
         if k == "caption":
             cap = pl.get("text", "")
@@ -2797,14 +2806,14 @@ def _upload_form_html(tenant, token: str) -> str:
           "var base=0;try{base=(await (await fetch('/me/sets/count')).json()).n;}catch(_){}"
           "var fd=new FormData(f);try{if(window.PM&&PM.f&&PM.f.length){fd.delete('photos');PM.f.forEach(function(x){fd.append('photos',x);});}}catch(_){}"
           "try{await fetch(f.action,{method:'POST',body:fd});}catch(_){}"
-          "var DONEURL='/me?tab=content&ok='+encodeURIComponent('✨ 콘텐츠가 완성돼 내 콘텐츠에 저장됐어요! 보기를 눌러 확인하세요');"
+          "function doneU(){return aid?('/me?made='+aid):'/me';}"
           "function done(url){clearInterval(iv);clearInterval(tick);location.href=url;}"
-          "var n=0;var iv=setInterval(async function(){n++;if(n>120){done(DONEURL);return;}"
+          "var n=0;var iv=setInterval(async function(){n++;if(n>120){done(doneU());return;}"
           "try{"
           "if(!aid){var d=await (await fetch('/me/sets/count')).json();if(d.n>base){aid=d.latest;if(p<62)p=62;setBar(p);}return;}"
           "var pj=await (await fetch('/me/asset/'+aid+'/pieces')).json();"
-          "if(pj.n>=5){clearInterval(iv);clearInterval(tick);setBar(100);var gl=document.getElementById('gLabel');if(gl)gl.textContent='✅ 5채널 완성!';setTimeout(function(){location.href=DONEURL;},700);}"
-          "else if(n>70){done(DONEURL);}"        # 영상이 너무 오래 걸리면 저장된 내 콘텐츠로(폴링은 보기에서 이어받음)
+          "if(pj.n>=5){clearInterval(iv);clearInterval(tick);setBar(100);var gl=document.getElementById('gLabel');if(gl)gl.textContent='✅ 5채널 완성!';setTimeout(function(){location.href='/me?made='+aid;},700);}"
+          "else if(n>70){done('/me?made='+aid);}"        # 영상이 너무 오래 걸리면 만들기 대시보드에 결과 표시(폴링은 보기에서 이어받음)
           "}catch(_){}"
           "},3000);return false;}"
           "</script>")
