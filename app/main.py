@@ -893,9 +893,10 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                     "try{var d=await (await fetch('/me/rank')).json();"
                     "if(!d.configured){b.innerHTML='<span class=\"text-slate-400\">네이버 키가 설정되면 순위가 표시됩니다.</span>';return;}"
                     "if(!d.items||!d.items.length){b.innerHTML='<span class=\"text-slate-400\">아직 타겟 키워드가 없어요. 콘텐츠를 만들면 채워져요.</span>';return;}"
-                    "b.innerHTML=d.items.map(function(it){var r=it.rank;var s=(r===null)?'<span class=\"text-slate-400\">조회불가</span>':"
-                    "(r>=1?('<span class=\"text-emerald-600 font-bold\">네이버 지역 '+r+'위 ✅</span>'):'<span class=\"text-slate-400\">상위 5위 밖</span>');"
-                    "return '<div class=\"flex items-center justify-between border-b border-slate-100 py-2.5\"><span class=\"text-slate-700 font-medium\">'+it.kw+'</span>'+s+'</div>';}).join('');"
+                    "function st(it){var r=it.rank;return (r===null)?'<span class=\"text-slate-400\">조회불가</span>':(r>=1?('<span class=\"text-emerald-600 font-bold\">네이버 지역 '+r+'위</span>'):'<span class=\"text-slate-400\">5위 밖</span>');}"
+                    "function chg(it){var c=it.rank,p=it.prev;if(c===null)return '';if(p===null||p===undefined)return '<span class=\"text-indigo-500 text-xs font-bold ml-2\">🆕 첫 측정</span>';var cc=(c===0?6:c),pp=(p===0?6:p);if(cc<pp)return '<span class=\"text-emerald-600 text-xs font-bold ml-2\">⬆️ '+(pp-cc)+'계단</span>';if(cc>pp)return '<span class=\"text-rose-500 text-xs font-bold ml-2\">⬇️ '+(cc-pp)+'계단</span>';return '<span class=\"text-slate-400 text-xs ml-2\">— 유지</span>';}"
+                    "function riv(it){if(it.rank===1)return '<div class=\"text-xs text-emerald-600 mt-1 font-semibold\">👑 이 키워드 1위!</div>';if(it.rank>1&&it.rival)return '<div class=\"text-xs text-amber-600 mt-1\">🎯 <b>'+it.rival+'</b>만 넘으면 '+(it.rank-1)+'위</div>';if((it.rank===0)&&it.leader)return '<div class=\"text-xs text-slate-400 mt-1\">현재 1위: '+it.leader+' — 콘텐츠 꾸준히 올리면 진입해요</div>';return '';}"
+                    "b.innerHTML=d.items.map(function(it){return '<div class=\"border-b border-slate-100 py-2.5\"><div class=\"flex items-center justify-between\"><span class=\"text-slate-700 font-medium\">'+it.kw+'</span><span class=\"whitespace-nowrap\">'+st(it)+chg(it)+'</span></div>'+riv(it)+'</div>';}).join('');"
                     "}catch(e){b.innerHTML='<span class=\"text-rose-400\">조회 실패</span>';}})();</script></div>")
         main_inner = _sbadge + stats_row + _kwbox + _rankbox
     else:                                                 # ✨ 만들기 (기본) — 통계·내콘텐츠 없이 폼만 전체폭 크게
@@ -963,7 +964,7 @@ def my_place_news(request: Request):
 
 @app.get("/me/rank")
 def my_rank(request: Request):
-    """참고용 순위 조회 — 타겟 키워드로 네이버 지역검색 상위 노출 여부(대략)."""
+    """순위 성과 조회 — 순위 + 지난 대비 변화(⬆️⬇️) + 경쟁 추월 대상(바로 위 가게)."""
     u = auth.current_user(request)
     if not u:
         return JSONResponse({"items": [], "configured": False})
@@ -975,7 +976,14 @@ def my_rank(request: Request):
             for k in (p.payload.get("target_keywords") or []):
                 if k and k not in kws:
                     kws.append(k)
-    items = [{"kw": k, "rank": place.rank(k, t.name)} for k in kws[:6]]
+    items = []
+    for k in kws[:5]:
+        det = place.rank_detail(k, t.name)
+        cur = det["rank"]
+        prev = db.get_prev_rank(t.id, k)            # 오늘 이전 순위(변화 계산)
+        db.save_rank_snapshot(t.id, k, cur)         # 오늘 순위 기록
+        items.append({"kw": k, "rank": cur, "prev": prev,
+                      "rival": det["rival"], "leader": det["leader"]})
     return JSONResponse({"items": items, "configured": place.configured()})
 
 

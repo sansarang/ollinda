@@ -69,6 +69,11 @@ def init_db() -> None:
         c.execute("CREATE TABLE IF NOT EXISTS links("
                   "code TEXT PRIMARY KEY, tenant_id TEXT, target TEXT, label TEXT, "
                   "clicks INTEGER DEFAULT 0, created_at TEXT)")
+        # 순위 스냅샷 — 키워드별 순위 이력('5위→2위⬆️' 성장 추적)
+        c.execute("CREATE TABLE IF NOT EXISTS rank_snapshots("
+                  "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, keyword TEXT, "
+                  "rank INTEGER, checked_at TEXT)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_rank_tk ON rank_snapshots(tenant_id, keyword, checked_at)")
         # 마이그레이션: users.tenant_id (구독자 ↔ 본인 가게), free_used (무료 생성 횟수)
         for col, ddl in [("tenant_id", "TEXT"), ("free_used", "INTEGER DEFAULT 0"),
                          ("usage_month", "TEXT"), ("month_used", "INTEGER DEFAULT 0")]:
@@ -80,6 +85,31 @@ def init_db() -> None:
 
 def _now() -> str:
     return datetime.utcnow().isoformat()
+
+
+def get_prev_rank(tenant_id: str, keyword: str) -> "int | None":
+    """이 키워드의 '오늘 이전' 마지막 순위(변화 계산용). 같은 날 재조회에도 안정. 없으면 None."""
+    today = _now()[:10]
+    with _conn() as c:
+        r = c.execute("SELECT rank FROM rank_snapshots WHERE tenant_id=? AND keyword=? "
+                      "AND checked_at NOT LIKE ? ORDER BY checked_at DESC LIMIT 1",
+                      (tenant_id, keyword, today + "%")).fetchone()
+    return (r["rank"] if r else None)
+
+
+def save_rank_snapshot(tenant_id: str, keyword: str, rank: "int | None") -> None:
+    """순위 스냅샷 기록(하루 1개로 제한 — 같은 날 재조회는 갱신)."""
+    if rank is None:
+        return
+    today = _now()[:10]
+    with _conn() as c:
+        ex = c.execute("SELECT id FROM rank_snapshots WHERE tenant_id=? AND keyword=? AND checked_at LIKE ?",
+                       (tenant_id, keyword, today + "%")).fetchone()
+        if ex:
+            c.execute("UPDATE rank_snapshots SET rank=?, checked_at=? WHERE id=?", (rank, _now(), ex["id"]))
+        else:
+            c.execute("INSERT INTO rank_snapshots(tenant_id, keyword, rank, checked_at) VALUES(?,?,?,?)",
+                      (tenant_id, keyword, rank, _now()))
 
 
 # ── Tenant ─────────────────────────────────────────────

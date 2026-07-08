@@ -86,3 +86,22 @@ def rank(keyword: str, store_name: str, limit: int = 5) -> int | None:
         if key and key in re.sub(r"\s+", "", it.get("name", "")):
             return i
     return 0
+
+
+def rank_detail(keyword: str, store_name: str, limit: int = 5) -> dict:
+    """순위 + 경쟁사 + '추월 대상'(내 바로 위 가게). 성과 가시화·경쟁 추월용.
+    반환: {rank, rival, leader, competitors:[{name, mine}]}. 무키/실패 시 rank=None."""
+    items = search(keyword, limit)
+    if not items:
+        return {"rank": None, "rival": "", "leader": "", "competitors": []}
+    key = re.sub(r"\s+", "", store_name or "")
+    my_i = 0
+    comps = []
+    for i, it in enumerate(items, 1):
+        mine = bool(key and key in re.sub(r"\s+", "", it.get("name", "")))
+        if mine:
+            my_i = i
+        comps.append({"name": it.get("name", ""), "mine": mine})
+    rival = (comps[my_i - 2]["name"] if my_i >= 2 else "")     # 내 바로 위 = 추월 대상
+    leader = comps[0]["name"] if comps else ""
+    return {"rank": my_i, "rival": rival, "leader": leader, "competitors": comps}

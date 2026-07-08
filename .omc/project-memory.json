@@ -96,8 +96,8 @@
   "hotPaths": [
     {
       "path": "app/main.py",
-      "accessCount": 257,
-      "lastAccessed": 1783473428327,
+      "accessCount": 263,
+      "lastAccessed": 1783476943380,
       "type": "file"
     },
     {
@@ -108,8 +108,8 @@
     },
     {
       "path": "app/db.py",
-      "accessCount": 11,
-      "lastAccessed": 1783291686172,
+      "accessCount": 15,
+      "lastAccessed": 1783476870570,
       "type": "file"
     },
     {
@@ -131,15 +131,15 @@
       "type": "file"
     },
     {
-      "path": "app/services/teaser.py",
-      "accessCount": 6,
-      "lastAccessed": 1783310174237,
+      "path": "app/services/place.py",
+      "accessCount": 7,
+      "lastAccessed": 1783476846190,
       "type": "file"
     },
     {
-      "path": "app/services/place.py",
-      "accessCount": 5,
-      "lastAccessed": 1783309958674,
+      "path": "app/services/teaser.py",
+      "accessCount": 6,
+      "lastAccessed": 1783310174237,
       "type": "file"
     },
     {
