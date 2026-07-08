@@ -1245,7 +1245,8 @@ def my_set_delete(request: Request, asset_id: str):
         return RedirectResponse("/login", status_code=303)
     t = _ensure_user_tenant(u)
     db.delete_set(asset_id, t.id)
-    return RedirectResponse("/me?ok=콘텐츠를 삭제했어요", status_code=303)
+    from urllib.parse import quote as _q
+    return RedirectResponse("/me?tab=content&ok=" + _q("콘텐츠를 삭제했어요"), status_code=303)
 
 
 @app.get("/r/{code}")
