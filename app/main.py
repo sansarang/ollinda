@@ -1600,7 +1600,10 @@ def _ch_folder(piece) -> str:
 
 def _piece_pack_entries(piece, imgs, prefix=""):
     """채널 하나의 (zip경로, 소스) 목록 — 글.txt + 사진 + 영상 한 묶음."""
+    import re as _re2
     k, pl = piece.kind.value, piece.payload
+    # 이미지 SEO — 파일명에 지역+업종 키워드(네이버·구글 이미지검색이 파일명을 읽음)
+    _kwbase = _re2.sub(r'[\\/:*?"<>|\s]+', "", ((pl.get("target_keywords") or [""])[0] or "")).strip("_")[:30] or "사진"
     ent = []
 
     def add(name, src):
@@ -1611,11 +1614,11 @@ def _piece_pack_entries(piece, imgs, prefix=""):
             txt += "\n[태그]\n" + " ".join(pl["tags"]) + "\n"
         add("네이버블로그_글.txt", ("text", txt))
         for i, im in enumerate(imgs, 1):
-            add(f"사진{i}{os.path.splitext(im)[1] or '.jpg'}", im)
+            add(f"{_kwbase}_{i}{os.path.splitext(im)[1] or '.jpg'}", im)
     elif k == "caption":
         add("인스타_캡션.txt", ("text", pl.get("text", "")))
         for i, im in enumerate(imgs, 1):
-            add(f"사진{i}{os.path.splitext(im)[1] or '.jpg'}", im)
+            add(f"{_kwbase}_{i}{os.path.splitext(im)[1] or '.jpg'}", im)
     elif k == "short" and piece.channel.value == "youtube":
         add("유튜브_제목설명.txt", ("text", f"[제목]\n{pl.get('title','')}\n\n[설명]\n{pl.get('narration','')}\n"))
         if pl.get("video_path"):

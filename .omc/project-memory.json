@@ -96,8 +96,8 @@
   "hotPaths": [
     {
       "path": "app/main.py",
-      "accessCount": 337,
-      "lastAccessed": 1783489913970,
+      "accessCount": 338,
+      "lastAccessed": 1783490290520,
       "type": "file"
     },
     {
@@ -114,8 +114,8 @@
     },
     {
       "path": "app/services/ingest.py",
-      "accessCount": 15,
-      "lastAccessed": 1783477500641,
+      "accessCount": 17,
+      "lastAccessed": 1783490274255,
       "type": "file"
     },
     {
@@ -152,6 +152,12 @@
       "path": "app/google_auth.py",
       "accessCount": 5,
       "lastAccessed": 1783483854718,
+      "type": "file"
+    },
+    {
+      "path": "app/media/photo_boost.py",
+      "accessCount": 4,
+      "lastAccessed": 1783490251839,
       "type": "file"
     },
     {
@@ -218,12 +224,6 @@
       "path": "app/media/ai_image.py",
       "accessCount": 1,
       "lastAccessed": 1783477023922,
-      "type": "file"
-    },
-    {
-      "path": "app/media/photo_boost.py",
-      "accessCount": 1,
-      "lastAccessed": 1783477115839,
       "type": "file"
     },
     {

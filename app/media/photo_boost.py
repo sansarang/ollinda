@@ -17,8 +17,42 @@ def _is_food(industry: str) -> bool:
     return any(w in ind for w in _FOOD)
 
 
-def auto_enhance(src: str, out: str | None = None, industry: str = "") -> str:
-    """폰 사진 → 전문가 톤 보정(밝기·대비·자동레벨·채도·선명도). 실패 시 원본 경로 반환."""
+def _dms(deg: float):
+    """십진 도 → EXIF GPS (도,분,초) 유리수."""
+    deg = abs(deg)
+    d = int(deg)
+    m = int((deg - d) * 60)
+    s = int(round((deg - d - m / 60) * 3600 * 100))
+    return ((d, 1), (m, 1), (s, 100))
+
+
+def _build_exif(meta: dict):
+    """검색노출용 EXIF — 설명(지역+업종)·키워드·작성자(상호)·GPS(가게 좌표)."""
+    try:
+        import piexif
+        z = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": None}
+        desc = (meta.get("description") or "")[:250]
+        if desc:
+            z["0th"][piexif.ImageIFD.ImageDescription] = desc.encode("utf-8", "ignore")
+        artist = (meta.get("artist") or "")
+        if artist:
+            z["0th"][piexif.ImageIFD.Artist] = artist.encode("utf-8", "ignore")
+        kw = (meta.get("keywords") or "")
+        if kw:
+            z["0th"][piexif.ImageIFD.XPKeywords] = kw.encode("utf-16-le")     # Windows 키워드 태그
+        lat, lon = meta.get("lat"), meta.get("lon")
+        if lat and lon:
+            z["GPS"][piexif.GPSIFD.GPSLatitudeRef] = ("N" if lat >= 0 else "S")
+            z["GPS"][piexif.GPSIFD.GPSLatitude] = _dms(lat)
+            z["GPS"][piexif.GPSIFD.GPSLongitudeRef] = ("E" if lon >= 0 else "W")
+            z["GPS"][piexif.GPSIFD.GPSLongitude] = _dms(lon)
+        return piexif.dump(z)
+    except Exception:
+        return None
+
+
+def auto_enhance(src: str, out: str | None = None, industry: str = "", meta: dict | None = None) -> str:
+    """폰 사진 → 전문가 톤 보정 + (meta 있으면) 검색노출용 EXIF·GPS 삽입. 실패 시 원본 경로 반환."""
     try:
         from PIL import Image, ImageEnhance, ImageOps
     except Exception:
@@ -40,16 +74,20 @@ def auto_enhance(src: str, out: str | None = None, industry: str = "") -> str:
         # 4) 선명도(디테일 살리기)
         im = ImageEnhance.Sharpness(im).enhance(1.25)
         out = out or src
-        im.save(out, "JPEG", quality=90)
+        exif_bytes = _build_exif(meta) if meta else None
+        if exif_bytes:
+            im.save(out, "JPEG", quality=90, exif=exif_bytes)      # 검색노출용 메타 삽입
+        else:
+            im.save(out, "JPEG", quality=90)
         return out
     except Exception:
         return src
 
 
-def enhance_all(paths: list[str], industry: str = "") -> int:
-    """여러 장 일괄 보정(제자리). 보정 성공 개수 반환."""
+def enhance_all(paths: list[str], industry: str = "", meta: dict | None = None) -> int:
+    """여러 장 일괄 보정(제자리) + EXIF·GPS 삽입. 보정 성공 개수 반환."""
     n = 0
     for p in paths:
-        if p and os.path.exists(p) and auto_enhance(p, p, industry) == p:
+        if p and os.path.exists(p) and auto_enhance(p, p, industry, meta) == p:
             n += 1
     return n

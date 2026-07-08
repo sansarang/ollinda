@@ -27,10 +27,17 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
     paths: list[str] = []
     for data, fname in files:
         paths.append(storage.save_upload(data, fname or "photo.jpg", tenant.id))
-    # ✨ 사진 자동 보정(전문가 톤) — 폰 사진을 밝기·채도·선명도로 살림. 보정본을 R2에도 재미러.
+    # ✨ 사진 자동 보정(전문가 톤) + 검색노출용 EXIF·GPS 메타 삽입. 보정본을 R2에도 재미러.
     try:
         from app.media import photo_boost
-        photo_boost.enhance_all(paths, tenant.industry)
+        _kws = seo.target_keywords(tenant.industry, tenant.region, note, limit=6)
+        _meta = {
+            "description": (f"{tenant.region} {tenant.industry} - {tenant.name}").strip(" -"),
+            "keywords": ", ".join(_kws) if _kws else f"{tenant.region} {tenant.industry}".strip(),
+            "artist": tenant.name,
+            "lat": getattr(tenant, "lat", None), "lon": getattr(tenant, "lon", None),
+        }
+        photo_boost.enhance_all(paths, tenant.industry, _meta)
         for _p in paths:
             storage.mirror_to_r2(_p)
     except Exception:
