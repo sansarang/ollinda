@@ -96,8 +96,8 @@
   "hotPaths": [
     {
       "path": "app/main.py",
-      "accessCount": 338,
-      "lastAccessed": 1783490290520,
+      "accessCount": 342,
+      "lastAccessed": 1783490616293,
       "type": "file"
     },
     {
@@ -108,8 +108,8 @@
     },
     {
       "path": "app/db.py",
-      "accessCount": 22,
-      "lastAccessed": 1783483906827,
+      "accessCount": 26,
+      "lastAccessed": 1783490528033,
       "type": "file"
     },
     {
@@ -138,8 +138,8 @@
     },
     {
       "path": "app/services/place.py",
-      "accessCount": 7,
-      "lastAccessed": 1783476846190,
+      "accessCount": 8,
+      "lastAccessed": 1783490547682,
       "type": "file"
     },
     {
@@ -164,6 +164,12 @@
       "path": "app/generators/editor.py",
       "accessCount": 3,
       "lastAccessed": 1783474184053,
+      "type": "file"
+    },
+    {
+      "path": "app/domain/models.py",
+      "accessCount": 3,
+      "lastAccessed": 1783490511136,
       "type": "file"
     },
     {

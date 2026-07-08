@@ -66,6 +66,8 @@ class Tenant:
     search_kw: str = ""       # seller: "쿠팡에서 OO 검색" 유도용 키워드
     brand_name: str = ""      # seller: SNS 노출 브랜드/스토어명
     publish_schedule: int = 0  # 대행 운영: 주간 발행 목표 횟수(0=미설정)
+    lat: Optional[float] = None  # 가게 위도(사진 GPS 지오태그)
+    lon: Optional[float] = None  # 가게 경도
     created_at: Optional[datetime] = None
 
 

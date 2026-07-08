@@ -58,7 +58,8 @@ def init_db() -> None:
                          ("map_url", "TEXT"), ("autonomy", "INTEGER DEFAULT 0"),
                          ("biz_type", "TEXT DEFAULT 'local'"), ("marketplace", "TEXT"),
                          ("buy_url", "TEXT"), ("search_kw", "TEXT"), ("brand_name", "TEXT"),
-                         ("publish_schedule", "INTEGER DEFAULT 0"), ("is_demo", "INTEGER DEFAULT 0")]:
+                         ("publish_schedule", "INTEGER DEFAULT 0"), ("is_demo", "INTEGER DEFAULT 0"),
+                         ("lat", "REAL"), ("lon", "REAL")]:      # 가게 좌표(사진 GPS 지오태그)
             try:
                 c.execute(f"ALTER TABLE tenants ADD COLUMN {col} {ddl}")
             except sqlite3.OperationalError:
@@ -155,7 +156,20 @@ def _row_to_tenant(r: sqlite3.Row) -> Tenant:
                   biz_type=g("biz_type", "local") or "local",
                   marketplace=g("marketplace"), buy_url=g("buy_url"),
                   search_kw=g("search_kw"), brand_name=g("brand_name"),
-                  publish_schedule=g("publish_schedule", 0) or 0)
+                  publish_schedule=g("publish_schedule", 0) or 0,
+                  lat=(r["lat"] if "lat" in keys else None), lon=(r["lon"] if "lon" in keys else None))
+
+
+def set_tenant_coords(tid: str, lat: float, lon: float) -> None:
+    """가게 좌표 저장(사진 GPS 지오태그용) — 한국 범위 검증."""
+    try:
+        lat, lon = float(lat), float(lon)
+    except Exception:
+        return
+    if not (33 <= lat <= 39 and 124 <= lon <= 132):     # 한국 밖이면 무시(잘못된 좌표 방지)
+        return
+    with _conn() as c:
+        c.execute("UPDATE tenants SET lat=?, lon=? WHERE id=?", (lat, lon, tid))
 
 
 def update_tenant_profile(tid: str, phone: str, address: str, hours: str, map_url: str) -> None:

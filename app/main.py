@@ -451,9 +451,17 @@ def api_lookup(q: str = ""):
             region = _short_region(it.get("jibun") or it["address"])   # 시/구/동만
             # 플레이스 URL(best-effort) — 지역+상호로 검색해 정확한 곳으로 유도(동명업체 구분)
             map_q = ((region + " " + it["name"]).strip()) if region else it["name"]
+            lat = lon = None
+            try:                                                       # 네이버 좌표(mapx=경도, mapy=위도, *10^7)
+                mx, my = float(it.get("mapx") or 0), float(it.get("mapy") or 0)
+                if mx and my:
+                    lon, lat = round(mx / 1e7, 7), round(my / 1e7, 7)
+            except Exception:
+                pass
             return {"name": it["name"], "industry": it["category"], "region": region,
                     "tel": it["tel"], "address": it["address"],
-                    "map_url": "https://map.naver.com/p/search/" + _q(map_q)}
+                    "map_url": "https://map.naver.com/p/search/" + _q(map_q),
+                    "lat": lat, "lon": lon}
         cands = [_cand(it) for it in local]
         resp = dict(cands[0])
         resp["type"] = "local"
@@ -1114,7 +1122,8 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
 def my_store(request: Request, name: str = Form(""), industry: str = Form(""), region: str = Form(""),
              biz_type: str = Form("local"), phone: str = Form(""), address: str = Form(""),
              marketplace: str = Form(""), brand_name: str = Form(""),
-             search_kw: str = Form(""), buy_url: str = Form(""), map_url: str = Form("")):
+             search_kw: str = Form(""), buy_url: str = Form(""), map_url: str = Form(""),
+             lat: str = Form(""), lon: str = Form("")):
     u = auth.current_user(request)
     if not u:
         return RedirectResponse("/login", status_code=303)
@@ -1122,6 +1131,8 @@ def my_store(request: Request, name: str = Form(""), industry: str = Form(""), r
     db.rename_tenant(t.id, name, industry, region)
     db.update_tenant_profile(t.id, phone, address, t.hours, (map_url.strip() or t.map_url))
     db.update_tenant_classification(t.id, biz_type, marketplace, buy_url, search_kw, brand_name)
+    if lat.strip() and lon.strip():                 # 자동인식 좌표 저장(사진 GPS 지오태그용)
+        db.set_tenant_coords(t.id, lat, lon)
     if industry.strip():
         from app.industries import ensure_profile
         ensure_profile(industry.strip())
@@ -2820,7 +2831,7 @@ def _upload_form_html(tenant, token: str) -> str:
           "var rb=document.querySelector('input[name=biztype][value=\"'+bz+'\"]');if(rb)rb.checked=true;"
           "var kind=(bz==='seller')?'📦 온라인 셀러':'🏪 동네 매장';"
           "document.getElementById('lk_result').innerHTML='<span class=\"text-emerald-600 font-semibold\">✓ '+(d.name||'')+' · '+(d.industry||'')+(d.region?(' · '+d.region):'')+' 선택됨 (저장)</span>';"
-          "try{if(d.name){var fd2=new FormData();fd2.append('name',d.name||'');fd2.append('industry',d.industry||'');fd2.append('region',d.region||'');fd2.append('biz_type',bz);fd2.append('phone',d.tel||'');fd2.append('address',d.address||'');fd2.append('map_url',d.map_url||'');if(d.buy_url)fd2.append('buy_url',d.buy_url);fetch('/me/store',{method:'POST',body:fd2});}}catch(_){}}"
+          "try{if(d.name){var fd2=new FormData();fd2.append('name',d.name||'');fd2.append('industry',d.industry||'');fd2.append('region',d.region||'');fd2.append('biz_type',bz);fd2.append('phone',d.tel||'');fd2.append('address',d.address||'');fd2.append('map_url',d.map_url||'');if(d.buy_url)fd2.append('buy_url',d.buy_url);if(d.lat)fd2.append('lat',d.lat);if(d.lon)fd2.append('lon',d.lon);fetch('/me/store',{method:'POST',body:fd2});}}catch(_){}}"
           "function pickCand(i){var c=(window.__cands||[])[i];if(c){c.type='local';fillStore(c);}}"
           "async function lookupStore(){var q=document.getElementById('lk_q').value.trim();if(!q)return;"
           "var b=document.getElementById('lk_result');b.innerHTML='<span class=\"text-slate-400\">인식 중…</span>';"

@@ -40,6 +40,8 @@ def search(query: str, limit: int = 5) -> list[dict]:
                 "address": (it.get("roadAddress") or it.get("address") or "").strip(),
                 "jibun": (it.get("address") or "").strip(),   # 지번(동 포함) — 짧은 지역 추출용
                 "tel": (it.get("telephone") or "").strip(),
+                "mapx": (it.get("mapx") or "").strip(),        # 경도*10^7 (WGS84)
+                "mapy": (it.get("mapy") or "").strip(),        # 위도*10^7
             })
         return out
     except Exception:
