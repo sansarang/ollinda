@@ -2412,6 +2412,23 @@ def admin_whois(email: str = ""):
     return out
 
 
+@app.get("/admin/recent-users")
+def admin_recent_users(n: int = 15):
+    """진단 — 최근 가입 사용자(게스트/미온보딩 새 계정 양산 여부 확인)."""
+    out = []
+    with db._conn() as c:
+        rows = c.execute("SELECT id,email,tenant_id,created_at FROM users ORDER BY created_at DESC LIMIT ?",
+                         (n,)).fetchall()
+    for r in rows:
+        ru = dict(r)
+        t = db.get_tenant(ru.get("tenant_id")) if ru.get("tenant_id") else None
+        ru["onboarded"] = bool((getattr(t, "industry", "") or "").strip())
+        ru["guest"] = str(ru.get("email", "")).endswith("@ollinda.guest")
+        out.append({"email": ru["email"], "onboarded": ru["onboarded"],
+                    "guest": ru["guest"], "created_at": ru["created_at"]})
+    return {"count": len(out), "users": out}
+
+
 @app.api_route("/admin/cleanup", methods=["GET", "POST"])
 def admin_cleanup():
     """디스크 확보 — 사장님(OWNER) 소유 tenant만 남기고 데모·테스트 저장폴더+DB 전부 삭제 + 사장님 오래된 영상 정리."""
