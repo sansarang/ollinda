@@ -239,14 +239,25 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
 
 
 def _img_thumb_data_uri(path, max_px: int = 640) -> str:
-    """업로드 사진 → 작은 base64 썸네일(data URI). 실패 시 ''."""
+    """업로드 사진 → 작은 base64 썸네일(data URI). 로컬 없으면 R2에서 가져옴. 실패 시 ''."""
     try:
-        if not (path and os.path.exists(path)):
-            return ""
         from PIL import Image
         import io
         import base64
-        im = Image.open(path).convert("RGB")
+        data = None
+        if path and os.path.exists(path):
+            with open(path, "rb") as f:
+                data = f.read()
+        elif path:                                   # 로컬 삭제됨(R2 이관) → R2에서 다운로드
+            from app import storage as _st
+            if _st.r2_configured():
+                import urllib.request
+                key = os.path.relpath(path, _st.STORAGE_DIR).replace(os.sep, "/")
+                url = os.environ["R2_PUBLIC_URL"].rstrip("/") + "/" + key
+                data = urllib.request.urlopen(url, timeout=10).read()
+        if not data:
+            return ""
+        im = Image.open(io.BytesIO(data)).convert("RGB")
         im.thumbnail((max_px, max_px))
         buf = io.BytesIO()
         im.save(buf, "JPEG", quality=80)
@@ -884,7 +895,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 if ic not in seen:
                     seen.add(ic)
                     badges += f"<span>{ic}</span>"
-            thumb_html = (f"<img src='{thumb}' class='w-14 h-14 rounded-xl object-cover flex-shrink-0'>" if thumb
+            thumb_html = (f"<img src='{thumb}' onerror=\"this.onerror=null;this.outerHTML='<div class=\\'w-14 h-14 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center text-2xl text-white flex-shrink-0\\'>✨</div>'\" class='w-14 h-14 rounded-xl object-cover flex-shrink-0 bg-slate-100'>" if thumb
                           else "<div class='w-14 h-14 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center text-2xl text-white flex-shrink-0'>✨</div>")
             _cards.append(
                 "<div class='group flex items-center gap-3 p-2.5 rounded-2xl border border-slate-100 bg-white hover:shadow-md hover:border-indigo-200 hover:-translate-y-0.5 transition-all'>"
@@ -1287,7 +1298,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
         return None
 
     def dl(path):
-        return f"/dl/{asset_id}/{os.path.basename(path)}" if (path and os.path.exists(path)) else ""
+        return f"/dl/{asset_id}/{os.path.basename(path)}" if path else ""      # /dl이 R2로 리다이렉트
 
     def copy_block(cid, text, h="28"):
         return (f"<textarea id='{cid}' readonly class='w-full h-{h} border border-slate-200 rounded-xl p-2 text-sm bg-slate-50'>{esc(text)}</textarea>"
@@ -1307,7 +1318,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
     tenant = db.get_tenant(pieces[0].tenant_id)
     sname = (tenant.name if tenant else "내 가게")
     handle = (_re.sub(r"[^a-zA-Z0-9]", "", sname) or "mystore").lower()[:15]
-    first_img = next((f"/dl/{asset_id}/{os.path.basename(im)}" for im in imgs if im and os.path.exists(im)), "")
+    first_img = next((f"/dl/{asset_id}/{os.path.basename(im)}" for im in imgs if im), "")
     wrap = "bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg transition-shadow"
 
     def _av():
@@ -1324,7 +1335,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
             m = _re.fullmatch(r"\[사진(\d+)\]", seg or "")
             if m:
                 i = int(m.group(1)) - 1
-                if 0 <= i < len(imgs) and imgs[i] and os.path.exists(imgs[i]):
+                if 0 <= i < len(imgs) and imgs[i]:
                     out.append(f"<img src='/dl/{asset_id}/{os.path.basename(imgs[i])}' class='my-3 rounded-xl w-full border border-slate-100'>")
             else:
                 for ln in (seg or "").split("\n"):
@@ -1342,8 +1353,8 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
             m = _re.fullmatch(r"\[사진(\d+)\]", seg or "")
             if m:
                 i = int(m.group(1)) - 1
-                if 0 <= i < len(imgs) and imgs[i] and os.path.exists(imgs[i]):
-                    uri = _img_thumb_data_uri(imgs[i], 900)
+                if 0 <= i < len(imgs) and imgs[i]:
+                    uri = _img_thumb_data_uri(imgs[i], 900)      # 로컬 없으면 R2에서 가져옴
                     if uri:
                         parts.append(f"<img src='{uri}' style='max-width:100%;border-radius:8px;margin:14px 0'>")
             else:
@@ -1441,7 +1452,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                "style='background:linear-gradient(120deg,#6366f1,#8b5cf6,#ec4899)'>⬇ 5채널 전체 한 번에 받기 "
                "<span class='opacity-80 font-medium text-sm'>· 글+사진+영상 (채널별 폴더)</span></a>")
     thumbs = "".join(f"<img src='/dl/{asset_id}/{os.path.basename(im)}' class='h-24 w-24 object-cover rounded-lg border border-slate-100'>"
-                     for im in imgs if im and os.path.exists(im))
+                     for im in imgs if im)
     photos_strip = (("<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-4 mb-4'>"
                      "<div class='font-bold text-sm mb-2'>📷 내가 올린 사진</div>"
                      f"<div class='flex gap-2 flex-wrap'>{thumbs}</div></div>") if thumbs else "")
@@ -1497,7 +1508,7 @@ def kit_naver(request: Request, asset_id: str):
     sname = tenant.name if tenant else "내 가게"
     title = blog.payload.get("title", "")
     body_marked = _re.sub(r"\[사진(\d+)\]", r"\n\n[📷 사진\1 위치]\n\n", blog.payload.get("body", "")).strip()
-    photos = [im for im in imgs if im and os.path.exists(im)]
+    photos = [im for im in imgs if im]                          # /dl이 R2로 서빙
     photo_cells = "".join(
         f"<div class='relative'><img src='/dl/{asset_id}/{os.path.basename(im)}' class='w-full aspect-square object-cover rounded-xl border border-slate-200'>"
         f"<div class='absolute top-2 left-2 w-7 h-7 rounded-full bg-black/75 text-white text-sm font-bold flex items-center justify-center'>{i+1}</div>"
