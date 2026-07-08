@@ -2389,6 +2389,29 @@ def _prune_old_media(tenant_id: str, keep_recent: int = 4) -> int:
     return freed
 
 
+@app.get("/admin/whois")
+def admin_whois(email: str = ""):
+    """진단 — 이메일의 사용자·가게 온보딩 상태(중복 계정/미온보딩 확인)."""
+    email = (email or "").lower().strip()
+    out = {"email": email, "users": []}
+    with db._conn() as c:
+        rows = c.execute("SELECT id,email,tenant_id,plan,created_at FROM users WHERE email=?", (email,)).fetchall()
+    for r in rows:
+        ru = dict(r)
+        t = db.get_tenant(ru.get("tenant_id")) if ru.get("tenant_id") else None
+        ru["tenant_name"] = getattr(t, "name", None)
+        ru["tenant_industry"] = getattr(t, "industry", None)
+        ru["onboarded"] = bool((getattr(t, "industry", "") or "").strip())
+        try:
+            ru["sets"] = len(db.list_sets(tenant_id=ru.get("tenant_id"))) if ru.get("tenant_id") else 0
+            ru["stores"] = len(db.list_user_stores(ru["id"]))
+        except Exception:
+            ru["sets"] = ru["stores"] = "?"
+        out["users"].append(ru)
+    out["user_count"] = len(out["users"])
+    return out
+
+
 @app.api_route("/admin/cleanup", methods=["GET", "POST"])
 def admin_cleanup():
     """디스크 확보 — 사장님(OWNER) 소유 tenant만 남기고 데모·테스트 저장폴더+DB 전부 삭제 + 사장님 오래된 영상 정리."""
