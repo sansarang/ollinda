@@ -318,11 +318,19 @@ class ShortVideoGenerator(Generator):
                 shutil.copy(hook_png, cover)
             except Exception:
                 cover = None
+            try:
+                shutil.rmtree(work, ignore_errors=True)   # 씬 작업폴더(wav·중간mp4·ass) 정리 — 디스크 누수 차단
+            except Exception:
+                pass
             note = (f"씬 {len(sentences)}개 · 단어자막(ASS) · 켄번스+색보정 · 로고/진행바 · 브랜드테마 · "
                     f"{'TTS싱크' if tts_lib.configured() else '무음'}"
                     f"{' · AI이미지' if len(visuals) > len(imgs) else ''}")
             return final, note, round(total), cover
         except Exception as e:
+            try:
+                shutil.rmtree(work, ignore_errors=True)   # 실패해도 작업폴더 정리
+            except Exception:
+                pass
             return None, f"씬 빌드 오류: {str(e)[:120]}", 0, None
 
     def _clamp(self, v: float) -> float:
