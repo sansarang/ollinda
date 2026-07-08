@@ -2497,7 +2497,8 @@ def _upload_form_html(tenant, token: str) -> str:
           <input name=s_brand id=s_brand placeholder='브랜드명' class='{inp}'>
           <input name=s_search id=s_search placeholder='검색어 유도 (예: 폴딩박스)' class='{inp}'>
           <input name=s_buy id=s_buy placeholder='상세페이지/스토어 링크' class='{inp}'></div></div>
-      <div><label class='{lb}'>2. 사진 <span class='text-slate-400 font-normal text-xs'>(끌어서 순서 변경 · × 삭제)</span></label>
+      <div><label class='{lb}'>2. 사진 <span class='text-slate-400 font-normal text-xs'>(끌어서 순서 변경 · × 삭제)</span>
+        <span class='inline-block ml-1 bg-indigo-50 text-indigo-600 text-[11px] font-bold px-2 py-0.5 rounded-full'>✨ 자동 전문가 보정</span></label>
         <div id=up_preview class='grid grid-cols-3 sm:grid-cols-4 gap-2'></div>
         <input type=file name=photos id=up_photos accept='image/*' multiple required class='hidden'>
         <p class='text-xs text-slate-400 mt-1.5'>💡 <b class='text-slate-500'>끌어서</b> 순서 변경 · <b class='text-slate-500'>＋</b> 로 여러 장 추가 · 올린 순서대로 영상·블로그에 배치돼요</p></div>

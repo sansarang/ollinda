@@ -24,6 +24,14 @@ def run_teaser(industry: str, biz_type: str, note: str,
     for data, name in (images or [])[:10]:
         if data:
             paths.append(storage.save_upload(data, name or "photo.jpg", t.id))
+    # ✨ 사진 자동 보정(전문가 톤) — 데모도 동일하게
+    try:
+        from app.media import photo_boost
+        photo_boost.enhance_all(paths, industry)
+        for _p in paths:
+            storage.mirror_to_r2(_p)
+    except Exception:
+        pass
     asset = db.create_asset(t.id, AssetType.IMAGE, paths[0] if paths else "", note or "")
     if paths:
         analysis = vision.analyze(paths[0], industry)   # 대표(첫) 사진 분석

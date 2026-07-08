@@ -96,8 +96,8 @@
   "hotPaths": [
     {
       "path": "app/main.py",
-      "accessCount": 263,
-      "lastAccessed": 1783476943380,
+      "accessCount": 264,
+      "lastAccessed": 1783477173709,
       "type": "file"
     },
     {
@@ -114,8 +114,8 @@
     },
     {
       "path": "app/services/ingest.py",
-      "accessCount": 11,
-      "lastAccessed": 1783471110889,
+      "accessCount": 13,
+      "lastAccessed": 1783477137566,
       "type": "file"
     },
     {
@@ -131,15 +131,15 @@
       "type": "file"
     },
     {
-      "path": "app/services/place.py",
-      "accessCount": 7,
-      "lastAccessed": 1783476846190,
+      "path": "app/services/teaser.py",
+      "accessCount": 8,
+      "lastAccessed": 1783477160244,
       "type": "file"
     },
     {
-      "path": "app/services/teaser.py",
-      "accessCount": 6,
-      "lastAccessed": 1783310174237,
+      "path": "app/services/place.py",
+      "accessCount": 7,
+      "lastAccessed": 1783476846190,
       "type": "file"
     },
     {
@@ -212,6 +212,18 @@
       "path": "app/services/lookup.py",
       "accessCount": 1,
       "lastAccessed": 1783214579134,
+      "type": "file"
+    },
+    {
+      "path": "app/media/ai_image.py",
+      "accessCount": 1,
+      "lastAccessed": 1783477023922,
+      "type": "file"
+    },
+    {
+      "path": "app/media/photo_boost.py",
+      "accessCount": 1,
+      "lastAccessed": 1783477115839,
       "type": "file"
     }
   ],
