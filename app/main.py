@@ -2677,17 +2677,21 @@ def _upload_form_html(tenant, token: str) -> str:
                   + _bz("seller", "📦", "온라인 셀러") + "</div>")
     lb = "block text-sm font-bold text-slate-800 mb-2"
     # 저장된 가게정보로 미리 채움(한번 인식되면 계속) — 기본명은 비움
-    _nm = esc(tenant.name) if getattr(tenant, "name", "") and tenant.name not in ("내 가게", "카카오회원", "구글회원") else ""
+    _nm = esc(tenant.name) if getattr(tenant, "name", "") and tenant.name not in ("내 가게", "새 가게", "카카오회원", "구글회원") else ""
     _ind0 = esc(getattr(tenant, "industry", "") or "")
     _rg = esc(getattr(tenant, "region", "") or "")
     _tel0 = esc(getattr(tenant, "phone", "") or "")
     _addr = esc(getattr(tenant, "address", "") or "")
     _map0 = esc(getattr(tenant, "map_url", "") or "")
     _hint = (f"<span class='text-emerald-600 font-semibold'>✓ {_nm} · {_ind0} 저장됨 (수정 가능)</span>" if _nm else "입력하면 업종·주소가 자동으로 채워져요 (없어도 OK)")
+    # 이미 저장된 가게(이름+업종)면 입력필드를 접어서 대시보드처럼 깔끔하게(펼치면 수정)
+    _store_open = "" if (_nm and _ind0) else "open"
+    _store_summary = (f"🏪 <b>{_nm}</b> · {_ind0} <span class='ml-1 text-indigo-500 font-bold'>✏️ 가게 정보 수정 ▾</span>"
+                      if _nm else "1. 가게 이름 또는 상품 링크")
     form = f"""<form method=post action='/u/{token}/upload' enctype='multipart/form-data' onsubmit='return showGen(event)' class='space-y-6'>
       <input type=hidden name=s_name id=s_name value="{_nm}"><input type=hidden name=s_industry id=s_industry value="{_ind0}"><input type=hidden name=s_biz id=s_biz value='{bt}'>
-      <div><label class='{lb}'>1. 가게 이름 또는 상품 링크</label>
-        <div class='flex gap-2'>
+      <details {_store_open} class='rounded-2xl border border-slate-100 bg-slate-50/50 p-4'><summary class='{lb} mb-0 cursor-pointer select-none'>{_store_summary}</summary>
+        <div class='mt-3 flex gap-2'>
           <input id=lk_q value="{_nm}" placeholder='가게 이름 또는 상품/스토어 링크' class='{inp} flex-1'>
           <button type=button onclick='lookupStore()' class='px-5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-sm whitespace-nowrap transition'>자동 인식</button></div>
         <div id=lk_result class='text-xs mt-2 mb-2 text-slate-400'>{_hint}</div>
@@ -2700,7 +2704,7 @@ def _upload_form_html(tenant, token: str) -> str:
           <input name=s_market id=s_market placeholder='마켓 (예: 쿠팡)' class='{inp}'>
           <input name=s_brand id=s_brand placeholder='브랜드명' class='{inp}'>
           <input name=s_search id=s_search placeholder='검색어 유도 (예: 폴딩박스)' class='{inp}'>
-          <input name=s_buy id=s_buy placeholder='상세페이지/스토어 링크' class='{inp}'></div></div>
+          <input name=s_buy id=s_buy placeholder='상세페이지/스토어 링크' class='{inp}'></div></details>
       <div><label class='{lb}'>2. 사진 <span class='text-slate-400 font-normal text-xs'>(끌어서 순서 변경 · × 삭제)</span>
         <span class='inline-block ml-1 bg-indigo-50 text-indigo-600 text-[11px] font-bold px-2 py-0.5 rounded-full'>✨ 자동 전문가 보정</span></label>
         <div id=up_preview class='grid grid-cols-3 sm:grid-cols-4 gap-2'></div>
