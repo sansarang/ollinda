@@ -254,7 +254,8 @@ def _img_thumb_data_uri(path, max_px: int = 640) -> str:
                 import urllib.request
                 key = os.path.relpath(path, _st.STORAGE_DIR).replace(os.sep, "/")
                 url = os.environ["R2_PUBLIC_URL"].rstrip("/") + "/" + key
-                data = urllib.request.urlopen(url, timeout=10).read()
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                data = urllib.request.urlopen(req, timeout=12).read()
         if not data:
             return ""
         im = Image.open(io.BytesIO(data)).convert("RGB")
@@ -1432,7 +1433,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
             durb += ("<div class='absolute top-2 left-2 bg-black/70 text-white text-[11px] font-bold px-1.5 py-0.5 rounded'>"
                      + ("▶️ 쇼츠" if p.channel.value == "youtube" else "🎬 릴스") + "</div>")
             if vurl:
-                player = (f"<div class='relative'><video src='{vurl}' controls playsinline preload='metadata' poster='{first_img}' "
+                player = (f"<div class='relative'><video src='{vurl}' controls autoplay muted loop playsinline preload='metadata' poster='{first_img}' "
                           f"class='w-full max-h-[520px] bg-black'></video>{durb}</div>")
             elif first_img:
                 player = ("<div class='relative bg-black'>"
@@ -1629,8 +1630,26 @@ def _piece_pack_entries(piece, imgs, prefix=""):
     return ent
 
 
+def _fetch_local_or_r2(path: str):
+    """파일 바이트 — 로컬 없으면 R2에서 다운로드(이관 후 다운로드 보장). 실패 시 None."""
+    try:
+        if path and os.path.exists(path):
+            with open(path, "rb") as f:
+                return f.read()
+        from app import storage as _st
+        if path and _st.r2_configured():
+            import urllib.request
+            key = os.path.relpath(path, _st.STORAGE_DIR).replace(os.sep, "/")
+            url = os.environ["R2_PUBLIC_URL"].rstrip("/") + "/" + key
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})   # r2.dev가 기본 UA 차단
+            return urllib.request.urlopen(req, timeout=25).read()
+    except Exception:
+        return None
+    return None
+
+
 def _zip_bytes(entries) -> bytes:
-    """ZIP을 메모리에서 생성(디스크 미사용 → disk full·누적 방지)."""
+    """ZIP을 메모리에서 생성(디스크 미사용). 로컬 삭제된 사진·영상은 R2에서 받아 포함."""
     import zipfile
     import io
     buf = io.BytesIO()
@@ -1638,8 +1657,10 @@ def _zip_bytes(entries) -> bytes:
         for arc, src in entries:
             if isinstance(src, tuple) and src[0] == "text":
                 z.writestr(arc, src[1])
-            elif src and os.path.exists(src):
-                z.write(src, arcname=arc)
+            elif src:
+                data = _fetch_local_or_r2(src)      # 로컬 또는 R2에서
+                if data:
+                    z.writestr(arc, data)
     return buf.getvalue()
 
 
@@ -1647,6 +1668,14 @@ def _zip_response(data: bytes, filename: str):
     from urllib.parse import quote
     return Response(content=data, media_type="application/zip",
                     headers={"Content-Disposition": "attachment; filename*=UTF-8''" + quote(filename)})
+
+
+def _safe_title(pieces) -> str:
+    """다운로드 파일명용 — 콘텐츠 제목(블로그 제목 우선)에서 파일명 금지문자 제거."""
+    import re
+    t = next((p.payload.get("title") for p in pieces if p.payload.get("title")), "") or "올린다콘텐츠"
+    t = re.sub(r'[\\/:*?"<>|\n\r\t]', "", t).strip()[:40]
+    return t or "올린다콘텐츠"
 
 
 @app.get("/kit/{asset_id}/pack/{pid}")
@@ -1661,7 +1690,7 @@ def kit_pack(request: Request, asset_id: str, pid: str):
         return HTMLResponse(status_code=404)
     imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
     data = _zip_bytes(_piece_pack_entries(piece, imgs))
-    return _zip_response(data, f"올린다_{_ch_folder(piece)}.zip")
+    return _zip_response(data, f"{_safe_title(pieces)}_{_ch_folder(piece)}.zip")
 
 
 @app.get("/kit/{asset_id}/pack-all")
@@ -1676,7 +1705,7 @@ def kit_pack_all(request: Request, asset_id: str):
     for p in pieces:
         entries += _piece_pack_entries(p, imgs, prefix=f"{_ch_folder(p)}/")
     data = _zip_bytes(entries)
-    return _zip_response(data, "올린다_5채널_전체.zip")
+    return _zip_response(data, f"{_safe_title(pieces)}_5채널전체.zip")
 
 
 @app.get("/demo/{name}")
