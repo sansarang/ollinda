@@ -1567,7 +1567,13 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
           "function omFilter(g,btn){document.querySelectorAll('.om-card').forEach(function(c){c.style.display=(g==='all'||c.getAttribute('data-ch')===g)?'':'none';});"
           "document.querySelectorAll('#chFilter .om-fbtn').forEach(function(b){b.classList.remove('bg-indigo-600','text-white');b.classList.add('bg-slate-100','text-slate-600');});"
           "btn.classList.remove('bg-slate-100','text-slate-600');btn.classList.add('bg-indigo-600','text-white');}"
-          "(function(){var vs=document.querySelectorAll('video[autoplay]');vs.forEach(function(v,i){if(i>0){v.autoplay=false;try{v.pause();}catch(e){}}});})();"
+          "(function(){var vs=document.querySelectorAll('video[autoplay]');if(!vs.length)return;"
+          "vs.forEach(function(v){v.muted=true;});"                                        # 무음이어야 자동재생 허용
+          "function tryplay(v){var p=v.play();if(p&&p.catch)p.catch(function(){});}"
+          "tryplay(vs[0]);"                                                                # 첫 영상 즉시 재생(보기 누르면 바로)
+          "if('IntersectionObserver' in window){var io=new IntersectionObserver(function(es){es.forEach(function(e){"
+          "if(e.isIntersecting){tryplay(e.target);}else{try{e.target.pause();}catch(_){}}});},{threshold:0.5});"
+          "vs.forEach(function(v){io.observe(v);});}else{vs.forEach(function(v){tryplay(v);});}})();"  # 화면에 보이는 영상 자동재생(릴스식)
           "function pickTitle(sid,btn){var t=btn.getAttribute('data-t');var el=document.getElementById('bt'+sid);if(el)el.textContent=t;var ta=document.getElementById('cb'+sid);if(ta)ta.value=t+'\\n\\n'+(ta.getAttribute('data-body')||'');}"
           "</script>")
     brief = next((p.payload.get("brief") for p in pieces if p.payload.get("brief")), None)
