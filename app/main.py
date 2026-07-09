@@ -2766,20 +2766,38 @@ def admin_cleanup():
 
 
 @app.api_route("/admin/testgen", methods=["GET", "POST"])
-def admin_testgen():
-    """진단용 — ingest_upload 동기 실행해 실제 에러/결과 반환."""
+def admin_testgen(biz: str = "local"):
+    """진단/샘플 — ingest_upload 동기 실행. biz=seller면 셀러 샘플 가게를 사장님 계정에 연결해 생성."""
     import traceback
     import io
     from PIL import Image
-    t = next((x for x in db.list_tenants() if (x.industry or "").strip() and not getattr(x, "is_demo", 0)), None)
+    from app.services.ingest import ingest_upload
+    if biz == "seller":
+        t = next((x for x in db.list_tenants() if x.name == "올린다 셀러샘플"), None)
+        if not t:
+            t = db.create_tenant("올린다 셀러샘플", "블루투스 이어폰", "", "seller")
+        db.update_tenant_classification(t.id, "seller", "coupang",
+                                        "https://smartstore.naver.com/sample", "블루투스 이어폰", "라익미")
+        try:  # 사장님 계정에 연결 → 내 콘텐츠에서 가게 전환해 확인 가능
+            ph = ",".join("?" * len(OWNER_EMAILS))
+            with db._conn() as c:
+                for r in c.execute(f"SELECT id FROM users WHERE email IN ({ph})", tuple(OWNER_EMAILS)).fetchall():
+                    db.link_store(r["id"], t.id)
+        except Exception:
+            pass
+        note = "무선 블루투스 이어폰 노이즈캔슬링 · 초경량 · IPX7 방수 · 저지연 게이밍 · 화이트"
+    else:
+        t = next((x for x in db.list_tenants()
+                  if (x.industry or "").strip() and not getattr(x, "is_demo", 0)
+                  and (x.biz_type or "local") != "seller"), None)
+        note = "[샘플] 오늘 직접 시공한 매장 후기 · 검은 SUV 열차단 썬팅"
     if not t:
-        return {"err": "no onboarded tenant"}
+        return {"err": "no tenant"}
     b = io.BytesIO()
     Image.new("RGB", (600, 400), (120, 140, 90)).save(b, "JPEG")
     try:
-        from app.services.ingest import ingest_upload
-        made = ingest_upload(t, [(b.getvalue(), "test.jpg")], "[진단테스트]")
-        return {"ok": True, "made": len(made), "tenant": t.name}
+        made = ingest_upload(t, [(b.getvalue(), "test.jpg")], note)
+        return {"ok": True, "made": len(made), "tenant": t.name, "biz": biz}
     except Exception as e:
         return {"err": repr(e), "tb": traceback.format_exc()[-1500:]}
 
