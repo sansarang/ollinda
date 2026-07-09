@@ -1688,6 +1688,8 @@ def kit_naver(request: Request, asset_id: str):
     title = blog.payload.get("title", "")
     body_marked = _re.sub(r"\[사진(\d+)\]", r"\n\n[📷 사진\1 위치]\n\n", blog.payload.get("body", "")).strip()
     photos = [im for im in imgs if im]                          # /dl이 R2로 서빙
+    vid = next((p for p in pieces if p.kind.value == "short" and p.payload.get("video_path")), None)
+    vurl = f"/dl/{asset_id}/{os.path.basename(vid.payload['video_path'])}" if vid else ""  # 블로그 본문 삽입용
     photo_cells = "".join(
         f"<div class='relative'><img src='/dl/{asset_id}/{os.path.basename(im)}' class='w-full aspect-square object-cover rounded-xl border border-slate-200'>"
         f"<div class='absolute top-2 left-2 w-7 h-7 rounded-full bg-black/75 text-white text-sm font-bold flex items-center justify-center'>{i+1}</div>"
@@ -1715,6 +1717,18 @@ def kit_naver(request: Request, asset_id: str):
            "<div class='text-xs font-bold text-slate-400'>3. 사진 <span class='text-slate-500'>(순서대로)</span></div>"
            f"<a href='/kit/{asset_id}/pack/{blog.id}' class='text-xs font-bold text-indigo-600'>⬇ 전체 ZIP 받기</a></div>"
            f"<div class='grid grid-cols-3 sm:grid-cols-4 gap-3'>{photo_cells}</div></div>" if photos else "")
+        # 4. 동영상 본문 삽입 (D.I.A.+ 가점) — #1
+        + (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>4. 동영상도 본문에 넣기 <span class='text-emerald-600'>(상위노출 유리)</span></div>"
+           "<p class='text-xs text-slate-500 mb-3'>네이버는 <b>15초+ 동영상이 들어간 글에 가점(D.I.A.+)</b>을 줍니다. 아래 영상을 받아 본문 중간(예: 첫 소제목 아래)에 넣어보세요.</p>"
+           f"<a href='{vurl}' download class='{cbtn} bg-indigo-600 hover:bg-indigo-700 inline-block'>⬇ 동영상 받기</a></div>" if vurl else "")
+        # 5. 발행 후 마무리 — 사진 6장 권장(#3) + 서치어드바이저 색인(#3)
+        + (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>{'5' if vurl else '4'}. 발행 후 — 상위노출 마무리</div>"
+           "<ul class='text-xs text-slate-600 space-y-1.5 mb-3 list-none'>"
+           + (f"<li>📷 사진은 <b>6장 이상</b>이면 더 유리해요 (지금 {len(photos)}장). 다음엔 더 올려보세요.</li>"
+              if len(photos) < 6 else "<li>📷 사진 6장+ ✓ 좋아요.</li>")
+           + "<li>🎬 직접 찍은 동영상까지 넣으면 D.I.A.+ 가점.</li>"
+           + "<li>⚡ 발행 직후 <b>서치어드바이저에 URL 색인 요청</b>하면 검색 반영이 수일→수시간으로 빨라져요.</li></ul>"
+           f"<a href='https://searchadvisor.naver.com/console/board/registration' target='_blank' rel='noopener' class='{cbtn} bg-slate-900 hover:bg-slate-800 inline-block'>🔗 서치어드바이저 색인 요청 →</a></div>")
         # 토스트
         + "<div id='nvToast' class='fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-sm font-bold px-5 py-3 rounded-xl shadow-xl opacity-0 pointer-events-none transition-opacity'>✅ 복사됨</div>"
         + "<script>function nvcp(id,btn){var t=document.getElementById(id);omCopy(t.value);"
@@ -2812,11 +2826,16 @@ def admin_testgen(biz: str = "local", note: str = "", photos: list[UploadFile] =
         b = io.BytesIO()
         Image.new("RGB", (600, 400), (120, 140, 90)).save(b, "JPEG")
         files = [(b.getvalue(), "test.jpg")]
-    try:
-        made = ingest_upload(t, files, note)
-        return {"ok": True, "made": len(made), "tenant": t.name, "biz": biz, "photos": len(files)}
-    except Exception as e:
-        return {"err": repr(e), "tb": traceback.format_exc()[-1500:]}
+    # 여러 장은 동기 생성이 HTTP 타임아웃을 넘김 → 백그라운드 스레드로 실행, 즉시 반환
+    import threading
+
+    def _bg():
+        try:
+            ingest_upload(t, files, note)
+        except Exception:
+            traceback.print_exc()
+    threading.Thread(target=_bg, daemon=True).start()
+    return {"ok": True, "started": True, "tenant": t.name, "biz": biz, "photos": len(files)}
 
 
 @app.get("/admin/geminicheck")
