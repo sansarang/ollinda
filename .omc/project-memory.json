@@ -96,8 +96,8 @@
   "hotPaths": [
     {
       "path": "app/main.py",
-      "accessCount": 434,
-      "lastAccessed": 1783600511247,
+      "accessCount": 435,
+      "lastAccessed": 1783603537329,
       "type": "file"
     },
     {
@@ -191,6 +191,18 @@
       "type": "file"
     },
     {
+      "path": "app/media/bgm.py",
+      "accessCount": 3,
+      "lastAccessed": 1783603342746,
+      "type": "file"
+    },
+    {
+      "path": "app/media/tts.py",
+      "accessCount": 3,
+      "lastAccessed": 1783603492602,
+      "type": "file"
+    },
+    {
       "path": "app/services/generate.py",
       "accessCount": 2,
       "lastAccessed": 1783052528358,
@@ -218,12 +230,6 @@
       "path": "app/services/pay.py",
       "accessCount": 2,
       "lastAccessed": 1783492212713,
-      "type": "file"
-    },
-    {
-      "path": "app/media/bgm.py",
-      "accessCount": 2,
-      "lastAccessed": 1783602507380,
       "type": "file"
     },
     {

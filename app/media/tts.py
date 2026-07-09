@@ -15,6 +15,7 @@ import uuid
 GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
 GEMINI_VOICE = os.environ.get("GEMINI_TTS_VOICE", "Kore")   # 차분한 한국어 보이스
 EL_DEFAULT_VOICE = "21m00Tcm4TlvDq8ikWAM"
+LAST_ERR = ""   # 진단용 — 마지막 TTS 실패 원인
 
 
 def configured() -> bool:
@@ -57,7 +58,9 @@ def _gemini(text: str, out_dir: str) -> str | None:
                         "-i", pcm, mp3], capture_output=True, timeout=60)
         os.remove(pcm)
         return mp3 if os.path.exists(mp3) else None
-    except Exception:
+    except Exception as e:
+        global LAST_ERR
+        LAST_ERR = repr(e)[:200]
         return None
 
 

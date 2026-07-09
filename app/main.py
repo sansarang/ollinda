@@ -2896,6 +2896,7 @@ def admin_audiocheck():
         wav = _tts.synthesize("안녕하세요, 소리 테스트입니다. 잘 들리나요.", d)
         out["tts_ok"] = bool(wav and os.path.exists(wav) and os.path.getsize(wav) > 500)
         out["tts_size"] = os.path.getsize(wav) if wav and os.path.exists(wav) else 0
+        out["tts_last_err"] = getattr(_tts, "LAST_ERR", "")
     except Exception as e:
         out["tts_err"] = repr(e)[:120]
     vid = os.path.join(d, "v.mp4")
