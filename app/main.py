@@ -2841,6 +2841,31 @@ def admin_testgen(biz: str = "local", note: str = "", photos: list[UploadFile] =
     return {"ok": True, "started": True, "tenant": t.name, "biz": biz, "photos": len(files)}
 
 
+@app.get("/admin/scenegen")
+def admin_scenegen():
+    """진단 — 정상 영상 경로(_build_scene_video)가 프로덕션에서 왜 실패하는지 note/error 반환."""
+    import os
+    import traceback
+    from PIL import Image
+    from app.generators.video import ShortVideoGenerator
+    from app.strategies import resolve_strategy
+    t = next((x for x in db.list_tenants() if (x.industry or "").strip() and not getattr(x, "is_demo", 0)), None)
+    if not t:
+        return {"err": "no tenant"}
+    d = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), t.id)
+    os.makedirs(d, exist_ok=True)
+    img = os.path.join(d, "scenetest.jpg")
+    Image.new("RGB", (1080, 1920), (70, 90, 120)).save(img)
+    try:
+        vp, note, dur, cover = ShortVideoGenerator()._build_scene_video(
+            [img], "테스트 훅 문구", ["오늘 시공한 케이스를 보여드릴게요.", "열차단 필름으로 마감했습니다."],
+            ["썬팅", "열차단"], t, resolve_strategy(t), "제목", "방문하세요")
+        return {"scene_video_ok": bool(vp), "note": note, "dur": dur,
+                "fname": os.path.basename(vp) if vp else None}
+    except Exception as e:
+        return {"err": repr(e), "tb": traceback.format_exc()[-1200:]}
+
+
 @app.get("/admin/ffmpegcheck")
 def admin_ffmpegcheck():
     """진단 — 프로덕션 ffmpeg가 ASS 자막(libass)을 실제로 렌더하는지."""
