@@ -49,7 +49,7 @@ body{font-family:'Pretendard','Apple SD Gothic Neo',system-ui,sans-serif;-webkit
 
 _HEAD = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
-<title>올린다 — 사진 한 장이면, 매출이 올라갑니다</title>
+<title>올린다 — 사진 한 장이면, 팔리는 콘텐츠가 됩니다</title>
 <meta name=description content="사장님은 사진만 올리세요. AI가 인스타·네이버블로그·유튜브·X 콘텐츠를 만들고 검색 상위에 뜨게 최적화해 자동 발행합니다. 소상공인 AI 마케팅 자동화 올린다.">
 <meta name=keywords content="AI 마케팅,소상공인 마케팅,셀러 마케팅,인스타 자동 업로드,네이버 블로그 자동,유튜브 쇼츠 자동,콘텐츠 자동화,SNS 대행,쿠팡 마케팅,올린다,Ollinda">
 <meta name=robots content="index,follow,max-image-preview:large,max-snippet:-1">
@@ -58,7 +58,7 @@ _HEAD = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <meta property=og:site_name content="올린다">
 <meta property=og:locale content="ko_KR">
 <meta property=og:type content=website>
-<meta property=og:title content="올린다 — 사진 한 장이면, 매출이 올라갑니다">
+<meta property=og:title content="올린다 — 사진 한 장이면, 팔리는 콘텐츠가 됩니다">
 <meta property=og:description content="AI가 5개 채널 콘텐츠를 만들고 자동 발행. 소상공인 마케팅 자동화.">
 <meta property=og:image content="__BASE__/demo/og.png">
 <meta property=og:image:width content="1200">
@@ -156,7 +156,7 @@ def _hero() -> str:
   <div class="reveal inline-flex items-center gap-2 px-4 py-1.5 rounded-full glass text-xs font-semibold mb-6">
    <span class="dot w-2 h-2 rounded-full bg-emerald-400"></span> 소상공인 · 온라인 셀러 전용 · AI 마케팅 자동화</div>
   <h1 class="reveal text-4xl sm:text-6xl font-extrabold tracking-tight leading-[1.08]">
-   사진 한 장이면,<br><span class="grad-text">매출이 올라갑니다</span></h1>
+   사진 한 장이면,<br><span class="grad-text">팔리는 콘텐츠가 됩니다</span></h1>
   <p class="reveal mt-6 text-lg text-slate-300 max-w-2xl mx-auto">동네 사장님도, <b class="text-white">쿠팡·11번가 셀러</b>도 사진만 올리세요. AI가 <b class="text-white">인스타·블로그·유튜브·X</b> 콘텐츠를 만들고,
    <b class="text-white">검색 상위</b>에 띄워 <b class="text-white">매장 방문·상세페이지 구매</b>로 연결합니다.</p>
   <p class="reveal mt-3 text-sm text-slate-400 max-w-xl mx-auto">✔ 2026 최신 알고리즘 반영 &nbsp;·&nbsp; ✔ 없는 가격·스펙 안 지어내는 정직한 글 &nbsp;·&nbsp; ✔ 실검색량 키워드로 상위노출</p>
