@@ -122,9 +122,14 @@ def _build_ass(scenes, kws, theme_key, out) -> str:
         "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
         "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, "
         "Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: Cap,Pretendard,84,{sung},{unsung},&H00141014,&H64000000,-1,0,0,0,100,100,0,0,"
+        f"Style: Cap,Pretendard,72,{sung},{unsung},&H00141014,&H64000000,-1,0,0,0,100,100,0,0,"
         "1,6,3,2,90,90,360,1\n\n"
         "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
+
+    def _cw(s):   # 글자 폭 가중치(한글/한자=1, 그 외=0.55) — 줄 길이 계산용
+        return sum(1.0 if ("가" <= c <= "힣" or "一" <= c <= "鿿") else 0.55 for c in s)
+
+    LINE_BUDGET = 11.0     # 한 줄 최대(한글 11자 ≈ 폭 900px @ 폰트72) — 넘치면 다음 줄로
     lines = []
     for start, dur, text in scenes:
         words = [w for w in re.split(r"\s+", (text or "").strip()) if w]
@@ -132,7 +137,12 @@ def _build_ass(scenes, kws, theme_key, out) -> str:
             continue
         tot = sum(max(1, len(w)) for w in words)
         body = ""
+        line_w = 0.0
         for w in words:
+            ww = _cw(w)
+            if line_w > 0 and line_w + 0.55 + ww > LINE_BUDGET:   # 단어 단위 줄바꿈(띄어쓰기 보존)
+                body = body.rstrip() + "\\N"
+                line_w = 0.0
             cs = max(8, int(round(dur * 100 * len(w) / tot)))   # 단어별 강조 시간(센티초)
             wl = w.lower()
             hot = any((k in wl) or (wl in k) for k in kws_low) if kws_low else False
@@ -140,6 +150,7 @@ def _build_ass(scenes, kws, theme_key, out) -> str:
                 body += "{\\1c" + theme + "\\k" + str(cs) + "}" + w + "{\\1c" + sung + "} "
             else:
                 body += "{\\k" + str(cs) + "}" + w + " "
+            line_w += ww + 0.55
         lines.append("Dialogue: 0," + _ts(start) + "," + _ts(start + dur) + ",Cap,,0,0,0,," + body.strip())
     with open(out, "w") as f:
         f.write(head + "\n".join(lines) + "\n")
@@ -507,18 +518,31 @@ class ShortVideoGenerator(Generator):
         img.save(out)
 
     def _wrap_lines(self, d, text, font, maxw):
-        out, cur = [], ""
-        for ch in text:
-            if ch == "\n":
+        """단어(띄어쓰기) 단위 줄바꿈 — 한글이 단어 중간에서 안 잘리게. 긴 단어만 예외적으로 글자 분할."""
+        out = []
+        for para in (text or "").split("\n"):
+            cur = ""
+            for w in para.split(" "):
+                cand = (cur + " " + w) if cur else w
+                if d.textlength(cand, font=font) <= maxw:
+                    cur = cand
+                    continue
                 if cur:
-                    out.append(cur); cur = ""
-                continue
-            if d.textlength(cur + ch, font=font) <= maxw:
-                cur += ch
-            else:
-                out.append(cur); cur = ch
-        if cur:
-            out.append(cur)
+                    out.append(cur)
+                if d.textlength(w, font=font) > maxw:      # 단어 하나가 폭 초과 → 글자 단위(예외)
+                    piece = ""
+                    for ch in w:
+                        if d.textlength(piece + ch, font=font) <= maxw:
+                            piece += ch
+                        else:
+                            if piece:
+                                out.append(piece)
+                            piece = ch
+                    cur = piece
+                else:
+                    cur = w
+            if cur:
+                out.append(cur)
         return out
 
     # ───────────────────── ffmpeg: 영상(무음) + 오디오(연속) 분리 ─────────────────────

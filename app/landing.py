@@ -175,7 +175,7 @@ def _video() -> str:
    <p class="text-slate-400 text-sm mt-1">사진 5장만 올리면 <b class="text-white">음성 영상</b>과 <b class="text-white">네이버 블로그 글</b>이 자동으로. 아래는 실제 생성 결과입니다.</p></div>
   <div class="reveal max-w-sm mx-auto rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-black">
    <video src="/demo/local_short.mp4" controls autoplay muted loop playsinline class="w-full"></video>
-   <div class="bg-slate-900 text-slate-300 text-sm px-5 py-3">부산 동구 카오디오 — 사진 5장 → AI 자동 생성 세로 영상 <b class="text-emerald-300">(음성 나레이션 + BGM)</b>.<br><span class="text-xs text-slate-400">🔊 탭하면 소리가 나와요</span></div></div>
+   <div class="bg-slate-900 text-slate-300 text-sm px-5 py-3">초량 루마썬팅 — 사진 5장 → AI 자동 생성 열차단 썬팅 세로 영상 <b class="text-emerald-300">(음성 나레이션 + BGM)</b>.<br><span class="text-xs text-slate-400">🔊 탭하면 소리가 나와요</span></div></div>
   {_naver_preview()}
  </div>
  <script>
@@ -492,24 +492,24 @@ def _sticky_cta() -> str:
 
 def _naver_preview() -> str:
     """실제 생성된 네이버 블로그 글 미리보기(스크린 녹화 대신 진짜 새 카피를 보여줌 = 신뢰)."""
-    title = "부산 동구 카오디오, 포터2 내비·후방카메라 직접 시공기"
+    title = "부산 동구 썬팅업체 후기, 포터2 냉동탑차 열차단 시공 팩트정리"
     body = (
-        "부산 동구에서 ‘내비 하나 다는데 뭐가 그렇게 다른가’ 싶으셨죠? "
+        "화물차 타시는 사장님, 한여름 앞유리로 쏟아지는 햇빛에 팔뚝이 익는 느낌 받아보신 적 있으시죠? "
         "<span class='text-emerald-600 text-xs'>(← 검색 유입 손님 공감 = 이탈 방지)</span><br>"
-        "화면 밝기·지도 반응·배선 마감까지 신경 안 쓰면 몇 달 뒤 후회하는 게 차량 전장 작업입니다. "
-        "그래서 오늘은 직접 시공한 <b>현대 포터2 냉동탑차</b> 케이스를 작업일지처럼 보여드릴게요.<br><br>"
-        "<b>■ 오늘 들어온 케이스 — 포터2 냉동탑차</b><br>"
-        "흰색 포터Ⅱ 냉동탑차 사장님이 ‘내비 화면이 흐려서 낮에 안 보인다, 후방도 불안하다’며 오셨어요. "
-        "영업용 트럭은 화면 시인성과 안전이 생명이죠. "
+        "오후 배송 돌 때 서쪽 햇빛 눈부심에 신호등이 순간 안 보이면 진짜 아찔합니다. "
+        "그래서 오늘은 직접 시공한 <b>현대 포터2 냉동탑차 열차단 썬팅</b>을 처음부터 끝까지 보여드릴게요.<br><br>"
+        "<b>■ 오늘의 케이스 — 포터2 냉동탑차 앞유리·측면</b><br>"
+        "매일 장거리 배송 도는 냉동탑차 사장님 요청은 명확했어요. ‘더위랑 눈부심만 잡아달라.’ "
+        "화물차는 유리 면적이 넓어 열차단 성능이 더 중요하죠. (내비·후방카메라는 옵션으로 함께) "
         "<span class='text-emerald-600 text-xs'>(← 손님 스토리 + 과정 = 신뢰·체류)</span>")
-    tags = ["부산동구카오디오", "포터2내비게이션시공", "후방카메라설치", "냉동탑차내비"]
+    tags = ["부산동구썬팅", "열차단썬팅", "포터2썬팅", "화물차썬팅"]
     tag_html = "".join(f"<span class='inline-block bg-emerald-50 text-emerald-600 text-xs px-2 py-1 rounded-full mr-1 mb-1'>#{t}</span>" for t in tags)
     return f"""
   <div class="reveal max-w-2xl mx-auto mt-6 bg-white rounded-3xl overflow-hidden border border-white/10 shadow-2xl">
    <div class="bg-[#03c75a] text-white text-sm font-bold px-5 py-2.5 flex items-center gap-2"><span class="bg-white text-[#03c75a] rounded px-1.5 text-xs font-extrabold">blog</span> 네이버 블로그 — AI가 쓴 실제 글 (사진 5장 기반)</div>
    <div class="p-6 text-left">
     <div class="text-lg font-extrabold text-slate-900 mb-2 leading-snug">{title}</div>
-    <div class="text-xs text-slate-400 border-b border-slate-100 pb-2 mb-3">루마카오디오 블로그 · 방금 전 · 조회 12</div>
+    <div class="text-xs text-slate-400 border-b border-slate-100 pb-2 mb-3">초량 루마썬팅 블로그 · 방금 전 · 조회 12</div>
     <p class="text-sm text-slate-700 leading-relaxed">{body}</p>
     <div class="mt-4">{tag_html}</div>
     <div class="mt-3 text-xs text-slate-400">PAS 오프닝 · 손님 스토리 · 실검색량 키워드 · 정직(없는 가격·스펙 안 씀) 자동 적용</div>
