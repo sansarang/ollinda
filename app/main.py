@@ -1487,7 +1487,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                      + f"<div class='flex gap-2'>{pack_btn(p.id, False)}{_cp('c_blogb', blog_copy, '글 복사')}</div></div></div>")
         elif k == "x_post":
             xt = pl.get("text", "")
-            xvid = (f"<video src='{vurl}' controls playsinline preload='metadata' poster='{first_img}' class='w-full rounded-xl mt-2 bg-black' style='max-height:360px'></video>" if vurl else "")
+            xvid = (f"<video src='{vurl}' controls autoplay muted loop playsinline preload='metadata' poster='{first_img}' class='w-full rounded-xl mt-2 bg-black' style='max-height:360px'></video>" if vurl else "")
             block = (_hd("𝕏 X") + f"<div class='{wrap} p-4'>"
                      "<div class='flex items-center gap-2 mb-2'>" + _av()
                      + f"<div><div class='font-bold text-sm leading-tight'>{esc(sname)}</div><div class='text-slate-400 text-xs'>@{handle} · now</div></div><div class='ml-auto text-lg font-bold'>𝕏</div></div>"

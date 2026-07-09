@@ -24,6 +24,7 @@ _STYLE = """
 <style>
 :root{--g1:#6366f1;--g2:#8b5cf6;--g3:#ec4899;}
 *{scroll-behavior:smooth}
+body{word-break:keep-all;overflow-wrap:break-word}   /* 한글은 단어 단위로만 줄바꿈(모바일 띄어쓰기) */
 body{font-family:'Pretendard','Apple SD Gothic Neo',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
 .grad-text{background:linear-gradient(110deg,#818cf8,#c084fc,#f472b6);-webkit-background-clip:text;background-clip:text;color:transparent}
 .grad-btn{background:linear-gradient(110deg,var(--g1),var(--g2),var(--g3));background-size:200% auto;transition:.5s}
