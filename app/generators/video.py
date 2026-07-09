@@ -338,7 +338,8 @@ class ShortVideoGenerator(Generator):
                 img = visuals[i % len(visuals)]
                 seg_tts = tts_lib.synthesize(text, work)
                 td = _probe_dur(seg_tts) if seg_tts else 0
-                sdur = self._clamp((td + 0.4) if td > 0.3 else (len(text) * 0.13 + 1.2))
+                # 음성이 있으면 씬 길이 = 음성 길이(+여유). 9초로 자르지 않음 → 긴 문장 나레이션 끊김·자막불일치 방지
+                sdur = min(15.0, max(MIN_SCENE, td + 0.4)) if td > 0.3 else self._clamp(len(text) * 0.13 + 1.2)
                 v = self._scene_video(img, sdur, i, os.path.join(work, f"v{i}.mp4"))
                 aw = self._audio_segment(seg_tts, sdur, os.path.join(work, f"a{i}.wav"))
                 if v and aw:

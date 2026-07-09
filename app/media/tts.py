@@ -14,7 +14,7 @@ import uuid
 
 GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
 GEMINI_VOICE = os.environ.get("GEMINI_TTS_VOICE", "Kore")   # 차분한 한국어 보이스
-EL_DEFAULT_VOICE = "21m00Tcm4TlvDq8ikWAM"
+EL_DEFAULT_VOICE = os.environ.get("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")   # George — 따뜻한 스토리텔러(사람 느낌)
 LAST_ERR = ""   # 진단용 — 마지막 TTS 실패 원인
 
 
@@ -23,10 +23,10 @@ def configured() -> bool:
 
 
 def synthesize(text: str, out_dir: str) -> str | None:
-    """text → mp3 경로. Gemini TTS 우선, 실패 시 ElevenLabs, 둘 다 안 되면 None."""
+    """text → mp3 경로. ElevenLabs 우선(사람 느낌·자연스러움), 실패/무키 시 Gemini, 둘 다 안 되면 None."""
     if not text.strip():
         return None
-    return _gemini(text, out_dir) or _elevenlabs(text, out_dir)
+    return _elevenlabs(text, out_dir) or _gemini(text, out_dir)
 
 
 def _gemini(text: str, out_dir: str) -> str | None:
@@ -80,7 +80,14 @@ def _elevenlabs(text: str, out_dir: str) -> str | None:
     try:
         r = requests.post(f"https://api.elevenlabs.io/v1/text-to-speech/{voice}",
                           headers={"xi-api-key": key, "Content-Type": "application/json"},
-                          json={"text": text, "model_id": "eleven_multilingual_v2"}, timeout=90)
+                          json={"text": text, "model_id": "eleven_multilingual_v2",
+                                # 자연스러움: stability 낮춰 표현력↑, style 살짝 → 사람처럼
+                                "voice_settings": {"stability": 0.4, "similarity_boost": 0.8,
+                                                   "style": 0.35, "use_speaker_boost": True}}, timeout=90)
+        if r.status_code == 429:
+            global LAST_ERR
+            LAST_ERR = "elevenlabs 429"
+            return None
         r.raise_for_status()
         with open(out, "wb") as f:
             f.write(r.content)
