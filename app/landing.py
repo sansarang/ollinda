@@ -530,7 +530,7 @@ def _why_rank() -> str:
   <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">{cards}</div>
   <div class="reveal bg-gradient-to-r from-indigo-600/20 to-pink-600/20 border border-white/10 rounded-2xl p-6 text-center">
    <div class="text-sm text-slate-300 mb-1">🔍 네이버 검색광고 <b class="text-white">실검색량</b> 연동</div>
-   <div class="text-lg sm:text-xl font-extrabold">지어낸 키워드가 아니라, <span class="grad-text">‘썬팅가격 월 4,100회’</span>처럼 진짜 뜨는 키워드로 씁니다</div>
+   <div class="text-lg sm:text-xl font-extrabold">지어낸 키워드가 아니라, <span class="grad-text">‘셀프네일 월 4,540회’</span>처럼 진짜 뜨는 키워드로 씁니다</div>
    <div class="text-xs text-slate-400 mt-2">검색량 500~5,000 롱테일(경쟁↓·전환↑)을 실측으로 골라 반영</div>
   </div>
  </div></section>"""
