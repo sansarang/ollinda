@@ -1,7 +1,7 @@
 {
   "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"cd ~/Desktop/shopcast\\necho \\\"=== 라우트별 상태(현재) ===\\\"\\nfor path in \\\"/\\\" \\\"/login\\\" \\\"/signup\\\" \\\"/robots.txt\\\"; do\\n  echo \\\"  GET $path → $(curl -s -o /dev/null -w '%{http_code}' --max-tim...",
-  "error": "Exit code 127\n=== 라우트별 상태(현재) ===\n  GET / → \n  GET /login → \n  GET /signup → \n  GET /robots.txt → \n  POST /signup → \n  POST /signup(2) → \n\n=== 로컬에서 signup_post 실제 호출(진짜 버그인지) ===\n(eval):10: command not found: tail",
-  "timestamp": "2026-07-06T06:05:44.462Z",
-  "retry_count": 1
+  "tool_input_preview": "{\"command\":\"cd ~/Desktop/shopcast\\nsource deploy.sh\\npython3 -c \\\"import os; print('ANTHROPIC:', (os.environ.get('ANTHROPIC_API_KEY') or 'NONE')[:10]); print('GEMINI:', (os.environ.get('GEMINI_API_KEY...",
+  "error": "Exit code 1\nINFO:     Started server process [78391]\nINFO:     Waiting for application startup.\nINFO:     Application startup complete.\nERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1', 8020): address already in use\nINFO:     Waiting for application shutdown.\nINFO:     Application shutdown complete.",
+  "timestamp": "2026-07-09T08:29:35.852Z",
+  "retry_count": 3
 }

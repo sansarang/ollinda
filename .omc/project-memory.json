@@ -96,8 +96,8 @@
   "hotPaths": [
     {
       "path": "app/main.py",
-      "accessCount": 407,
-      "lastAccessed": 1783584074261,
+      "accessCount": 409,
+      "lastAccessed": 1783585708413,
       "type": "file"
     },
     {
@@ -113,21 +113,21 @@
       "type": "file"
     },
     {
-      "path": "app/services/ingest.py",
-      "accessCount": 19,
-      "lastAccessed": 1783551212496,
-      "type": "file"
-    },
-    {
       "path": "app/generators/text_claude.py",
-      "accessCount": 19,
-      "lastAccessed": 1783585204641,
+      "accessCount": 22,
+      "lastAccessed": 1783585661103,
       "type": "file"
     },
     {
       "path": "app/generators/video.py",
+      "accessCount": 20,
+      "lastAccessed": 1783585682153,
+      "type": "file"
+    },
+    {
+      "path": "app/services/ingest.py",
       "accessCount": 19,
-      "lastAccessed": 1783585236327,
+      "lastAccessed": 1783551212496,
       "type": "file"
     },
     {
@@ -144,8 +144,8 @@
     },
     {
       "path": "app/seo.py",
-      "accessCount": 7,
-      "lastAccessed": 1783585132340,
+      "accessCount": 8,
+      "lastAccessed": 1783585632742,
       "type": "file"
     },
     {
@@ -176,6 +176,12 @@
       "path": "app/registry.py",
       "accessCount": 3,
       "lastAccessed": 1783551188781,
+      "type": "file"
+    },
+    {
+      "path": "app/generators/x_text.py",
+      "accessCount": 3,
+      "lastAccessed": 1783585674199,
       "type": "file"
     },
     {
@@ -212,12 +218,6 @@
       "path": "app/services/pay.py",
       "accessCount": 2,
       "lastAccessed": 1783492212713,
-      "type": "file"
-    },
-    {
-      "path": "app/generators/x_text.py",
-      "accessCount": 2,
-      "lastAccessed": 1783585225629,
       "type": "file"
     },
     {

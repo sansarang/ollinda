@@ -32,7 +32,7 @@ class XPostGenerator(Generator):
             f"[가게] {tenant.name} ({prof.name}, {tenant.region})\n"
             f"[사업형태] {strat.label}\n[페르소나] {prof.persona}\n[입력 정보] {asset.note}\n"
             f"[CTA] {strat.cta}{buy_line}\n"
-            f"{seo.keywords_line(kws)}\n\n{seo.X_DIRECTIVES}\n{seo.FACTS_RULE}\n\n"
+            f"{seo.keywords_line(kws)}\n\n{seo.X_DIRECTIVES}\n{seo.HOOK_RULE}\n{seo.COPY_PSYCH}\n{seo.FACTS_RULE}\n\n"
             "X(트위터)용 단문을 한국어로 작성하라. 한 덩어리 텍스트로만 출력."
         )
         text = _call_llm(prompt, self.model, 400)[:280]
