@@ -182,6 +182,7 @@ class ShortVideoGenerator(Generator):
     def generate(self, tenant: Tenant, asset: Asset,
                  images: list[str] | None = None) -> ContentPiece:
         imgs = [p for p in (images or [asset.path]) if p and os.path.exists(p)][:8]
+        vid_imgs = self._downscale_for_video(imgs)   # 대용량 원본(5712×4284) → zoompan 타임아웃 방지(백그라운드 스레드)
         prof = resolve_industry(tenant.industry)
         strat = resolve_strategy(tenant)
         kws = seo.target_keywords(prof.name, tenant.region, asset.note,
@@ -229,12 +230,12 @@ class ShortVideoGenerator(Generator):
             outro_cta = (f"📍 네이버 '{tenant.name}' 검색\n방문·예약 환영" if tenant.name else "방문·예약 환영")
 
         video_path, note, dur_sec, cover_path = self._build_scene_video(
-            imgs, hook, sent, kws, tenant, strat, title, outro_cta)
+            vid_imgs, hook, sent, kws, tenant, strat, title, outro_cta)
         _scene_note = note                                    # 씬 경로 결과/오류(진단용)
         # 폴백: 씬 파이프라인 실패 → 기존 슬라이드쇼 + 단일자막 + 오디오
         if not video_path:
-            per = _per_image(len(imgs))
-            video_path, note = self._assemble_legacy(imgs, hook, tenant.id, per)
+            per = _per_image(len(vid_imgs))
+            video_path, note = self._assemble_legacy(vid_imgs, hook, tenant.id, per)
             video_path, _t, _b, _ = self._add_audio(video_path, narration, tenant.id)
             dur_sec = round(max(len(imgs), 1) * per)
             cover_path = imgs[0] if imgs else asset.path
@@ -269,6 +270,27 @@ class ShortVideoGenerator(Generator):
                 "assemble_note": note, "_scene_note": _scene_note,
             },
             status=ContentStatus.DRAFT)
+
+    def _downscale_for_video(self, imgs):
+        """영상용 사진 다운스케일 — 대용량 원본(예: 5712×4284)은 zoompan/scale이 느려
+        백그라운드 스레드(CPU 적음)에서 ffmpeg 타임아웃 → 씬 실패 → 레거시(짧고 자막없음) 유발.
+        긴 변 1600px로 줄여 처리 속도↑ (원본은 payload/블로그용으로 그대로 유지)."""
+        from PIL import Image as _I
+        out = []
+        for p in imgs:
+            try:
+                im = _I.open(p)
+                if max(im.size) <= 1600:
+                    out.append(p)
+                    continue
+                im = im.convert("RGB")
+                im.thumbnail((1600, 1600))
+                dp = os.path.splitext(p)[0] + "_vid.jpg"
+                im.save(dp, "JPEG", quality=88)
+                out.append(dp if os.path.exists(dp) else p)
+            except Exception:
+                out.append(p)
+        return out or imgs
 
     # ───────────────────── 씬 기반 빌드 (핵심) ─────────────────────
     def _build_scene_video(self, imgs, hook, sentences, kws, tenant, strat, title, outro_cta):
