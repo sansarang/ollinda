@@ -96,8 +96,8 @@
   "hotPaths": [
     {
       "path": "app/main.py",
-      "accessCount": 382,
-      "lastAccessed": 1783557555648,
+      "accessCount": 395,
+      "lastAccessed": 1783563689397,
       "type": "file"
     },
     {
@@ -126,8 +126,8 @@
     },
     {
       "path": "app/generators/text_claude.py",
-      "accessCount": 11,
-      "lastAccessed": 1783475129170,
+      "accessCount": 14,
+      "lastAccessed": 1783563740693,
       "type": "file"
     },
     {

@@ -1454,8 +1454,15 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                         parts.append(f"<p style='margin:0 0 11px;line-height:1.75'>{esc(s)}</p>")
         return "".join(parts)
 
-    def _hd(label):
-        return f"<div class='text-xs font-bold text-slate-400 mb-2'>{label}</div>"
+    def _hd(label, pl=None):
+        badge = ""
+        au = (pl or {}).get("ranking_audit") or {}
+        sc = au.get("score")
+        if sc:
+            cls = ("bg-emerald-100 text-emerald-700" if sc >= 85 else
+                   "bg-amber-100 text-amber-700" if sc >= 70 else "bg-slate-100 text-slate-600")
+            badge = f"<span class='ml-2 text-[11px] font-bold px-2 py-0.5 rounded-full {cls}'>상위노출 {sc}점</span>"
+        return f"<div class='text-xs font-bold text-slate-400 mb-2 flex items-center flex-wrap'>{label}{badge}</div>"
     naver_btn = (f"<a href='/kit/{asset_id}/naver' target='_blank' class='block text-center py-3 rounded-xl text-white text-sm font-extrabold "
                  "shadow-md hover:brightness-110 active:scale-[.99] transition' style='background:#03c75a'>🟢 네이버 블로그에 올리기 →</a>")
     cards = ""
@@ -1468,7 +1475,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
             cap = pl.get("text", "")
             media = (f"<img src='{first_img}' class='w-full aspect-square object-cover'>" if first_img
                      else "<div class='w-full aspect-square bg-slate-100 flex items-center justify-center text-5xl text-slate-300'>📷</div>")
-            block = (_hd("📷 인스타그램") + f"<div class='{wrap} overflow-hidden'>"
+            block = (_hd("📷 인스타그램", pl) + f"<div class='{wrap} overflow-hidden'>"
                      "<div class='flex items-center gap-2 px-3.5 py-3'>" + _av()
                      + f"<div class='font-semibold text-sm'>{esc(sname)}</div><div class='ml-auto text-slate-400'>⋯</div></div>" + media
                      + "<div class='px-3.5 pt-3 flex items-center gap-4 text-2xl'><span>♡</span><span>💬</span><span>➤</span><span class='ml-auto'>🔖</span></div>"
@@ -1476,19 +1483,30 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                      + f"<div class='px-3.5 pb-3.5 flex gap-2'>{pack_btn(p.id, has_video)}{_cp('c_cap', cap, '캡션')}</div></div>")
         elif k == "blog":
             title = pl.get("title", "")
-            blog_copy = title + "\n\n" + _re.sub(r"\[사진(\d+)\]", r"⬇⬇ 여기에 사진\1 올리기 ⬇⬇", pl.get("body", "")).strip()
-            block = (_hd("📝 네이버 블로그") + f"<div class='{wrap} p-5'>"
-                     f"<div class='text-lg font-extrabold text-slate-900 leading-snug mb-2'>{esc(title)}</div>"
-                     "<div class='flex items-center gap-2 text-xs text-slate-400 border-b border-slate-100 pb-2 mb-3'>" + _av()
+            sid = p.id[:5]
+            body_part = _re.sub(r"\[사진(\d+)\]", r"⬇⬇ 여기에 사진\1 올리기 ⬇⬇", pl.get("body", "")).strip()
+            blog_copy = title + "\n\n" + body_part
+            topts = [t for t in (pl.get("title_options") or []) if t]
+            opts_html = ""
+            if len(topts) >= 2:
+                chips = "".join(f"<button type=button onclick=\"pickTitle('{sid}',this)\" data-t=\"{esc(t)}\" "
+                                "class='text-[11px] bg-slate-100 hover:bg-indigo-50 text-slate-600 px-2 py-1 rounded-lg mr-1 mb-1 text-left'>"
+                                f"{esc(t[:26])}</button>" for t in topts)
+                opts_html = (f"<div class='mb-2'><span class='text-[11px] text-slate-400'>제목 바꾸기 (검색 노출용 3안):</span>"
+                             f"<div class='mt-1 flex flex-wrap'>{chips}</div></div>")
+            block = (_hd("📝 네이버 블로그", pl) + f"<div class='{wrap} p-5'>"
+                     f"<div id='bt{sid}' class='text-lg font-extrabold text-slate-900 leading-snug mb-1.5'>{esc(title)}</div>"
+                     + opts_html
+                     + "<div class='flex items-center gap-2 text-xs text-slate-400 border-b border-slate-100 pb-2 mb-3'>" + _av()
                      + f"<span>{esc(sname)} 블로그 · 방금 전</span></div>"
                      + f"<div class='max-h-72 overflow-y-auto'>{_blog_body(pl.get('body',''))}</div>"
-                     + f"<textarea id='c_blog' class='hidden'>{esc(blog_copy)}</textarea>"
+                     + f"<textarea id='cb{sid}' data-body=\"{esc(body_part)}\" class='hidden'>{esc(blog_copy)}</textarea>"
                      + f"<div class='mt-4 space-y-2'>{naver_btn}"
-                     + f"<div class='flex gap-2'>{pack_btn(p.id, False)}{_cp('c_blogb', blog_copy, '글 복사')}</div></div></div>")
+                     + f"<div class='flex gap-2'>{pack_btn(p.id, False)}<button type=button onclick=\"cp('cb{sid}',this)\" class='px-3.5 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold rounded-xl transition'>📋 글 복사</button></div></div></div>")
         elif k == "x_post":
             xt = pl.get("text", "")
             xvid = (f"<video src='{vurl}' controls autoplay muted loop playsinline preload='metadata' poster='{first_img}' class='w-full rounded-xl mt-2 bg-black' style='max-height:360px'></video>" if vurl else "")
-            block = (_hd("𝕏 X") + f"<div class='{wrap} p-4'>"
+            block = (_hd("𝕏 X", pl) + f"<div class='{wrap} p-4'>"
                      "<div class='flex items-center gap-2 mb-2'>" + _av()
                      + f"<div><div class='font-bold text-sm leading-tight'>{esc(sname)}</div><div class='text-slate-400 text-xs'>@{handle} · now</div></div><div class='ml-auto text-lg font-bold'>𝕏</div></div>"
                      + f"<div class='text-sm whitespace-pre-wrap leading-relaxed text-slate-800'>{esc(xt)}</div>"
@@ -1514,7 +1532,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                           f"<span class='text-white text-xs mt-2'>영상은 ‘통째로 받기’에 포함</span></div>{durb}</div>")
             else:
                 player = "<div class='w-full aspect-video bg-black flex items-center justify-center text-white text-3xl'>▶️</div>"
-            block = (_hd(lab) + f"<div class='{wrap} overflow-hidden'>{player}"
+            block = (_hd(lab, pl) + f"<div class='{wrap} overflow-hidden'>{player}"
                      f"<div class='p-4'><div class='font-bold text-sm mb-1'>{esc(title)}</div>"
                      f"<div class='text-xs text-slate-500 whitespace-pre-wrap max-h-24 overflow-y-auto'>{esc(desc)}</div>"
                      f"<div class='mt-3 flex gap-2'>{pack_btn(p.id, has_video)}{_cp('c_v' + p.id[:5], title, '제목')}</div></div></div>")
@@ -1528,14 +1546,15 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                 f"<div class='flex-1 text-sm text-slate-800'>{esc(n)}</div>{_cp('c_mn' + str(i) + p.id[:4], n, '복사')}</div>"
                 for i, n in enumerate(names[:3]))
             tags_html = "".join(f"<span class='inline-block bg-slate-100 text-slate-600 text-xs px-2 py-1 rounded-full mr-1 mb-1'>{esc(tg)}</span>" for tg in tags)
-            block = (_hd(f"🛒 {esc(mk)} 판매 콘텐츠") + f"<div class='{wrap} p-4'>"
+            block = (_hd(f"🛒 {esc(mk)} 판매 콘텐츠", pl) + f"<div class='{wrap} p-4'>"
                      "<div class='text-xs font-bold text-slate-400 mb-1.5'>상품명 (검색 최적화 · 3안)</div>" + names_html
                      + "<div class='text-xs font-bold text-slate-400 mt-3 mb-1'>상세페이지</div>"
                      + f"<div class='text-xs text-slate-600 whitespace-pre-wrap max-h-40 overflow-y-auto border border-slate-100 rounded-lg p-2'>{esc(detail)}</div>"
                      + (f"<div class='text-xs font-bold text-slate-400 mt-3 mb-1'>검색 태그</div><div>{tags_html}</div>" if tags_html else "")
                      + f"<div class='mt-3 flex gap-2'>{_cp('c_md' + p.id[:5], detail, '상세 복사')}{pack_btn(p.id, False)}</div></div>")
         if block:
-            cards += "<div class='break-inside-avoid mb-6'>" + block + "</div>"
+            grp = ("video" if k == "short" else "sell" if k == "marketplace" else "text")
+            cards += f"<div class='break-inside-avoid mb-6 om-card' data-ch='{grp}'>" + block + "</div>"
     js = ("<script>"
           "function omCopy(text){if(navigator.clipboard&&navigator.clipboard.writeText){return navigator.clipboard.writeText(text);}"
           "return new Promise(function(res,rej){var ta=document.createElement('textarea');ta.value=text;ta.setAttribute('readonly','');ta.style.position='fixed';ta.style.top='0';ta.style.opacity='0';document.body.appendChild(ta);ta.focus();ta.select();ta.setSelectionRange(0,text.length);var ok=false;try{ok=document.execCommand('copy');}catch(e){}document.body.removeChild(ta);ok?res():rej();});}"
@@ -1544,7 +1563,13 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
           "async function copyRich(id,btn){var el=document.getElementById(id);var o=btn.textContent;"
           "try{await navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([el.innerHTML],{type:'text/html'}),'text/plain':new Blob([el.innerText],{type:'text/plain'})})]);btn.textContent='✅ 복사됨! 네이버 글쓰기에 붙여넣기';}"
           "catch(e){try{await omCopy(el.innerText);btn.textContent='✅ 글 복사됨(사진은 아래로 따로)';}catch(e2){btn.textContent='길게 눌러 복사';}}"
-          "setTimeout(function(){btn.textContent=o;},2600);}</script>")
+          "setTimeout(function(){btn.textContent=o;},2600);}"
+          "function omFilter(g,btn){document.querySelectorAll('.om-card').forEach(function(c){c.style.display=(g==='all'||c.getAttribute('data-ch')===g)?'':'none';});"
+          "document.querySelectorAll('#chFilter .om-fbtn').forEach(function(b){b.classList.remove('bg-indigo-600','text-white');b.classList.add('bg-slate-100','text-slate-600');});"
+          "btn.classList.remove('bg-slate-100','text-slate-600');btn.classList.add('bg-indigo-600','text-white');}"
+          "(function(){var vs=document.querySelectorAll('video[autoplay]');vs.forEach(function(v,i){if(i>0){v.autoplay=false;try{v.pause();}catch(e){}}});})();"
+          "function pickTitle(sid,btn){var t=btn.getAttribute('data-t');var el=document.getElementById('bt'+sid);if(el)el.textContent=t;var ta=document.getElementById('cb'+sid);if(ta)ta.value=t+'\\n\\n'+(ta.getAttribute('data-body')||'');}"
+          "</script>")
     brief = next((p.payload.get("brief") for p in pieces if p.payload.get("brief")), None)
     pipeline = ("<div class='bg-indigo-50 border border-indigo-100 rounded-2xl p-4 mb-4'>"
                 "<div class='text-sm font-bold text-indigo-700 mb-1'>🤖 AI 전문가 팀이 제작했어요</div>"
@@ -1583,11 +1608,39 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                      "var iv=setInterval(async function(){n++;if(n>50){clearInterval(iv);return;}"
                      "try{var d=await (await fetch('/me/asset/'+aid+'/pieces')).json();if(d.n>base){clearInterval(iv);location.reload();}}catch(_){}"
                      "},3000);})();</script>")
+    # 🎯 성과 추적 링크/QR — 콘텐츠에 넣으면 유입 집계(리포트와 연결)
+    track_box = ""
+    try:
+        _tl = _ensure_track_link(tenant) if tenant else None
+        if _tl:
+            _base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
+            _short = f"{_base}/r/{_tl['code']}"
+            track_box = (
+                "<div class='bg-white rounded-2xl border border-slate-100 p-4 mb-4 flex items-center gap-3'>"
+                f"<img src='/me/qr/{_tl['code']}.png' class='w-16 h-16 rounded-lg border border-slate-100 flex-shrink-0 bg-white' alt='추적 QR'>"
+                "<div class='flex-1 min-w-0'><div class='text-xs font-bold text-slate-700'>🎯 성과 추적 링크·QR</div>"
+                "<div class='text-[11px] text-slate-400 mb-1'>콘텐츠·프로필에 넣으면 여기로 온 손님이 리포트에 집계돼요</div>"
+                f"<input readonly value='{_short}' id='rtrk' class='w-full text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 text-slate-600'></div>"
+                "<button type=button onclick=\"omCopy(document.getElementById('rtrk').value);this.textContent='✅'\" class='flex-shrink-0 bg-indigo-600 text-white text-xs font-bold px-3 py-2 rounded-lg'>복사</button></div>")
+    except Exception:
+        track_box = ""
+    # 채널 필터(탭) — 카드가 많을 때 글/영상/판매로 걸러보기
+    _fbtns = [("all", "전체"), ("text", "📝 글")]
+    if any(p.kind.value == "short" for p in pieces):
+        _fbtns.append(("video", "🎬 영상"))
+    if any(p.kind.value == "marketplace" for p in pieces):
+        _fbtns.append(("sell", "🛒 판매"))
+    filter_bar = (("<div class='flex gap-2 mb-4 overflow-x-auto' id='chFilter'>"
+                   + "".join("<button type=button onclick=\"omFilter('" + v + "',this)\" "
+                             "class='om-fbtn flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap "
+                             + ("bg-indigo-600 text-white" if v == "all" else "bg-slate-100 text-slate-600") + "'>" + lab + "</button>"
+                             for v, lab in _fbtns)
+                   + "</div>") if len(pieces) >= 3 else "")
     body = (f"<a href='{back_href}' class='inline-block text-sm text-slate-500 font-bold mb-2'>{back_label}</a>"
             + store_hd
             + "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>발행 소재</h2>"
             "<p class='text-slate-400 text-sm mb-5'>각 앱에 올리면 <b class='text-slate-600'>이렇게</b> 보여요. 글은 복사, 사진·영상은 다운로드하세요.</p>"
-            + _vid_poll + pipeline + all_btn
+            + _vid_poll + pipeline + all_btn + track_box + filter_bar
             + "<div class='sm:columns-2 gap-6'>" + cards + "</div>" + js)
     return body
 
