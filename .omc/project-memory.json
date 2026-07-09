@@ -107,6 +107,12 @@
       "type": "file"
     },
     {
+      "path": "app/seo.py",
+      "accessCount": 29,
+      "lastAccessed": 1783587868630,
+      "type": "file"
+    },
+    {
       "path": "app/db.py",
       "accessCount": 27,
       "lastAccessed": 1783491785766,
@@ -128,12 +134,6 @@
       "path": "app/services/ingest.py",
       "accessCount": 19,
       "lastAccessed": 1783551212496,
-      "type": "file"
-    },
-    {
-      "path": "app/seo.py",
-      "accessCount": 19,
-      "lastAccessed": 1783587047583,
       "type": "file"
     },
     {
@@ -173,6 +173,12 @@
       "type": "file"
     },
     {
+      "path": "deploy.sh",
+      "accessCount": 4,
+      "lastAccessed": 1783587672058,
+      "type": "file"
+    },
+    {
       "path": "app/generators/editor.py",
       "accessCount": 3,
       "lastAccessed": 1783474184053,
@@ -200,12 +206,6 @@
       "path": "app/storage.py",
       "accessCount": 2,
       "lastAccessed": 1783465463735,
-      "type": "file"
-    },
-    {
-      "path": "deploy.sh",
-      "accessCount": 2,
-      "lastAccessed": 1783467997514,
       "type": "file"
     },
     {
@@ -266,6 +266,12 @@
       "path": "app/services/pay_paddle.py",
       "accessCount": 1,
       "lastAccessed": 1783491751922,
+      "type": "file"
+    },
+    {
+      "path": "app/services/searchad.py",
+      "accessCount": 1,
+      "lastAccessed": 1783587611175,
       "type": "file"
     }
   ],
