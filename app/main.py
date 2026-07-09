@@ -610,10 +610,21 @@ def signup_post(request: Request, email: str = Form(""), pw: str = Form("")):
 
 @app.get("/login")
 def login_get(request: Request):
-    # 별도 로그인 페이지 없앰 — 로그인돼 있으면 작업실, 아니면 랜딩('시작하기' 버튼)로 통일
+    # 로그인돼 있으면 작업실, 아니면 로그인 화면(카카오/구글)
     if auth.current_user(request):
         return RedirectResponse("/me", status_code=303)
-    return RedirectResponse("/", status_code=303)
+    from app import landing
+    inner = (
+        "<div class='min-h-screen flex items-center justify-center bg-slate-50 px-5'>"
+        "<div class='bg-white rounded-3xl shadow-xl border border-slate-100 p-8 w-full max-w-sm text-center'>"
+        f"<a href='/' class='inline-flex items-center gap-2 font-extrabold text-2xl mb-2'>{landing.LOGO}<span>올린다</span></a>"
+        "<p class='text-slate-500 text-sm mb-6'>로그인하고 내 작업실로 이동하세요</p>"
+        "<a href='/login/kakao' class='block text-center py-3.5 rounded-xl font-extrabold mb-2.5' style='background:#FEE500;color:#191600'>💬 카카오로 시작하기</a>"
+        "<a href='/login/google' class='block text-center py-3.5 rounded-xl font-bold border border-slate-200 hover:bg-slate-50 transition'>구글로 시작하기</a>"
+        "<p class='text-xs text-slate-400 mt-5'>가입도 로그인도 클릭 한 번 · 비밀번호 없음</p>"
+        "<a href='/' class='inline-block text-xs text-slate-400 mt-3 hover:text-slate-600'>← 홈으로</a>"
+        "</div></div>")
+    return HTMLResponse(landing._HEAD + inner + landing._FOOT)
 
 
 @app.post("/login")

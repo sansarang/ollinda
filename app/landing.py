@@ -288,7 +288,7 @@ def _results() -> str:
           "<p class='text-slate-400 text-sm mt-3'>QR·링크로 <b class='text-white'>실제 유입이 숫자로</b> 잡혀요.</p></div>")
     c4 = ("<div class='reveal glass rounded-3xl p-6 flex flex-col'>"
           "<div class='text-xs font-bold text-emerald-300 mb-3'>사진 자동 보정 · 실제 전/후</div>"
-          "<div class='relative flex-1 rounded-2xl overflow-hidden select-none' style='aspect-ratio:1/1'>"
+          "<div class='relative rounded-2xl overflow-hidden select-none mx-auto w-full' style='aspect-ratio:16/10;max-height:230px'>"
           "<img src='/demo/food-after.jpg' class='absolute inset-0 w-full h-full object-cover' alt='보정 후'>"
           "<img src='/demo/food-before.jpg' class='baclip absolute inset-0 w-full h-full object-cover' alt='보정 전'>"
           "<div class='badiv absolute top-0 bottom-0 w-0.5 bg-white/90 shadow'></div>"
