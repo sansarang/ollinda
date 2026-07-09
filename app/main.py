@@ -2802,6 +2802,36 @@ def admin_testgen(biz: str = "local"):
         return {"err": repr(e), "tb": traceback.format_exc()[-1500:]}
 
 
+@app.get("/admin/geminicheck")
+def admin_geminicheck():
+    """진단 — 프로덕션 GEMINI_API_KEY로 텍스트·TTS·이미지 호출해 실제 작동 확인."""
+    import os
+    import requests
+    key = os.environ.get("GEMINI_API_KEY", "")
+    if not key:
+        return {"gemini": "no key on server"}
+    base = "https://generativelanguage.googleapis.com/v1beta/models/"
+    out = {"key_prefix": key[:9]}
+    try:
+        r = requests.post(base + "gemini-2.5-flash:generateContent", params={"key": key},
+                          json={"contents": [{"parts": [{"text": "ok"}]}]}, timeout=20)
+        out["text_ok"] = (r.status_code == 200)
+    except Exception as e:
+        out["text_err"] = str(e)[:80]
+    try:
+        r = requests.post(base + "gemini-2.5-flash-preview-tts:generateContent", params={"key": key},
+                          json={"contents": [{"parts": [{"text": "안녕하세요"}]}],
+                                "generationConfig": {"responseModalities": ["AUDIO"],
+                                    "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Kore"}}}}},
+                          timeout=45)
+        out["tts_voice_ok"] = (r.status_code == 200)
+        if r.status_code != 200:
+            out["tts_msg"] = (r.json().get("error", {}).get("message", "") or "")[:80]
+    except Exception as e:
+        out["tts_err"] = str(e)[:80]
+    return out
+
+
 @app.post("/admin/shops/{tid}/autonomy")
 def shop_autonomy(tid: str, level: int = Form(0)):
     db.set_autonomy(tid, level)
