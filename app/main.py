@@ -1523,8 +1523,9 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
             durb += ("<div class='absolute top-2 left-2 bg-black/70 text-white text-[11px] font-bold px-1.5 py-0.5 rounded'>"
                      + ("▶️ 쇼츠" if p.channel.value == "youtube" else "🎬 릴스") + "</div>")
             if vurl:
-                player = (f"<div class='relative'><video src='{vurl}' controls autoplay muted loop playsinline preload='metadata' poster='{first_img}' "
-                          f"class='w-full max-h-[520px] bg-black'></video>{durb}"
+                player = (f"<div class='relative mx-auto bg-black rounded-xl overflow-hidden' style='max-width:340px;aspect-ratio:9/16'>"
+                          f"<video src='{vurl}' controls autoplay muted loop playsinline preload='metadata' poster='{first_img}' "
+                          f"class='w-full h-full' style='object-fit:cover'></video>{durb}"
                           "<button type=button onclick='omUnmute(this)' class='om-unmute absolute bottom-3 left-3 z-10 bg-black/80 text-white text-xs font-extrabold px-3.5 py-2 rounded-full shadow-lg animate-pulse'>🔇 탭하여 소리 켜기</button></div>")
             elif first_img:
                 player = ("<div class='relative bg-black'>"

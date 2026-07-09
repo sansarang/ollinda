@@ -239,6 +239,15 @@ class ShortVideoGenerator(Generator):
             cover_path = imgs[0] if imgs else asset.path
         # 다중 화면비(1:1·4:5) 변형 자동 생성 (#1)
         out_dir = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), tenant.id)
+        # video_path 확정: 중간파일(video.mp4)/작업폴더 경로면 out_dir로 복사(재생 404 원천차단 — 모든 경로 공통)
+        if video_path and os.path.exists(video_path) and (
+                "scenes_" in video_path or os.path.basename(video_path) in ("video.mp4", "video_fx.mp4")):
+            _safe = os.path.join(out_dir, f"short_{uuid.uuid4().hex}.mp4")
+            try:
+                shutil.copy(video_path, _safe)
+                video_path = _safe
+            except Exception:
+                pass
         variants = self._aspect_variants(video_path, out_dir) if video_path else {}
 
         return ContentPiece(

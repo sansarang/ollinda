@@ -96,8 +96,8 @@
   "hotPaths": [
     {
       "path": "app/main.py",
-      "accessCount": 419,
-      "lastAccessed": 1783595453928,
+      "accessCount": 421,
+      "lastAccessed": 1783595774847,
       "type": "file"
     },
     {
@@ -107,15 +107,15 @@
       "type": "file"
     },
     {
-      "path": "app/seo.py",
-      "accessCount": 29,
-      "lastAccessed": 1783587868630,
+      "path": "app/generators/video.py",
+      "accessCount": 32,
+      "lastAccessed": 1783595810084,
       "type": "file"
     },
     {
-      "path": "app/generators/video.py",
+      "path": "app/seo.py",
       "accessCount": 29,
-      "lastAccessed": 1783595212315,
+      "lastAccessed": 1783587868630,
       "type": "file"
     },
     {
