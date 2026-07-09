@@ -2856,14 +2856,21 @@ def admin_scenegen():
     os.makedirs(d, exist_ok=True)
     img = os.path.join(d, "scenetest.jpg")
     Image.new("RGB", (1080, 1920), (70, 90, 120)).save(img)
+    from app.domain.models import AssetType
+    a = db.create_asset(t.id, AssetType.IMAGE, img,
+                        "오늘 흰색 포터2 냉동탑차 앞유리·측면 열차단 썬팅 시공. 여름 더위·눈부심 개선.")
+    import time as _t
+    t0 = _t.time()
     try:
-        vp, note, dur, cover = ShortVideoGenerator()._build_scene_video(
-            [img], "테스트 훅 문구", ["오늘 시공한 케이스를 보여드릴게요.", "열차단 필름으로 마감했습니다."],
-            ["썬팅", "열차단"], t, resolve_strategy(t), "제목", "방문하세요")
-        return {"scene_video_ok": bool(vp), "note": note, "dur": dur,
-                "fname": os.path.basename(vp) if vp else None}
+        piece = ShortVideoGenerator().generate(t, a, [img])
+        vp = piece.payload.get("video_path", "")
+        fname = os.path.basename(vp) if vp else ""
+        return {"full_generate_ok": bool(vp), "note": piece.payload.get("note", ""),
+                "dur_sec": piece.payload.get("duration_sec"), "fname": fname,
+                "is_scene_path": "ASS" in (piece.payload.get("note") or ""),
+                "elapsed_sec": round(_t.time() - t0)}
     except Exception as e:
-        return {"err": repr(e), "tb": traceback.format_exc()[-1200:]}
+        return {"err": repr(e), "tb": traceback.format_exc()[-1200:], "elapsed_sec": round(_t.time() - t0)}
 
 
 @app.get("/admin/ffmpegcheck")
