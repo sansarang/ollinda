@@ -37,9 +37,6 @@ body{font-family:'Pretendard','Apple SD Gothic Neo',system-ui,sans-serif;-webkit
 .card-hover{transition:transform .35s,box-shadow .35s}
 .card-hover:hover{transform:translateY(-8px);box-shadow:0 24px 50px -20px rgba(99,102,241,.45)}
 .glass{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);backdrop-filter:blur(12px)}
-.kakao-float{position:fixed;right:20px;bottom:20px;z-index:50;width:60px;height:60px;border-radius:9999px;
- background:#FEE500;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 30px -8px rgba(0,0,0,.4);font-weight:800;color:#191600;font-size:13px}
-@media(max-width:640px){.kakao-float{bottom:86px}}
 .rise{animation:rise 3s ease-in-out infinite}@keyframes rise{0%,100%{height:28%}50%{height:92%}}
 .rise2{animation:rise 3s ease-in-out .4s infinite}
 .rise3{animation:rise 3s ease-in-out .8s infinite}
@@ -483,11 +480,6 @@ def _footer() -> str:
     문의 {CONTACT_EMAIL} · <a href="/privacy" class="underline hover:text-slate-300">개인정보처리방침</a> · 🔒 SSL 보안 연결
   </div>
  </div></footer>"""
-
-
-def _kakao_float() -> str:
-    return ('<a href="https://pf.kakao.com/_EGrPX/chat" target="_blank" rel="noopener" '
-            'onclick="trackEv(\'kakao_channel\',{})" class="kakao-float" title="카카오톡 상담">TALK</a>')
 
 
 def _ga() -> str:
