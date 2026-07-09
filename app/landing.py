@@ -167,39 +167,21 @@ def _hero() -> str:
 
 
 def _video() -> str:
-    return """
+    return f"""
 <section id="video" class="bg-slate-950 pb-16">
  <div class="max-w-4xl mx-auto px-5">
   <div class="reveal text-center mb-5">
    <h2 class="text-2xl sm:text-3xl font-extrabold text-white">실제 결과물, 직접 보세요</h2>
-   <p class="text-slate-400 text-sm mt-1">사진만 올리면 채널별 콘텐츠가 자동으로. 장사 방식에 맞춰 다르게 나옵니다.</p></div>
-  <div class="flex justify-center gap-2 mb-5">
-   <button onclick="shopTab('local')" id="tab-local" class="px-5 py-2.5 rounded-full font-bold text-sm bg-emerald-500 text-white">🏪 소상공인 (매장 방문)</button>
-   <button onclick="shopTab('seller')" id="tab-seller" class="px-5 py-2.5 rounded-full font-bold text-sm bg-white/10 text-slate-300">📦 온라인 셀러 (구매 유도)</button></div>
-  <div id="pane-local" class="reveal">
-   <div class="max-w-sm mx-auto rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-black">
-    <video src="/demo/local_short.mp4" controls autoplay muted loop playsinline class="w-full"></video>
-    <div class="bg-slate-900 text-slate-300 text-sm px-5 py-3">초량 루마썬팅 — 사진 → AI가 자동 생성한 세로 숏폼 + <b class="text-emerald-300">방문·연락 유도</b>. 실제 결과물.</div></div>
-   <div class="max-w-3xl mx-auto mt-6 rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-black">
-    <video src="/demo/process.mp4" controls autoplay muted loop playsinline preload="auto" class="w-full"></video>
-    <div class="bg-slate-900 text-slate-300 text-sm px-5 py-3">＋ 전체 발행 과정 — 네이버 블로그·인스타·유튜브·X 한 번에 (지도·연락처 마무리)</div></div></div>
-  <div id="pane-seller" class="reveal hidden max-w-sm mx-auto rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-black">
-   <video src="/demo/seller_short.mp4" controls autoplay muted loop playsinline preload="auto" class="w-full"></video>
-   <div class="bg-slate-900 text-slate-300 text-sm px-5 py-3">셀프 썬팅 키트 셀러 — 사진 1장 → AI가 자동 생성한 세로 숏폼(릴스/쇼츠) + <b class="text-amber-300">쿠팡 구매 유도</b>. 실제 프로그램 결과물.</div></div>
+   <p class="text-slate-400 text-sm mt-1">사진 5장만 올리면 <b class="text-white">음성 영상</b>과 <b class="text-white">네이버 블로그 글</b>이 자동으로. 아래는 실제 생성 결과입니다.</p></div>
+  <div class="reveal max-w-sm mx-auto rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-black">
+   <video src="/demo/local_short.mp4" controls autoplay muted loop playsinline class="w-full"></video>
+   <div class="bg-slate-900 text-slate-300 text-sm px-5 py-3">부산 동구 카오디오 — 사진 5장 → AI 자동 생성 세로 영상 <b class="text-emerald-300">(음성 나레이션 + BGM)</b>.<br><span class="text-xs text-slate-400">🔊 탭하면 소리가 나와요</span></div></div>
+  {_naver_preview()}
  </div>
  <script>
- function shopTab(m){
-   document.getElementById('pane-local').classList.toggle('hidden', m!=='local');
-   document.getElementById('pane-seller').classList.toggle('hidden', m!=='seller');
-   document.getElementById('tab-local').className='px-5 py-2.5 rounded-full font-bold text-sm '+(m==='local'?'bg-emerald-500 text-white':'bg-white/10 text-slate-300');
-   document.getElementById('tab-seller').className='px-5 py-2.5 rounded-full font-bold text-sm '+(m==='seller'?'bg-amber-500 text-white':'bg-white/10 text-slate-300');
-   var pane=document.getElementById('pane-'+m);
-   if(pane)pane.querySelectorAll('video').forEach(function(v){v.muted=true;var p=v.play();if(p&&p.catch)p.catch(function(){});});
- }
- // 접속 시 보이는 영상 자동재생 보장(브라우저 muted 정책)
- window.addEventListener('load',function(){
-   document.querySelectorAll('#video video').forEach(function(v){v.muted=true;var p=v.play();if(p&&p.catch)p.catch(function(){});});
- });
+ window.addEventListener('load',function(){{
+   document.querySelectorAll('#video video').forEach(function(v){{v.muted=true;var p=v.play();if(p&&p.catch)p.catch(function(){{}});}});
+ }});
  </script></section>"""
 
 
@@ -506,6 +488,32 @@ def _sticky_cta() -> str:
             '<a href="/login/kakao" onclick="trackEv(\'sticky_cta\',{})" '
             'class="block text-center py-3.5 rounded-xl font-extrabold text-white" '
             'style="background:linear-gradient(120deg,#6366f1,#8b5cf6,#ec4899)">✨ 무료로 시작하기</a></div>')
+
+
+def _naver_preview() -> str:
+    """실제 생성된 네이버 블로그 글 미리보기(스크린 녹화 대신 진짜 새 카피를 보여줌 = 신뢰)."""
+    title = "부산 동구 카오디오, 포터2 내비·후방카메라 직접 시공기"
+    body = (
+        "부산 동구에서 ‘내비 하나 다는데 뭐가 그렇게 다른가’ 싶으셨죠? "
+        "<span class='text-emerald-600 text-xs'>(← 검색 유입 손님 공감 = 이탈 방지)</span><br>"
+        "화면 밝기·지도 반응·배선 마감까지 신경 안 쓰면 몇 달 뒤 후회하는 게 차량 전장 작업입니다. "
+        "그래서 오늘은 직접 시공한 <b>현대 포터2 냉동탑차</b> 케이스를 작업일지처럼 보여드릴게요.<br><br>"
+        "<b>■ 오늘 들어온 케이스 — 포터2 냉동탑차</b><br>"
+        "흰색 포터Ⅱ 냉동탑차 사장님이 ‘내비 화면이 흐려서 낮에 안 보인다, 후방도 불안하다’며 오셨어요. "
+        "영업용 트럭은 화면 시인성과 안전이 생명이죠. "
+        "<span class='text-emerald-600 text-xs'>(← 손님 스토리 + 과정 = 신뢰·체류)</span>")
+    tags = ["부산동구카오디오", "포터2내비게이션시공", "후방카메라설치", "냉동탑차내비"]
+    tag_html = "".join(f"<span class='inline-block bg-emerald-50 text-emerald-600 text-xs px-2 py-1 rounded-full mr-1 mb-1'>#{t}</span>" for t in tags)
+    return f"""
+  <div class="reveal max-w-2xl mx-auto mt-6 bg-white rounded-3xl overflow-hidden border border-white/10 shadow-2xl">
+   <div class="bg-[#03c75a] text-white text-sm font-bold px-5 py-2.5 flex items-center gap-2"><span class="bg-white text-[#03c75a] rounded px-1.5 text-xs font-extrabold">blog</span> 네이버 블로그 — AI가 쓴 실제 글 (사진 5장 기반)</div>
+   <div class="p-6 text-left">
+    <div class="text-lg font-extrabold text-slate-900 mb-2 leading-snug">{title}</div>
+    <div class="text-xs text-slate-400 border-b border-slate-100 pb-2 mb-3">루마카오디오 블로그 · 방금 전 · 조회 12</div>
+    <p class="text-sm text-slate-700 leading-relaxed">{body}</p>
+    <div class="mt-4">{tag_html}</div>
+    <div class="mt-3 text-xs text-slate-400">PAS 오프닝 · 손님 스토리 · 실검색량 키워드 · 정직(없는 가격·스펙 안 씀) 자동 적용</div>
+   </div></div>"""
 
 
 def _why_rank() -> str:
