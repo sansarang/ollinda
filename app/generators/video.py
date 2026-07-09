@@ -251,6 +251,12 @@ class ShortVideoGenerator(Generator):
             except Exception:
                 pass
         variants = self._aspect_variants(video_path, out_dir) if video_path else {}
+        for _vp in vid_imgs:                       # 영상용 다운스케일 임시파일 정리(디스크 누수 방지)
+            if _vp not in imgs and _vp.endswith("_vid.jpg") and os.path.exists(_vp):
+                try:
+                    os.remove(_vp)
+                except Exception:
+                    pass
 
         return ContentPiece(
             id=str(uuid.uuid4()), tenant_id=tenant.id, asset_id=asset.id,

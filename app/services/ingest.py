@@ -188,6 +188,9 @@ def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: di
     try:
         from app import storage as _st
         _st.mirror_to_r2(short.payload.get("video_path"))
+        _st.mirror_to_r2(short.payload.get("cover_path"))
+        for _v in (short.payload.get("video_variants") or {}).values():   # 정사각·4:5 변형도 R2로
+            _st.mirror_to_r2(_v)
         for cp in (caption.payload.get("carousel_paths") or []) if caption else []:
             _st.mirror_to_r2(cp)
         if _st.r2_configured():
@@ -195,6 +198,9 @@ def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: di
             for pc in db.get_set_pieces(asset.id):     # 사진은 save_upload가 이미 R2 미러함
                 paths.add(pc.payload.get("video_path"))
                 paths.add(pc.payload.get("image_path"))
+                paths.add(pc.payload.get("cover_path"))
+                for _v in (pc.payload.get("video_variants") or {}).values():   # 변형 mp4(디스크 누수 주범)
+                    paths.add(_v)
                 for ip in (pc.payload.get("image_paths") or []):
                     paths.add(ip)
                 for cp2 in (pc.payload.get("carousel_paths") or []):

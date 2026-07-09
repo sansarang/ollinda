@@ -96,8 +96,8 @@
   "hotPaths": [
     {
       "path": "app/main.py",
-      "accessCount": 433,
-      "lastAccessed": 1783599055054,
+      "accessCount": 434,
+      "lastAccessed": 1783600511247,
       "type": "file"
     },
     {
@@ -108,8 +108,8 @@
     },
     {
       "path": "app/generators/video.py",
-      "accessCount": 45,
-      "lastAccessed": 1783598584767,
+      "accessCount": 47,
+      "lastAccessed": 1783600589752,
       "type": "file"
     },
     {
@@ -125,15 +125,15 @@
       "type": "file"
     },
     {
-      "path": "app/generators/text_claude.py",
-      "accessCount": 23,
-      "lastAccessed": 1783586629586,
+      "path": "app/services/ingest.py",
+      "accessCount": 24,
+      "lastAccessed": 1783600556741,
       "type": "file"
     },
     {
-      "path": "app/services/ingest.py",
-      "accessCount": 22,
-      "lastAccessed": 1783598482666,
+      "path": "app/generators/text_claude.py",
+      "accessCount": 23,
+      "lastAccessed": 1783586629586,
       "type": "file"
     },
     {
