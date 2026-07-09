@@ -337,6 +337,14 @@ class ShortVideoGenerator(Generator):
             fx = self._post_overlay(video_only, ass, logo, total, strat.key)
             # 5) 영상+연속오디오 mux (+BGM) — 길이 동일 → 정확히 싱크
             final = self._mux(fx, full_wav, out_dir)
+            # 안전장치: 최종본이 작업폴더 안이면 out_dir로 복사(rmtree 삭제 방지 → 재생 404 원천 차단)
+            if final and (work in final):
+                safe = os.path.join(out_dir, f"short_{uuid.uuid4().hex}.mp4")
+                try:
+                    shutil.copy(final, safe)
+                    final = safe
+                except Exception:
+                    pass
             # 6) 커버(썸네일) = 훅 카드
             cover = os.path.join(out_dir, f"cover_{uuid.uuid4().hex}.png")
             try:
@@ -655,7 +663,14 @@ class ShortVideoGenerator(Generator):
             cmd = ["ffmpeg", "-y", "-i", video, "-i", full_wav, "-map", "0:v", "-map", "1:a",
                    "-c:v", "copy", "-c:a", "aac", "-ar", "44100", "-shortest", out]
         r = subprocess.run(cmd, capture_output=True, timeout=180)
-        return out if (r.returncode == 0 and os.path.exists(out)) else video
+        if r.returncode == 0 and os.path.exists(out):
+            return out
+        # mux 실패 → 무음이라도 out_dir에 확정 저장(작업폴더 경로 반환 금지: rmtree로 삭제돼 재생 404)
+        try:
+            shutil.copy(video, out)
+            return out
+        except Exception:
+            return video
 
     # ───────────────────── 레거시 폴백 ─────────────────────
     def _add_audio(self, video_path, narration, tenant_id):
