@@ -2838,6 +2838,40 @@ def admin_testgen(biz: str = "local", note: str = "", photos: list[UploadFile] =
     return {"ok": True, "started": True, "tenant": t.name, "biz": biz, "photos": len(files)}
 
 
+@app.get("/admin/videocheck")
+def admin_videocheck():
+    """진단 — 내 콘텐츠 영상 재생 체인(로컬/R2/URL/접근) 어디서 막히는지."""
+    import os
+    from app import storage as _st
+    out = {"r2_configured": _st.r2_configured(),
+           "R2_PUBLIC_URL_set": bool(os.environ.get("R2_PUBLIC_URL"))}
+    piece = None
+    for t in db.list_tenants():
+        for j in db.list_jobs(tenant_id=t.id, limit=40):
+            p = db.get_piece(j["id"])
+            if p and p.kind.value == "short" and p.payload.get("video_path"):
+                piece = p
+                break
+        if piece:
+            break
+    if not piece:
+        return {**out, "err": "no short piece with video_path"}
+    fname = os.path.basename(piece.payload["video_path"])
+    local = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), piece.tenant_id, fname)
+    out.update({"tenant": piece.tenant_id[:8], "fname": fname, "local_exists": os.path.exists(local)})
+    try:
+        r2url = _st.r2_media_url(piece.tenant_id, fname)
+        out["r2_url_built"] = bool(r2url)
+        if r2url:
+            import requests
+            r = requests.get(r2url, headers={"Range": "bytes=0-1024", "User-Agent": "Mozilla/5.0"}, timeout=15)
+            out["r2_fetch_status"] = r.status_code
+            out["serves_ok"] = r.status_code in (200, 206)
+    except Exception as e:
+        out["r2_err"] = repr(e)[:120]
+    return out
+
+
 @app.get("/admin/geminicheck")
 def admin_geminicheck():
     """진단 — 프로덕션 GEMINI_API_KEY로 텍스트·TTS·이미지 호출해 실제 작동 확인."""
