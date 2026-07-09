@@ -2938,7 +2938,10 @@ def admin_videocheck():
     piece = shorts[0]     # 가장 최신
     fname = os.path.basename(piece.payload["video_path"])
     local = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), piece.tenant_id, fname)
-    out.update({"tenant": piece.tenant_id[:8], "fname": fname, "local_exists": os.path.exists(local)})
+    out.update({"tenant": piece.tenant_id[:8], "fname": fname, "local_exists": os.path.exists(local),
+                "newest_dur": piece.payload.get("duration_sec"),
+                "newest_scene_note": (piece.payload.get("_scene_note") or "")[:160],
+                "newest_assemble_note": (piece.payload.get("assemble_note") or "")[:120]})
     try:
         r2url = _st.r2_media_url(piece.tenant_id, fname)
         out["r2_url_built"] = bool(r2url)

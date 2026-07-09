@@ -230,6 +230,7 @@ class ShortVideoGenerator(Generator):
 
         video_path, note, dur_sec, cover_path = self._build_scene_video(
             imgs, hook, sent, kws, tenant, strat, title, outro_cta)
+        _scene_note = note                                    # 씬 경로 결과/오류(진단용)
         # 폴백: 씬 파이프라인 실패 → 기존 슬라이드쇼 + 단일자막 + 오디오
         if not video_path:
             per = _per_image(len(imgs))
@@ -265,7 +266,7 @@ class ShortVideoGenerator(Generator):
                 "video_path": video_path, "image_path": imgs[0] if imgs else asset.path,
                 "image_paths": imgs, "duration_sec": dur_sec, "cover_path": cover_path,
                 "video_variants": variants,    # {square, feed45} 다중 화면비
-                "assemble_note": note,
+                "assemble_note": note, "_scene_note": _scene_note,
             },
             status=ContentStatus.DRAFT)
 
