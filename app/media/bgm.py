@@ -9,7 +9,9 @@ import glob
 import os
 import random
 
-BGM_DIR = os.environ.get("SHOPCAST_BGM_DIR", "assets/bgm")
+# 절대경로 — 프로덕션 cwd가 repo 루트가 아니어도 BGM을 찾도록(상대경로면 파일 못 찾아 무음 버그)
+_REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+BGM_DIR = os.environ.get("SHOPCAST_BGM_DIR") or os.path.join(_REPO, "assets", "bgm")
 
 
 def available() -> bool:
