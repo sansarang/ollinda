@@ -488,12 +488,22 @@ class ShortVideoGenerator(Generator):
         ft = _pil_font(48, "ExtraBold")
         d.text(((W - d.textlength(tag, font=ft)) / 2, H // 2 - 360), tag,
                font=ft, fill=(255, 224, 77))
-        fb = _pil_font(92, "ExtraBold")
-        lines = self._wrap_lines(d, big, fb, W - 160)[:4]
+        # 훅 문구 — 2줄 안에 들어가는 최대 폰트 자동 선택(단어 하나 고아로 떨어지는 것 방지)
+        big_lines, fb = None, _pil_font(92, "ExtraBold")
+        for fs in (92, 84, 76, 68, 60):
+            fb = _pil_font(fs, "ExtraBold")
+            ls = self._wrap_lines(d, big, fb, W - 160)
+            if len(ls) <= 2:
+                big_lines = ls
+                break
+        if big_lines is None:
+            fb = _pil_font(58, "ExtraBold")
+            big_lines = self._wrap_lines(d, big, fb, W - 160)[:3]
+        lh = int(getattr(fb, "size", 92) * 1.28)
         y = H // 2 - 180
-        for ln in lines:
+        for ln in big_lines:
             d.text(((W - d.textlength(ln, font=fb)) / 2, y), ln, font=fb, fill="white")
-            y += 120
+            y += lh
         if small:
             fs = _pil_font(50, "SemiBold")
             d.text(((W - d.textlength(small, font=fs)) / 2, y + 40), small,
