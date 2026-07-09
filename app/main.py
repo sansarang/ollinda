@@ -2766,8 +2766,8 @@ def admin_cleanup():
 
 
 @app.api_route("/admin/testgen", methods=["GET", "POST"])
-def admin_testgen(biz: str = "local"):
-    """진단/샘플 — ingest_upload 동기 실행. biz=seller면 셀러 샘플 가게를 사장님 계정에 연결해 생성."""
+def admin_testgen(biz: str = "local", photo: UploadFile = File(None)):
+    """진단/샘플 — ingest_upload 동기 실행. photo 업로드 시 실제 사진 사용. biz=seller면 셀러 샘플 가게를 사장님 계정에 연결."""
     import traceback
     import io
     from PIL import Image
@@ -2793,11 +2793,15 @@ def admin_testgen(biz: str = "local"):
         note = "[샘플] 오늘 직접 시공한 매장 후기 · 검은 SUV 열차단 썬팅"
     if not t:
         return {"err": "no tenant"}
-    b = io.BytesIO()
-    Image.new("RGB", (600, 400), (120, 140, 90)).save(b, "JPEG")
+    if photo is not None and getattr(photo, "filename", ""):     # 실제 사진 업로드
+        data, fname = photo.file.read(), photo.filename
+    else:
+        b = io.BytesIO()
+        Image.new("RGB", (600, 400), (120, 140, 90)).save(b, "JPEG")
+        data, fname = b.getvalue(), "test.jpg"
     try:
-        made = ingest_upload(t, [(b.getvalue(), "test.jpg")], note)
-        return {"ok": True, "made": len(made), "tenant": t.name, "biz": biz}
+        made = ingest_upload(t, [(data, fname)], note)
+        return {"ok": True, "made": len(made), "tenant": t.name, "biz": biz, "real_photo": bool(photo and photo.filename)}
     except Exception as e:
         return {"err": repr(e), "tb": traceback.format_exc()[-1500:]}
 
