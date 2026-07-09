@@ -119,15 +119,15 @@
       "type": "file"
     },
     {
-      "path": "app/generators/video.py",
-      "accessCount": 16,
-      "lastAccessed": 1783491248221,
+      "path": "app/generators/text_claude.py",
+      "accessCount": 19,
+      "lastAccessed": 1783585204641,
       "type": "file"
     },
     {
-      "path": "app/generators/text_claude.py",
-      "accessCount": 14,
-      "lastAccessed": 1783563740693,
+      "path": "app/generators/video.py",
+      "accessCount": 19,
+      "lastAccessed": 1783585236327,
       "type": "file"
     },
     {
@@ -144,8 +144,8 @@
     },
     {
       "path": "app/seo.py",
-      "accessCount": 5,
-      "lastAccessed": 1783475096208,
+      "accessCount": 7,
+      "lastAccessed": 1783585132340,
       "type": "file"
     },
     {
@@ -212,6 +212,12 @@
       "path": "app/services/pay.py",
       "accessCount": 2,
       "lastAccessed": 1783492212713,
+      "type": "file"
+    },
+    {
+      "path": "app/generators/x_text.py",
+      "accessCount": 2,
+      "lastAccessed": 1783585225629,
       "type": "file"
     },
     {
