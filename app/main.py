@@ -1573,12 +1573,14 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
           "document.querySelectorAll('#chFilter .om-fbtn').forEach(function(b){b.classList.remove('bg-indigo-600','text-white');b.classList.add('bg-slate-100','text-slate-600');});"
           "btn.classList.remove('bg-slate-100','text-slate-600');btn.classList.add('bg-indigo-600','text-white');}"
           "(function(){var vs=document.querySelectorAll('video[autoplay]');if(!vs.length)return;"
-          "vs.forEach(function(v){v.muted=true;});"                                        # 무음이어야 자동재생 허용
-          "function tryplay(v){if(window.omSound){v.muted=false;}var p=v.play();if(p&&p.catch)p.catch(function(){});}"
-          "tryplay(vs[0]);"                                                                # 첫 영상 즉시 재생(보기 누르면 바로)
+          "vs.forEach(function(v){v.muted=true;v.setAttribute('muted','');v.playsInline=true;});"       # 무음이어야 자동재생 허용
+          "function tryplay(v){if(window.omSound){v.muted=false;}try{v.load&&v.readyState<2&&v.load();}catch(e){}var p=v.play();if(p&&p.catch)p.catch(function(){});}"
+          "function arm(v){tryplay(v);['loadeddata','canplay','loadedmetadata'].forEach(function(ev){v.addEventListener(ev,function(){tryplay(v);});});}"
+          "arm(vs[0]);"                                                                    # 첫 영상 즉시+로드완료 시 재생(보기 누르면 바로)
           "if('IntersectionObserver' in window){var io=new IntersectionObserver(function(es){es.forEach(function(e){"
-          "if(e.isIntersecting){tryplay(e.target);}else{try{e.target.pause();}catch(_){}}});},{threshold:0.5});"
-          "vs.forEach(function(v){io.observe(v);});}else{vs.forEach(function(v){tryplay(v);});}})();"  # 화면에 보이는 영상 자동재생(릴스식)
+          "if(e.isIntersecting){tryplay(e.target);}else{try{e.target.pause();}catch(_){}}});},{threshold:0.35});"
+          "vs.forEach(function(v){io.observe(v);});}else{vs.forEach(arm);}"                # 화면에 보이는 영상 자동재생(릴스식)
+          "document.addEventListener('touchstart',function(){vs.forEach(function(v){if(!v.paused)return;});tryplay(vs[0]);},{once:true});})();"  # 모바일 첫 터치 시 재생 보증
           "function omUnmute(btn){window.omSound=true;var v=btn.parentElement.querySelector('video');if(v){v.muted=false;v.volume=1;var p=v.play();if(p&&p.catch)p.catch(function(){});}document.querySelectorAll('.om-unmute').forEach(function(b){b.style.display='none';});}"
           "function pickTitle(sid,btn){var t=btn.getAttribute('data-t');var el=document.getElementById('bt'+sid);if(el)el.textContent=t;var ta=document.getElementById('cb'+sid);if(ta)ta.value=t+'\\n\\n'+(ta.getAttribute('data-body')||'');}"
           "</script>")
@@ -2837,6 +2839,46 @@ def admin_testgen(biz: str = "local", note: str = "", photos: list[UploadFile] =
             traceback.print_exc()
     threading.Thread(target=_bg, daemon=True).start()
     return {"ok": True, "started": True, "tenant": t.name, "biz": biz, "photos": len(files)}
+
+
+@app.get("/admin/ffmpegcheck")
+def admin_ffmpegcheck():
+    """진단 — 프로덕션 ffmpeg가 ASS 자막(libass)을 실제로 렌더하는지."""
+    import subprocess
+    import os
+    import tempfile
+    out = {}
+    try:
+        v = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True, timeout=10).stdout
+        out["version"] = v.split("\n")[0][:60]
+        out["build_has_libass"] = "--enable-libass" in v
+    except Exception as e:
+        out["version_err"] = str(e)[:80]
+    try:
+        f = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True, timeout=10).stdout
+        out["subtitles_filter"] = (" subtitles " in f)
+    except Exception as e:
+        out["filters_err"] = str(e)[:80]
+    try:                                # 실제 자막 렌더 테스트
+        from app.generators import video as _v
+        d = tempfile.mkdtemp()
+        ass = os.path.join(d, "t.ass")
+        with open(ass, "w") as fp:
+            fp.write("[Script Info]\nScriptType: v4.00+\nPlayResX: 200\nPlayResY: 200\n\n"
+                     "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, Alignment\nStyle: D,Pretendard,40,2\n\n"
+                     "[Events]\nFormat: Layer, Start, End, Style, Text\n"
+                     "Dialogue: 0,0:00:00.00,0:00:02.00,D,자막테스트\n")
+        outv = os.path.join(d, "o.mp4")
+        cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=black:s=200x200:d=2",
+               "-vf", f"subtitles=filename='{ass}':fontsdir='{_v._FONT_DIR}'", "-t", "2", outv]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        out["subtitle_render_ok"] = (r.returncode == 0 and os.path.exists(outv) and os.path.getsize(outv) > 500)
+        if not out["subtitle_render_ok"]:
+            out["subtitle_stderr"] = r.stderr[-400:]
+        out["font_dir_exists"] = os.path.isdir(_v._FONT_DIR)
+    except Exception as e:
+        out["render_err"] = repr(e)[:150]
+    return out
 
 
 @app.get("/admin/videocheck")
