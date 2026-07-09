@@ -2845,17 +2845,18 @@ def admin_videocheck():
     from app import storage as _st
     out = {"r2_configured": _st.r2_configured(),
            "R2_PUBLIC_URL_set": bool(os.environ.get("R2_PUBLIC_URL"))}
-    piece = None
+    shorts = []
     for t in db.list_tenants():
-        for j in db.list_jobs(tenant_id=t.id, limit=40):
+        for j in db.list_jobs(tenant_id=t.id, limit=60):
             p = db.get_piece(j["id"])
             if p and p.kind.value == "short" and p.payload.get("video_path"):
-                piece = p
-                break
-        if piece:
-            break
-    if not piece:
+                shorts.append(p)
+    if not shorts:
         return {**out, "err": "no short piece with video_path"}
+    shorts.sort(key=lambda p: p.created_at or "", reverse=True)
+    out["total_shorts"] = len(shorts)
+    out["broken_video_mp4"] = sum(1 for p in shorts if os.path.basename(p.payload["video_path"]) == "video.mp4")
+    piece = shorts[0]     # 가장 최신
     fname = os.path.basename(piece.payload["video_path"])
     local = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), piece.tenant_id, fname)
     out.update({"tenant": piece.tenant_id[:8], "fname": fname, "local_exists": os.path.exists(local)})
