@@ -1505,7 +1505,8 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                      + f"<div class='flex gap-2'>{pack_btn(p.id, False)}<button type=button onclick=\"cp('cb{sid}',this)\" class='px-3.5 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold rounded-xl transition'>📋 글 복사</button></div></div></div>")
         elif k == "x_post":
             xt = pl.get("text", "")
-            xvid = (f"<video src='{vurl}' controls autoplay muted loop playsinline preload='metadata' poster='{first_img}' class='w-full rounded-xl mt-2 bg-black' style='max-height:360px'></video>" if vurl else "")
+            xvid = (f"<div class='relative mt-2'><video src='{vurl}' controls autoplay muted loop playsinline preload='metadata' poster='{first_img}' class='w-full rounded-xl bg-black' style='max-height:360px'></video>"
+                    "<button type=button onclick='omUnmute(this)' class='om-unmute absolute bottom-3 left-3 z-10 bg-black/80 text-white text-xs font-extrabold px-3.5 py-2 rounded-full shadow-lg animate-pulse'>🔇 탭하여 소리 켜기</button></div>" if vurl else "")
             block = (_hd("𝕏 X", pl) + f"<div class='{wrap} p-4'>"
                      "<div class='flex items-center gap-2 mb-2'>" + _av()
                      + f"<div><div class='font-bold text-sm leading-tight'>{esc(sname)}</div><div class='text-slate-400 text-xs'>@{handle} · now</div></div><div class='ml-auto text-lg font-bold'>𝕏</div></div>"
@@ -1523,7 +1524,8 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                      + ("▶️ 쇼츠" if p.channel.value == "youtube" else "🎬 릴스") + "</div>")
             if vurl:
                 player = (f"<div class='relative'><video src='{vurl}' controls autoplay muted loop playsinline preload='metadata' poster='{first_img}' "
-                          f"class='w-full max-h-[520px] bg-black'></video>{durb}</div>")
+                          f"class='w-full max-h-[520px] bg-black'></video>{durb}"
+                          "<button type=button onclick='omUnmute(this)' class='om-unmute absolute bottom-3 left-3 z-10 bg-black/80 text-white text-xs font-extrabold px-3.5 py-2 rounded-full shadow-lg animate-pulse'>🔇 탭하여 소리 켜기</button></div>")
             elif first_img:
                 player = ("<div class='relative bg-black'>"
                           f"<img src='{first_img}' class='w-full max-h-[440px] object-cover opacity-85'>"
@@ -1569,11 +1571,12 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
           "btn.classList.remove('bg-slate-100','text-slate-600');btn.classList.add('bg-indigo-600','text-white');}"
           "(function(){var vs=document.querySelectorAll('video[autoplay]');if(!vs.length)return;"
           "vs.forEach(function(v){v.muted=true;});"                                        # 무음이어야 자동재생 허용
-          "function tryplay(v){var p=v.play();if(p&&p.catch)p.catch(function(){});}"
+          "function tryplay(v){if(window.omSound){v.muted=false;}var p=v.play();if(p&&p.catch)p.catch(function(){});}"
           "tryplay(vs[0]);"                                                                # 첫 영상 즉시 재생(보기 누르면 바로)
           "if('IntersectionObserver' in window){var io=new IntersectionObserver(function(es){es.forEach(function(e){"
           "if(e.isIntersecting){tryplay(e.target);}else{try{e.target.pause();}catch(_){}}});},{threshold:0.5});"
           "vs.forEach(function(v){io.observe(v);});}else{vs.forEach(function(v){tryplay(v);});}})();"  # 화면에 보이는 영상 자동재생(릴스식)
+          "function omUnmute(btn){window.omSound=true;var v=btn.parentElement.querySelector('video');if(v){v.muted=false;v.volume=1;var p=v.play();if(p&&p.catch)p.catch(function(){});}document.querySelectorAll('.om-unmute').forEach(function(b){b.style.display='none';});}"
           "function pickTitle(sid,btn){var t=btn.getAttribute('data-t');var el=document.getElementById('bt'+sid);if(el)el.textContent=t;var ta=document.getElementById('cb'+sid);if(ta)ta.value=t+'\\n\\n'+(ta.getAttribute('data-body')||'');}"
           "</script>")
     brief = next((p.payload.get("brief") for p in pieces if p.payload.get("brief")), None)
