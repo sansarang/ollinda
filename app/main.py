@@ -2928,13 +2928,16 @@ def admin_videocheck():
     for t in db.list_tenants():
         for j in db.list_jobs(tenant_id=t.id, limit=60):
             p = db.get_piece(j["id"])
-            if p and p.kind.value == "short" and p.payload.get("video_path"):
+            if p and p.kind.value == "short" and p.channel.value == "youtube" and p.payload.get("video_path"):
                 shorts.append(p)
     if not shorts:
-        return {**out, "err": "no short piece with video_path"}
-    shorts.sort(key=lambda p: p.created_at or "", reverse=True)
-    out["total_shorts"] = len(shorts)
-    out["broken_video_mp4"] = sum(1 for p in shorts if os.path.basename(p.payload["video_path"]) == "video.mp4")
+        return {**out, "err": "no youtube short with video_path"}
+    shorts.sort(key=lambda p: str(p.created_at or ""), reverse=True)
+    out["total_youtube_shorts"] = len(shorts)
+    out["recent"] = [{"dur": p.payload.get("duration_sec"),
+                      "scene_note": (p.payload.get("_scene_note") or "(비어있음)")[:150],
+                      "fname": os.path.basename(p.payload["video_path"])[:24]}
+                     for p in shorts[:5]]
     piece = shorts[0]     # 가장 최신
     fname = os.path.basename(piece.payload["video_path"])
     local = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), piece.tenant_id, fname)
