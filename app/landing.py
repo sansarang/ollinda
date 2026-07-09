@@ -518,7 +518,7 @@ def _sticky_cta() -> str:
 def render() -> str:
     return (_HEAD + _ga() + _seo_jsonld() + _nav() + _hero() + _video() + _demo_widget() + _stats() + _problem()
             + _results() + _modes() + _features() + _pricing() + _faq() + _contact() + _cta() + _footer()
-            + _kakao_float() + _sticky_cta() + _FOOT)
+            + _sticky_cta() + _FOOT)
 
 
 def privacy() -> str:
