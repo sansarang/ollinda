@@ -2777,8 +2777,8 @@ def admin_cleanup():
 
 
 @app.api_route("/admin/testgen", methods=["GET", "POST"])
-def admin_testgen(biz: str = "local", photo: UploadFile = File(None)):
-    """진단/샘플 — ingest_upload 동기 실행. photo 업로드 시 실제 사진 사용. biz=seller면 셀러 샘플 가게를 사장님 계정에 연결."""
+def admin_testgen(biz: str = "local", note: str = "", photos: list[UploadFile] = File(None)):
+    """진단/샘플 — ingest_upload 동기 실행. photos 여러 장 업로드 지원. note로 메모 지정. biz=seller면 셀러 샘플 가게를 사장님 계정에 연결."""
     import traceback
     import io
     from PIL import Image
@@ -2786,9 +2786,9 @@ def admin_testgen(biz: str = "local", photo: UploadFile = File(None)):
     if biz == "seller":
         t = next((x for x in db.list_tenants() if x.name == "올린다 셀러샘플"), None)
         if not t:
-            t = db.create_tenant("올린다 셀러샘플", "블루투스 이어폰", "", "seller")
+            t = db.create_tenant("올린다 셀러샘플", "차량용 전자기기", "", "seller")
         db.update_tenant_classification(t.id, "seller", "coupang",
-                                        "https://smartstore.naver.com/sample", "블루투스 이어폰", "라익미")
+                                        "https://smartstore.naver.com/sample", "차량용 후방카메라 내비게이션", "올린다")
         try:  # 사장님 계정에 연결 → 내 콘텐츠에서 가게 전환해 확인 가능
             ph = ",".join("?" * len(OWNER_EMAILS))
             with db._conn() as c:
@@ -2796,23 +2796,25 @@ def admin_testgen(biz: str = "local", photo: UploadFile = File(None)):
                     db.link_store(r["id"], t.id)
         except Exception:
             pass
-        note = "무선 블루투스 이어폰 노이즈캔슬링 · 초경량 · IPX7 방수 · 저지연 게이밍 · 화이트"
+        note = note or "차량용 후방카메라·내비게이션 세트. 부산 동구 매장 설치 화면. 3D 내비, 후방 가이드라인"
     else:
         t = next((x for x in db.list_tenants()
                   if (x.industry or "").strip() and not getattr(x, "is_demo", 0)
                   and (x.biz_type or "local") != "seller"), None)
-        note = "[샘플] 오늘 직접 시공한 매장 후기 · 검은 SUV 열차단 썬팅"
+        note = note or "[샘플] 부산 동구 매장에서 직접 설치한 차량 내비게이션·후방카메라 화면"
     if not t:
         return {"err": "no tenant"}
-    if photo is not None and getattr(photo, "filename", ""):     # 실제 사진 업로드
-        data, fname = photo.file.read(), photo.filename
-    else:
+    files = []
+    for ph_f in (photos or []):
+        if ph_f is not None and getattr(ph_f, "filename", ""):
+            files.append((ph_f.file.read(), ph_f.filename))
+    if not files:                                                # 사진 없으면 더미 1장
         b = io.BytesIO()
         Image.new("RGB", (600, 400), (120, 140, 90)).save(b, "JPEG")
-        data, fname = b.getvalue(), "test.jpg"
+        files = [(b.getvalue(), "test.jpg")]
     try:
-        made = ingest_upload(t, [(data, fname)], note)
-        return {"ok": True, "made": len(made), "tenant": t.name, "biz": biz, "real_photo": bool(photo and photo.filename)}
+        made = ingest_upload(t, files, note)
+        return {"ok": True, "made": len(made), "tenant": t.name, "biz": biz, "photos": len(files)}
     except Exception as e:
         return {"err": repr(e), "tb": traceback.format_exc()[-1500:]}
 

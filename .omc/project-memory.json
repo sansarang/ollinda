@@ -114,8 +114,8 @@
     },
     {
       "path": "app/generators/text_claude.py",
-      "accessCount": 22,
-      "lastAccessed": 1783585661103,
+      "accessCount": 23,
+      "lastAccessed": 1783586629586,
       "type": "file"
     },
     {
@@ -131,6 +131,12 @@
       "type": "file"
     },
     {
+      "path": "app/seo.py",
+      "accessCount": 17,
+      "lastAccessed": 1783586622631,
+      "type": "file"
+    },
+    {
       "path": "app/services/teaser.py",
       "accessCount": 8,
       "lastAccessed": 1783477160244,
@@ -143,12 +149,6 @@
       "type": "file"
     },
     {
-      "path": "app/seo.py",
-      "accessCount": 8,
-      "lastAccessed": 1783585632742,
-      "type": "file"
-    },
-    {
       "path": "app/google_auth.py",
       "accessCount": 5,
       "lastAccessed": 1783483854718,
@@ -158,6 +158,12 @@
       "path": "app/domain/models.py",
       "accessCount": 5,
       "lastAccessed": 1783551110752,
+      "type": "file"
+    },
+    {
+      "path": "app/generators/x_text.py",
+      "accessCount": 5,
+      "lastAccessed": 1783586644087,
       "type": "file"
     },
     {
@@ -176,12 +182,6 @@
       "path": "app/registry.py",
       "accessCount": 3,
       "lastAccessed": 1783551188781,
-      "type": "file"
-    },
-    {
-      "path": "app/generators/x_text.py",
-      "accessCount": 3,
-      "lastAccessed": 1783585674199,
       "type": "file"
     },
     {

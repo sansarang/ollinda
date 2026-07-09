@@ -27,7 +27,10 @@ class XPostGenerator(Generator):
         kws = seo.target_keywords(prof.name, tenant.region, asset.note,
                                   axis=strat.keyword_axis, brand=tenant.brand_name)
         buy = buy_block(tenant)
-        buy_line = f"\n[구매 안내] {buy}" if buy else ""
+        # X는 외부 링크가 도달 50~90% 깎음(2026) → URL 제거하고 '검색/프로필' 유도만
+        import re as _re
+        buy_nolink = _re.sub(r"https?://\S+", "", buy or "").strip()
+        buy_line = f"\n[구매 안내(링크 절대 넣지 말고 검색·프로필로 유도)] {buy_nolink}" if buy_nolink else ""
         prompt = (
             f"[가게] {tenant.name} ({prof.name}, {tenant.region})\n"
             f"[사업형태] {strat.label}\n[페르소나] {prof.persona}\n[입력 정보] {asset.note}\n"
