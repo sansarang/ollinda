@@ -574,7 +574,7 @@ def _honesty() -> str:
 <section class="bg-slate-50 py-20">
  <div class="max-w-4xl mx-auto px-5 text-center">
   <h2 class="reveal text-3xl sm:text-4xl font-extrabold mb-3">없는 건 <span class="grad-text">지어내지 않습니다</span></h2>
-  <p class="reveal text-slate-500 mb-12 max-w-xl mx-auto">허위 콘텐츠는 안 만드느니만 못합니다. 손님을 속이면 신뢰를 잃으니까요. <b class="text-slate-700">올린다는 사진과 사장님이 준 정보로만</b> 정직하게 씁니다.</p>
+  <p class="reveal text-slate-500 mb-12 max-w-xl mx-auto">허위 콘텐츠는 차라리 안 만드는 게 낫습니다. 손님을 속이면 신뢰를 잃으니까요. <b class="text-slate-700">올린다는 사진과 사장님이 준 정보로만</b> 정직하게 씁니다.</p>
   <div class="grid grid-cols-2 sm:grid-cols-4 gap-6">{cells}</div>
  </div></section>"""
 
