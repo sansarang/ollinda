@@ -22,7 +22,7 @@ from app.domain.models import (Asset, Channel, ContentKind, ContentPiece,
                                ContentStatus, Tenant)
 from app.generators.base import Generator
 from app.generators.text_claude import MODEL, _call_llm, _parse_sections
-from app.industries import resolve_industry
+from app.industries import resolve_industry, industry_brief
 from app.strategies import resolve_strategy, buy_block
 from app.formats import pick_format, format_directive
 from app.media import bgm as bgm_lib
@@ -194,7 +194,7 @@ class ShortVideoGenerator(Generator):
         prompt = (
             f"[가게] {tenant.name} ({prof.name}, {tenant.region})\n"
             f"[사업형태] {strat.label} — {strat.goal}\n"
-            f"[페르소나] {prof.persona}\n[입력 정보] {asset.note}\n[사진 {len(imgs)}장]\n"
+            f"[페르소나] {prof.persona}\n{industry_brief(prof)}[입력 정보] {asset.note}\n[사진 {len(imgs)}장]\n"
             f"[CTA] {strat.cta}\n{cta_hint}\n"
             f"{seo.speaker_frame(strat.key)}\n"
             f"{format_directive(fmt)}\n"

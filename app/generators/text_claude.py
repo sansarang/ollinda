@@ -9,7 +9,7 @@ import uuid
 
 from app.domain.models import Asset, Channel, ContentKind, ContentPiece, ContentStatus, Tenant
 from app.generators.base import Generator
-from app.industries import resolve_industry
+from app.industries import resolve_industry, industry_brief
 from app.strategies import resolve_strategy, buy_block
 from app import seo
 
@@ -71,6 +71,7 @@ class CaptionGenerator(Generator):
             f"[가게] {tenant.name} (업종: {prof.name}, 지역: {tenant.region})\n"
             f"[사업형태] {strat.label} — {strat.goal}\n"
             f"[페르소나] {prof.persona}\n[업종 톤] {prof.tone}\n"
+            f"{industry_brief(prof)}"
             f"[입력 정보] {asset.note}{carousel}\n[CTA] {strat.cta}{buy_line}\n"
             f"{seo.speaker_frame(strat.key)}\n"
             f"[기본 해시태그] {seeds}{cautions}\n"
@@ -129,6 +130,7 @@ class BlogDraftGenerator(Generator):
             f"[가게] {tenant.name} (업종: {prof.name}, 지역: {tenant.region})\n"
             f"[사업형태] {strat.label} — {strat.goal}\n"
             f"[페르소나] {prof.persona}\n[업종 톤] {prof.tone}\n"
+            f"{industry_brief(prof)}"
             f"[입력 정보(실제 사진 분석 포함)] {asset.note}\n[사진 {len(imgs)}장]\n"
             f"{seo.speaker_frame(strat.key)}\n"
             f"{seo.keywords_line(kws)}\n{closing}\n\n"

@@ -8,7 +8,7 @@ import uuid
 from app.domain.models import Asset, Channel, ContentKind, ContentPiece, ContentStatus, Tenant
 from app.generators.base import Generator
 from app.generators.text_claude import MODEL, _call_llm
-from app.industries import resolve_industry
+from app.industries import resolve_industry, industry_brief
 from app.strategies import resolve_strategy, buy_block
 from app import seo
 
@@ -33,7 +33,7 @@ class XPostGenerator(Generator):
         buy_line = f"\n[구매 안내(링크 절대 넣지 말고 검색·프로필로 유도)] {buy_nolink}" if buy_nolink else ""
         prompt = (
             f"[가게] {tenant.name} ({prof.name}, {tenant.region})\n"
-            f"[사업형태] {strat.label}\n[페르소나] {prof.persona}\n[입력 정보] {asset.note}\n"
+            f"[사업형태] {strat.label}\n[페르소나] {prof.persona}\n{industry_brief(prof)}[입력 정보] {asset.note}\n"
             f"[CTA] {strat.cta}{buy_line}\n"
             f"{seo.keywords_line(kws)}\n\n{seo.X_DIRECTIVES}\n{seo.HOOK_RULE}\n{seo.COPY_PSYCH}\n{seo.FACTS_RULE}\n\n"
             "X(트위터)용 단문을 한국어로 작성하라. 한 덩어리 텍스트로만 출력."
