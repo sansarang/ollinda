@@ -2854,21 +2854,23 @@ def admin_scenegen():
         return {"err": "no tenant"}
     d = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), t.id)
     os.makedirs(d, exist_ok=True)
-    img = os.path.join(d, "scenetest.jpg")
-    Image.new("RGB", (1080, 1920), (70, 90, 120)).save(img)
-    from app.domain.models import AssetType
-    a = db.create_asset(t.id, AssetType.IMAGE, img,
-                        "오늘 흰색 포터2 냉동탑차 앞유리·측면 열차단 썬팅 시공. 여름 더위·눈부심 개선.")
+    # 실제와 동일: 큰 사진(5712×4284) 3장 + 6문장으로 씬 경로 직접 테스트
+    imgs = []
+    for i in range(3):
+        p = os.path.join(d, f"big{i}.jpg")
+        Image.new("RGB", (5712, 4284), (70 + i * 25, 90, 120)).save(p, quality=90)
+        imgs.append(p)
+    from app.strategies import resolve_strategy as _rs
+    sents = ["오늘 흰색 포터2 냉동탑차 열차단 썬팅 시공합니다.", "여름 앞유리 햇빛에 눈부심이 심했다고 하셨어요.",
+             "먼저 유리를 깨끗이 닦고 필름을 재단했습니다.", "기포 없이 밀어내며 가장자리까지 잡았어요.",
+             "시공 후 눈부심이 확 줄고 시원해졌습니다.", "부산 초량에서 썬팅 고민되면 방문하세요."]
     import time as _t
     t0 = _t.time()
     try:
-        piece = ShortVideoGenerator().generate(t, a, [img])
-        vp = piece.payload.get("video_path", "")
-        fname = os.path.basename(vp) if vp else ""
-        return {"full_generate_ok": bool(vp), "note": piece.payload.get("note", ""),
-                "dur_sec": piece.payload.get("duration_sec"), "fname": fname,
-                "is_scene_path": "ASS" in (piece.payload.get("note") or ""),
-                "elapsed_sec": round(_t.time() - t0)}
+        vp, note, dur, cover = ShortVideoGenerator()._build_scene_video(
+            imgs, "탑차 앞유리 이 차이 실화", sents, ["썬팅", "열차단"], t, _rs(t), "제목", "방문하세요")
+        return {"scene_ok": bool(vp), "note": note, "dur": dur,
+                "fname": os.path.basename(vp) if vp else None, "elapsed_sec": round(_t.time() - t0)}
     except Exception as e:
         return {"err": repr(e), "tb": traceback.format_exc()[-1200:], "elapsed_sec": round(_t.time() - t0)}
 
