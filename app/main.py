@@ -2860,17 +2860,19 @@ def admin_scenegen():
         p = os.path.join(d, f"big{i}.jpg")
         Image.new("RGB", (5712, 4284), (70 + i * 25, 90, 120)).save(p, quality=90)
         imgs.append(p)
-    from app.strategies import resolve_strategy as _rs
-    sents = ["오늘 흰색 포터2 냉동탑차 열차단 썬팅 시공합니다.", "여름 앞유리 햇빛에 눈부심이 심했다고 하셨어요.",
-             "먼저 유리를 깨끗이 닦고 필름을 재단했습니다.", "기포 없이 밀어내며 가장자리까지 잡았어요.",
-             "시공 후 눈부심이 확 줄고 시원해졌습니다.", "부산 초량에서 썬팅 고민되면 방문하세요."]
+    from app.domain.models import AssetType
+    a = db.create_asset(t.id, AssetType.IMAGE, imgs[0],
+                        "흰색 포터2 냉동탑차 앞유리·측면 열차단 썬팅 시공. 여름 더위·눈부심 개선. 부산 초량.")
     import time as _t
     t0 = _t.time()
     try:
-        vp, note, dur, cover = ShortVideoGenerator()._build_scene_video(
-            imgs, "탑차 앞유리 이 차이 실화", sents, ["썬팅", "열차단"], t, _rs(t), "제목", "방문하세요")
-        return {"scene_ok": bool(vp), "note": note, "dur": dur,
-                "fname": os.path.basename(vp) if vp else None, "elapsed_sec": round(_t.time() - t0)}
+        piece = ShortVideoGenerator().generate(t, a, imgs)     # 전체 흐름(LLM 스크립트 포함) · 3장
+        vp = piece.payload.get("video_path", "")
+        return {"full_ok": bool(vp), "dur_sec": piece.payload.get("duration_sec"),
+                "fname": os.path.basename(vp) if vp else None,
+                "narration_len": len(piece.payload.get("narration", "") or ""),
+                "n_scenes": (piece.payload.get("narration", "") or "").count("\n") + 1,
+                "elapsed_sec": round(_t.time() - t0)}
     except Exception as e:
         return {"err": repr(e), "tb": traceback.format_exc()[-1200:], "elapsed_sec": round(_t.time() - t0)}
 
