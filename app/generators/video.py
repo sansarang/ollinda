@@ -309,7 +309,10 @@ class ShortVideoGenerator(Generator):
         except Exception:
             return None, "Pillow 미설치", 0, None
         out_dir = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), tenant.id)
-        work = os.path.join(out_dir, f"scenes_{uuid.uuid4().hex}")
+        os.makedirs(out_dir, exist_ok=True)
+        # 임시 작업은 /tmp(컨테이너 디스크)에서 — 작은 /data 볼륨(434MB) 디스크풀 방지(근본책)
+        import tempfile
+        work = os.path.join(tempfile.gettempdir(), f"omc_scenes_{uuid.uuid4().hex}")
         os.makedirs(work, exist_ok=True)
         try:
             visuals = self._visuals_for(imgs, sentences, kws, work, strat.key)
@@ -693,13 +696,17 @@ class ShortVideoGenerator(Generator):
         bgm = bgm_lib.pick()
         out = os.path.join(out_dir, f"short_{uuid.uuid4().hex}.mp4")
         if bgm:
+            # 목소리 full + BGM 22%, amix normalize=0(볼륨 안 깎임) → loudnorm -14 LUFS(소셜 표준, 크게 들림)
+            fc = ("[1:a]volume=1.0[v];[2:a]volume=0.22[b];"
+                  "[v][b]amix=inputs=2:duration=first:normalize=0[m];"
+                  "[m]loudnorm=I=-14:TP=-1.5:LRA=11[a]")
             cmd = ["ffmpeg", "-y", "-i", video, "-i", full_wav, "-stream_loop", "-1", "-i", bgm,
-                   "-filter_complex", "[2:a]volume=0.10[b];[1:a][b]amix=inputs=2:duration=first[a]",
-                   "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-ar", "44100",
+                   "-filter_complex", fc, "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-ar", "44100",
                    "-shortest", out]
         else:
-            cmd = ["ffmpeg", "-y", "-i", video, "-i", full_wav, "-map", "0:v", "-map", "1:a",
-                   "-c:v", "copy", "-c:a", "aac", "-ar", "44100", "-shortest", out]
+            cmd = ["ffmpeg", "-y", "-i", video, "-i", full_wav,
+                   "-filter_complex", "[1:a]loudnorm=I=-14:TP=-1.5:LRA=11[a]",
+                   "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-ar", "44100", "-shortest", out]
         r = subprocess.run(cmd, capture_output=True, timeout=180)
         if r.returncode == 0 and os.path.exists(out):
             return out
@@ -726,11 +733,12 @@ class ShortVideoGenerator(Generator):
         if bgm_path:
             cmd += ["-stream_loop", "-1", "-i", bgm_path]
         if tts_path and bgm_path:
-            fc, amap = "[2:a]volume=0.15[bg];[1:a][bg]amix=inputs=2:duration=first[a]", "[a]"
+            fc, amap = ("[1:a]volume=1.0[v];[2:a]volume=0.22[bg];[v][bg]amix=inputs=2:duration=first:normalize=0[m];"
+                        "[m]loudnorm=I=-14:TP=-1.5:LRA=11[a]", "[a]")
         elif tts_path:
-            fc, amap = None, "1:a"
+            fc, amap = "[1:a]loudnorm=I=-14:TP=-1.5:LRA=11[a]", "[a]"
         else:
-            fc, amap = "[1:a]volume=0.3[a]", "[a]"
+            fc, amap = "[1:a]volume=0.5,loudnorm=I=-16:TP=-1.5:LRA=11[a]", "[a]"
         if fc:
             cmd += ["-filter_complex", fc]
         cmd += ["-map", "0:v", "-map", amap, "-c:v", "copy", "-c:a", "aac", "-shortest", out]
