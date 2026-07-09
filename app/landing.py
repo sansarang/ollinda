@@ -159,6 +159,7 @@ def _hero() -> str:
    사진 한 장이면,<br><span class="grad-text">매출이 올라갑니다</span></h1>
   <p class="reveal mt-6 text-lg text-slate-300 max-w-2xl mx-auto">동네 사장님도, <b class="text-white">쿠팡·11번가 셀러</b>도 사진만 올리세요. AI가 <b class="text-white">인스타·블로그·유튜브·X</b> 콘텐츠를 만들고,
    <b class="text-white">검색 상위</b>에 띄워 <b class="text-white">매장 방문·상세페이지 구매</b>로 연결합니다.</p>
+  <p class="reveal mt-3 text-sm text-slate-400 max-w-xl mx-auto">✔ 2026 최신 알고리즘 반영 &nbsp;·&nbsp; ✔ 없는 가격·스펙 안 지어내는 정직한 글 &nbsp;·&nbsp; ✔ 실검색량 키워드로 상위노출</p>
   <div class="reveal mt-8 flex flex-col sm:flex-row gap-3 justify-center">
    <a href="/login/kakao" class="flex items-center justify-center px-8 py-4 rounded-2xl font-extrabold text-lg" style="background:#FEE500;color:#191600">💬 카카오로 시작하기</a>
    <a href="/login/google" class="flex items-center justify-center gap-2 px-8 py-4 rounded-2xl font-extrabold text-lg bg-white text-slate-700 shadow-lg"><svg width="22" height="22" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg> 구글로 시작하기</a></div>
@@ -507,9 +508,81 @@ def _sticky_cta() -> str:
             'style="background:linear-gradient(120deg,#6366f1,#8b5cf6,#ec4899)">✨ 무료로 시작하기</a></div>')
 
 
+def _why_rank() -> str:
+    """왜 상위노출 되나 — 2026 알고리즘을 '알고' 만든다 + 채널별 최적화(#2·#5)."""
+    chans = [
+        ("📝", "네이버 블로그", "C-Rank·D.I.A.+ 반영, PAS 오프닝으로 체류↑, FAQ·표·사진배치"),
+        ("▶️", "유튜브 쇼츠", "검색 키워드 제목, 30~45초·완주율·루프로 재노출"),
+        ("🎬", "인스타 릴스", "3초 훅 + '저장·공유' 유도(도달 최강 신호), 해시태그 3~5개"),
+        ("𝕏", "X (트위터)", "외부링크 대신 검색 유도(도달 페널티 회피) + 답글 유발"),
+        ("🛒", "쿠팡·스토어", "검색 최적화 상품명 3안 + 상세페이지 + 마켓 태그"),
+    ]
+    cards = "".join(
+        f"<div class='reveal card-hover bg-slate-900/60 border border-white/10 rounded-2xl p-5'>"
+        f"<div class='text-2xl mb-2'>{e}</div><div class='font-bold mb-1'>{t}</div>"
+        f"<p class='text-sm text-slate-400 leading-relaxed'>{d}</p></div>" for e, t, d in chans)
+    return f"""
+<section class="bg-slate-950 text-white py-20">
+ <div class="max-w-6xl mx-auto px-5">
+  <div class="text-center mb-3"><span class="reveal inline-block px-3 py-1 rounded-full glass text-xs font-bold">2026 최신 알고리즘 반영</span></div>
+  <h2 class="reveal text-3xl sm:text-4xl font-extrabold text-center mb-3">왜 우리 콘텐츠는 <span class="grad-text">상위에 뜰까요?</span></h2>
+  <p class="reveal text-center text-slate-400 mb-10 max-w-2xl mx-auto">그냥 글이 아닙니다. 채널마다 <b class="text-white">노출 알고리즘이 다르다</b>는 걸 알고, 각각 다르게 최적화해서 만듭니다.</p>
+  <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">{cards}</div>
+  <div class="reveal bg-gradient-to-r from-indigo-600/20 to-pink-600/20 border border-white/10 rounded-2xl p-6 text-center">
+   <div class="text-sm text-slate-300 mb-1">🔍 네이버 검색광고 <b class="text-white">실검색량</b> 연동</div>
+   <div class="text-lg sm:text-xl font-extrabold">지어낸 키워드가 아니라, <span class="grad-text">‘썬팅가격 월 4,100회’</span>처럼 진짜 뜨는 키워드로 씁니다</div>
+   <div class="text-xs text-slate-400 mt-2">검색량 500~5,000 롱테일(경쟁↓·전환↑)을 실측으로 골라 반영</div>
+  </div>
+ </div></section>"""
+
+
+def _copy_compare() -> str:
+    """'그냥 글' vs '팔리는 글' before/after(#4)."""
+    before = ("안녕하세요~ 저희 루마썬팅입니다 😊<br>오늘도 열심히 시공했어요!<br>"
+              "저희는 좋은 필름으로 정성껏 작업합니다.<br>많은 관심 부탁드려요~")
+    after = ("운전할 때 앞유리 햇빛에 눈 시리고, 신호 대기만 해도 얼굴 화끈거린 적 있으시죠?<br>"
+             "<span class='text-emerald-300'>(← 검색해서 들어온 손님 공감 = 이탈 방지)</span><br>"
+             "오늘 오신 검은 SUV 손님도 그 고민이었어요. 그래서 열차단 세라믹으로 시공한 과정, 그대로 보여드릴게요…<br>"
+             "<span class='text-emerald-300'>(← 손님 스토리 + 과정 = 신뢰·체류)</span>")
+    col = "reveal rounded-2xl p-6 border"
+    return f"""
+<section class="bg-white py-20">
+ <div class="max-w-5xl mx-auto px-5">
+  <h2 class="reveal text-3xl sm:text-4xl font-extrabold text-center mb-3">‘그냥 글’ vs <span class="grad-text">‘팔리는 글’</span></h2>
+  <p class="reveal text-center text-slate-500 mb-10">같은 사진, 같은 가게. 글이 다르면 결과가 다릅니다.</p>
+  <div class="grid sm:grid-cols-2 gap-5">
+   <div class="{col} bg-slate-50 border-slate-200">
+    <div class="text-xs font-bold text-slate-400 mb-3">❌ 흔한 AI 글</div>
+    <p class="text-sm text-slate-500 leading-relaxed">{before}</p></div>
+   <div class="{col} bg-slate-900 border-indigo-500/30 text-white">
+    <div class="text-xs font-bold text-indigo-300 mb-3">⭕ 올린다 (PAS·손님스토리·손실회피)</div>
+    <p class="text-sm text-slate-200 leading-relaxed">{after}</p></div>
+  </div>
+ </div></section>"""
+
+
+def _honesty() -> str:
+    """정직 원칙 — 신뢰 = 전환(#3)."""
+    badges = [("🚫", "가격 날조 안 함", "20만원짜리를 3만원이라 안 씁니다"),
+              ("🚫", "허위 스펙 안 함", "없는 성능·효능 지어내지 않습니다"),
+              ("🚫", "가짜 후기 안 함", "‘내돈내산’ 사칭 없이 판매자 시연으로"),
+              ("✅", "표시광고법 안전", "믿고 배포해도 되는 콘텐츠")]
+    cells = "".join(f"<div class='reveal text-center'><div class='text-3xl mb-2'>{e}</div>"
+                    f"<div class='font-bold text-sm mb-1'>{t}</div><div class='text-xs text-slate-500'>{d}</div></div>"
+                    for e, t, d in badges)
+    return f"""
+<section class="bg-slate-50 py-20">
+ <div class="max-w-4xl mx-auto px-5 text-center">
+  <h2 class="reveal text-3xl sm:text-4xl font-extrabold mb-3">없는 건 <span class="grad-text">지어내지 않습니다</span></h2>
+  <p class="reveal text-slate-500 mb-12 max-w-xl mx-auto">허위 콘텐츠는 안 만드느니만 못합니다. 손님을 속이면 신뢰를 잃으니까요. <b class="text-slate-700">올린다는 사진과 사장님이 준 정보로만</b> 정직하게 씁니다.</p>
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-6">{cells}</div>
+ </div></section>"""
+
+
 def render() -> str:
     return (_HEAD + _ga() + _seo_jsonld() + _nav() + _hero() + _video() + _demo_widget() + _stats() + _problem()
-            + _results() + _modes() + _features() + _pricing() + _faq() + _contact() + _cta() + _footer()
+            + _why_rank() + _copy_compare() + _results() + _honesty() + _modes() + _features()
+            + _pricing() + _faq() + _contact() + _cta() + _footer()
             + _sticky_cta() + _FOOT)
 
 

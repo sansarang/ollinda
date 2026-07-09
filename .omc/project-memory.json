@@ -96,14 +96,14 @@
   "hotPaths": [
     {
       "path": "app/main.py",
-      "accessCount": 413,
-      "lastAccessed": 1783587135067,
+      "accessCount": 416,
+      "lastAccessed": 1783588063616,
       "type": "file"
     },
     {
       "path": "app/landing.py",
-      "accessCount": 71,
-      "lastAccessed": 1783576962337,
+      "accessCount": 76,
+      "lastAccessed": 1783588396530,
       "type": "file"
     },
     {

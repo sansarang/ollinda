@@ -2865,6 +2865,16 @@ def admin_geminicheck():
             out["tts_msg"] = (r.json().get("error", {}).get("message", "") or "")[:80]
     except Exception as e:
         out["tts_err"] = str(e)[:80]
+    # 네이버 검색광고(실검색량) 키 작동 확인
+    try:
+        from app.services import searchad
+        out["searchad_configured"] = searchad.configured()
+        if searchad.configured():
+            v = searchad.keyword_volumes(["자동차썬팅"])
+            out["searchad_ok"] = bool(v)
+            out["searchad_sample"] = (f"{v[0]['keyword']}={v[0]['total']}/월" if v else "빈 결과")
+    except Exception as e:
+        out["searchad_err"] = str(e)[:80]
     return out
 
 
