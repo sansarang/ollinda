@@ -34,14 +34,20 @@ def _gemini(text: str, out_dir: str) -> str | None:
     if not (key and shutil.which("ffmpeg")):
         return None
     import requests
+    import time
     try:
-        r = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_TTS_MODEL}:generateContent",
-            params={"key": key},
-            json={"contents": [{"parts": [{"text": text}]}],
-                  "generationConfig": {"responseModalities": ["AUDIO"],
-                      "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": GEMINI_VOICE}}}}},
-            timeout=120)
+        r = None
+        for attempt in range(4):        # 429(속도제한) 지수 백오프 재시도
+            r = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_TTS_MODEL}:generateContent",
+                params={"key": key},
+                json={"contents": [{"parts": [{"text": text}]}],
+                      "generationConfig": {"responseModalities": ["AUDIO"],
+                          "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": GEMINI_VOICE}}}}},
+                timeout=120)
+            if r.status_code != 429:
+                break
+            time.sleep(2 * (attempt + 1))    # 2s, 4s, 6s 백오프
         r.raise_for_status()
         parts = r.json()["candidates"][0]["content"]["parts"]
         d = next((p.get("inlineData") or p.get("inline_data") for p in parts
