@@ -2877,6 +2877,52 @@ def admin_scenegen():
         return {"err": repr(e), "tb": traceback.format_exc()[-1200:], "elapsed_sec": round(_t.time() - t0)}
 
 
+@app.get("/admin/audiocheck")
+def admin_audiocheck():
+    """진단 — 프로덕션 오디오 체인(TTS 생성 + BGM 찾기 + mux) 어디서 무음이 되는지."""
+    import subprocess
+    import os
+    import tempfile
+    import re
+    from app.media import bgm as _bgm, tts as _tts
+    out = {}
+    d = tempfile.mkdtemp()
+    b = _bgm.pick()
+    out["bgm_pick"] = b
+    out["bgm_exists"] = bool(b and os.path.exists(b))
+    out["tts_configured"] = _tts.configured()
+    wav = None
+    try:
+        wav = _tts.synthesize("안녕하세요, 소리 테스트입니다. 잘 들리나요.", d)
+        out["tts_ok"] = bool(wav and os.path.exists(wav) and os.path.getsize(wav) > 500)
+        out["tts_size"] = os.path.getsize(wav) if wav and os.path.exists(wav) else 0
+    except Exception as e:
+        out["tts_err"] = repr(e)[:120]
+    vid = os.path.join(d, "v.mp4")
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=black:s=1080x1920:d=5", "-t", "5", vid], capture_output=True)
+    wav_in = wav if (wav and os.path.exists(wav)) else os.path.join(d, "s.wav")
+    if wav_in.endswith("s.wav"):
+        subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", "5", wav_in], capture_output=True)
+    outv = os.path.join(d, "out.mp4")
+    if b and os.path.exists(b):
+        fc = ("[1:a]volume=1.0[v];[2:a]volume=0.22[bg];[v][bg]amix=inputs=2:duration=first:normalize=0[m];"
+              "[m]loudnorm=I=-14:TP=-1.5:LRA=11[a]")
+        cmd = ["ffmpeg", "-y", "-i", vid, "-i", wav_in, "-stream_loop", "-1", "-i", b,
+               "-filter_complex", fc, "-map", "0:v", "-map", "[a]", "-c:a", "aac", "-shortest", outv]
+    else:
+        cmd = ["ffmpeg", "-y", "-i", vid, "-i", wav_in, "-filter_complex", "[1:a]loudnorm=I=-14:TP=-1.5:LRA=11[a]",
+               "-map", "0:v", "-map", "[a]", "-c:a", "aac", "-shortest", outv]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    out["mux_ok"] = (r.returncode == 0 and os.path.exists(outv))
+    if not out["mux_ok"]:
+        out["mux_stderr"] = r.stderr[-500:]
+    else:
+        vol = subprocess.run(["ffmpeg", "-i", outv, "-af", "volumedetect", "-f", "null", "-"], capture_output=True, text=True).stderr
+        m = re.search(r"mean_volume: ([\-0-9.]+)", vol)
+        out["output_mean_db"] = m.group(1) if m else "?"
+    return out
+
+
 @app.get("/admin/ffmpegcheck")
 def admin_ffmpegcheck():
     """진단 — 프로덕션 ffmpeg가 ASS 자막(libass)을 실제로 렌더하는지."""
