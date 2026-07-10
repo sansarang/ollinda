@@ -48,9 +48,9 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
     # 대표 Asset(첫 장)에 메모 기록 — 나머지 장은 images로 전달
     asset = db.create_asset(tenant.id, AssetType.IMAGE, paths[0], note)
     # 👁 비전: 대표 사진을 실제 분석해 생성 프롬프트에 반영(키 없으면 ""). DB엔 원본 메모 유지.
-    analysis = vision.analyze(paths[0], tenant.industry)
+    analysis = vision.analyze_all(paths, tenant.industry)   # 준 사진 전부를 보고 분석(1장만 반영되던 것 강화)
     if analysis:
-        asset.note = f"{note}\n\n[사진 분석(실제 이미지 기반)]\n{analysis}"
+        asset.note = f"{note}\n\n[사진 분석(실제 이미지 {min(len(paths),6)}장 기반)]\n{analysis}"
     # 🎯 마케팅 전략가 — 전 채널이 공유할 크리에이티브 브리프(1콜). 프롬프트에 주입 → 채널 일관성.
     from app.generators.strategist import build_brief, brief_to_directive
     from app.generators.editor import polish

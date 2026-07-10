@@ -55,3 +55,34 @@ def analyze(image_path: str, industry_name: str = "") -> str:
         return next((b.text for b in resp.content if b.type == "text"), "").strip()
     except Exception:
         return ""
+
+
+def analyze_all(image_paths: list[str], industry_name: str = "", max_imgs: int = 6) -> str:
+    """여러 사진을 '한 번의 호출'로 전부 분석 — 사진마다 뭐가 담겼는지 + 이어지는 이야기.
+    사진을 여러 장 줘도 1장만 반영되던 문제 해결(비전 강화). 실패/무키 시 ""."""
+    paths = [p for p in (image_paths or []) if p and os.path.exists(p)][:max_imgs]
+    if not (configured() and paths):
+        return ""
+    if len(paths) == 1:
+        return analyze(paths[0], industry_name)
+    try:
+        import anthropic
+        content = []
+        for i, p in enumerate(paths):
+            with open(p, "rb") as f:
+                data = base64.standard_b64encode(f.read()).decode()
+            content.append({"type": "text", "text": f"[사진{i + 1}]"})
+            content.append({"type": "image", "source": {"type": "base64",
+                            "media_type": _media_type(p), "data": data}})
+        content.append({"type": "text", "text": (
+            f"위 사진 {len(paths)}장을 한국 소상공인 마케팅 관점에서 분석하라. 업종: {industry_name or '일반'}.\n"
+            "각 사진마다 '[사진N]'으로 구분해서 무엇이 보이는지 구체적으로(피사체·제품·차종·전후 변화·사진 속 글자 그대로).\n"
+            "마지막에 '[전체]'로, 사진들이 이어지는 하나의 이야기를 한 줄로(예: 시공 전→과정→완성, 제품→사용→결과).\n"
+            "※ 사진에 실제로 보이는 것만. 추측·과장 금지. 각 항목 간결히.")})
+        client = anthropic.Anthropic()
+        resp = client.messages.create(
+            model=MODEL, max_tokens=1000,
+            messages=[{"role": "user", "content": content}])
+        return next((b.text for b in resp.content if b.type == "text"), "").strip()
+    except Exception:
+        return ""
