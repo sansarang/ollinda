@@ -614,6 +614,8 @@ def login_get(request: Request):
     if auth.current_user(request):
         return RedirectResponse("/me", status_code=303)
     from app import landing
+    err = ("<p class='text-rose-500 text-xs mb-2'>아이디 또는 비밀번호가 맞지 않아요.</p>"
+           if request.query_params.get("err") else "")
     inner = (
         "<div class='min-h-screen flex items-center justify-center bg-slate-50 px-5'>"
         "<div class='bg-white rounded-3xl shadow-xl border border-slate-100 p-8 w-full max-w-sm text-center'>"
@@ -621,8 +623,16 @@ def login_get(request: Request):
         "<p class='text-slate-500 text-sm mb-6'>로그인하고 내 작업실로 이동하세요</p>"
         "<a href='/login/kakao' class='block text-center py-3.5 rounded-xl font-extrabold mb-2.5' style='background:#FEE500;color:#191600'>💬 카카오로 시작하기</a>"
         "<a href='/login/google' class='block text-center py-3.5 rounded-xl font-bold border border-slate-200 hover:bg-slate-50 transition'>구글로 시작하기</a>"
-        "<p class='text-xs text-slate-400 mt-5'>가입도 로그인도 클릭 한 번 · 비밀번호 없음</p>"
-        "<a href='/' class='inline-block text-xs text-slate-400 mt-3 hover:text-slate-600'>← 홈으로</a>"
+        "<div class='flex items-center gap-2 my-4'><div class='flex-1 h-px bg-slate-100'></div>"
+        "<span class='text-xs text-slate-400'>또는 아이디로</span><div class='flex-1 h-px bg-slate-100'></div></div>"
+        f"{err}"
+        "<form method='post' action='/login' class='space-y-2 text-left'>"
+        "<input name='email' type='email' required placeholder='아이디(이메일)' autocomplete='username' "
+        "class='w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-indigo-400'>"
+        "<input name='pw' type='password' required placeholder='비밀번호' autocomplete='current-password' "
+        "class='w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-indigo-400'>"
+        "<button class='w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition'>로그인</button></form>"
+        "<a href='/' class='inline-block text-xs text-slate-400 mt-4 hover:text-slate-600'>← 홈으로</a>"
         "</div></div>")
     return HTMLResponse(landing._HEAD + inner + landing._FOOT)
 
@@ -2874,6 +2884,28 @@ def admin_scenegen():
                 "elapsed_sec": round(_t.time() - t0)}
     except Exception as e:
         return {"err": repr(e), "tb": traceback.format_exc()[-1200:], "elapsed_sec": round(_t.time() - t0)}
+
+
+@app.api_route("/admin/testaccount", methods=["GET", "POST"])
+def admin_testaccount(email: str = "", pw: str = "", uses: int = 8):
+    """지인 테스트 계정 생성/갱신 — 아이디(이메일)+비번 로그인 + 지정 횟수 부여."""
+    if not (email and pw):
+        return {"err": "email·pw 필요"}
+    existing = db.get_user_by_email(email)
+    h, salt = auth.hash_pw(pw)
+    free_used = FREE_LIMIT - int(uses)     # 예: 2 - 8 = -6 → 8회 사용 가능
+    if existing:
+        uid = existing["id"]
+        with db._conn() as c:
+            c.execute("UPDATE users SET pw_hash=?, salt=?, free_used=?, plan='free' WHERE id=?",
+                      (h, salt, free_used, uid))
+    else:
+        u = db.create_user(email=email, pw_hash=h, salt=salt)
+        uid = u["id"]
+        with db._conn() as c:
+            c.execute("UPDATE users SET free_used=? WHERE id=?", (free_used, uid))
+    return {"ok": True, "login_url": "https://ollinda.kr/login",
+            "아이디": email, "비밀번호": pw, "부여횟수": int(uses), "신규": not existing}
 
 
 @app.get("/admin/audiocheck")
