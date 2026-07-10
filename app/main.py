@@ -577,16 +577,25 @@ def _auth_page(title: str, inner: str) -> str:
 
 
 @app.get("/signup", response_class=HTMLResponse)
-def signup_get(from_: str = ""):
+def signup_get(from_: str = "", err: str = ""):
+    msg = ""
+    if err == "1":
+        msg = "<p class='text-rose-500 text-sm mb-3 text-center'>이미 가입된 이메일이거나 입력이 비었어요.</p>"
+    elif err == "2":
+        msg = "<p class='text-rose-500 text-sm mb-3 text-center'>잠시 후 다시 시도해주세요.</p>"
     social = (_google_btn("구글로 가입하기")
               + "<a href='/login/kakao' class='block text-center mb-4 py-3 rounded-xl font-bold' "
               "style='background:#FEE500;color:#191600'>💬 카카오로 3초 가입</a>"
-              "<div class='text-center text-xs text-slate-400 mb-4'>승인 한 번이면 가입 완료 · 또는 이메일</div>")
-    form = ("<form method=post action='/signup' class='space-y-3'>"
-            "<input name=email type=email placeholder='이메일' required class='w-full border rounded-xl p-3'>"
-            "<input name=pw type=password placeholder='비밀번호' required class='w-full border rounded-xl p-3'>"
-            "<button class='w-full bg-slate-100 text-slate-600 font-bold py-3 rounded-xl'>이메일로 가입</button></form>"
-            "<p class='text-sm text-slate-400 mt-4 text-center'>이미 회원? <a href='/login' class='text-indigo-600'>로그인</a></p>")
+              "<div class='flex items-center gap-2 my-4'><div class='flex-1 h-px bg-slate-200'></div>"
+              "<span class='text-xs text-slate-400'>또는 이메일로 (인증 없이 바로)</span>"
+              "<div class='flex-1 h-px bg-slate-200'></div></div>")
+    form = (f"{msg}<form method=post action='/signup' class='space-y-3'>"
+            "<input name=email type=email placeholder='이메일 (아이디로 사용)' required "
+            "class='w-full border border-slate-200 rounded-xl p-3 outline-none focus:border-indigo-400'>"
+            "<input name=pw type=password placeholder='비밀번호 (6자 이상)' minlength='6' required "
+            "class='w-full border border-slate-200 rounded-xl p-3 outline-none focus:border-indigo-400'>"
+            "<button class='w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-3 rounded-xl transition'>이메일로 가입하기</button></form>"
+            "<p class='text-sm text-slate-400 mt-4 text-center'>이미 회원? <a href='/login' class='text-indigo-600 font-semibold'>로그인</a></p>")
     return _auth_page("가입하고 시작하기", social + form)
 
 
@@ -632,7 +641,8 @@ def login_get(request: Request):
         "<input name='pw' type='password' required placeholder='비밀번호' autocomplete='current-password' "
         "class='w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-indigo-400'>"
         "<button class='w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition'>로그인</button></form>"
-        "<a href='/' class='inline-block text-xs text-slate-400 mt-4 hover:text-slate-600'>← 홈으로</a>"
+        "<p class='text-sm text-slate-400 mt-4'>아직 회원이 아니신가요? <a href='/signup' class='text-indigo-600 font-semibold'>이메일로 회원가입</a></p>"
+        "<a href='/' class='inline-block text-xs text-slate-400 mt-3 hover:text-slate-600'>← 홈으로</a>"
         "</div></div>")
     return HTMLResponse(landing._HEAD + inner + landing._FOOT)
 

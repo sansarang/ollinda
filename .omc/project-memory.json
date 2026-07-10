@@ -96,14 +96,14 @@
   "hotPaths": [
     {
       "path": "app/main.py",
-      "accessCount": 441,
-      "lastAccessed": 1783647185024,
+      "accessCount": 444,
+      "lastAccessed": 1783673816998,
       "type": "file"
     },
     {
       "path": "app/landing.py",
-      "accessCount": 87,
-      "lastAccessed": 1783590434431,
+      "accessCount": 89,
+      "lastAccessed": 1783673804492,
       "type": "file"
     },
     {
@@ -174,8 +174,8 @@
     },
     {
       "path": "app/google_auth.py",
-      "accessCount": 5,
-      "lastAccessed": 1783483854718,
+      "accessCount": 6,
+      "lastAccessed": 1783664496673,
       "type": "file"
     },
     {
