@@ -85,9 +85,50 @@ def auto_enhance(src: str, out: str | None = None, industry: str = "", meta: dic
 
 
 def enhance_all(paths: list[str], industry: str = "", meta: dict | None = None) -> int:
-    """여러 장 일괄 보정(제자리) + EXIF·GPS 삽입. 보정 성공 개수 반환."""
+    """여러 장 일괄 보정(제자리) + 개인정보 자동 모자이크 + EXIF·GPS 삽입. 보정 성공 개수 반환."""
     n = 0
     for p in paths:
-        if p and os.path.exists(p) and auto_enhance(p, p, industry, meta) == p:
-            n += 1
+        if p and os.path.exists(p):
+            mask_personal_info(p)   # 🔒 번호판·얼굴·전화·라벨 자동 가림(보정 전에)
+            if auto_enhance(p, p, industry, meta) == p:
+                n += 1
     return n
+
+
+def _pixelate_region(im, box) -> bool:
+    """정규화 bbox 영역을 모자이크(픽셀화). PIL 기반, 추가 설치 불필요."""
+    from PIL import Image
+    W, H = im.size
+    try:
+        x0 = max(0, int(float(box["x0"]) * W)); y0 = max(0, int(float(box["y0"]) * H))
+        x1 = min(W, int(float(box["x1"]) * W)); y1 = min(H, int(float(box["y1"]) * H))
+    except Exception:
+        return False
+    pw = int((x1 - x0) * 0.15); ph = int((y1 - y0) * 0.15)   # LLM 박스 정밀도 보정(패딩 15%)
+    x0 = max(0, x0 - pw); y0 = max(0, y0 - ph); x1 = min(W, x1 + pw); y1 = min(H, y1 + ph)
+    if x1 - x0 < 6 or y1 - y0 < 6:
+        return False
+    region = im.crop((x0, y0, x1, y1))
+    small = region.resize((max(1, (x1 - x0) // 14), max(1, (y1 - y0) // 14)))   # 축소→확대 = 모자이크
+    im.paste(small.resize((x1 - x0, y1 - y0), Image.NEAREST), (x0, y0))
+    return True
+
+
+def mask_personal_info(path: str) -> int:
+    """사진 속 개인정보(번호판·얼굴·전화·라벨·주소) 자동 모자이크(제자리). 가린 개수 반환.
+    끄기: 환경변수 SHOPCAST_PII_MASK=0."""
+    if os.environ.get("SHOPCAST_PII_MASK", "1") == "0":
+        return 0
+    try:
+        from app import vision
+        boxes = vision.detect_personal_info(path)
+        if not boxes:
+            return 0
+        from PIL import Image
+        im = Image.open(path).convert("RGB")
+        cnt = sum(1 for b in boxes if _pixelate_region(im, b))
+        if cnt:
+            im.save(path, quality=90)
+        return cnt
+    except Exception:
+        return 0

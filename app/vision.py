@@ -86,3 +86,36 @@ def analyze_all(image_paths: list[str], industry_name: str = "", max_imgs: int =
         return next((b.text for b in resp.content if b.type == "text"), "").strip()
     except Exception:
         return ""
+
+
+def detect_personal_info(image_path: str) -> list[dict]:
+    """사진 속 개인정보 위치를 정규화 bbox로 반환 → 모자이크용. 실패/무키 시 []."""
+    if not (configured() and image_path and os.path.exists(image_path)):
+        return []
+    try:
+        import json
+        import re as _re
+        with open(image_path, "rb") as f:
+            data = base64.standard_b64encode(f.read()).decode()
+        import anthropic
+        client = anthropic.Anthropic()
+        prompt = (
+            "이 사진에서 '가려야 할 개인정보'의 위치를 모두 찾아라: "
+            "차량 번호판, 사람 얼굴, 전화번호, 이름표·차량정보 라벨·차대번호(VIN), 주소·명함.\n"
+            "각 항목을 이미지 기준 0~1로 정규화한 사각형으로, JSON 배열만 출력(설명·코드블록 없이):\n"
+            '[{"type":"plate|face|phone|label|address","x0":0.00,"y0":0.00,"x1":0.00,"y1":0.00}]\n'
+            "x0,y0=왼쪽위, x1,y1=오른쪽아래. 없으면 [] 만 출력. 확실한 것만, 넉넉하게 잡아라."
+        )
+        resp = client.messages.create(
+            model=MODEL, max_tokens=700,
+            messages=[{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64",
+                 "media_type": _media_type(image_path), "data": data}},
+                {"type": "text", "text": prompt},
+            ]}])
+        txt = next((b.text for b in resp.content if b.type == "text"), "")
+        m = _re.search(r"\[.*\]", txt, _re.S)
+        boxes = json.loads(m.group(0)) if m else []
+        return [b for b in boxes if isinstance(b, dict) and all(k in b for k in ("x0", "y0", "x1", "y1"))]
+    except Exception:
+        return []
