@@ -471,9 +471,30 @@ def get_link(code: str) -> Optional[dict]:
         return None
 
 
-def incr_link_click(code: str) -> None:
+def incr_link_click(code: str, referrer: str = "", ua: str = "", utm_source: str = "") -> None:
+    """클릭 집계(누적 카운터) + 행 단위 로깅(시각·리퍼러·UA·채널). 어트리뷰션 정확도↑(PHASE 6)."""
     with _conn() as c:
         c.execute("UPDATE links SET clicks=clicks+1 WHERE code=?", (code,))
+        try:
+            c.execute("CREATE TABLE IF NOT EXISTS link_clicks("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT, ts TEXT, "
+                      "referrer TEXT, ua TEXT, utm_source TEXT)")
+            c.execute("INSERT INTO link_clicks(code, ts, referrer, ua, utm_source) VALUES(?,?,?,?,?)",
+                      (code, _now(), referrer[:300], ua[:300], utm_source[:60]))
+        except Exception:
+            pass
+
+
+def link_click_stats(code: str) -> dict:
+    """링크별 클릭 통계(총합 + 채널별 분해). 성과 대시보드용(PHASE 6)."""
+    try:
+        with _conn() as c:
+            rows = c.execute("SELECT utm_source, COUNT(*) n FROM link_clicks WHERE code=? "
+                             "GROUP BY utm_source", (code,)).fetchall()
+        by = {(r["utm_source"] or "direct"): r["n"] for r in rows}
+        return {"total": sum(by.values()), "by_source": by}
+    except sqlite3.OperationalError:
+        return {"total": 0, "by_source": {}}
 
 
 def list_links(tenant_id: str, limit: int = 20) -> list[dict]:

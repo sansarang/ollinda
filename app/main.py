@@ -1395,12 +1395,13 @@ def my_set_delete(request: Request, asset_id: str):
 
 
 @app.get("/r/{code}")
-def link_redirect(code: str):
-    """제휴/추적 단축링크 — 클릭 집계 후 원본으로 이동."""
+def link_redirect(code: str, request: Request, utm_source: str = ""):
+    """제휴/추적 단축링크 — 클릭 집계(행 단위+채널) 후 원본으로 이동(PHASE 6)."""
     link = db.get_link(code)
     if not link or not link.get("target"):
         return RedirectResponse("/", status_code=302)
-    db.incr_link_click(code)
+    db.incr_link_click(code, referrer=request.headers.get("referer", ""),
+                       ua=request.headers.get("user-agent", ""), utm_source=utm_source)
     target = link["target"]
     if not target.startswith(("http://", "https://")):
         target = "https://" + target
