@@ -92,6 +92,9 @@ body{font-family:'Pretendard','Apple SD Gothic Neo',system-ui,sans-serif;-webkit
 .hero-dots{background-image:radial-gradient(rgba(99,102,241,.14) 1px,transparent 1px);background-size:22px 22px;
  -webkit-mask-image:linear-gradient(180deg,#000 0%,transparent 55%);mask-image:linear-gradient(180deg,#000 0%,transparent 55%)}
 .card-hi{background:#F5F3FF;border:1px solid #DDD6FE;border-radius:16px}   /* 강조 카드(연보라) */
+/* 무료 결과 확장(가로 레이아웃): 좁은 위젯 칸을 탈출해 뷰포트 기준 넓게(최대 1160px) 중앙 정렬 */
+.result-expanded{width:100vw;margin-left:calc(50% - 50vw);padding:0 16px}
+.result-inner{max-width:1160px;margin:0 auto}
 </style>"""
 
 _HEAD = """<!doctype html><html lang=ko><head><meta charset=utf-8>
@@ -306,7 +309,9 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
   function runScripts(el){el.querySelectorAll('script').forEach(function(s){
     var n=document.createElement('script');n.textContent=s.textContent;s.replaceWith(n);});}
   function renderTeaser(html){clearInterval(_pg);
-    box.innerHTML=html;runScripts(box);box.scrollIntoView({behavior:'smooth',block:'nearest'});}
+    box.classList.add('result-expanded');   // 결과는 위젯 폭 탈출 → 화면 가로 활용(최대 1160px 중앙)
+    box.innerHTML='<div class="result-inner">'+html+'</div>';
+    runScripts(box);box.scrollIntoView({behavior:'smooth',block:'nearest'});}
   function renderFail(msg){clearInterval(_pg);
     box.innerHTML='<div class="card p-4 text-center"><div class="text-sm font-bold text-slate-700 mb-1">'+esc(msg||'생성에 문제가 있었어요')+'</div>'
       +'<div class="text-xs text-slate-400">잠시 후 아래 버튼으로 다시 만들어보세요.</div>'
