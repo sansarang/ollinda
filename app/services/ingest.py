@@ -136,11 +136,13 @@ def _spawn_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: d
     import threading
 
     def _run():
-        try:
-            _make_video_bundle(tenant, asset, paths, brief_public)
-        except Exception:
-            import logging
-            logging.exception("[ingest] 비동기 영상 번들 실패 tenant=%s", tenant.id)
+        from app.generators.video import RENDER_SEM   # 동시 렌더 상한(ffmpeg 폭주 방지, PHASE 12)
+        with RENDER_SEM:
+            try:
+                _make_video_bundle(tenant, asset, paths, brief_public)
+            except Exception:
+                import logging
+                logging.exception("[ingest] 비동기 영상 번들 실패 tenant=%s", tenant.id)
     threading.Thread(target=_run, daemon=True).start()
 
 
