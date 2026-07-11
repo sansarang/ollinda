@@ -454,8 +454,8 @@ class ShortVideoGenerator(Generator):
             ass = _build_ass(ass_scenes, kws, strat.key, os.path.join(work, "cap.ass"))
             logo = _brand_logo_png(os.path.join(work, "logo.png"), strat.key)
             fx = self._post_overlay(video_only, ass, logo, total, strat.key)
-            # 5) 영상+연속오디오 mux (+BGM) — 길이 동일 → 정확히 싱크
-            final = self._mux(fx, full_wav, out_dir)
+            # 5) 영상+연속오디오 mux (+BGM: 업종 분위기 선택) — 길이 동일 → 정확히 싱크
+            final = self._mux(fx, full_wav, out_dir, mood=bgm_lib.mood_for(tenant.industry))
             # 안전장치: 최종본이 작업폴더 안이면 out_dir로 복사(rmtree 삭제 방지 → 재생 404 원천 차단)
             if final and (work in final):
                 safe = os.path.join(out_dir, f"short_{uuid.uuid4().hex}.mp4")
@@ -822,9 +822,11 @@ class ShortVideoGenerator(Generator):
                                capture_output=True, timeout=300)
         return out if os.path.exists(out) else None
 
-    def _mux(self, video, full_wav, out_dir) -> str:
-        """무음영상 + 연속오디오(+BGM) → 최종. 둘 길이가 같아 정확히 싱크."""
-        bgm = bgm_lib.pick()
+    def _mux(self, video, full_wav, out_dir, mood: str = "") -> str:
+        """무음영상 + 연속오디오(+BGM) → 최종. 둘 길이가 같아 정확히 싱크.
+        BGM은 업종 분위기(mood)로 선택(영상강화 PHASE 3). 목소리 loudnorm -14 LUFS,
+        BGM 0.30 + 사이드체인 더킹(threshold 0.03 → 무음 구간 펌핑 방지)."""
+        bgm = bgm_lib.pick(mood)
         out = os.path.join(out_dir, f"short_{uuid.uuid4().hex}.mp4")
         if bgm:
             # 목소리 full + BGM 사이드체인 더킹(내레이션 구간 BGM 자동 감쇄 → 명료도↑, 무음 구간 펌핑 방지, PHASE 11)
