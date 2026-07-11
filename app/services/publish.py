@@ -40,6 +40,13 @@ def publish_and_record(content: ContentPiece) -> PublishResult:
     if result.ok and not result.detail.get("manual"):
         db.create_publication(content.id, content.channel, result.external_id, result.detail)
         db.set_piece_status(content.id, ContentStatus.PUBLISHED)
+        try:                                    # 성과증명: 발행 시점 순위 스냅샷 + 7일 리포트 예약(PHASE 2)
+            from app.services import growth
+            t = db.get_tenant(content.tenant_id)
+            if t:
+                growth.on_publish(t, content)
+        except Exception:
+            pass
     elif not result.ok:
         db.set_piece_status(content.id, ContentStatus.FAILED)
     return result

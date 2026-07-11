@@ -346,6 +346,39 @@ def _ym() -> str:
     return datetime.utcnow().strftime("%Y%m")
 
 
+def schedule_report(tenant_id: str, keyword: str, baseline_rank, due_at: str, channel: str = "email") -> None:
+    """7일 순위 리포트 예약 — 발행 시 baseline 기록, due_at에 발송(성장 PHASE 2)."""
+    try:
+        with _conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS scheduled_reports("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, keyword TEXT, "
+                      "baseline_rank INTEGER, due_at TEXT, channel TEXT, sent INTEGER DEFAULT 0, created_at TEXT)")
+            c.execute("INSERT INTO scheduled_reports(tenant_id,keyword,baseline_rank,due_at,channel,created_at) "
+                      "VALUES(?,?,?,?,?,?)",
+                      (tenant_id, keyword, baseline_rank, due_at, channel, _now()))
+    except Exception:
+        pass
+
+
+def due_reports(now_iso: str) -> list[dict]:
+    """발송 시점 도달 + 미발송 리포트."""
+    try:
+        with _conn() as c:
+            rows = c.execute("SELECT * FROM scheduled_reports WHERE sent=0 AND due_at<=? ORDER BY due_at",
+                             (now_iso,)).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.OperationalError:
+        return []
+
+
+def mark_report_sent(report_id: int) -> None:
+    with _conn() as c:
+        try:
+            c.execute("UPDATE scheduled_reports SET sent=1 WHERE id=?", (report_id,))
+        except Exception:
+            pass
+
+
 def claim_once(key: str) -> bool:
     """멱등 키를 최초 1회만 True 반환. 이미 처리된 키면 False(결제 이중청구 방지, B10)."""
     if not key:

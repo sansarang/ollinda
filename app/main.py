@@ -834,9 +834,24 @@ def _perf_report(tenant_id: str) -> str:
         kw_html = ("<div class='mb-2'><div class='text-sm font-bold text-slate-600 mb-2'>🎯 노리는 키워드 "
                    f"<span class='text-xs text-slate-400 font-normal'>({len(kws)}개)</span></div>"
                    f"<div class='max-h-24 overflow-hidden'>{head}<span id='kwmore' class='hidden'>{rest}</span>{more_btn}</div></div>")
+    # 🚀 before/after 순위 성장 카드 — 발행 후 자동 스냅샷 기반(성장 PHASE 2)
+    ba = ""
+    try:
+        imp = db.improving_keywords(tenant_id)
+        if imp:
+            rows = "".join(
+                f"<div class='flex items-center justify-between bg-emerald-50 rounded-xl px-3 py-2 mb-1.5'>"
+                f"<span class='text-sm font-bold text-slate-700'>{esc(x['keyword'])}</span>"
+                f"<span class='text-sm font-extrabold text-emerald-600'>"
+                f"{(x['first'] if x['first'] else '밖')}위 → {(x['last'] if x['last'] else '밖')}위 ⬆️</span></div>"
+                for x in imp[:3])
+            ba = ("<div class='mb-4'><div class='text-sm font-bold text-slate-600 mb-2'>🚀 순위 성장</div>"
+                  + rows + "</div>")
+    except Exception:
+        pass
     return ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow p-5 sm:p-6 mb-5'>"
             "<h2 class='font-extrabold text-slate-900 mb-4 text-base'>📈 성과 리포트</h2>"
-            + stats + kw_html
+            + ba + stats + kw_html
             + "<div class='mt-2'><button onclick='checkRank()' class='px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl transition'>🔎 키워드 순위 조회</button>"
             + "<div id='rankbox' class='mt-2'></div></div>"
             + "<script>async function checkRank(){var b=document.getElementById('rankbox');"
@@ -2657,6 +2672,13 @@ async def paddle_webhook(request: Request):
         elif etype in ("subscription.canceled", "subscription.paused", "subscription.past_due"):
             db.set_user_plan(uid, "free")
     return JSONResponse({"ok": True})
+
+
+@app.post("/admin/reports/send-due")
+def reports_send_due():
+    """7일 순위 리포트 발송(성장 PHASE 2) — 발송은 스텁, 크론/운영자가 호출."""
+    from app.services import growth
+    return JSONResponse(growth.send_due_reports())
 
 
 @app.post("/admin/billing/charge-due")
