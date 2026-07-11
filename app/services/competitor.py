@@ -105,3 +105,33 @@ def report(tenant, competitors: list) -> dict:
         cards.append({"id": comp["id"], "name": comp["name"], "rows": rows,
                       "scanned": bool(latest)})
     return {"cards": cards, "alerts": alerts}
+
+
+def notify_alerts(user_email: str, alerts: list) -> None:
+    """경보 발송 — 앱 내 표시(report)가 1차. 여기선 이메일(SMTP 있으면) + 카톡(스텁).
+    실패해도 조용히(스캔 자체를 막지 않음)."""
+    if not alerts:
+        return
+    import os
+    import logging
+    # ① 이메일 — SMTP 설정 시에만
+    if user_email and os.environ.get("SMTP_HOST"):
+        try:
+            import smtplib
+            from email.mime.text import MIMEText
+            body = "경쟁사 추적 알림\n\n" + "\n".join(f"- {a}" for a in alerts)
+            msg = MIMEText(body, _charset="utf-8")
+            msg["Subject"] = "[올린다] 경쟁사 순위 변화 알림"
+            msg["From"] = os.environ.get("SMTP_USER", "no-reply@ollinda.kr")
+            msg["To"] = user_email
+            host = os.environ["SMTP_HOST"]
+            port = int(os.environ.get("SMTP_PORT", "587"))
+            with smtplib.SMTP(host, port, timeout=10) as s:
+                s.starttls()
+                if os.environ.get("SMTP_USER"):
+                    s.login(os.environ["SMTP_USER"], os.environ.get("SMTP_PASS", ""))
+                s.send_message(msg)
+        except Exception:
+            logging.exception("[competitor] 경보 이메일 발송 실패")
+    # ② 카카오 알림톡 — Phase 후속(발송 함수 자리만)
+    # TODO(kakao): 알림톡 템플릿 승인 후 여기서 발송. 현재는 스텁.

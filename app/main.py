@@ -502,6 +502,132 @@ def competitor_scan_now(request: Request):
     return JSONResponse({"scans": scans, "usage": gating.usage_summary(db.get_user(u["id"]), "competitor_scans")})
 
 
+@app.post("/api/competitor")
+async def competitor_add(request: Request):
+    """경쟁사 등록 — competitors_max 검사(PHASE 4)."""
+    from app import gating, config as _cfg
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"error": "가입하면 경쟁사를 추적할 수 있어요!", "need_signup": True}, status_code=401)
+    t = _ensure_user_tenant(u)
+    limit = _cfg.plan_limit(u.get("plan") or "free", "competitors_max")
+    if limit != -1 and db.count_competitors(t.id) >= limit:
+        return JSONResponse({"error": f"등록 가능한 경쟁사 {limit}개를 다 쓰셨어요. 업그레이드하면 더 추가돼요!",
+                             "upgrade": True, "cta": "요금제 업그레이드"}, status_code=402)
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    region = (form.get("region") or t.region or "").strip()
+    kws = [k.strip() for k in (form.get("keywords") or "").replace("\n", ",").split(",") if k.strip()]
+    if not name:
+        return JSONResponse({"error": "경쟁사 상호를 입력해 주세요."}, status_code=400)
+    cid = db.create_competitor(t.id, name, region, kws)
+    return JSONResponse({"ok": True, "id": cid,
+                         "usage": gating.usage_summary(db.get_user(u["id"]), "competitor_scans")})
+
+
+@app.get("/api/competitor/list")
+def competitor_list(request: Request):
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"items": []})
+    t = _ensure_user_tenant(u)
+    return JSONResponse({"items": db.list_competitors(t.id)})
+
+
+@app.post("/api/competitor/{cid}/delete")
+def competitor_delete(cid: str, request: Request):
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"error": "로그인이 필요해요."}, status_code=401)
+    t = _ensure_user_tenant(u)
+    db.delete_competitor(cid, t.id)
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/competitor/report")
+def competitor_report(request: Request):
+    """내 순위 vs 경쟁사 최신 현황 + 역전/뒤처짐 경보(PHASE 4)."""
+    from app.services import competitor
+    from app import gating
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"cards": [], "alerts": [], "need_signup": True})
+    t = _ensure_user_tenant(u)
+    comps = db.list_competitors(t.id)
+    rep = competitor.report(t, comps)
+    rep["usage"] = gating.usage_summary(db.get_user(u["id"]), "competitor_scans")
+    return JSONResponse(rep)
+
+
+@app.get("/me/competitors", response_class=HTMLResponse)
+def competitors_page(request: Request):
+    """경쟁사 추적 대시보드 페이지(PHASE 4). 등록·현황·수동스캔·업그레이드 CTA."""
+    from app import gating, config as _cfg
+    from app.services import competitor
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    t = _ensure_user_tenant(u)
+    comps = db.list_competitors(t.id)
+    rep = competitor.report(t, comps)
+    usage = gating.usage_summary(db.get_user(u["id"]), "competitor_scans")
+    cmax = _cfg.plan_limit(u.get("plan") or "free", "competitors_max")
+    used_label = ("무제한" if usage["limit"] == -1 else f"{usage['used']}/{usage['limit']}회")
+    cmax_label = ("무제한" if cmax == -1 else f"{cmax}개")
+
+    alerts = "".join(
+        f"<div class='bg-rose-50 border border-rose-200 text-rose-700 rounded-xl px-4 py-2.5 mb-2 text-sm'>⚠️ {esc(a)}</div>"
+        for a in rep.get("alerts", []))
+    cards = ""
+    for c in rep.get("cards", []):
+        rows = "".join(
+            f"<div class='flex items-center justify-between border-b border-slate-100 py-1.5 text-sm'>"
+            f"<span class='text-slate-500'>{esc(r['keyword'])}</span>"
+            f"<span class='text-slate-700'>나 <b>{esc(r['my_label'])}</b> · 상대 <b>{esc(r['competitor_label'])}</b> "
+            f"<span class='ml-1'>{esc(r['verdict'])}</span></span></div>"
+            for r in c.get("rows", []))
+        empty = "" if c.get("scanned") else "<div class='text-xs text-slate-400 py-2'>아직 스캔 전이에요. ‘지금 스캔’을 눌러보세요.</div>"
+        cards += (f"<div class='bg-white rounded-2xl border border-slate-100 p-5 mb-3'>"
+                  f"<div class='flex items-center justify-between mb-2'><div class='font-bold text-slate-800'>🥊 {esc(c['name'])}</div>"
+                  f"<button onclick=\"delComp('{c['id']}')\" class='text-xs text-slate-400 hover:text-rose-500'>삭제</button></div>"
+                  f"{rows}{empty}</div>")
+    if not comps:
+        cards = "<div class='bg-slate-50 rounded-2xl p-6 text-center text-slate-500 text-sm'>아직 등록한 경쟁사가 없어요. 옆집·경쟁 매장 상호를 등록하면 매일 자동으로 순위를 비교해 드려요.</div>"
+
+    upgrade = ("" if usage["limit"] == -1 or usage["remaining"] > 0 else
+               "<a href='/#pricing' class='block text-center bg-indigo-600 text-white font-bold py-3 rounded-xl mt-3'>업그레이드하고 더 추적하기 →</a>")
+
+    inner = (
+        f"<a href='/me' class='text-sm text-slate-500 font-bold'>← 내 작업실</a>"
+        "<div class='flex items-center justify-between mt-2 mb-1'>"
+        "<h1 class='text-2xl font-extrabold'>🥊 경쟁사 추적</h1>"
+        f"<span class='text-xs text-slate-400'>이번 달 스캔 {used_label} · 경쟁사 {cmax_label}</span></div>"
+        "<p class='text-slate-500 text-sm mb-5'>옆집보다 위에 뜨고 있는지, 매일 자동으로 체크해 드려요. (네이버 지역검색 상위 5위 기준)</p>"
+        + alerts +
+        "<div class='bg-white rounded-2xl border border-slate-100 p-5 mb-4'>"
+        "<div class='font-bold text-slate-800 mb-2'>+ 경쟁사 등록</div>"
+        "<input id='c_name' placeholder='경쟁사 상호(예: 옆집모터스)' class='w-full rounded-xl border px-3 py-2.5 mb-2 text-sm outline-none'>"
+        "<input id='c_kw' placeholder='비교할 키워드(선택, 쉼표로 여러 개 · 비우면 자동)' class='w-full rounded-xl border px-3 py-2.5 mb-2 text-sm outline-none'>"
+        "<button onclick='addComp()' class='w-full bg-slate-900 text-white font-bold py-2.5 rounded-xl text-sm'>등록</button>"
+        "<div id='c_msg' class='text-xs mt-2'></div></div>"
+        "<button onclick='scanNow()' class='w-full grad-btn text-white font-bold py-3 rounded-xl mb-4'>🔄 지금 스캔 (내 순위 vs 경쟁사)</button>"
+        + cards + upgrade +
+        "<script>"
+        "async function addComp(){var n=document.getElementById('c_name').value,k=document.getElementById('c_kw').value;"
+        "var m=document.getElementById('c_msg');if(!n){m.textContent='상호를 입력해주세요';m.className='text-xs mt-2 text-rose-500';return;}"
+        "var fd=new FormData();fd.append('name',n);fd.append('keywords',k);"
+        "var r=await fetch('/api/competitor',{method:'POST',body:fd});var d=await r.json();"
+        "if(d.ok){location.reload();}else{m.textContent=d.error||'등록 실패';m.className='text-xs mt-2 text-rose-500';"
+        "if(d.upgrade){m.innerHTML+=' <a href=\"/#pricing\" class=\"underline text-indigo-600\">업그레이드</a>';}}}"
+        "async function delComp(id){if(!confirm('삭제할까요?'))return;await fetch('/api/competitor/'+id+'/delete',{method:'POST'});location.reload();}"
+        "async function scanNow(){var b=event.target;b.textContent='스캔 중…';b.disabled=true;"
+        "var r=await fetch('/api/competitor/scan',{method:'POST'});var d=await r.json();"
+        "if(d.error){alert(d.error);b.disabled=false;b.textContent='🔄 지금 스캔';if(d.upgrade)location.href='/#pricing';return;}"
+        "location.reload();}"
+        "</script>")
+    return HTMLResponse(_subscriber_page("", inner))
+
+
 def _short_region(addr: str) -> str:
     """전체 주소 → '부산 동구' / '부산 동구 초량동'처럼 짧은 지역(키워드용)."""
     toks = (addr or "").split()
@@ -1281,7 +1407,8 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         main_inner = _backban + main_inner
     from app import landing
     _navitems = [("🏠", "홈", "/me", "create"), ("📄", "내 콘텐츠", "/me?tab=content", "content"),
-                 ("📊", "리포트", "/me?tab=report", "report")]
+                 ("📊", "리포트", "/me?tab=report", "report"),
+                 ("🥊", "경쟁사", "/me/competitors", "competitors")]
 
     def _navlink(i, l, h, key):
         cls = ("bg-indigo-50 text-indigo-700" if key == active
