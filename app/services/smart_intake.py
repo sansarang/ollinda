@@ -183,6 +183,21 @@ def build_intake_note(industry: str, confirmed: str = "", answers: dict | None =
         "위에 없는 가격·수치·스펙은 지어내지 마라 — 없으면 그 항목은 생략하고 '문의' 유도로.\n")
 
 
+def analysis_block(analysis: str, confirmed: str = "") -> str:
+    """vision 분석 → note 삽입 블록(SEO_CURRENT §5-3: 추측이 '사실'로 각인되던 단일경로 차단).
+    사용자가 사진 내용을 확인(confirmed)했으면 '확인됨', 아니면 'AI 추측(미확인)' 라벨 +
+    단정 금지 지시를 붙인다 — 오인 시 브리프·본문까지 틀린 전제로 가는 것을 막는다."""
+    analysis = (analysis or "").strip()
+    if not analysis:
+        return ""
+    if (confirmed or "").strip():
+        return ("\n\n[사진 분석 — 사장님이 사진 내용을 확인·수정함(사실로 사용 가능)]\n" + analysis)
+    return ("\n\n[사진 분석 — AI 추측(사장님 미확인)]\n" + analysis +
+            "\n[⚠️ 추측 주의] 위 분석은 확인되지 않은 추측이다. 차종·모델명·메뉴명 등 구체 대상을 "
+            "단정하지 마라 — 확실치 않으면 일반 표현(예: 'SUV 차량', '시그니처 메뉴')으로 쓰고, "
+            "사진 속 글자를 그대로 읽은 것만 구체적으로 써라.")
+
+
 def record_insight(industry: str, answers: dict | None = None, experience: str = "") -> None:
     """스마트질문 답변 축적(SEO_CURRENT §2 — AI 생성 업종 프로필엔 viral_hooks가 없음).
     ※ 스텁: 지금은 저장만 한다. TODO(viral_hooks): 같은 업종 답변·경험담이 N건 쌓이면

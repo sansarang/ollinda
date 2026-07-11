@@ -51,7 +51,9 @@ def run_teaser(industry: str, biz_type: str, note: str,
         # 선추측 단계에서 이미 분석했으면 재호출 생략(같은 사진, 비용 절감)
         analysis = (intake.get("analysis") or "").strip() or vision.analyze(paths[0], industry)
         note_add = f"\n\n[사진 {len(paths)}장 · 캐러셀]" if len(paths) > 1 else ""
-        asset.note = f"{note}{note_add}" + (f"\n\n[사진 분석]\n{analysis}" if analysis else "")
+        # 확인 절차(SEO_CURRENT §5-3): 사용자 확인 없인 '추측' 라벨 + 단정 금지 — 사실로 각인 방지
+        from app.services import smart_intake as _si
+        asset.note = f"{note}{note_add}" + _si.analysis_block(analysis, intake.get("confirmed", ""))
 
     brief = build_brief(t, asset)                          # 🎯 전략가
     asset.note = asset.note + brief_to_directive(brief)

@@ -77,7 +77,9 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
     # 선추측(intake.analysis) 있으면 재호출 생략 — 같은 사진을 이미 분석함(비용 1콜 유지, PHASE 4)
     analysis = (intake.get("analysis") or "").strip() or vision.analyze_all(paths, tenant.industry)
     if analysis:
-        asset.note = f"{note}\n\n[사진 분석(실제 이미지 {min(len(paths),6)}장 기반)]\n{analysis}"
+        # 확인 절차(SEO_CURRENT §5-3): 사용자 확인 없인 '추측' 라벨 + 단정 금지 — 사실로 각인 방지
+        from app.services import smart_intake as _si2
+        asset.note = f"{note}" + _si2.analysis_block(analysis, intake.get("confirmed", ""))
     # 🎯 마케팅 전략가 — 전 채널이 공유할 크리에이티브 브리프(1콜). 프롬프트에 주입 → 채널 일관성.
     from app.generators.strategist import build_brief, brief_to_directive
     from app.generators.editor import polish
