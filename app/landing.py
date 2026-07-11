@@ -164,7 +164,7 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
      var oldExp=(document.getElementById(expId)||{}).value||'';
      var h='<details open class="bg-slate-50 border border-slate-200 rounded-xl p-3"><summary class="text-xs font-bold text-slate-600 cursor-pointer select-none">'
        +'더 좋은 글 만들기 <span class="text-slate-400 font-normal">('+esc(d.hint||'선택')+')</span></summary>'
-       +'<div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">';   // 질문 2×2(데스크탑) — 세로 4줄→2줄
+       +'<div class="mt-2 grid grid-cols-2 gap-2">';   // 질문 2×2 — 모바일 포함(세로 4줄→2줄)
      qs.forEach(function(q,i){
        h+='<div><div class="text-xs font-semibold text-slate-600 mb-1">'+esc(q.q)+'</div>';
        if(q.type==='choice'){h+='<div class="flex flex-wrap gap-1.5">'+(q.options||[]).map(function(o){
@@ -173,7 +173,7 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
        else{h+='<input data-iqt="'+esc(q.id)+'" value="'+esc(prev[q.id]||'')+'" placeholder="'+esc(q.ph||'')+'" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400">';}
        h+='</div>';});
      var ex=d.experience||{};
-     h+='<div class="sm:col-span-2"><div class="text-xs font-semibold text-indigo-600 mb-1">'+esc(ex.q||'')+'</div>'
+     h+='<div class="col-span-2"><div class="text-xs font-semibold text-indigo-600 mb-1">'+esc(ex.q||'')+'</div>'
        +'<input id="'+expId+'" value="'+esc(oldExp)+'" placeholder="'+esc(ex.ph||'')+'" class="w-full rounded-lg border border-indigo-200 px-3 py-2 text-sm outline-none focus:border-indigo-400"></div>';
      h+='</div></details>';
      box.innerHTML=h;window.__intakeAnswers=prev;
@@ -458,8 +458,8 @@ def _hero_demo_card() -> str:
      <input type=hidden id="d_confirmed"><input type=hidden id="d_vision">
      <!-- 업종칸은 항상 빈칸 시작(하드코딩 금지) — 값이 채워지는 유일한 경로는
           fillDemo(): 순위진단 위젯에 사용자가 직접 입력한 업종 복사(그것도 빈칸일 때만) -->
-     <!-- 가로·컴팩트(폼 개선): 업종+목적 한 줄(데스크탑) → 세로 스크롤 최소화 -->
-     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+     <!-- 가로·컴팩트(폼 개선): 업종+목적 한 줄 — 모바일 포함 항상 2열(세로 스크롤 최소화) -->
+     <div class="grid grid-cols-2 gap-2">
       <input id="d_ind" placeholder="업종/상품 (예: 꽃집, 헬스장...)" class="{inp}"
         onblur="window.demoQs&&demoQs()"
         oninput="clearTimeout(window.__dqt);window.__dqt=setTimeout(function(){{window.demoQs&&demoQs();}},800)">
