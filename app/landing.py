@@ -352,6 +352,8 @@ def _hero_demo_card() -> str:
      <div id="d_preview" class="hidden flex gap-2 overflow-x-auto pb-1"></div>
      <div id="d_guessbox"></div>
      <input type=hidden id="d_confirmed"><input type=hidden id="d_vision">
+     <!-- 업종칸은 항상 빈칸 시작(하드코딩 금지) — 값이 채워지는 유일한 경로는
+          fillDemo(): 순위진단 위젯에 사용자가 직접 입력한 업종 복사(그것도 빈칸일 때만) -->
      <input id="d_ind" placeholder="업종/상품 (예: 꽃집, 헬스장, 캠핑 폴딩박스...)" class="{inp}"
        onblur="window.intakeQuestionsUI&&intakeQuestionsUI(document.getElementById('d_questions'),this.value,(document.querySelector('input[name=d_biz]:checked')||{{}}).value,(document.getElementById('d_purpose')||{{}}).value,'d_exp')">
      <div id="d_questions"></div>
