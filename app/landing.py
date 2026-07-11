@@ -49,8 +49,8 @@ body{font-family:'Pretendard','Apple SD Gothic Neo',system-ui,sans-serif;-webkit
 
 _HEAD = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
-<title>올린다 — 사진 한 장이면, 팔리는 콘텐츠가 됩니다</title>
-<meta name=description content="사장님은 사진만 올리세요. AI가 인스타·네이버블로그·유튜브·X 콘텐츠를 만들고 검색 상위에 뜨게 최적화해 자동 발행합니다. 소상공인 AI 마케팅 자동화 올린다.">
+<title>올린다 — 네이버 검색 상위노출에 유리한 AI 마케팅</title>
+<meta name=description content="사진만 올리면 AI가 네이버 블로그·플레이스 상위노출에 유리한 글을 씁니다. 인스타·유튜브·릴스·X까지 자동 생성(네이버는 초안 반자동 발행). 소상공인 AI 마케팅 올린다.">
 <meta name=keywords content="AI 마케팅,소상공인 마케팅,셀러 마케팅,인스타 자동 업로드,네이버 블로그 자동,유튜브 쇼츠 자동,콘텐츠 자동화,SNS 대행,쿠팡 마케팅,올린다,Ollinda">
 <meta name=robots content="index,follow,max-image-preview:large,max-snippet:-1">
 <meta name=author content="올린다 (Ollinda)">
@@ -58,8 +58,8 @@ _HEAD = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <meta property=og:site_name content="올린다">
 <meta property=og:locale content="ko_KR">
 <meta property=og:type content=website>
-<meta property=og:title content="올린다 — 사진 한 장이면, 팔리는 콘텐츠가 됩니다">
-<meta property=og:description content="AI가 5개 채널 콘텐츠를 만들고 자동 발행. 소상공인 마케팅 자동화.">
+<meta property=og:title content="올린다 — 네이버 검색 상위노출에 유리한 AI 마케팅">
+<meta property=og:description content="사진만 올리면 네이버 상위노출에 유리한 글 + 5채널 콘텐츠. 소상공인 마케팅.">
 <meta property=og:image content="__BASE__/demo/og.png">
 <meta property=og:image:width content="1200">
 <meta property=og:image:height content="630">
@@ -156,13 +156,33 @@ def _hero() -> str:
   <div class="reveal inline-flex items-center gap-2 px-4 py-1.5 rounded-full glass text-xs font-semibold mb-6">
    <span class="dot w-2 h-2 rounded-full bg-emerald-400"></span> 소상공인 · 온라인 셀러 전용 · AI 마케팅 자동화</div>
   <h1 class="reveal text-4xl sm:text-6xl font-extrabold tracking-tight leading-[1.08]">
-   사진 한 장이면,<br><span class="grad-text">팔리는 콘텐츠가 됩니다</span></h1>
-  <p class="reveal mt-6 text-lg text-slate-300 max-w-2xl mx-auto">동네 사장님도, <b class="text-white">쿠팡·11번가 셀러</b>도 사진만 올리세요. AI가 <b class="text-white">인스타·블로그·유튜브·X</b> 콘텐츠를 만들고,
-   <b class="text-white">검색 상위</b>에 띄워 <b class="text-white">매장 방문·상세페이지 구매</b>로 연결합니다.</p>
-  <p class="reveal mt-3 text-sm text-slate-400 max-w-xl mx-auto">✔ 2026 최신 알고리즘 반영 &nbsp;·&nbsp; ✔ 없는 가격·스펙 안 지어내는 정직한 글 &nbsp;·&nbsp; ✔ 실검색량 키워드로 상위노출</p>
+   네이버에서 우리 가게,<br><span class="grad-text">검색 상위에 뜨게</span></h1>
+  <p class="reveal mt-6 text-lg text-slate-300 max-w-2xl mx-auto">사진만 올리면 AI가 <b class="text-white">네이버 블로그·플레이스 상위노출에 유리한 글</b>을 씁니다.
+   <b class="text-white">인스타·유튜브·릴스·X</b>까지 덤으로 만들어 <b class="text-white">매장 방문·구매</b>로 연결해요.</p>
+  <p class="reveal mt-3 text-sm text-slate-400 max-w-xl mx-auto">✔ C-Rank·D.I.A.+ 신호 반영 &nbsp;·&nbsp; ✔ 없는 가격·스펙 안 지어내는 정직한 글 &nbsp;·&nbsp; ✔ 실검색량 키워드</p>
   <div class="reveal mt-8 flex justify-center">
    <a href="/login/kakao" class="flex items-center justify-center px-10 py-4 rounded-2xl font-extrabold text-lg shadow-lg" style="background:#FEE500;color:#191600">💬 카카오로 무료 시작</a></div>
   <p class="reveal mt-4 text-xs text-slate-500">구글 <a href="/login/google" class="text-slate-300 underline">간편가입</a> · 이메일 <a href="/signup" class="text-slate-300 underline">회원가입</a> · 이미 회원이면 <a href="/login" class="text-slate-300 underline">로그인</a></p>
+  <div class="reveal mt-8 max-w-md mx-auto glass rounded-2xl p-4 text-left">
+   <div class="text-white font-bold text-sm mb-2">🔎 내 가게 네이버 순위 즉시 진단</div>
+   <div class="flex gap-2">
+     <input id="rc_region" placeholder="지역(부산 동구)" class="w-1/3 rounded-lg px-2 py-2 text-slate-800 text-sm outline-none">
+     <input id="rc_ind" placeholder="업종" class="w-1/3 rounded-lg px-2 py-2 text-slate-800 text-sm outline-none">
+     <input id="rc_name" placeholder="상호" class="w-1/3 rounded-lg px-2 py-2 text-slate-800 text-sm outline-none"></div>
+   <button onclick="rankCheck()" class="grad-btn w-full mt-2 py-2.5 rounded-lg text-white font-bold text-sm">현재 순위 확인</button>
+   <div id="rc_out" class="text-slate-200 text-sm mt-2"></div>
+  </div>
+  <script>
+  async function rankCheck(){{var o=document.getElementById('rc_out');o.textContent='조회 중…';
+   var fd=new FormData();fd.append('region',document.getElementById('rc_region').value);
+   fd.append('industry',document.getElementById('rc_ind').value);fd.append('name',document.getElementById('rc_name').value);
+   try{{var r=await fetch('/api/rank-check',{{method:'POST',body:fd}});var d=await r.json();
+   if(d.error){{o.textContent=d.error;return;}}
+   o.innerHTML='<b class="text-white">'+d.headline+'</b><br><span class="text-slate-400">'+d.subline+'</span><br>'
+     +'<a href="/login/kakao" class="text-emerald-300 underline font-bold">'+d.cta+' →</a>'
+     +(d.estimated?' <span class="text-amber-300 text-xs">(추정)</span>':'');
+   }}catch(e){{o.textContent='조회 실패 — 잠시 후 다시';}}}}
+  </script>
  </div></section>"""
 
 
@@ -395,7 +415,7 @@ def _seo_jsonld() -> str:
                            "acceptedAnswer": {"@type": "Answer", "text": a}} for q, a in _QA]}
     org = {"@context": "https://schema.org", "@type": "Organization", "name": "올린다",
            "url": BASE + "/", "logo": BASE + "/demo/og.png",
-           "description": "소상공인·온라인 셀러를 위한 AI 마케팅 콘텐츠 자동 생성·발행 서비스"}
+           "description": "소상공인·온라인 셀러를 위한 네이버 상위노출 최적화 AI 마케팅 콘텐츠 생성 서비스"}
     site = {"@context": "https://schema.org", "@type": "WebSite", "name": "올린다",
             "url": BASE + "/", "inLanguage": "ko-KR"}
     return "".join(f'<script type="application/ld+json">{json.dumps(x, ensure_ascii=False)}</script>'
@@ -586,8 +606,12 @@ def _honesty() -> str:
 
 
 def render() -> str:
-    return (_HEAD + _ga() + _seo_jsonld() + _nav() + _hero() + _video() + _demo_widget() + _stats() + _problem()
-            + _why_rank() + _copy_compare() + _results() + _honesty() + _modes() + _features()
+    # 전환 최적화 순서(PHASE 15): 히어로(순위진단) → 즉시신뢰(데모) → 문제(PAS) → 해결·차별점 →
+    # 성과증명 → 정직성(상단) → 요금 → FAQ → 마지막 CTA
+    return (_HEAD + _ga() + _seo_jsonld() + _nav()
+            + _hero() + _video() + _demo_widget()
+            + _problem() + _why_rank() + _results() + _honesty()
+            + _stats() + _copy_compare() + _modes() + _features()
             + _pricing() + _faq() + _contact() + _cta() + _footer()
             + _sticky_cta() + _FOOT)
 
