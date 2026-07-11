@@ -167,6 +167,32 @@ def _build_ass(scenes, kws, theme_key, out) -> str:
     return out
 
 
+_LOSS_WORDS = ["손해", "모르면", "모르고", "놓치", "후회", "돈 버리", "낭비", "속지", "함정", "실수"]
+
+
+def _pick_hook(cands: list[str], kws: list[str]) -> str:
+    """훅 3~5안 → 최강 1개(영상강화 PHASE 1). 손실회피·숫자·키워드·적정길이 가점."""
+    best, best_s = "", -1
+    for c in cands:
+        c = c.strip().strip('"').strip()
+        if not (4 <= len(c) <= 26):
+            continue
+        s = 0
+        if any(w in c for w in _LOSS_WORDS):
+            s += 4                                     # 손실회피 = 검색 유입자 공감 최강
+        if re.search(r"\d", c):
+            s += 2
+        if any(k and k[:4] in c for k in (kws or [])[:3]):
+            s += 2                                     # 검색 키워드 포함(쇼츠 검색 노출)
+        if c.endswith(("?", "요", "죠")):
+            s += 1
+        if 8 <= len(c) <= 16:
+            s += 2                                     # 첫 프레임에서 한눈에 읽히는 길이
+        if s > best_s:
+            best, best_s = c, s
+    return best or (cands[0].strip() if cands else "")
+
+
 def _brand_logo_png(out, theme_key) -> str:
     """우상단 로고 워터마크(브랜드 일관성)."""
     from PIL import Image, ImageDraw
@@ -215,15 +241,20 @@ class ShortVideoGenerator(Generator):
             "[루프] 마지막 장면이 첫 장면과 자연스럽게 이어지게(끝→처음 루프 = 재생 반복 → 재노출). 길이 30~45초 목표.\n\n"
             "위 규칙으로 인스타 릴스/유튜브 쇼츠를 기획하라. 아래 형식 그대로(대괄호 머리표 유지):\n"
             "[제목]\n(후킹 제목)\n[길이]\n(예: 25초)\n[플랫폼]\n(인스타 릴스/유튜브 쇼츠)\n"
-            "[훅]\n(0~3초에 띄울 강한 한 줄, 12자 내외)\n"
+            "[훅후보]\n(첫 3초 훅 4안 — 한 줄씩. 검색 유입자가 공감할 문제제기·손실회피형 우선"
+            "(예: '여름 앞유리 이거 모르면 손해'). 각 8~16자, 훅 공식(결과/손실회피/호기심갭/숫자) 서로 다르게)\n"
             "[내레이션]\n(한 문장씩 줄바꿈. 각 문장이 한 장면이 됨. 5~6문장, 구어체, 마지막은 CTA)\n"
             "[장면]\n1) 0-3초 | 비주얼: .. | 자막: .. | 내레이션: ..\n2) .."
         )
         raw = _call_llm(prompt, self.model, 1500)
-        d = _parse_sections(raw, ["제목", "길이", "플랫폼", "훅", "내레이션", "장면"])
+        d = _parse_sections(raw, ["제목", "길이", "플랫폼", "훅후보", "훅", "내레이션", "장면"])
         scenes_meta = _parse_scenes(d.get("장면", ""))
         title = d.get("제목") or (asset.note[:30] or "shorts")
-        hook = (d.get("훅") or (scenes_meta[0]["on_screen_text"] if scenes_meta else asset.note[:18])).strip()
+        # 첫 3초 훅(영상강화 PHASE 1) — 3~5안 중 손실회피·숫자·적정길이 점수로 최강 1개 선택
+        hook_cands = [h.strip().lstrip("-*·0123456789.) ").strip()
+                      for h in (d.get("훅후보") or d.get("훅") or "").split("\n") if h.strip()]
+        hook = (_pick_hook(hook_cands, kws)
+                or (scenes_meta[0]["on_screen_text"] if scenes_meta else asset.note[:18])).strip()
         narration = d.get("내레이션", "")
 
         # 씬 텍스트 = 내레이션 문장(없으면 장면 자막 → 메모)
@@ -277,7 +308,7 @@ class ShortVideoGenerator(Generator):
                 "title": title, "video_title": title,
                 "duration": d.get("길이", f"{dur_sec}초"),
                 "target_platform": d.get("플랫폼", "인스타 릴스/유튜브 쇼츠"),
-                "hook_strategy": hook, "subtitle": hook,
+                "hook_strategy": hook, "subtitle": hook, "hook_candidates": hook_cands,
                 "narration": narration, "scenes": scenes_meta, "script": raw,
                 "scene_texts": sent, "outro_cta": outro_cta, "viral_format": fmt.name,
                 "trending_sound_tip": "발행 시 인스타/유튜브 앱에서 '트렌딩 사운드'를 입히면 도달이 크게 늘어요(공식 API 미지원→앱에서 1탭).",
@@ -336,14 +367,24 @@ class ShortVideoGenerator(Generator):
             awavs: list[str] = []      # 씬별 오디오(PCM, 정확히 dur초)
             ass_scenes = []            # (start, dur, text) — 본문 자막 타이밍
             t = 0.0
-            # 0) 훅 카드(펀치인 줌)
+            # 0) 첫 3초 훅(영상강화 PHASE 1) — 실사진 배경 + 큰 문제제기 텍스트.
+            #    그라데이션 카드 대신 실사진(오리지널 신호) + 첫 프레임부터 즉시 노출(페이드인 없음).
             hook_png = os.path.join(work, "hook.png")
-            self._card_png(hook_png, big=hook or title, small=tenant.name,
-                           accent=strat.key, kind="hook")
+            real_bg = next((p for p in visuals if not os.path.basename(p).startswith("cardbg")), None)
+            if real_bg:
+                ok_hook = self._hook_photo_png(hook_png, big=hook or title, small=tenant.name,
+                                               img_path=real_bg, accent=strat.key)
+                if not ok_hook:
+                    self._card_png(hook_png, big=hook or title, small=tenant.name,
+                                   accent=strat.key, kind="hook")
+            else:
+                self._card_png(hook_png, big=hook or title, small=tenant.name,
+                               accent=strat.key, kind="hook")
             hook_tts = tts_lib.synthesize(hook, work) if hook else None
             ht = _probe_dur(hook_tts) if hook_tts else 0
             hdur = self._clamp((ht + 0.5) if ht > 0.3 else (len(hook or "") * 0.14 + 1.4))
-            v = self._scene_card_video(hook_png, hdur, os.path.join(work, "v_hook.mp4"), punch=True)
+            v = self._scene_card_video(hook_png, hdur, os.path.join(work, "v_hook.mp4"),
+                                       punch=True, fade_in=False)
             aw = self._audio_segment(hook_tts, hdur, os.path.join(work, "a_hook.wav"))
             if v and aw:
                 vclips.append(v); awavs.append(aw); t += hdur
@@ -535,6 +576,54 @@ class ShortVideoGenerator(Generator):
             runs.append((cur, curm))
         return runs
 
+    def _hook_photo_png(self, out: str, big: str, small: str, img_path: str, accent: str) -> bool:
+        """첫 3초 훅 — 실사진 배경(cover crop) + 어둡게 + 큰 문제제기 텍스트(영상강화 PHASE 1).
+        그라데이션 카드보다 '진짜 현장' 느낌 = 오리지널·주제 일관성 신호. 성공 True."""
+        try:
+            from PIL import Image, ImageDraw, ImageOps, ImageFilter
+            im = Image.open(img_path)
+            im = ImageOps.exif_transpose(im).convert("RGB")
+            im = ImageOps.fit(im, (W, H), method=Image.LANCZOS, centering=(0.5, 0.42))
+            im = im.filter(ImageFilter.GaussianBlur(1))          # 미세 블러 → 텍스트 대비↑(사진은 살림)
+            # 상하 어두운 그라데이션 오버레이(텍스트 가독) — 중앙 사진은 보이게
+            ov = Image.new("L", (W, H), 0)
+            od = ImageDraw.Draw(ov)
+            for y in range(H):
+                if y < H * 0.55:
+                    a = int(170 * (1 - y / (H * 0.55)) ** 1.3)   # 위쪽 어둡게(텍스트 영역)
+                else:
+                    a = int(120 * ((y - H * 0.55) / (H * 0.45)) ** 1.6)
+                od.line([(0, y), (W, y)], fill=a)
+            im.paste(Image.new("RGB", (W, H), (8, 10, 16)), (0, 0), ov)
+            d = ImageDraw.Draw(im)
+            # 훅 텍스트 — 크게, 화면 상단 1/3(첫 프레임부터 한눈에)
+            big_lines, fb = None, None
+            for fs in (104, 96, 88, 78, 68):
+                fb = _pil_font(fs, "ExtraBold")
+                ls = self._wrap_lines(d, big, fb, W - 140)
+                if len(ls) <= 2:
+                    big_lines = ls
+                    break
+            if big_lines is None:
+                fb = _pil_font(62, "ExtraBold")
+                big_lines = self._wrap_lines(d, big, fb, W - 140)[:3]
+            lh = int(getattr(fb, "size", 96) * 1.24)
+            y = int(H * 0.16)
+            for ln in big_lines:
+                x = (W - d.textlength(ln, font=fb)) / 2
+                for dx, dy in ((-3, 0), (3, 0), (0, -3), (0, 3), (2, 2), (-2, 2)):  # 외곽선(가독)
+                    d.text((x + dx, y + dy), ln, font=fb, fill=(0, 0, 0, 255))
+                d.text((x, y), ln, font=fb, fill=(255, 255, 255))
+                y += lh
+            if small:
+                fs2 = _pil_font(44, "SemiBold")
+                x2 = (W - d.textlength(small, font=fs2)) / 2
+                d.text((x2, y + 26), small, font=fs2, fill=(225, 228, 238))
+            im.save(out)
+            return os.path.exists(out)
+        except Exception:
+            return False
+
     def _card_png(self, out: str, big: str, small: str, accent: str, kind: str, qr_url: str = "") -> None:
         """훅/아웃트로 풀스크린 카드(그라데이션 + 큰 문구 + 셀러 판매 QR)."""
         from PIL import Image, ImageDraw
@@ -641,15 +730,19 @@ class ShortVideoGenerator(Generator):
         r = subprocess.run(cmd, capture_output=True, timeout=120)
         return out if (r.returncode == 0 and os.path.exists(out)) else None
 
-    def _scene_card_video(self, png, dur, out, punch=False) -> str | None:
-        """카드(훅/아웃트로) → 정확히 dur초 무음 영상. punch=True면 천천히 줌인."""
+    def _scene_card_video(self, png, dur, out, punch=False, fade_in=True) -> str | None:
+        """카드(훅/아웃트로) → 정확히 dur초 무음 영상. punch=True면 천천히 줌인.
+        fade_in=False = 첫 프레임부터 즉시 노출(첫 3초 훅 — 로딩·인트로 없이 바로 본론)."""
         frames = max(1, int(dur * FPS))
         if punch:
             vf = (f"scale={W}:{H},setsar=1,zoompan=z='min(zoom+0.0018,1.10)':"
                   f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s={W}x{H}:fps={FPS}")
         else:
             vf = f"scale={W}:{H},setsar=1,fps={FPS}"
-        vf += self._fade(dur)
+        if fade_in:
+            vf += self._fade(dur)
+        elif dur >= 0.9:                              # 훅: 페이드아웃만(다음 씬 전환용), 인은 즉시
+            vf += f",fade=t=out:st={max(0.0, dur - 0.25):.2f}:d=0.22"
         cmd = ["ffmpeg", "-y", "-loop", "1", "-t", f"{dur:.2f}", "-i", png, "-vf", vf,
                "-t", f"{dur:.2f}", "-r", str(FPS), "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", "-an", out]
         r = subprocess.run(cmd, capture_output=True, timeout=120)
