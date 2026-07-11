@@ -284,9 +284,28 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
   fd.append('answers',JSON.stringify(window.__intakeAnswers||{}));
   fd.append('experience',(document.getElementById('d_exp')||{}).value||'');
   if(pf&&pf.files)Array.from(pf.files).slice(0,10).forEach(function(f){fd.append('photos',f);});
+  // 결과 렌더 — innerHTML 주입 script는 실행되지 않으므로(버그1 원인②) 재생성해 실행
+  function runScripts(el){el.querySelectorAll('script').forEach(function(s){
+    var n=document.createElement('script');n.textContent=s.textContent;s.replaceWith(n);});}
+  function renderTeaser(html){clearInterval(_pg);
+    box.innerHTML=html;runScripts(box);box.scrollIntoView({behavior:'smooth',block:'nearest'});}
+  function renderFail(msg){clearInterval(_pg);
+    box.innerHTML='<div class="card p-4 text-center"><div class="text-sm font-bold text-slate-700 mb-1">'+esc(msg||'생성에 문제가 있었어요')+'</div>'
+      +'<div class="text-xs text-slate-400">잠시 후 아래 버튼으로 다시 만들어보세요.</div>'
+      +'<button type="button" onclick="document.getElementById(\\'demoForm\\').requestSubmit()" class="mt-3 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold">다시 시도</button></div>';}
   try{const r=await fetch('/api/demo',{method:'POST',body:fd});const d=await r.json();
+   if(d.job){ // 백그라운드 생성(버그1: CF 100초 타임아웃 회피) → 폴링, 진행바는 계속
+     var tries=0;var pv=setInterval(async function(){tries++;
+       if(tries>100){clearInterval(pv);renderFail('생성이 너무 오래 걸려요');return;}
+       try{var rr=await fetch('/api/demo/result/'+d.job);var dd=await rr.json();
+         if(dd.ready&&dd.teaser_html){clearInterval(pv);
+           var _b2=document.getElementById('pgBar');if(_b2)_b2.style.width='100%';
+           setTimeout(function(){renderTeaser(dd.teaser_html);},300);}
+         else if(dd.error){clearInterval(pv);renderFail(dd.error);}
+       }catch(e){}},3000);
+     return;}
    clearInterval(_pg);var _b=document.getElementById('pgBar');if(_b)_b.style.width='100%';
-   if(d.teaser){box.innerHTML=d.teaser_html;box.scrollIntoView({behavior:'smooth',block:'nearest'});return;}
+   if(d.teaser){renderTeaser(d.teaser_html);return;}
    if(d.go_dashboard){window.location.href='/me';return;}
    let cta;
    if(d.limit){cta='<a href="#pricing" class="block py-3 rounded-xl font-bold bg-indigo-600 text-white">요금제 보기 →</a>';}
@@ -297,7 +316,7 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
     +'<p class="text-slate-500 text-xs mb-4">가입 후 \\'내 작업실\\'에서 사진을 올리면 5채널이 자동 생성됩니다.</p>'
     +cta+'</div>';
    box.scrollIntoView({behavior:'smooth',block:'nearest'});
-  }catch(err){clearInterval(_pg);box.innerHTML='<div class="text-slate-500 text-sm text-center py-3">오류가 발생했어요. 잠시 후 다시.</div>';}
+  }catch(err){renderFail('생성 요청에 문제가 있었어요');}
  });})();
 // 문의 폼
 (function(){const cf=document.getElementById('contactForm');if(!cf)return;

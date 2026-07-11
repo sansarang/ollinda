@@ -289,21 +289,56 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
               "answers": smart_intake.parse_answers(answers),
               "experience": experience.strip()[:200]}
     _level = smart_intake.enrichment_level(intake["confirmed"], intake["answers"], intake["experience"])
-    try:
-        from app.services import teaser as teaser_svc
-        _t, _a, pieces, brief = teaser_svc.run_teaser(industry, biz_type, full_note, imgs, intake=intake)
-    except Exception:
-        import logging
-        logging.exception("[teaser] 실패")
-        return JSONResponse({"require_signup": True, "message": "가입하면 바로 만들어드려요!"})
-    if not pieces:                                   # 크레딧 부족/일시 오류 → 정직 안내
-        return JSONResponse({"require_signup": True, "message": "지금 생성이 잠시 붐벼요. 잠깐 뒤 다시 시도해 주세요 🙏"})
-    db.incr_demo_ip(ip)
-    remaining = max(0, 2 - db.demo_ip_count(ip))
-    return JSONResponse({"teaser": True,
-                         "teaser_html": _teaser_html(pieces, brief, _a, remaining,
-                                                     target_kw=target_kw, target_vol=target_vol_n,
-                                                     enrichment=_level)})
+    # 생성은 LLM 3~4콜로 60~150초 — 동기 응답은 Cloudflare 100초 한도에 잘려
+    # '진행바만 돌고 결과 무소식'이 됨(버그1 원인①) → 백그라운드 잡 + 폴링으로 전환.
+    import threading
+    import time as _time
+    import uuid as _uuid
+    job = _uuid.uuid4().hex[:12]
+    with _demo_jobs_lock:
+        _demo_jobs[job] = {"status": "running", "ts": _time.time()}
+
+    def _run_demo():
+        try:
+            from app.services import teaser as teaser_svc
+            _t, _a, pieces, brief = teaser_svc.run_teaser(industry, biz_type, full_note, imgs, intake=intake)
+            if not pieces:
+                raise RuntimeError("no pieces")
+            db.incr_demo_ip(ip)
+            remaining = max(0, 2 - db.demo_ip_count(ip))
+            html = _teaser_html(pieces, brief, _a, remaining,
+                                target_kw=target_kw, target_vol=target_vol_n, enrichment=_level)
+            with _demo_jobs_lock:
+                _demo_jobs[job] = {"status": "done", "html": html, "ts": _time.time()}
+        except Exception:
+            import logging
+            logging.exception("[teaser] 실패 job=%s", job)
+            with _demo_jobs_lock:
+                _demo_jobs[job] = {"status": "error", "ts": _time.time()}
+    threading.Thread(target=_run_demo, daemon=True).start()
+    return JSONResponse({"job": job})
+
+
+_demo_jobs: dict = {}                 # job_id → {status: running|done|error, html} (1 replica 전제)
+_demo_jobs_lock = __import__("threading").Lock()
+
+
+@app.get("/api/demo/result/{job}")
+def api_demo_result(job: str):
+    """무료 생성 폴링 — 완료되면 teaser_html 반환(버그1: 무소식 금지, 실패도 명시)."""
+    import time as _time
+    with _demo_jobs_lock:
+        # 오래된 잡 정리(30분+) — 메모리 누수 방지
+        for k in [k for k, v in _demo_jobs.items() if _time.time() - v.get("ts", 0) > 1800]:
+            _demo_jobs.pop(k, None)
+        j = _demo_jobs.get(job)
+    if not j:
+        return JSONResponse({"error": "생성 정보를 찾지 못했어요. 다시 시도해 주세요.", "retry": True})
+    if j["status"] == "running":
+        return JSONResponse({"ready": False})
+    if j["status"] == "error":
+        return JSONResponse({"error": "생성에 문제가 있었어요. 잠시 후 다시 시도해 주세요.", "retry": True})
+    return JSONResponse({"ready": True, "teaser": True, "teaser_html": j.get("html", "")})
 
 
 def _img_thumb_data_uri(path, max_px: int = 640) -> str:
