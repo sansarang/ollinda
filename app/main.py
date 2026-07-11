@@ -110,23 +110,27 @@ app = FastAPI(title="shopcast", version="0.3.0")
 
 @app.middleware("http")
 async def admin_basic_auth(request, call_next):
-    """/admin* 운영자 보호(HTTP Basic). SHOPCAST_ADMIN_PASS 설정 시에만 활성(미설정=로컬개발).
+    """/admin* 운영자 보호(HTTP Basic). SHOPCAST_ADMIN_PASS 미설정 시 fail-closed로 /admin/* 전면 차단
+    (/admin/cleanup·/admin/testaccount 등 파괴적·민감 라우트 무인증 노출 방지).
     사장님 업로드(/u/*)·OAuth 콜백·미디어는 공개 유지."""
     if request.url.path.startswith("/admin"):
         pw = os.environ.get("SHOPCAST_ADMIN_PASS")
-        if pw:
-            user = os.environ.get("SHOPCAST_ADMIN_USER", "admin")
-            ok = False
-            auth = request.headers.get("authorization", "")
-            if auth.startswith("Basic "):
-                try:
-                    u, _, p = base64.b64decode(auth[6:]).decode().partition(":")
-                    ok = secrets.compare_digest(u, user) and secrets.compare_digest(p, pw)
-                except Exception:
-                    ok = False
-            if not ok:
-                return Response("운영자 인증 필요", status_code=401,
-                                headers={"WWW-Authenticate": 'Basic realm="shopcast admin"'})
+        if not pw:
+            # 운영자 비밀번호 미구성 = 관리자 영역 접근 차단(fail-closed).
+            return Response("운영자 인증이 구성되지 않아 관리자 영역을 사용할 수 없습니다(SHOPCAST_ADMIN_PASS 미설정).",
+                            status_code=503)
+        user = os.environ.get("SHOPCAST_ADMIN_USER", "admin")
+        ok = False
+        auth = request.headers.get("authorization", "")
+        if auth.startswith("Basic "):
+            try:
+                u, _, p = base64.b64decode(auth[6:]).decode().partition(":")
+                ok = secrets.compare_digest(u, user) and secrets.compare_digest(p, pw)
+            except Exception:
+                ok = False
+        if not ok:
+            return Response("운영자 인증 필요", status_code=401,
+                            headers={"WWW-Authenticate": 'Basic realm="shopcast admin"'})
     resp = await call_next(request)
     # 보안 헤더(신뢰·SEO) — 모든 응답에 적용
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")

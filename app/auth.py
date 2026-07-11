@@ -12,7 +12,13 @@ import uuid
 
 from app import db
 
-SECRET = os.environ.get("SHOPCAST_SECRET", "dev-secret-change-me").encode()
+_secret = os.environ.get("SHOPCAST_SECRET")
+if not _secret:
+    # fail-closed: 서명 키가 없으면 세션 위조가 가능하므로 기동을 중단한다.
+    raise RuntimeError(
+        "SHOPCAST_SECRET 환경변수가 설정되지 않았습니다. 세션 서명 키 없이는 서버를 기동할 수 없습니다."
+    )
+SECRET = _secret.encode()
 COOKIE = "shop_session"
 
 
@@ -31,7 +37,7 @@ def verify_pw(pw: str, salt: str, h: str) -> bool:
 # ── 세션 쿠키 ──
 def make_session(uid: str) -> str:
     raw = f"{uid}.{int(time.time())}"
-    sig = hmac.new(SECRET, raw.encode(), hashlib.sha256).hexdigest()[:16]
+    sig = hmac.new(SECRET, raw.encode(), hashlib.sha256).hexdigest()
     return f"{raw}.{sig}"
 
 
@@ -41,7 +47,7 @@ def read_session(cookie: str | None) -> str | None:
     try:
         uid, ts, sig = cookie.rsplit(".", 2)
         raw = f"{uid}.{ts}"
-        good = hmac.new(SECRET, raw.encode(), hashlib.sha256).hexdigest()[:16]
+        good = hmac.new(SECRET, raw.encode(), hashlib.sha256).hexdigest()
         if hmac.compare_digest(good, sig):
             return uid
     except Exception:

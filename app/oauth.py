@@ -29,7 +29,13 @@ import requests
 
 from app.domain.models import Channel
 
-SECRET = os.environ.get("SHOPCAST_SECRET", "dev-secret-change-me").encode()
+_secret = os.environ.get("SHOPCAST_SECRET")
+if not _secret:
+    # fail-closed: state 서명 키가 없으면 OAuth state 변조가 가능하므로 기동을 중단한다.
+    raise RuntimeError(
+        "SHOPCAST_SECRET 환경변수가 설정되지 않았습니다. OAuth state 서명 키 없이는 서버를 기동할 수 없습니다."
+    )
+SECRET = _secret.encode()
 
 
 def base_url() -> str:
