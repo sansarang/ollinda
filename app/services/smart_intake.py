@@ -64,19 +64,39 @@ _QUESTION_BANK: dict[str, list[dict]] = {
     ],
 }
 
-# 범용(미정의 업종) — 어떤 업종이든 D.I.A.+ 재료가 되는 기본 2개(나머지는 프로필에서 변환 생성)
+# 범용(미정의 업종) 폴백 — 업종 중립 질문만(타업종 냄새 금지: '시공·당일 1시간' 같은 예시 금지)
 _GENERIC_QUESTIONS = [
+    {"id": "strength", "q": "우리 가게만의 강점 하나는요?", "type": "text",
+     "ph": "예: 10년 경력, 매일 직접 준비해요"},
     {"id": "price", "q": "가격대는요?", "type": "text", "ph": "예: 3만원대 (없으면 비워두세요)"},
-    {"id": "duration", "q": "소요 시간·기간은요?", "type": "text", "ph": "예: 당일 1시간"},
+    {"id": "fit_for", "q": "어떤 분께 추천하나요?", "type": "text", "ph": "예: 선물 찾는 분, 처음 오시는 분"},
 ]
 
 # 경험 유도(공통 1개, 항상 포함) — '왜/과정' 질문(SEO_CURRENT §5: vision은 결과만 보고
 # 과정·이유를 못 본다). D.I.A.+ 1차 경험의 핵심 재료라 모든 업종에서 필수.
+# placeholder는 업종별(프리셋) — 타업종 예시가 어색하게 나오지 않게. 비프리셋은 중립.
+_EXPERIENCE_PH = {
+    "tinting": "예: 기포 없애려고 유리 물세척만 20분 했어요",
+    "usedcar": "예: 하부·엔진룸까지 직접 점검하고 사진으로 남겼어요",
+    "clothing": "예: 실측 사이즈를 직접 재서 안내해요",
+    "hair": "예: 모발 상태 보고 약제 도포 시간을 조절했어요",
+    "restaurant": "예: 육수를 새벽부터 6시간 우려요",
+    "cafe": "예: 원두를 매일 아침 새로 갈아요",
+}
+_EXPERIENCE_PH_NEUTRAL = "한 줄이면 충분해요. 오늘 특히 정성 들인 부분을 적어주세요"
+
 EXPERIENCE_QUESTION = {
     "id": "experience",
     "q": "손님이 왜 만족했나요? 또는 작업하며 특별히 신경 쓴 점은요?",
-    "type": "text", "ph": "한 줄이면 충분해요. 예: 기포 없애려고 유리 물세척만 20분 했어요",
+    "type": "text", "ph": _EXPERIENCE_PH_NEUTRAL,
 }
+
+
+def _experience_question_for(prof) -> dict:
+    """경험 유도 질문 — 업종별 placeholder(프리셋), 그 외 중립."""
+    q = dict(EXPERIENCE_QUESTION)
+    q["ph"] = _EXPERIENCE_PH.get(getattr(prof, "key", ""), _EXPERIENCE_PH_NEUTRAL)
+    return q
 
 
 def _questions_from_profile(prof) -> list[dict]:
@@ -86,9 +106,8 @@ def _questions_from_profile(prof) -> list[dict]:
     - pain_points(고객 고민) → PAS 재료 질문("이번 손님은 왜 오셨어요?")."""
     out: list[dict] = []
     if getattr(prof, "key", "generic") == "generic":
-        # GENERIC(프로필 없음)의 모호한 신호("실제 사진, 후기")는 변환하지 않음 — 강점 질문으로 대체
-        return [{"id": "strength", "q": "우리 가게만의 강점 하나는요?", "type": "text",
-                 "ph": "예: 10년 경력, 정품만 사용"}]
+        # GENERIC(프로필 없음)의 모호한 신호("실제 사진, 후기")는 변환하지 않음 — 중립 폴백이 담당
+        return []
     sig = [s.strip() for s in re.split(r"[,·/]", getattr(prof, "trust_signals", "") or "") if s.strip()]
     for i, item in enumerate(sig[:2]):
         short = item[:24]
@@ -118,7 +137,8 @@ def questions_for(industry: str, biz_type: str = "local", purpose: str = "",
     # 목적별 미세 조정 — 이벤트·할인 목적이면 이벤트 질문을 앞으로
     if "이벤트" in (purpose or "") or "할인" in (purpose or ""):
         qs.sort(key=lambda x: 0 if ("이벤트" in x["q"] or x["id"] in ("event", "perks")) else 1)
-    return {"industry": prof.name, "questions": qs, "experience": EXPERIENCE_QUESTION,
+    return {"industry": prof.name, "questions": qs,
+            "experience": _experience_question_for(prof),
             "prefill": known,
             "hint": "안 넣어도 되지만, 넣으면 글이 훨씬 구체적으로 좋아져요"}
 

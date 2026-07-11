@@ -525,13 +525,27 @@ def demo_zip(asset_id: str, request: Request):
 
 # ══ 스마트 입력 엔진(콘텐츠생성 개선 PHASE 1~3) — 무료·유료 공용 ══
 @app.get("/api/intake/questions")
-def intake_questions(industry: str = "", biz_type: str = "local", purpose: str = ""):
-    """업종·목적 맞춤 스마트 질문 3~4개 + 경험 유도 1개(전부 선택 입력)."""
+def intake_questions(request: Request, industry: str = "", biz_type: str = "local", purpose: str = ""):
+    """업종·목적 맞춤 스마트 질문 3~4개 + 경험 유도 1개(전부 선택 입력).
+    미정의 업종(프리셋·캐시 없음)은 ensure_profile로 AI 프로필을 1회 생성해 캐시
+    (industry_profiles 재사용) → 빵집 같은 업종도 맞춤 질문. 재요청은 LLM 0콜(캐시)."""
     from app.services import smart_intake
-    if not (industry or "").strip():
+    from app.industries import resolve_industry, ensure_profile
+    industry = (industry or "").strip()
+    if not industry:
         return JSONResponse({"questions": [], "experience": smart_intake.EXPERIENCE_QUESTION,
                              "hint": "업종을 입력하면 맞춤 질문을 보여드려요"})
-    return JSONResponse(smart_intake.questions_for(industry.strip(), biz_type, purpose))
+    if resolve_industry(industry).key == "generic":
+        from app import ratelimit
+        ip = (request.headers.get("cf-connecting-ip")
+              or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+              or (request.client.host if request.client else "") or "unknown")
+        if ratelimit.allow("intakeq:" + ip, 4, 20):    # 미가입 LLM 콜 남용 방지(캐시 히트는 소모 없음)
+            try:
+                ensure_profile(industry)               # 생성 실패 시 GENERIC → 중립 폴백 질문
+            except Exception:
+                pass
+    return JSONResponse(smart_intake.questions_for(industry, biz_type, purpose))
 
 
 @app.post("/api/intake/guess")
