@@ -89,6 +89,12 @@ class CaptionGenerator(Generator):
         kws = seo.target_keywords(prof.name, tenant.region, asset.note,
                                   axis=strat.keyword_axis, brand=tenant.brand_name)
         text = _call_llm(self._prompt(tenant, asset, len(imgs), kws), self.model, 1200)
+        # 저장·공유 CTA 자동 삽입(영상강화 PHASE 5) — 저장·공유가 좋아요보다 3~5배 가중치.
+        # LLM이 이미 넣었으면 중복 삽입하지 않음. 해시태그 앞에 배치.
+        if text and "저장" not in text:
+            cta = seo.save_share_line("instagram")
+            m = __import__("re").search(r"\n\s*#", text)
+            text = (text[:m.start()] + "\n\n" + cta + text[m.start():]) if m else (text.rstrip() + "\n\n" + cta)
         return ContentPiece(
             id=str(uuid.uuid4()), tenant_id=tenant.id, asset_id=asset.id,
             channel=Channel.INSTAGRAM, kind=self.kind,

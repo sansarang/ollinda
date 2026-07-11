@@ -276,7 +276,7 @@ class ShortVideoGenerator(Generator):
             f"{format_directive(fmt)}\n"
             f"{seo.keywords_line(kws)}\n\n"
             f"{seo.SHORT_DIRECTIVES_SELLER if strat.key == 'seller' else seo.SHORT_DIRECTIVES}\n"
-            f"{seo.HOOK_RULE}\n{seo.VIDEO_SCRIPT_CRAFT}\n{seo.SUBTITLE_DENSITY}\n{seo.PLATFORM_YOUTUBE}\n{seo.PLATFORM_REEL}\n{seo.COPY_PSYCH}\n{seo.FACTS_RULE}\n"
+            f"{seo.HOOK_RULE}\n{seo.VIDEO_SCRIPT_CRAFT}\n{seo.SUBTITLE_DENSITY}\n{seo.SAVE_SHARE_RULE}\n{seo.PLATFORM_YOUTUBE}\n{seo.PLATFORM_REEL}\n{seo.COPY_PSYCH}\n{seo.FACTS_RULE}\n"
             f"[검색 진입] 제목과 0~3초 첫 자막에 검색 키워드('{kws[0] if kws else prof.name}')를 자연스럽게 포함(쇼츠 검색 노출).\n"
             "[루프] 마지막 장면이 첫 장면과 자연스럽게 이어지게(끝→처음 루프 = 재생 반복 → 재노출). 길이 30~45초 목표.\n\n"
             "위 규칙으로 인스타 릴스/유튜브 쇼츠를 기획하라. 아래 형식 그대로(대괄호 머리표 유지):\n"
@@ -311,6 +311,7 @@ class ShortVideoGenerator(Generator):
             outro_cta = "🔗 프로필 링크에서 구매하세요"
         else:
             outro_cta = (f"📍 네이버 '{tenant.name}' 검색\n방문·예약 환영" if tenant.name else "방문·예약 환영")
+        outro_cta += "\n🔖 저장해두고 필요할 때 보세요"       # 저장 유도(정보성 포맷 = 저장 신호, PHASE 5)
 
         video_path, note, dur_sec, cover_path = self._build_scene_video(
             vid_imgs, hook, sent, kws, tenant, strat, title, outro_cta)
@@ -352,6 +353,8 @@ class ShortVideoGenerator(Generator):
                 "narration": narration, "scenes": scenes_meta, "script": raw,
                 "scene_texts": sent, "outro_cta": outro_cta, "viral_format": fmt.name,
                 "trending_sound_tip": "발행 시 인스타/유튜브 앱에서 '트렌딩 사운드'를 입히면 도달이 크게 늘어요(공식 API 미지원→앱에서 1탭).",
+                "save_share_cta": {"youtube": seo.save_share_line("youtube"),
+                                   "instagram": seo.save_share_line("instagram")},   # 설명란 삽입용(PHASE 5)
                 "biz_type": strat.key, "target_keywords": kws,
                 "video_path": video_path, "image_path": imgs[0] if imgs else asset.path,
                 "image_paths": imgs, "duration_sec": dur_sec, "cover_path": cover_path,
