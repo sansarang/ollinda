@@ -386,12 +386,14 @@ def _teaser_html(pieces, brief, asset_id, remaining: int = 0,
         "el.innerHTML='<video src=\"'+d.url+'\" controls autoplay muted loop playsinline class=\"w-full rounded-xl bg-black\" style=\"max-height:440px\"></video>'"
         "+'<div class=\"flex items-center justify-between mt-2\"><span class=\"text-xs text-slate-400\">완성본(전체 길이·워터마크 없음)은 가입 후</span>"
         "<a href=\"/login/kakao\" class=\"text-xs font-bold text-indigo-600\">완성본 받기 →</a></div>';}}catch(e){}},3000);})();</script>"))
-    # ④ 잠긴 채널 — 실제로 생성된 것만 정직하게 안내(X는 이미 생성됨, 나머지는 가입 후 생성)
+    # ④ 잠긴 채널 — 실제로 생성된 것만 '생성 완료'로 정직하게 표기(무료경계 PHASE 5)
+    x_label = ("X (트위터) 단문 — 생성 완료, 가입하면 열려요" if by.get("x_post")
+               else "X (트위터) 단문 — 가입 후 생성")
     locked_items = "".join(
         f"<div class='flex items-center gap-2 text-sm text-slate-500 py-1.5 border-b border-slate-100'>"
         f"<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' class='w-4 h-4 text-slate-400'>"
         f"<rect x='3' y='11' width='18' height='11' rx='2'/><path d='M7 11V7a5 5 0 0 1 10 0v4'/></svg>{t}</div>"
-        for t in ["X (트위터) 단문 — 생성 완료, 가입하면 열려요",
+        for t in [x_label,
                   "인스타 캐러셀 카드 — 가입 후 생성",
                   "영상 완성본 + 피드 규격(1:1·4:5) — 가입 후",
                   "전체 다운로드(ZIP) · 네이버 발행 도우미 — 가입 후"])
