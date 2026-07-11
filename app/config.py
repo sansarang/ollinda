@@ -59,3 +59,9 @@ PLAN_LIMITS = {
 def plan_limit(plan: str, feature: str) -> int:
     """플랜별 기능 한도. -1=무제한. 미지정 플랜은 free로 취급."""
     return PLAN_LIMITS.get(plan or "free", PLAN_LIMITS["free"]).get(feature, 0)
+
+
+# ── 블로그 추적(블로그등록 PHASE 4) — 발행 일관성·주간 리포트 ──
+BLOG_WEEKLY_TARGET = int(os.environ.get("SHOPCAST_BLOG_WEEKLY", "3"))   # 기본 주 3회(C-Rank 지속성)
+WEEKLY_REPORT_DOW = int(os.environ.get("SHOPCAST_REPORT_DOW", "0"))     # 발송 요일(0=월요일, KST)
+WEEKLY_REPORT_HOUR = int(os.environ.get("SHOPCAST_REPORT_HOUR", "9"))   # 발송 시각(KST)

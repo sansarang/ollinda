@@ -175,3 +175,41 @@ def is_my_post_url(url: str, blog_id: str) -> bool:
     return bool(blog_id) and normalize_blog_id(url) == blog_id
 
 
+# ── PHASE 4: 발행 일관성(C-Rank '활동 지속성' 신호) ─────────────────
+def posting_consistency(posts: list[dict], weekly_target: int = 3, weeks: int = 4) -> dict:
+    """RSS 최근글 발행일 → 실제 발행 주기 측정. 올린다 안에서의 활동이 아니라
+    '블로그의 진짜 발행'을 기준으로 재기 때문에 정직하다(수동 발행 포함).
+    반환: {this_week, weekly_target, on_pace, last_post_at, days_since_last,
+           week_counts:[오래된주→이번주], streak_weeks, avg_per_week}"""
+    from datetime import datetime, timedelta
+    now = datetime.utcnow()
+    # 이번 주 시작(월요일 00:00 UTC 근사 — KST 엄밀 경계보다 단순함 우선, 지표는 추세용)
+    week_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    dates = sorted([p["published_at"] for p in (posts or []) if p.get("published_at")], reverse=True)
+    counts = [0] * weeks                      # [이번주, 지난주, ...] → 마지막에 뒤집음
+    for d in dates:
+        for i in range(weeks):
+            lo = week_start - timedelta(weeks=i)
+            hi = lo + timedelta(weeks=1)
+            if lo <= d < hi:
+                counts[i] += 1
+                break
+    streak = 0
+    for i in range(weeks):                    # 이번 주 포함 연속으로 1회+ 발행한 주 수
+        if counts[i] > 0:
+            streak += 1
+        elif i > 0:                           # 이번 주는 아직 진행 중 — 0이어도 스트릭 안 끊음
+            break
+    last = dates[0] if dates else None
+    return {
+        "this_week": counts[0],
+        "weekly_target": max(1, weekly_target),
+        "on_pace": counts[0] >= max(1, weekly_target),
+        "last_post_at": (last.isoformat() if last else ""),
+        "days_since_last": ((now - last).days if last else None),
+        "week_counts": list(reversed(counts)),
+        "streak_weeks": streak,
+        "avg_per_week": round(sum(counts) / weeks, 1),
+    }
+
+

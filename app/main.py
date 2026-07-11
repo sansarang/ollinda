@@ -1739,6 +1739,51 @@ def _blog_connect_card(t, fw: str) -> str:
     """'내 네이버 블로그 연결' 카드 — 연결 전(입력 폼) / 연결 후(현황+해제)."""
     inp = "flex-1 border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
     if getattr(t, "blog_id", ""):
+        # 발행 일관성(RSS 실측, C-Rank 지속성) + 최신 주간 리포트(블로그등록 PHASE 4)
+        cons_html = ""
+        try:
+            from app.services import blogsync as _bs
+            from app import config as _cfg
+            _feed = _bs.fetch_feed(t.blog_id)
+            if _feed.get("ok") and _feed.get("exists"):
+                _target = (getattr(t, "publish_schedule", 0) or 0) or _cfg.BLOG_WEEKLY_TARGET
+                cons = _bs.posting_consistency(_feed["posts"], weekly_target=_target)
+                _pace = ("<span class='text-emerald-600'>목표 달성 ✓</span>" if cons["on_pace"]
+                         else f"<span class='text-amber-600'>이번 주 {cons['this_week']}/{cons['weekly_target']}회</span>")
+                _mx = max(cons["week_counts"] + [1])
+                _bars = "".join(
+                    f"<div class='flex flex-col items-center gap-1'><div class='w-7 rounded-t bg-emerald-400' "
+                    f"style='height:{max(4, int(36 * n / _mx))}px'></div>"
+                    f"<span class='text-[10px] text-slate-400'>{n}</span></div>"
+                    for n in cons["week_counts"])
+                _gap = (f" · 마지막 발행 {cons['days_since_last']}일 전" if cons["days_since_last"] is not None else "")
+                cons_html = ("<div class='mt-4 bg-slate-50 rounded-2xl p-4'>"
+                             "<div class='flex items-center justify-between mb-2'>"
+                             f"<div class='text-sm font-bold text-slate-700'>📅 실제 발행 현황(RSS 실측) — {_pace}</div>"
+                             f"<div class='text-xs text-slate-400'>연속 {cons['streak_weeks']}주 발행{_gap}</div></div>"
+                             f"<div class='flex items-end gap-2 h-14'>{_bars}</div>"
+                             "<div class='text-[10px] text-slate-400 mt-1'>← 4주 전 · · 이번 주 →</div>"
+                             "<p class='text-xs text-slate-500 mt-2'>꾸준한 발행은 C-Rank '활동 지속성' 신호예요. "
+                             f"주 {cons['weekly_target']}회 페이스를 유지해 봐요. (무조건 상위 보장은 아니에요)</p></div>")
+        except Exception:
+            pass
+        _wr = db.latest_weekly_report(t.id)
+        if _wr and _wr.get("data"):
+            _d = _wr["data"]
+            _rows2 = ""
+            for c in (_d.get("rank_changes") or [])[:4]:
+                _b = c.get("before") or "미노출"
+                _a = c.get("after") or "미노출"
+                _src = {"blog_search": "블로그탭", "place": "플레이스", "blog": "지역검색"}.get(c.get("kind"), "")
+                _up = (c.get("after") or 99) < (c.get("before") or 99) and c.get("after")
+                _cls = "text-emerald-600" if _up else "text-slate-500"
+                _rows2 += (f"<div class='flex justify-between text-sm py-1 border-b border-slate-100'>"
+                           f"<span class='text-slate-600'>{esc(str(c.get('keyword', '')))} <span class='text-[10px] text-slate-400'>{_src}</span></span>"
+                           f"<span class='font-bold {_cls}'>{_b} → {_a}{' ⬆️' if _up else ''}</span></div>")
+            cons_html += ("<div class='mt-3 bg-indigo-50/50 rounded-2xl p-4'>"
+                          f"<div class='text-sm font-bold text-slate-700 mb-1'>🗞 주간 리포트 <span class='text-xs text-slate-400 font-normal'>({esc(_wr.get('week') or '')})</span></div>"
+                          + _rows2
+                          + f"<p class='text-xs text-slate-500 mt-2'>{esc(_d.get('coaching') or '')}</p></div>")
         pubs = db.list_blog_publishes(t.id, limit=5)
         pub_rows = "".join(
             f"<div class='flex items-center justify-between border-b border-slate-100 py-2 gap-2'>"
@@ -1761,7 +1806,7 @@ def _blog_connect_card(t, fw: str) -> str:
                 "<form method=post action='/me/blog' class='ml-auto' onsubmit=\"return confirm('블로그 연결을 해제할까요? 발행 확인·순위 매칭이 꺼져요.')\">"
                 "<input type=hidden name=blog value=''>"
                 "<button class='text-xs text-slate-400 hover:text-rose-500 font-semibold'>연결 해제</button></form>"
-                "</div>" + pub_box +
+                "</div>" + cons_html + pub_box +
                 "<script>async function blogChk(btn){var m=document.getElementById('blogChkMsg');m.textContent='확인 중…';btn.disabled=true;"
                 "try{var r=await fetch('/api/blog/check-published',{method:'POST'});var d=await r.json();"
                 "if(d.error){m.textContent=d.error;btn.disabled=false;return;}"
@@ -3216,6 +3261,13 @@ def reports_send_due():
     """7일 순위 리포트 발송(성장 PHASE 2) — 발송은 스텁, 크론/운영자가 호출."""
     from app.services import growth
     return JSONResponse(growth.send_due_reports())
+
+
+@app.post("/admin/reports/weekly")
+def reports_weekly_now():
+    """주간 블로그 리포트 즉시 발송(수동 트리거) — 스케줄러와 동일 로직(블로그등록 PHASE 4)."""
+    from app.services import weekly_report
+    return JSONResponse(weekly_report.send_all())
 
 
 @app.post("/admin/billing/charge-due")

@@ -95,6 +95,11 @@ def init_db() -> None:
                   "piece_id TEXT PRIMARY KEY, tenant_id TEXT, published_url TEXT, "
                   "published_at TEXT, matched_by TEXT, match_score REAL, post_title TEXT, created_at TEXT)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_blogpub_t ON blog_publishes(tenant_id, published_at)")
+        # 주간 성과 리포트(블로그등록 PHASE 4) — 발행 수·순위 변화 종합(앱내 + 이메일/카톡 스텁)
+        c.execute("CREATE TABLE IF NOT EXISTS weekly_reports("
+                  "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, week TEXT, "
+                  "data TEXT, sent_email INTEGER DEFAULT 0, created_at TEXT)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_weekrep ON weekly_reports(tenant_id, week)")
         # ── 신규기능①: 경쟁사 추적기 ──
         c.execute("CREATE TABLE IF NOT EXISTS competitors("
                   "id TEXT PRIMARY KEY, tenant_id TEXT, name TEXT, region TEXT, "
@@ -532,6 +537,76 @@ def list_blog_publishes(tenant_id: str, limit: int = 30) -> list[dict]:
             rows = c.execute("SELECT * FROM blog_publishes WHERE tenant_id=? "
                              "ORDER BY published_at DESC LIMIT ?", (tenant_id, limit)).fetchall()
         return [dict(r) for r in rows]
+    except sqlite3.OperationalError:
+        return []
+
+
+# ── 주간 리포트(블로그등록 PHASE 4) ──
+def save_weekly_report(tenant_id: str, week: str, data: dict, sent_email: bool = False) -> None:
+    """주간 리포트 저장(같은 주 재실행은 갱신)."""
+    try:
+        with _conn() as c:
+            ex = c.execute("SELECT id FROM weekly_reports WHERE tenant_id=? AND week=?",
+                           (tenant_id, week)).fetchone()
+            if ex:
+                c.execute("UPDATE weekly_reports SET data=?, sent_email=?, created_at=? WHERE id=?",
+                          (json.dumps(data, ensure_ascii=False), int(sent_email), _now(), ex["id"]))
+            else:
+                c.execute("INSERT INTO weekly_reports(tenant_id, week, data, sent_email, created_at) "
+                          "VALUES(?,?,?,?,?)",
+                          (tenant_id, week, json.dumps(data, ensure_ascii=False), int(sent_email), _now()))
+    except sqlite3.OperationalError:
+        pass
+
+
+def latest_weekly_report(tenant_id: str) -> Optional[dict]:
+    try:
+        with _conn() as c:
+            r = c.execute("SELECT * FROM weekly_reports WHERE tenant_id=? ORDER BY week DESC LIMIT 1",
+                          (tenant_id,)).fetchone()
+        if not r:
+            return None
+        d = dict(r)
+        d["data"] = json.loads(d.get("data") or "{}")
+        return d
+    except (sqlite3.OperationalError, ValueError):
+        return None
+
+
+def list_tenants_with_blog() -> list:
+    """블로그 연결된 가게 전체(주간 리포트·발행확인 잡 대상)."""
+    try:
+        with _conn() as c:
+            rows = c.execute("SELECT * FROM tenants WHERE blog_id IS NOT NULL AND blog_id!=''").fetchall()
+        return [_row_to_tenant(r) for r in rows]
+    except sqlite3.OperationalError:
+        return []
+
+
+def rank_history(tenant_id: str, keyword: str, kind: str = "", limit: int = 30) -> list[dict]:
+    """키워드 순위 이력(오래된→최신) — 성장 그래프·주간 변화 계산용."""
+    try:
+        with _conn() as c:
+            if kind:
+                rows = c.execute("SELECT rank, checked_at, COALESCE(kind,'blog') AS kind FROM rank_snapshots "
+                                 "WHERE tenant_id=? AND keyword=? AND COALESCE(kind,'blog')=? "
+                                 "ORDER BY checked_at ASC LIMIT ?", (tenant_id, keyword, kind, limit)).fetchall()
+            else:
+                rows = c.execute("SELECT rank, checked_at, COALESCE(kind,'blog') AS kind FROM rank_snapshots "
+                                 "WHERE tenant_id=? AND keyword=? ORDER BY checked_at ASC LIMIT ?",
+                                 (tenant_id, keyword, limit)).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.OperationalError:
+        return []
+
+
+def tracked_keywords(tenant_id: str, limit: int = 10) -> list[str]:
+    """스냅샷이 있는 추적 키워드(최근 기록 순)."""
+    try:
+        with _conn() as c:
+            rows = c.execute("SELECT keyword, MAX(checked_at) m FROM rank_snapshots WHERE tenant_id=? "
+                             "GROUP BY keyword ORDER BY m DESC LIMIT ?", (tenant_id, limit)).fetchall()
+        return [r["keyword"] for r in rows]
     except sqlite3.OperationalError:
         return []
 

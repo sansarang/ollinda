@@ -28,11 +28,27 @@ def start() -> None:
         sch = BackgroundScheduler(daemon=True, timezone="Asia/Seoul")
         sch.add_job(_daily_scan, "cron", hour=hour, minute=0,
                     id="competitor_daily", replace_existing=True)
+        # 주간 성과 리포트(블로그등록 PHASE 4) — 블로그 연결 가게 대상, 월요일 아침
+        from app import config as _cfg
+        sch.add_job(_weekly_blog_report, "cron",
+                    day_of_week=_cfg.WEEKLY_REPORT_DOW, hour=_cfg.WEEKLY_REPORT_HOUR, minute=10,
+                    id="weekly_blog_report", replace_existing=True)
         sch.start()
         _scheduler = sch
         logging.info("[scheduler] 경쟁사 일일 자동 스캔 등록(매일 %02d:00 KST)", hour)
+        logging.info("[scheduler] 주간 블로그 리포트 등록(요일=%d %02d:10 KST)",
+                     _cfg.WEEKLY_REPORT_DOW, _cfg.WEEKLY_REPORT_HOUR)
     except Exception:
         logging.exception("[scheduler] 기동 실패 — 자동 스캔 없이 계속")
+
+
+def _weekly_blog_report() -> None:
+    """주간 성과 리포트 — 블로그 연결 가게 전체(블로그등록 PHASE 4)."""
+    try:
+        from app.services import weekly_report
+        weekly_report.send_all()
+    except Exception:
+        logging.exception("[scheduler] 주간 블로그 리포트 실패")
 
 
 def _daily_scan() -> None:
