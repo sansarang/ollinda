@@ -130,12 +130,13 @@ class BlogDraftGenerator(Generator):
                        f"'네이버에서 \"{tenant.name}\" 검색 → 플레이스 찜·예약', 먼 손님은 온라인 구매로 안내."
                        + (f" 구매 안내: {buy}" if buy else "") + place)
         else:
-            place = (f" 네이버 지도 링크: {tenant.map_url}" if getattr(tenant, "map_url", "") else "")
-            closing = ("[마무리] 글 끝에 '찾아오는길(지도)·영업시간·전화' + "
-                       f"'네이버에서 \"{tenant.name}\" 검색 → 플레이스 저장·방문자리뷰·예약·전화' 행동 유도"
+            # 고정정보(주소·전화·영업시간·주차·지도)는 템플릿이 자동 삽입 — LLM은 행동 유도만(블로그템플릿 PHASE 2)
+            closing = ("[마무리] 글 끝은 방문 유도 한두 문장으로만 마쳐라. 주소·전화·영업시간·지도 링크는 "
+                       "시스템이 자동 삽입하니 본문에 쓰지 마라(중복 금지). "
+                       f"'네이버에서 \"{tenant.name}\" 검색 → 플레이스 저장·방문자리뷰·예약' 행동 유도는 좋다"
                        "(저장·리뷰·예약은 플레이스 순위의 핵심 신호). "
                        f"본문에서 업체명은 반드시 '{tenant.name}', 지역은 '{tenant.region}'으로 일관 표기"
-                       "(플레이스 등록정보와 일치 = 상호 신뢰 신호)." + place)
+                       "(플레이스 등록정보와 일치 = 상호 신뢰 신호).")
         prompt = (
             f"[가게] {tenant.name} (업종: {prof.name}, 지역: {tenant.region})\n"
             f"[사업형태] {strat.label} — {strat.goal}\n"
@@ -144,6 +145,7 @@ class BlogDraftGenerator(Generator):
             f"[입력 정보(실제 사진 분석 포함)] {asset.note}\n[사진 {len(imgs)}장]\n"
             f"{seo.speaker_frame(strat.key)}\n"
             f"{seo.keywords_line(kws)}\n{closing}\n\n"
+            f"{_tpl_sequence(tenant)}\n"
             f"{seo.BLOG_DIRECTIVES}\n{seo.BLOG_SELL_STRUCT}\n{seo.COPY_PSYCH}\n{seo.FACTS_RULE}\n"
             + (seo.blog_angle_directive(getattr(asset, "angle", "")) + "\n"
                if getattr(asset, "angle", "") else "")
@@ -176,19 +178,13 @@ class BlogDraftGenerator(Generator):
         # 셀러: 본문 끝에 구매 블록 보강(누락 대비)
         if strat.closing in ("buy", "both") and buy and buy not in body:
             body = body.rstrip() + "\n\n" + buy
-        # 매장(local/hybrid): 글 끝에 '지도·연락처·플레이스' 블록 항상 보장
+        # 매장(local/hybrid): 글 끝에 고정정보 블록 자동 삽입(블로그템플릿 PHASE 2)
+        # 지도는 텍스트 URL 대신 [여기 네이버 지도 넣기] 마커 — 발행 화면에서 장소 컴포넌트 가이드(PHASE 3)
+        fixed_block = ""
         if (getattr(tenant, "biz_type", "local") or "local") in ("local", "hybrid") and "찾아오는 길" not in body:
-            cb = ["📍 찾아오는 길 · 문의"]
-            if getattr(tenant, "address", ""):
-                cb.append(tenant.address)
-            if getattr(tenant, "phone", ""):
-                cb.append(f"📞 {tenant.phone}")
-            if getattr(tenant, "hours", ""):
-                cb.append(f"🕒 {tenant.hours}")
-            cb.append(f"네이버에서 '{tenant.name}' 검색 → 플레이스에서 찜·예약·길찾기 ⭐")
-            if getattr(tenant, "map_url", ""):
-                cb.append(f"🗺 {tenant.map_url}")
-            body = body.rstrip() + "\n\n" + "\n".join(cb)
+            from app.services import blogtpl
+            fixed_block = blogtpl.fixed_info_block(tenant)
+            body = body.rstrip() + "\n\n" + fixed_block
         # ③ FAQ 섹션 누락 대비 최소 보강(스마트블록·체류 신호)
         if "자주 묻는 질문" not in body and "자주묻는" not in body:
             body = body.rstrip() + (
@@ -214,8 +210,18 @@ class BlogDraftGenerator(Generator):
                      "biz_type": strat.key, "closing": strat.closing, "buy_block": buy,
                      "angle": getattr(asset, "angle", "") or "",
                      "target_kw": tkw,
+                     "fixed_info_block": fixed_block,      # 발행 화면 컴포넌트 가이드용(템플릿 PHASE 2·3)
                      "raw": raw, "image_path": imgs[0], "image_paths": imgs},
             status=ContentStatus.DRAFT)
+
+
+def _tpl_sequence(tenant) -> str:
+    """업종별 블로그 템플릿 시퀀스(블로그템플릿 PHASE 2) — 매장형/셀러형 자동분기 재사용."""
+    try:
+        from app.services import blogtpl
+        return blogtpl.sequence_directive(getattr(tenant, "biz_type", "local") or "local")
+    except Exception:
+        return ""
 
 
 def _ensure_photo_markers(body: str, n: int) -> str:
