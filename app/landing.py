@@ -208,14 +208,14 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
      box.innerHTML='';setDemoReady(true,'사진 확인이 오래 걸려 건너뛰었어요 — 바로 만들 수 있어요');},tmo);
    var fd=new FormData();fd.append('industry',(document.getElementById('d_ind')||{}).value||'');
    // 업로드 가속(버그1): 전송 전 1280px JPEG로 축소(모바일 수 MB 원본 → 수백 KB). 실패 시 원본.
-   async function shrink(f){try{if(!/^image\//.test(f.type||''))return f;
+   async function shrink(f){try{if(!/^image\\//.test(f.type||''))return f;
      var bmp=await createImageBitmap(f);var mx=Math.max(bmp.width,bmp.height);
      if(mx<=1280&&f.size<1500000)return f;
      var s=Math.min(1,1280/mx),cv=document.createElement('canvas');
      cv.width=Math.round(bmp.width*s);cv.height=Math.round(bmp.height*s);
      cv.getContext('2d').drawImage(bmp,0,0,cv.width,cv.height);
      var b=await new Promise(function(r){cv.toBlob(r,'image/jpeg',0.85);});
-     return b?new File([b],(f.name||'p').replace(/\.[^.]+$/,'')+'.jpg',{type:'image/jpeg'}):f;
+     return b?new File([b],(f.name||'p').replace(/\\.[^.]+$/,'')+'.jpg',{type:'image/jpeg'}):f;
    }catch(e){return f;}}
    var small=await Promise.all(Array.from(files).slice(0,6).map(shrink));
    if(fin||seq!==_gseq)return;
@@ -231,7 +231,17 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
    }catch(e){if(fin||seq!==_gseq)return;fin=true;clearTimeout(to);clearInterval(st);
      box.innerHTML='';setDemoReady(true,'');}}
  // 사진 관리(개선2) — 개별 삭제(×)·추가(+)·장수 실시간 갱신. 0장이면 초기 상태로.
- function dpChanged(){demoGuess();}   // 사진 목록 변경 시 동작(다음 커밋에서 '분석 동의'로 교체)
+ // 분석 전 동의(개선1) — 올리자마자 자동 분석하지 않음. 사용자가 사진 정리를 끝내고
+ // '분석 시작'을 눌러야 vision 실행(잘못 올린 사진에 비용·시간 낭비 방지). 안 눌러도 만들기는 가능.
+ function dpChanged(){var box=document.getElementById('d_guessbox');if(!box||!DP.length)return;
+   var c=document.getElementById('d_confirmed'),v=document.getElementById('d_vision');
+   if(c)c.value='';if(v)v.value='';_gseq++;setDemoReady(true,'');   // 목록 바뀜 → 이전 분석·확인 무효화
+   box.innerHTML='<div class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm">'
+     +'<div class="text-slate-700">사진 <b>'+DP.length+'장</b> 준비됐어요. 정리(×삭제·＋추가)가 끝났으면 AI 확인을 시작할까요?</div>'
+     +'<div class="flex items-center gap-2 mt-2">'
+     +'<button type="button" id="d_gstart" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold">이 사진들로 분석 시작</button>'
+     +'<span class="text-[11px] text-slate-400">안 해도 바로 만들 수 있어요</span></div></div>';
+   document.getElementById('d_gstart').onclick=function(){demoGuess();};}
  var DP=[];
  function dpSync(){try{var dt=new DataTransfer();DP.forEach(function(f){dt.items.add(f);});pf.files=dt.files;}catch(e){}}
  function dpReset(){var gb=document.getElementById('d_guessbox');if(gb)gb.innerHTML='';
