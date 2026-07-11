@@ -535,17 +535,46 @@ def intake_questions(request: Request, industry: str = "", biz_type: str = "loca
     if not industry:
         return JSONResponse({"questions": [], "experience": smart_intake.EXPERIENCE_QUESTION,
                              "hint": "업종을 입력하면 맞춤 질문을 보여드려요"})
+    preparing = False
     if resolve_industry(industry).key == "generic":
+        # 신규 업종 ~20초 지연 개선: 즉시 중립 질문 반환 + 프로필은 백그라운드 생성(방식 b).
+        # 캐시 저장 후엔 같은 업종 재요청(같은 사용자 목적변경/재포커스 포함)부터 맞춤 질문 즉시.
         from app import ratelimit
         ip = (request.headers.get("cf-connecting-ip")
               or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
               or (request.client.host if request.client else "") or "unknown")
         if ratelimit.allow("intakeq:" + ip, 4, 20):    # 미가입 LLM 콜 남용 방지(캐시 히트는 소모 없음)
-            try:
-                ensure_profile(industry)               # 생성 실패 시 GENERIC → 중립 폴백 질문
-            except Exception:
-                pass
-    return JSONResponse(smart_intake.questions_for(industry, biz_type, purpose))
+            preparing = _spawn_profile_gen(industry)
+    out = smart_intake.questions_for(industry, biz_type, purpose)
+    if preparing:
+        out["preparing_custom"] = True                 # (정보용) 맞춤 질문 준비 중 — 다음 조회부터 적용
+    return JSONResponse(out)
+
+
+_intake_gen_busy: set = set()                          # 동일 업종 동시요청 → LLM 중복 콜 방지
+_intake_gen_lock = __import__("threading").Lock()
+
+
+def _spawn_profile_gen(industry: str) -> bool:
+    """ensure_profile을 백그라운드로 — 요청을 막지 않음. 이미 생성 중이면 스킵. 시작 여부 반환."""
+    key = industry.strip().lower()
+    with _intake_gen_lock:
+        if key in _intake_gen_busy:
+            return True                                # 이미 준비 중
+        _intake_gen_busy.add(key)
+
+    def _run():
+        try:
+            from app.industries import ensure_profile as _ep
+            _ep(industry)                              # 성공 시 industry_profiles 캐시 저장
+        except Exception:
+            pass
+        finally:
+            with _intake_gen_lock:
+                _intake_gen_busy.discard(key)
+    import threading
+    threading.Thread(target=_run, daemon=True).start()
+    return True
 
 
 @app.post("/api/intake/guess")
