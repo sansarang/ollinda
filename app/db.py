@@ -119,7 +119,8 @@ def init_db() -> None:
                          ("agency_note", "TEXT"),   # 대행 고객 담당 메모(성장 PHASE 4)
                          ("feat_usage_month", "TEXT"),          # 신규기능 월간 사용량 리셋 기준
                          ("competitor_scans_used", "INTEGER DEFAULT 0"),
-                         ("print_items_used", "INTEGER DEFAULT 0")]:
+                         ("print_items_used", "INTEGER DEFAULT 0"),
+                         ("angle_variants_used", "INTEGER DEFAULT 0")]:   # 앵글 변형 생성(상위노출 PHASE 4)
             try:
                 c.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
             except sqlite3.OperationalError:
@@ -711,7 +712,8 @@ def tracked_keywords(tenant_id: str, limit: int = 10) -> list[str]:
 
 
 # ── 신규기능 월간 사용량(경쟁사 스캔 / 인쇄물) — month_used 패턴, 원자적 ──
-_FEAT_COL = {"competitor_scans": "competitor_scans_used", "print_items": "print_items_used"}
+_FEAT_COL = {"competitor_scans": "competitor_scans_used", "print_items": "print_items_used",
+             "angle_variants": "angle_variants_used"}
 
 
 def feature_usage(uid: str, feature: str) -> int:
@@ -735,16 +737,17 @@ def incr_feature_usage(uid: str, feature: str, n: int = 1) -> None:
     if not (uid and col):
         return
     ym = _ym()
-    other = [v for k, v in _FEAT_COL.items() if v != col][0]
+    others = [v for v in _FEAT_COL.values() if v != col]
     with _conn() as c:
         try:
-            # 월이 바뀌면 대상 컬럼=n, 나머지 컬럼=0 리셋. 같은 달이면 대상 +n.
+            # 월이 바뀌면 대상 컬럼=n, 나머지 컬럼 전부 0 리셋. 같은 달이면 대상 +n.
+            other_sql = ", ".join(
+                f"{o} = CASE WHEN feat_usage_month = ? THEN COALESCE({o},0) ELSE 0 END" for o in others)
+            args = [ym, n, n] + [ym] * len(others) + [ym, uid]
             c.execute(
                 f"UPDATE users SET {col} = MAX(0, CASE WHEN feat_usage_month = ? "
-                f"THEN COALESCE({col},0) + ? ELSE ? END), "
-                f"{other} = CASE WHEN feat_usage_month = ? THEN COALESCE({other},0) ELSE 0 END, "
-                f"feat_usage_month = ? WHERE id=?",
-                (ym, n, n, ym, ym, uid))
+                f"THEN COALESCE({col},0) + ? ELSE ? END), " + other_sql + ", "
+                "feat_usage_month = ? WHERE id=?", args)
         except sqlite3.OperationalError:
             pass
 
@@ -1095,6 +1098,15 @@ def tenant_token(tid: str) -> str:
 
 
 # ── Asset ──────────────────────────────────────────────
+def get_asset(aid: str) -> Optional[Asset]:
+    with _conn() as c:
+        r = c.execute("SELECT * FROM assets WHERE id=?", (aid,)).fetchone()
+    if not r:
+        return None
+    return Asset(id=r["id"], tenant_id=r["tenant_id"], type=AssetType(r["type"]),
+                 path=r["path"], note=r["note"] or "")
+
+
 def create_asset(tenant_id: str, type_: AssetType, path: str, note: str = "") -> Asset:
     aid = str(uuid.uuid4())
     with _conn() as c:

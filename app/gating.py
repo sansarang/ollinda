@@ -6,7 +6,8 @@ from __future__ import annotations
 
 from app import config, db
 
-_LABEL = {"competitor_scans": "경쟁사 스캔", "print_items": "인쇄물"}
+_LABEL = {"competitor_scans": "경쟁사 스캔", "print_items": "인쇄물",
+          "angle_variants": "앵글 변형 생성"}
 
 
 def check_limit(user: dict | None, feature: str) -> dict | None:

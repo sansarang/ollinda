@@ -175,6 +175,28 @@ def is_my_post_url(url: str, blog_id: str) -> bool:
     return bool(blog_id) and normalize_blog_id(url) == blog_id
 
 
+def related_published(tenant_id: str, keywords: list[str], limit: int = 3) -> list[dict]:
+    """내부링크 제안(상위노출 PHASE 4) — 같은 주제(키워드 겹침)의 '발행 확인된' 내 글.
+    같은 주제 글끼리 서로 링크 = 블로그 주제 응집도(C-Rank 신호). [{url, title}]"""
+    from app import db
+    kws = {_norm_text(k) for k in (keywords or []) if k}
+    out = []
+    for pub in db.list_blog_publishes(tenant_id, limit=30):
+        url = pub.get("published_url") or ""
+        if not url:
+            continue
+        title = pub.get("post_title") or ""
+        piece = db.get_piece(pub.get("piece_id") or "")
+        p_kws = {_norm_text(k) for k in ((piece.payload.get("target_keywords") or []) if piece else [])}
+        p_title = _norm_text((piece.payload.get("title") or "") if piece else title)
+        # 키워드 직접 겹침 or 제목에 키워드 포함이면 같은 주제 축으로 판정
+        if (kws & p_kws) or any(k and k in p_title for k in kws):
+            out.append({"url": url, "title": title or (piece.payload.get("title") if piece else url)})
+        if len(out) >= limit:
+            break
+    return out
+
+
 # ── PHASE 4: 발행 일관성(C-Rank '활동 지속성' 신호) ─────────────────
 def posting_consistency(posts: list[dict], weekly_target: int = 3, weeks: int = 4) -> dict:
     """RSS 최근글 발행일 → 실제 발행 주기 측정. 올린다 안에서의 활동이 아니라

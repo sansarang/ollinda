@@ -96,6 +96,17 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
         db.save_piece(p)
     # 🎬 영상(SHORT)+릴스+캐러셀 = 백그라운드에서 생성(요청 막지 않음, /kit·폴링으로 표시)
     _spawn_video_bundle(tenant, asset, paths, brief_public)
+    # 🔗 내부링크 제안(상위노출 PHASE 4) — 같은 주제 축의 발행 확인된 내 글(주제 응집도 = C-Rank 신호)
+    try:
+        blog_piece0 = next((p for p in pieces if p.kind == ContentKind.BLOG), None)
+        if blog_piece0:
+            from app.services import blogsync
+            rel = blogsync.related_published(tenant.id, blog_piece0.payload.get("target_keywords") or [])
+            if rel:
+                blog_piece0.payload["related_posts"] = rel
+                db.save_piece(blog_piece0)
+    except Exception:
+        pass
     # 네이버 플레이스 연동 — 매장(local/hybrid)이면 블로그에 플레이스 키워드 + 리뷰요청 문구 첨부 (#플레이스전략)
     try:
         if (getattr(tenant, "biz_type", "local") or "local") in ("local", "hybrid"):

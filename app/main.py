@@ -1868,6 +1868,58 @@ def _blog_connect_card(t, fw: str) -> str:
             "<p class='text-xs text-slate-400 mt-2'>공개 RSS(공식 제공)로만 확인해요 — 비밀번호·로그인이 필요 없어요.</p></div>")
 
 
+@app.post("/api/blog/angle-variant")
+async def api_blog_angle_variant(request: Request):
+    """앵글 변형 생성(상위노출 PHASE 4) — 기존 블로그 글의 사진·소재를 재사용해
+    다른 의도 앵글(후기형/방법형/가격형) 글을 생성 → 각기 다른 스마트블록 진입.
+    plan 게이팅: angle_variants(config.PLAN_LIMITS)."""
+    from app import gating
+    u = auth.current_user(request)
+    blk = gating.check_limit(u, "angle_variants")
+    if blk:
+        return JSONResponse(blk, status_code=(401 if blk.get("need_signup") else 402))
+    t = _ensure_user_tenant(u)
+    form = await request.form()
+    piece_id = (form.get("piece_id") or "").strip()
+    angle = (form.get("angle") or "").strip()
+    if angle not in ("review", "howto", "price"):
+        return JSONResponse({"error": "앵글은 review/howto/price 중 하나예요."}, status_code=400)
+    piece = db.get_piece(piece_id)
+    if not piece or piece.tenant_id != t.id or piece.kind.value != "blog":
+        return JSONResponse({"error": "내 블로그 글을 찾지 못했어요."}, status_code=404)
+    asset = db.get_asset(piece.asset_id)
+    if not asset:
+        return JSONResponse({"error": "원본 소재를 찾지 못했어요."}, status_code=404)
+    asset.angle = angle
+    tkw = (piece.payload.get("target_kw") or "").strip() or \
+          ((piece.payload.get("target_keywords") or [""])[0] or "").strip()
+    if tkw:
+        asset.target_kw = tkw
+
+    def _bg():
+        try:
+            from app.services.generate import generate_for
+            from app.domain.models import ContentKind as _CK
+            imgs = piece.payload.get("image_paths") or ([piece.payload.get("image_path")]
+                                                        if piece.payload.get("image_path") else None)
+            made = generate_for(t, asset, [_CK.BLOG], images=imgs)
+            for p in made:
+                p.payload["angle"] = angle
+                p.payload["variant_of"] = piece.id
+                p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value,
+                                                               p.payload, source=asset.note)
+                db.save_piece(p)
+        except Exception:
+            import logging
+            logging.exception("[angle-variant] 생성 실패 piece=%s", piece_id)
+    import threading
+    threading.Thread(target=_bg, daemon=True).start()
+    gating.consume(u, "angle_variants")
+    lab = {"review": "후기형", "howto": "방법·과정형", "price": "가격·비용형"}[angle]
+    return JSONResponse({"ok": True, "asset_id": piece.asset_id,
+                         "msg": f"{lab} 앵글 글을 만들고 있어요 (20~40초). '내 콘텐츠'에서 확인하세요."})
+
+
 @app.post("/me/topic-axis")
 def my_topic_axis(request: Request, topic_axis: str = Form("")):
     """'전문 주제 축' 저장 — 이 블로그가 밀 핵심 주제/키워드군(C-Rank 주제 집중)."""
@@ -2446,6 +2498,58 @@ def kit(request: Request, asset_id: str):
     return HTMLResponse(_subscriber_page("발행 소재", body))
 
 
+def _internal_link_box(blog, sec: str) -> str:
+    """내부링크 안내 — 같은 주제 축의 '발행 확인된' 내 글을 본문 끝에 링크로 넣도록 제안."""
+    rel = blog.payload.get("related_posts") or []
+    if not rel:
+        try:
+            from app.services import blogsync
+            rel = blogsync.related_published(blog.tenant_id, blog.payload.get("target_keywords") or [])
+        except Exception:
+            rel = []
+    if not rel:
+        return ""
+    links_text = "\n".join(f"▶ 함께 보면 좋은 글: {r.get('title') or r['url']}\n{r['url']}" for r in rel[:3])
+    rows = "".join(
+        f"<div class='flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2 mb-1.5'>"
+        f"<span class='text-sm text-slate-600 truncate'>{esc(r.get('title') or r['url'])}</span>"
+        f"<a href='{esc(r['url'])}' target=_blank rel=noopener class='text-xs text-indigo-500 font-bold whitespace-nowrap ml-2'>보기 ↗</a></div>"
+        for r in rel[:3])
+    return (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>🔗 내부링크 — 같은 주제 내 글과 연결 "
+            "<span class='text-emerald-600'>(주제 응집도 = C-Rank 신호)</span></div>"
+            "<p class='text-xs text-slate-500 mb-2'>발행할 때 본문 끝에 아래 글 링크를 넣어보세요. 같은 주제 글끼리 연결되면 "
+            "블로그의 주제 전문성이 쌓여요.</p>" + rows +
+            f"<textarea id='nvRel' class='hidden'>{esc(links_text)}</textarea>"
+            "<button onclick=\"nvcp('nvRel',this)\" class='mt-1 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl transition'>📋 링크 문구 복사</button></div>")
+
+
+def _angle_variant_box(blog, sec: str, cbtn: str) -> str:
+    """앵글 변형 생성 버튼 — 후기/방법/가격 서로 다른 스마트블록 다중진입."""
+    cur = blog.payload.get("angle") or ""
+    btns = ""
+    for a, lab, desc in (("review", "후기형", "'후기' 블록"), ("howto", "방법·과정형", "'방법' 블록·스니펫"),
+                         ("price", "가격·비용형", "'가격/비용' 블록")):
+        if a == cur:
+            btns += (f"<div class='px-3.5 py-2 rounded-xl bg-indigo-50 text-indigo-600 text-xs font-bold'>"
+                     f"✓ {lab} (이 글)</div>")
+        else:
+            btns += (f"<button type=button onclick=\"angVar('{a}',this)\" "
+                     f"class='px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-indigo-100 text-slate-600 text-xs font-bold transition'>"
+                     f"＋ {lab} <span class='text-slate-400 font-normal'>{desc}</span></button>")
+    return (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>🧩 스마트블록 다중진입 — 같은 소재, 다른 앵글"
+            "<span class='text-emerald-600'> (한 키워드로 여러 블록 노리기)</span></div>"
+            "<p class='text-xs text-slate-500 mb-3'>후기형·방법형·가격형은 각각 다른 검색결과 블록에 걸려요. "
+            "같은 사진으로 다른 앵글 글을 만들어 진입 기회를 늘려요.</p>"
+            f"<div class='flex flex-wrap gap-2'>{btns}</div>"
+            "<div id='angMsg' class='text-xs text-slate-400 mt-2'></div>"
+            f"<script>async function angVar(a,btn){{var m=document.getElementById('angMsg');m.textContent='생성 요청 중…';btn.disabled=true;"
+            "try{var fd=new FormData();fd.append('piece_id','" + blog.id + "');fd.append('angle',a);"
+            "var r=await fetch('/api/blog/angle-variant',{method:'POST',body:fd});var d=await r.json();"
+            "if(d.error){m.textContent=d.error;btn.disabled=false;return;}"
+            "m.innerHTML='✅ '+d.msg+' <a href=\"/me?tab=content\" class=\"text-indigo-500 font-bold underline\">내 콘텐츠 →</a>';"
+            "}catch(e){m.textContent='요청 실패';btn.disabled=false;}}</script></div>")
+
+
 def _naver_publish_confirm_box(tenant, blog, sec: str, cbtn: str, ok: str = "", err: str = "") -> str:
     """발행 확인 카드 — 이미 확인됨(✅) / 자동 확인 버튼(RSS) + 수동 URL 붙여넣기 폼."""
     banner = ""
@@ -2545,6 +2649,10 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
            + "<li>🎬 직접 찍은 동영상까지 넣으면 D.I.A.+ 가점.</li>"
            + "<li>⚡ 발행 직후 <b>서치어드바이저에 URL 색인 요청</b>하면 검색 반영이 수일→수시간으로 빨라져요.</li></ul>"
            f"<a href='https://searchadvisor.naver.com/console/board/registration' target='_blank' rel='noopener' class='{cbtn} bg-slate-900 hover:bg-slate-800 inline-block'>🔗 서치어드바이저 색인 요청 →</a></div>")
+        # 내부링크 제안(상위노출 PHASE 4) — 같은 주제 발행글 서로 링크(주제 응집도 = C-Rank 신호)
+        + _internal_link_box(blog, sec)
+        # 앵글 변형(상위노출 PHASE 4) — 같은 소재로 다른 스마트블록 진입
+        + _angle_variant_box(blog, sec, cbtn)
         # 6. 발행 확인(블로그등록 PHASE 2) — 자동(RSS 매칭) + 수동(URL 붙여넣기) 병행
         + _naver_publish_confirm_box(tenant, blog, sec, cbtn, ok, err)
         # 토스트
