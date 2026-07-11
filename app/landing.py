@@ -150,6 +150,8 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
   const biz=(document.querySelector('input[name="d_biz"]:checked')||{}).value||'local';
   const fd=new FormData();fd.append('industry',ind);fd.append('biz_type',biz);
   fd.append('purpose',(document.getElementById('d_purpose')||{}).value||'');
+  fd.append('target_kw',(document.getElementById('d_target_kw')||{}).value||'');
+  fd.append('target_vol',(document.getElementById('d_target_vol')||{}).value||'');
   if(pf&&pf.files)Array.from(pf.files).slice(0,10).forEach(function(f){fd.append('photos',f);});
   try{const r=await fetch('/api/demo',{method:'POST',body:fd});const d=await r.json();
    clearInterval(_pg);var _b=document.getElementById('pgBar');if(_b)_b.style.width='100%';
@@ -224,7 +226,12 @@ def _hero() -> str:
   </div>
   <script>
   function fillDemo(){{var v=document.getElementById('rc_ind').value.trim();var d=document.getElementById('d_ind');
-   if(d&&v&&!d.value)d.value=v;var t=document.getElementById('herodemo');if(t)t.scrollIntoView({{behavior:'smooth',block:'center'}});
+   if(d&&v&&!d.value)d.value=v;
+   var top=window.__rcTop||{{}};var tk=document.getElementById('d_target_kw'),tv=document.getElementById('d_target_vol');
+   if(tk)tk.value=top.kw||'';if(tv)tv.value=top.vol||'';
+   var hint=document.getElementById('d_target_hint');
+   if(hint){{if(top.kw){{hint.textContent="목표: 미노출 키워드 '"+top.kw+"'"+(top.vol?(' (월 '+top.vol.toLocaleString()+'회 검색)'):'')+" 잡는 글";hint.classList.remove('hidden');}}else{{hint.classList.add('hidden');}}}}
+   var t=document.getElementById('herodemo');if(t)t.scrollIntoView({{behavior:'smooth',block:'center'}});
    if(d)d.focus();}}
   async function rankCheck(){{var o=document.getElementById('rc_out');o.textContent='조회 중…';
    var fd=new FormData();fd.append('region',document.getElementById('rc_region').value);
@@ -235,6 +242,7 @@ def _hero() -> str:
    (d.caught||[]).forEach(function(s){{rows+='<div class="flex justify-between bg-slate-50 rounded-lg px-3 py-1.5 mt-1.5"><span class="text-slate-700">'+s.keyword+'</span><span class="text-emerald-600 font-bold">'+s.rank+'위</span></div>';}});
    (d.missing||[]).forEach(function(s){{var v=s.volume?(' <span class="text-slate-400">월 '+s.volume.toLocaleString()+'회</span>'):'';rows+='<div class="flex justify-between bg-slate-50 rounded-lg px-3 py-1.5 mt-1.5"><span class="text-slate-500">'+s.keyword+v+'</span><span class="text-slate-400 font-bold">미노출</span></div>';}});
    var mk='';
+   window.__rcTop=(d.targets&&d.targets.length)?{{kw:d.targets[0].keyword,vol:d.targets[0].volume||0}}:null;
    (d.targets||[]).forEach(function(tg){{var v=tg.volume?(' (월 '+tg.volume.toLocaleString()+'회)':'');
      mk+='<a href="'+tg.make_href+'" class="block bg-indigo-50 hover:bg-indigo-100 rounded-xl px-3.5 py-2.5 mt-2 text-indigo-700 font-bold text-sm transition">'+tg.keyword+v+' — 이 키워드 잡는 글 만들기 →</a>';}});
    o.innerHTML='<b class="text-slate-900">'+d.headline+'</b>'+rows
@@ -274,7 +282,9 @@ def _hero_demo_card() -> str:
    <div id="herodemo" class="bg-white border-2 border-indigo-200 rounded-2xl shadow-sm p-5">
     <div class="flex items-center gap-2 text-slate-800 font-bold text-sm mb-1">{_icon('camera', 'w-4 h-4 text-indigo-600')} 내 사진으로 지금 만들어보기</div>
     <p class="text-xs text-slate-400 mb-3">사진 올리고 업종만 고르면 <b class="text-slate-600">진짜로 생성</b>해서 바로 보여드려요 · 가입 없이</p>
+    <div id="d_target_hint" class="hidden bg-[#EEF2FF] text-indigo-700 text-xs font-bold rounded-xl px-3 py-2 mb-2"></div>
     <form id="demoForm" class="space-y-2.5">
+     <input type=hidden id="d_target_kw"><input type=hidden id="d_target_vol">
      <label class="block bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl px-4 py-4 text-center cursor-pointer hover:border-indigo-300 transition">
        <span class="text-slate-800 font-bold text-sm inline-flex items-center gap-2">{_icon('camera', 'w-4 h-4 text-indigo-600')} 사진 올리기</span>
        <span class="block text-slate-400 text-xs mt-0.5">가게·상품 사진 (여러 장 가능 · 선택)</span>
