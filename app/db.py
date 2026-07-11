@@ -88,10 +88,21 @@ def init_db() -> None:
         # 다중 가게 — 한 사용자가 여러 가게(tenant)를 등록·전환
         c.execute("CREATE TABLE IF NOT EXISTS user_stores("
                   "user_id TEXT, tenant_id TEXT, created_at TEXT, PRIMARY KEY(user_id, tenant_id))")
+        # ── 신규기능①: 경쟁사 추적기 ──
+        c.execute("CREATE TABLE IF NOT EXISTS competitors("
+                  "id TEXT PRIMARY KEY, tenant_id TEXT, name TEXT, region TEXT, "
+                  "keywords TEXT, created_at TEXT, active INTEGER DEFAULT 1)")
+        c.execute("CREATE TABLE IF NOT EXISTS competitor_snapshots("
+                  "id INTEGER PRIMARY KEY AUTOINCREMENT, competitor_id TEXT, keyword TEXT, "
+                  "my_rank INTEGER, competitor_rank INTEGER, checked_at TEXT)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_comp_snap ON competitor_snapshots(competitor_id, checked_at)")
         # 마이그레이션: users.tenant_id (구독자 ↔ 본인 가게), free_used (무료 생성 횟수)
         for col, ddl in [("tenant_id", "TEXT"), ("free_used", "INTEGER DEFAULT 0"),
                          ("usage_month", "TEXT"), ("month_used", "INTEGER DEFAULT 0"),
-                         ("agency_note", "TEXT")]:   # 대행 고객 담당 메모(성장 PHASE 4)
+                         ("agency_note", "TEXT"),   # 대행 고객 담당 메모(성장 PHASE 4)
+                         ("feat_usage_month", "TEXT"),          # 신규기능 월간 사용량 리셋 기준
+                         ("competitor_scans_used", "INTEGER DEFAULT 0"),
+                         ("print_items_used", "INTEGER DEFAULT 0")]:
             try:
                 c.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
             except sqlite3.OperationalError:
@@ -460,6 +471,145 @@ def incr_month_usage(uid: str, n: int = 1) -> None:
             "UPDATE users SET month_used = MAX(0, CASE WHEN usage_month = ? "
             "THEN COALESCE(month_used,0) + ? ELSE ? END), usage_month = ? WHERE id=?",
             (ym, n, n, ym, uid))
+
+
+# ── 신규기능 월간 사용량(경쟁사 스캔 / 인쇄물) — month_used 패턴, 원자적 ──
+_FEAT_COL = {"competitor_scans": "competitor_scans_used", "print_items": "print_items_used"}
+
+
+def feature_usage(uid: str, feature: str) -> int:
+    """이번 달 기능 사용량(월 바뀌면 0). feature: competitor_scans | print_items."""
+    col = _FEAT_COL.get(feature)
+    if not col:
+        return 0
+    with _conn() as c:
+        try:
+            r = c.execute(f"SELECT feat_usage_month, {col} FROM users WHERE id=?", (uid,)).fetchone()
+        except sqlite3.OperationalError:
+            return 0
+    if not r or (r["feat_usage_month"] or "") != _ym():
+        return 0
+    return r[col] or 0
+
+
+def incr_feature_usage(uid: str, feature: str, n: int = 1) -> None:
+    """기능 사용량 +n (월 바뀌면 두 카운터 리셋 후 카운트). 단일 UPDATE 원자적."""
+    col = _FEAT_COL.get(feature)
+    if not (uid and col):
+        return
+    ym = _ym()
+    other = [v for k, v in _FEAT_COL.items() if v != col][0]
+    with _conn() as c:
+        try:
+            # 월이 바뀌면 대상 컬럼=n, 나머지 컬럼=0 리셋. 같은 달이면 대상 +n.
+            c.execute(
+                f"UPDATE users SET {col} = MAX(0, CASE WHEN feat_usage_month = ? "
+                f"THEN COALESCE({col},0) + ? ELSE ? END), "
+                f"{other} = CASE WHEN feat_usage_month = ? THEN COALESCE({other},0) ELSE 0 END, "
+                f"feat_usage_month = ? WHERE id=?",
+                (ym, n, n, ym, ym, uid))
+        except sqlite3.OperationalError:
+            pass
+
+
+# ── 경쟁사 추적 CRUD ──
+def create_competitor(tenant_id: str, name: str, region: str = "", keywords: list | None = None) -> str:
+    cid = uuid.uuid4().hex[:12]
+    with _conn() as c:
+        c.execute("INSERT INTO competitors(id,tenant_id,name,region,keywords,created_at,active) "
+                  "VALUES(?,?,?,?,?,?,1)",
+                  (cid, tenant_id, name, region, json.dumps(keywords or [], ensure_ascii=False), _now()))
+    return cid
+
+
+def list_competitors(tenant_id: str, active_only: bool = True) -> list[dict]:
+    try:
+        with _conn() as c:
+            q = "SELECT * FROM competitors WHERE tenant_id=?" + (" AND active=1" if active_only else "")
+            rows = c.execute(q + " ORDER BY created_at DESC", (tenant_id,)).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["keywords"] = json.loads(d.get("keywords") or "[]")
+            except Exception:
+                d["keywords"] = []
+            out.append(d)
+        return out
+    except sqlite3.OperationalError:
+        return []
+
+
+def get_competitor(cid: str) -> Optional[dict]:
+    try:
+        with _conn() as c:
+            r = c.execute("SELECT * FROM competitors WHERE id=?", (cid,)).fetchone()
+        if not r:
+            return None
+        d = dict(r)
+        try:
+            d["keywords"] = json.loads(d.get("keywords") or "[]")
+        except Exception:
+            d["keywords"] = []
+        return d
+    except sqlite3.OperationalError:
+        return None
+
+
+def count_competitors(tenant_id: str) -> int:
+    with _conn() as c:
+        try:
+            r = c.execute("SELECT COUNT(*) n FROM competitors WHERE tenant_id=? AND active=1", (tenant_id,)).fetchone()
+            return r["n"] if r else 0
+        except sqlite3.OperationalError:
+            return 0
+
+
+def delete_competitor(cid: str, tenant_id: str) -> None:
+    with _conn() as c:
+        c.execute("UPDATE competitors SET active=0 WHERE id=? AND tenant_id=?", (cid, tenant_id))
+
+
+def list_active_competitors() -> list[dict]:
+    """스케줄러용 — 전체 active 경쟁사."""
+    return list_competitors_all_active()
+
+
+def list_competitors_all_active() -> list[dict]:
+    try:
+        with _conn() as c:
+            rows = c.execute("SELECT * FROM competitors WHERE active=1").fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["keywords"] = json.loads(d.get("keywords") or "[]")
+            except Exception:
+                d["keywords"] = []
+            out.append(d)
+        return out
+    except sqlite3.OperationalError:
+        return []
+
+
+def save_competitor_snapshot(competitor_id: str, keyword: str, my_rank, competitor_rank) -> None:
+    with _conn() as c:
+        c.execute("INSERT INTO competitor_snapshots(competitor_id,keyword,my_rank,competitor_rank,checked_at) "
+                  "VALUES(?,?,?,?,?)", (competitor_id, keyword, my_rank, competitor_rank, _now()))
+
+
+def competitor_snapshots(competitor_id: str, keyword: str = "", limit: int = 30) -> list[dict]:
+    try:
+        with _conn() as c:
+            if keyword:
+                rows = c.execute("SELECT * FROM competitor_snapshots WHERE competitor_id=? AND keyword=? "
+                                 "ORDER BY checked_at DESC LIMIT ?", (competitor_id, keyword, limit)).fetchall()
+            else:
+                rows = c.execute("SELECT * FROM competitor_snapshots WHERE competitor_id=? "
+                                 "ORDER BY checked_at DESC LIMIT ?", (competitor_id, limit)).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.OperationalError:
+        return []
 
 
 def list_users() -> list[dict]:

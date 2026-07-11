@@ -45,3 +45,17 @@ PERFORMANCE_RANK_THRESHOLD = int(os.environ.get("SHOPCAST_PERF_RANK", "10"))  # 
 RANK_RATE_PER_MIN = int(os.environ.get("SHOPCAST_RANK_RPM", "5"))     # 동일 IP 분당 허용(넉넉히: 자기 가게+경쟁사 몇 개)
 RANK_RATE_PER_HOUR = int(os.environ.get("SHOPCAST_RANK_RPH", "20"))   # 동일 IP 시간당 허용
 RANK_CACHE_TTL = int(os.environ.get("SHOPCAST_RANK_CACHE_TTL", "3600"))  # 동일 상호+지역 캐시 1시간(네이버 콜 절감)
+
+# ── 신규 기능 플랜 게이팅(경쟁사 추적 / 인쇄물 생성) — 여기서만 조정(-1=무제한) ──
+PLAN_LIMITS = {
+    "free":   {"competitor_scans": 5,   "print_items": 3,  "competitors_max": 1},
+    "basic":  {"competitor_scans": 30,  "print_items": 10, "competitors_max": 2},
+    "pro":    {"competitor_scans": 300, "print_items": 50, "competitors_max": 5},
+    "self":   {"competitor_scans": 300, "print_items": 50, "competitors_max": 5},   # pro 별칭
+    "agency": {"competitor_scans": -1,  "print_items": -1, "competitors_max": -1},   # 무제한
+}
+
+
+def plan_limit(plan: str, feature: str) -> int:
+    """플랜별 기능 한도. -1=무제한. 미지정 플랜은 free로 취급."""
+    return PLAN_LIMITS.get(plan or "free", PLAN_LIMITS["free"]).get(feature, 0)
