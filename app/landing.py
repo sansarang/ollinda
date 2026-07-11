@@ -240,7 +240,7 @@ def _hero() -> str:
 
 def _video() -> str:
     return f"""
-<section id="video" class="bg-[#F9FAFB] py-20">
+<section id="video" class="bg-white py-20">
  <div class="max-w-4xl mx-auto px-5">
   <div class="reveal text-center mb-8">
    <h2 class="text-2xl sm:text-3xl font-bold text-slate-900">실제 결과물, 직접 보세요</h2>
@@ -294,7 +294,8 @@ def _stats() -> str:
     items = [("5", "개 채널 동시"), ("1", "장 사진이면 끝"), ("100", "점 상위노출 점검"), ("2", "개 모드 자동분기")]
     cells = "".join(f"<div class='reveal text-center'><div class='text-5xl font-bold text-indigo-600' data-count='{n}'>{n}</div>"
                     f"<div class='text-sm text-slate-500 mt-2 font-medium'>{l}</div></div>" for n, l in items)
-    return f"<section class='max-w-5xl mx-auto px-5 py-20'><div class='grid grid-cols-2 sm:grid-cols-4 gap-8'>{cells}</div></section>"
+    return (f"<section class='bg-[#F9FAFB] pt-20 pb-2'><div class='max-w-5xl mx-auto px-5'>"
+            f"<div class='grid grid-cols-2 sm:grid-cols-4 gap-8'>{cells}</div></div></section>")
 
 
 def _problem() -> str:
@@ -361,7 +362,7 @@ def _results() -> str:
           "<div class='flex-1'><div class='text-[11px] font-bold text-indigo-600'>오늘의 액션</div>"
           "<div class='text-sm text-slate-800 font-medium'>순위 오르는 중! 하나 더 올리면 1위 각이에요.</div></div></div>"
           "<p class='text-slate-500 text-sm mt-3'>뭘 할지 <b class='text-slate-800'>앱이 먼저 알려줘요</b> — 직원처럼.</p></div>")
-    return ("<section id='results' class='bg-white py-24'>"
+    return ("<section id='results' class='bg-[#F9FAFB] py-24'>"
             "<div class='max-w-6xl mx-auto px-5'>"
             "<div class='reveal text-center mb-4'>"
             "<span class='inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-500'>글만 뽑는 툴과 다른 점</span>"
@@ -447,7 +448,7 @@ def _new_features() -> str:
                  f"<p class='text-slate-500 text-sm leading-relaxed mb-4'>{desc}</p>"
                  f"<div class='text-xs text-slate-400 mb-4'>{trial}</div>"
                  f"<a href='{href}' class='block text-center bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition'>무료로 체험하기</a></div>")
-    return ("<section class='bg-white py-24'><div class='max-w-5xl mx-auto px-5'>"
+    return ("<section class='bg-[#F9FAFB] py-24'><div class='max-w-5xl mx-auto px-5'>"
             "<h2 class='reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900'>상위노출, 그다음까지</h2>"
             "<p class='reveal text-center text-slate-500 mb-14'>순위만 올리는 게 아니라 — 경쟁사를 이기고, 매장 밖 마케팅까지.</p>"
             f"<div class='grid sm:grid-cols-2 gap-6'>{body}</div></div></section>")
@@ -491,7 +492,7 @@ def _pricing() -> str:
                   f"<div class='text-xs text-slate-400 mb-3'>{sub}</div>"
                   f"<ul class='space-y-2.5 text-sm text-slate-600 flex-1 mt-2'>{lis}</ul>"
                   f"<a href='{href}' class='{btn} mt-7 text-center px-4 py-3.5 rounded-xl font-bold transition'>{cta}</a>{annual}</div>")
-    return (f"<section id='pricing' class='bg-[#F9FAFB] py-24'><div class='max-w-5xl mx-auto px-5'>"
+    return (f"<section id='pricing' class='bg-white py-24'><div class='max-w-5xl mx-auto px-5'>"
             f"<h2 class='reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900'>합리적인 요금</h2>"
             f"<p class='reveal text-center text-slate-500 mb-14'>대행사 1/5 가격 — 손님 2~3명만 더 와도 본전.</p>"
             f"<div class='grid sm:grid-cols-3 gap-6 items-stretch pt-3'>{cards}</div></div></section>")
@@ -506,7 +507,7 @@ _QA = [("정말 사진만 올리면 되나요?", "네. 사진과 한 줄 설명�
 
 def _faq() -> str:
     items = "".join(f"<details class='reveal card p-5'><summary class='font-semibold cursor-pointer text-slate-800'>{q}</summary><p class='text-slate-500 text-sm mt-2'>{a}</p></details>" for q, a in _QA)
-    return f"<section id='faq' class='py-24'><div class='max-w-3xl mx-auto px-5'><h2 class='reveal text-3xl sm:text-4xl font-bold text-center mb-12 text-slate-900'>자주 묻는 질문</h2><div class='space-y-3'>{items}</div></div></section>"
+    return f"<section id='faq' class='bg-[#F9FAFB] py-24'><div class='max-w-3xl mx-auto px-5'><h2 class='reveal text-3xl sm:text-4xl font-bold text-center mb-12 text-slate-900'>자주 묻는 질문</h2><div class='space-y-3'>{items}</div></div></section>"
 
 
 def _seo_jsonld() -> str:
@@ -527,7 +528,7 @@ def _seo_jsonld() -> str:
 def _contact() -> str:
     f = "w-full border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-indigo-400"
     return f"""
-<section id="contact" class="bg-[#F9FAFB] py-24"><div class="max-w-3xl mx-auto px-5">
+<section id="contact" class="bg-white py-24"><div class="max-w-3xl mx-auto px-5">
  <h2 class="reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900">문의하기</h2>
  <p class="reveal text-center text-slate-500 mb-10">올린다 도입·대행 상담을 무료로 도와드립니다.</p>
  <form id="contactForm" class="reveal card p-6 grid sm:grid-cols-2 gap-3">
@@ -718,7 +719,7 @@ def _honesty() -> str:
                     f"<div class='font-bold text-sm mb-1 text-slate-800'>{t}</div><div class='text-xs text-slate-500'>{d}</div></div>"
                     for ic, t, d in badges)
     return f"""
-<section class="bg-[#F9FAFB] py-24">
+<section class="bg-white py-24">
  <div class="max-w-4xl mx-auto px-5 text-center">
   <h2 class="reveal text-3xl sm:text-4xl font-bold mb-3 text-slate-900">없는 건 <span class="text-indigo-600">지어내지 않습니다</span></h2>
   <p class="reveal text-slate-500 mb-14 max-w-xl mx-auto">허위 콘텐츠는 차라리 안 만드는 게 낫습니다. 손님을 속이면 신뢰를 잃으니까요. <b class="text-slate-700">올린다는 사진과 사장님이 준 정보로만</b> 정직하게 씁니다.</p>
@@ -727,13 +728,16 @@ def _honesty() -> str:
 
 
 def render() -> str:
-    # 전환 최적화 순서(PHASE 15): 히어로(순위진단) → 즉시신뢰(데모) → 문제(PAS) → 해결·차별점 →
-    # 성과증명 → 정직성(상단) → 요금 → FAQ → 마지막 CTA
+    # 전환 논리 순서(랜딩 개선): ① 히어로(가치+CTA+진단) → ② 문제 공감(먼저 아프게) →
+    # ③ 해결·증명(영상·블로그) + 체험 위젯(증명 직후) → ④ 작동 원리(채널 알고리즘+루프+글 비교) →
+    # ⑤ 차별점(성과 가시화+정직) → ⑥ 전체 기능(숫자+핵심4) → ⑦ 신규 기능 → ⑧ 요금 → ⑨ 마지막 CTA
     return (_HEAD + _ga() + _seo_jsonld() + _nav()
-            + _hero() + _video() + _demo_widget()
-            + _problem() + _why_rank() + _rank_loop() + _results() + _honesty()
-            + _stats() + _copy_compare() + _modes() + _features() + _new_features()
-            + _pricing() + _faq() + _contact() + _cta() + _footer()
+            + _hero() + _problem()
+            + _video() + _demo_widget()
+            + _why_rank() + _rank_loop() + _copy_compare()
+            + _results() + _honesty()
+            + _stats() + _features() + _modes()
+            + _new_features() + _pricing() + _faq() + _contact() + _cta() + _footer()
             + _sticky_cta() + _FOOT)
 
 
