@@ -142,7 +142,7 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
      +'<div class="flex gap-2 mt-2"><button type="button" data-g="ok" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold">맞아요</button>'
      +'<button type="button" data-g="fix" class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 text-xs font-bold">수정할게요</button></div></div>';
    function confirmedLine(v){return '<div class="text-xs text-indigo-600 font-bold py-1 truncate cursor-pointer" '
-     +'title="'+esc(v)+'" onclick="this.classList.toggle(\'truncate\')">확인됨: '+esc(v)+'</div>';}
+     +'title="'+esc(v)+'" onclick="this.classList.toggle(&quot;truncate&quot;)">확인됨: '+esc(v)+'</div>';}
    box.querySelector('[data-g=ok]').onclick=function(){if(c)c.value=guess;
      box.innerHTML=confirmedLine(guess);   // 1줄 요약(넘치면 … · 탭하면 전체)
      onDone&&onDone();};
@@ -411,7 +411,7 @@ def _hero() -> str:
    (d.missing||[]).forEach(function(s){{var v=s.volume?(' <span class="text-slate-400">월 '+s.volume.toLocaleString()+'회</span>'):'';rows+='<div class="flex justify-between bg-slate-50 rounded-lg px-3 py-1.5 mt-1.5"><span class="text-slate-500">'+s.keyword+v+'</span><span class="text-slate-400 font-bold">미노출</span></div>';}});
    var mk='';
    window.__rcTop=(d.targets&&d.targets.length)?{{kw:d.targets[0].keyword,vol:d.targets[0].volume||0}}:null;
-   (d.targets||[]).forEach(function(tg){{var v=tg.volume?(' (월 '+tg.volume.toLocaleString()+'회)':'');
+   (d.targets||[]).forEach(function(tg){{var v=tg.volume?(' (월 '+tg.volume.toLocaleString()+'회)'):'';
      mk+='<a href="'+tg.make_href+'" class="block bg-indigo-50 hover:bg-indigo-100 rounded-xl px-3.5 py-2.5 mt-2 text-indigo-700 font-bold text-sm transition">'+tg.keyword+v+' — 이 키워드 잡는 글 만들기 →</a>';}});
    o.innerHTML='<b class="text-slate-900">'+d.headline+'</b>'+rows
      +'<div class="text-slate-400 mt-2">'+d.subline+'</div>'+mk
