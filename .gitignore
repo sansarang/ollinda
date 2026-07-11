@@ -16,3 +16,6 @@ references/
 deploy.sh
 data/
 *.zip
+
+# pytest
+.pytest_cache/
