@@ -79,11 +79,15 @@ EXPERIENCE_QUESTION = {
 }
 
 
-def questions_for(industry: str, biz_type: str = "local", purpose: str = "") -> dict:
+def questions_for(industry: str, biz_type: str = "local", purpose: str = "",
+                  known: dict | None = None) -> dict:
     """업종·목적 맞춤 질문 3~4개 + 경험 유도 1개. 무료·유료 공용(JSON 직렬화 가능).
-    프리셋 없는 업종은 범용 3문 + trust_signals 기반 선택형 1문(AI 프로필 활용)."""
+    프리셋 없는 업종은 범용 3문 + trust_signals 기반 선택형 1문(AI 프로필 활용).
+    known: 유료 프리필(콘텐츠생성 PHASE 3) — 이미 아는 값(매장정보 등)은 질문에서 제외하고
+    prefill로 되돌려 반복 입력을 없앤다."""
+    known = {k: v for k, v in (known or {}).items() if (v or "").strip()}
     prof = resolve_industry(industry)
-    qs = list(_QUESTION_BANK.get(prof.key, []))
+    qs = [q for q in _QUESTION_BANK.get(prof.key, []) if q["id"] not in known]
     if not qs:
         qs = list(_GENERIC_QUESTIONS)
         # AI/프리셋 프로필의 신뢰 신호 → "우리 가게에 해당되는 것" 선택형(그 가게의 실제 값 수집)
@@ -96,6 +100,7 @@ def questions_for(industry: str, biz_type: str = "local", purpose: str = "") -> 
     if "이벤트" in (purpose or "") or "할인" in (purpose or ""):
         qs.sort(key=lambda x: 0 if ("이벤트" in x["q"] or x["id"] in ("event", "perks")) else 1)
     return {"industry": prof.name, "questions": qs, "experience": EXPERIENCE_QUESTION,
+            "prefill": known,
             "hint": "안 넣어도 되지만, 넣으면 글이 훨씬 구체적으로 좋아져요"}
 
 

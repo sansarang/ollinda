@@ -355,7 +355,8 @@ def _hero_demo_card() -> str:
      <input id="d_ind" placeholder="업종/상품 (예: 꽃집, 헬스장, 캠핑 폴딩박스...)" class="{inp}"
        onblur="window.intakeQuestionsUI&&intakeQuestionsUI(document.getElementById('d_questions'),this.value,(document.querySelector('input[name=d_biz]:checked')||{{}}).value,(document.getElementById('d_purpose')||{{}}).value,'d_exp')">
      <div id="d_questions"></div>
-     <select id="d_purpose" class="{inp} bg-white">
+     <select id="d_purpose" class="{inp} bg-white"
+       onchange="window.intakeQuestionsUI&&intakeQuestionsUI(document.getElementById('d_questions'),(document.getElementById('d_ind')||{{}}).value,(document.querySelector('input[name=d_biz]:checked')||{{}}).value,this.value,'d_exp')">
        <option value="">무슨 목적으로 만들까요? (선택)</option>
        <option value="방문 유도">매장 방문·예약 유도</option>
        <option value="판매 전환">구매·판매 전환</option>
