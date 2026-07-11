@@ -6,10 +6,26 @@ docs: https://developers.naver.com/docs/serviceapi/search/local/local.md
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 
 import requests
+
+_log = logging.getLogger("shopcast.place")
+
+
+def _norm_name(s: str) -> str:
+    """상호명 정규화 — 공백·특수문자 제거 + 소문자. 지점명 차이로 인한 매칭 실패 완화."""
+    return re.sub(r"[\s()\[\]{}·・.,\-–—_/&'\"]+", "", (s or "")).lower()
+
+
+def _name_match(user_name: str, naver_name: str) -> bool:
+    """내 상호 ↔ 네이버 업체명 매칭(정규화 후 양방향 부분일치, 짧은 오탐 방지)."""
+    u, n = _norm_name(user_name), _norm_name(naver_name)
+    if len(u) < 2 or not n:
+        return False
+    return u in n or (len(n) >= 3 and n in u)
 
 
 def configured() -> bool:
@@ -20,6 +36,7 @@ def search(query: str, limit: int = 5) -> list[dict]:
     """가게명/키워드 → [{name, category, address, tel}]. 실패/무키 시 []."""
     query = (query or "").strip()
     if not (configured() and query):
+        _log.info("[place.search] 무키/빈쿼리 → 빈결과 (configured=%s, q=%r)", configured(), query)
         return []
     try:
         r = requests.get(
@@ -29,6 +46,9 @@ def search(query: str, limit: int = 5) -> list[dict]:
                      "X-Naver-Client-Secret": os.environ["NAVER_CLIENT_SECRET"]},
             timeout=8)
         if r.status_code != 200:
+            # 401/403=키 문제, 429=레이트리밋 — 원인 구분 위해 로깅
+            _log.warning("[place.search] 네이버 지역검색 non-200: status=%s q=%r body=%.200s",
+                         r.status_code, query, r.text)
             return []
         out = []
         for it in r.json().get("items", []):
@@ -85,9 +105,8 @@ def rank(keyword: str, store_name: str, limit: int = 5) -> int | None:
     items = search(keyword, limit)
     if not items:
         return None
-    key = re.sub(r"\s+", "", store_name or "")
     for i, it in enumerate(items, 1):
-        if key and key in re.sub(r"\s+", "", it.get("name", "")):
+        if _name_match(store_name, it.get("name", "")):
             return i
     return 0
 
@@ -98,14 +117,14 @@ def rank_detail(keyword: str, store_name: str, limit: int = 5) -> dict:
     items = search(keyword, limit)
     if not items:
         return {"rank": None, "rival": "", "leader": "", "competitors": []}
-    key = re.sub(r"\s+", "", store_name or "")
     my_i = 0
     comps = []
     for i, it in enumerate(items, 1):
-        mine = bool(key and key in re.sub(r"\s+", "", it.get("name", "")))
+        mine = _name_match(store_name, it.get("name", ""))
         if mine:
             my_i = i
         comps.append({"name": it.get("name", ""), "mine": mine})
     rival = (comps[my_i - 2]["name"] if my_i >= 2 else "")     # 내 바로 위 = 추월 대상
     leader = comps[0]["name"] if comps else ""
+    _log.info("[place.rank_detail] kw=%r store=%r → rank=%s (top%d)", keyword, store_name, my_i, len(items))
     return {"rank": my_i, "rival": rival, "leader": leader, "competitors": comps}
