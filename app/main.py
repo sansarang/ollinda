@@ -2652,6 +2652,48 @@ def kit(request: Request, asset_id: str):
     return HTMLResponse(_subscriber_page("발행 소재", body))
 
 
+def _workflow_guide(sec: str) -> str:
+    """임시저장/이어쓰기 워크플로우 안내(블로그템플릿 PHASE 4) — 네이버는 PC↔모바일앱
+    임시저장이 동기화되므로 'PC에서 뼈대 → 모바일에서 사진·지도 → 발행' 흐름이 가장 편하다.
+    사용자 상황(PC만/모바일만/둘다)별 추천 흐름을 탭으로 제시."""
+    flows = {
+        "both": ("💻+📱 PC와 모바일 둘 다 (추천)",
+                 ["💻 PC 네이버 블로그 글쓰기에 <b>제목·본문 붙여넣기</b> (긴 글은 PC가 편해요)",
+                  "💾 우측 상단 <b>임시저장</b> — 모바일앱과 자동 동기화돼요",
+                  "📱 네이버 블로그 <b>앱 → 글쓰기 → 임시저장 글 이어쓰기</b>",
+                  "📷 폰에 저장한 사진을 [사진N] 자리에 업로드 + <b>장소 컴포넌트</b> 삽입",
+                  "🚀 발행 → 아래 '발행함 ✓'으로 확인"]),
+        "pc": ("💻 PC만 쓸 때",
+               ["사진을 먼저 PC로 저장(위 '전체 ZIP 받기'가 편해요)",
+                "글쓰기에 제목·본문 붙여넣기 → [사진N] 자리에 사진 업로드",
+                "<b>장소</b> 버튼으로 지도 컴포넌트 삽입([여기 네이버 지도 넣기] 자리)",
+                "발행 → 아래 '발행함 ✓'으로 확인"]),
+        "mobile": ("📱 모바일만 쓸 때",
+                   ["이 화면에서 제목·본문을 각각 <b>복사</b>",
+                    "네이버 블로그 앱 → 글쓰기 → 붙여넣기",
+                    "사진은 <b>⬇ 저장</b> 버튼으로 폰에 받은 뒤 업로드(붙여넣기는 불안정해요)",
+                    "<b>장소</b> 버튼 → 위 초록 버튼으로 복사한 상호 붙여넣기 → 지도 삽입",
+                    "발행 → 아래 '발행함 ✓'으로 확인"]),
+    }
+    tabs = ""
+    panes = ""
+    for i, (key, (label, steps)) in enumerate(flows.items()):
+        on = "bg-slate-900 text-white" if i == 0 else "bg-slate-100 text-slate-600"
+        tabs += (f"<button type=button onclick=\"wfTab('{key}',this)\" data-wftab=1 "
+                 f"class='{on} px-3.5 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap'>{label}</button>")
+        lis = "".join(
+            f"<li class='flex gap-2.5 items-start mb-2'><span class='flex-shrink-0 w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 text-[11px] font-bold flex items-center justify-center mt-0.5'>{n+1}</span>"
+            f"<span class='text-sm text-slate-600'>{s}</span></li>" for n, s in enumerate(steps))
+        panes += f"<ul id='wf_{key}' class='mt-3 {'hidden' if i else ''}'>{lis}</ul>"
+    return (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>📝 어디서 쓰실 건가요? "
+            "<span class='text-emerald-600'>(네이버는 PC↔모바일 임시저장이 동기화돼요)</span></div>"
+            f"<div class='flex gap-1.5 overflow-x-auto'>{tabs}</div>{panes}"
+            "<script>function wfTab(k,btn){['both','pc','mobile'].forEach(function(x){"
+            "var p=document.getElementById('wf_'+x);if(p)p.classList.toggle('hidden',x!==k);});"
+            "document.querySelectorAll('[data-wftab]').forEach(function(b){b.className=b.className.replace('bg-slate-900 text-white','bg-slate-100 text-slate-600');});"
+            "btn.className=btn.className.replace('bg-slate-100 text-slate-600','bg-slate-900 text-white');}</script></div>")
+
+
 def _naver_component_guide(tenant, blog, sec: str) -> str:
     """네이버 지도·장소 컴포넌트 삽입 가이드(블로그템플릿 PHASE 3) — 모바일 우선.
     지도는 텍스트가 아니라 네이버 '장소' 컴포넌트로 넣어야 플레이스 연결·지역SEO에 유리.
@@ -2832,8 +2874,10 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
         f"<div class='text-sm text-emerald-600 font-bold'>🏪 {esc(sname)}</div>"
         "<h1 class='text-2xl font-extrabold text-slate-900 mb-1'>네이버 블로그에 올리기</h1>"
         "<p class='text-slate-400 text-sm mb-5'>① 제목·본문 복사해서 붙여넣기 → ② 사진을 순서대로 저장 → ③ 본문 <b>[📷 사진N 위치]</b>에 네이버 사진버튼으로 올리기</p>"
+        # 워크플로우 안내(블로그템플릿 PHASE 4) — PC/모바일/둘다 상황별 흐름
+        + _workflow_guide(sec)
         # 제목
-        f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>1. 제목</div>"
+        + f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>1. 제목</div>"
         f"<div class='text-lg font-extrabold text-slate-900 mb-3'>{esc(title)}</div>"
         f"<textarea id='nvT' class='hidden'>{esc(title)}</textarea>"
         f"<button onclick=\"nvcp('nvT',this)\" class='{cbtn} bg-slate-900 hover:bg-slate-800'>📋 제목 복사</button></div>"
