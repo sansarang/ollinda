@@ -13,13 +13,14 @@ import requests
 
 API = "https://api.tosspayments.com"
 
-PLANS = {
-    "basic":  {"name": "베이직", "price": 39000, "monthly": 8},      # 진입용 · 월 8건
-    "pro":    {"name": "프로", "price": 79000, "monthly": 0},        # 메인 · 무제한 + 성과기능
-    "agency": {"name": "대행(문의)", "price": 0, "monthly": 0},      # 커스텀 · 문의
-    # (구) self 플랜 하위호환 — 기존 참조 방어
-    "self":   {"name": "프로", "price": 79000, "monthly": 0},
-}
+from app.config import PLANS  # 가격·플랜은 app/config.py 단일 소스(성장 개선 규칙3)
+
+# 연 결제 플랜(월가×12×0.7) — Paddle/Toss priceId는 env 매핑
+from app import config as _cfg
+for _k in ("basic", "pro"):
+    PLANS[f"{_k}_yearly"] = {"name": PLANS[_k]["name"] + "(연)",
+                             "price": _cfg.yearly_price(PLANS[_k]["price"]),
+                             "monthly": PLANS[_k]["monthly"], "yearly": True}
 
 
 def configured() -> bool:
