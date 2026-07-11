@@ -1557,7 +1557,8 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 f"<a href='/me/qr/{_tl['code']}.png' download='ollinda-qr.png' class='inline-block mt-2 text-xs font-bold text-indigo-500'>⬇ QR 이미지 저장</a>"
                 "</div></div></div>")
         main_inner = (_sbadge + stats_row + _missbox + _growth_card(t, _fw)
-                      + _blog_connect_card(t, _fw) + _trackbox + _rankbox + _kwbox)
+                      + _blog_connect_card(t, _fw) + _place_card(t, _fw)
+                      + _trackbox + _rankbox + _kwbox)
     else:                                                 # ✨ 만들기 (기본) — 완성되면 여기(만들기 대시보드)에 결과 표시
         active = "create"
         _made = (request.query_params.get("made") or "").strip()
@@ -1979,6 +1980,65 @@ def _growth_card(t, fw: str) -> str:
             "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>📈 순위 성장</h2>"
             "<p class='text-sm text-slate-400 mb-3'>자동 추적 스냅샷 기준 · 실측만 표시(참고용, 위치·기기별 차이)</p>"
             + rows + coach + "</div>")
+
+
+def _place_card(t, fw: str) -> str:
+    """📍 플레이스 최적화 카드(상위노출 PHASE 5) — 매장(local/hybrid)만.
+    순위 요약 + 정보 완성도 체크리스트 + 리뷰 요청 키트(QR·문구)."""
+    if (getattr(t, "biz_type", "local") or "local") not in ("local", "hybrid"):
+        return ""
+    from app.services import place_opt
+    s = place_opt.place_summary(t)
+    # 플레이스 순위 요약
+    rank_rows = ""
+    for r in s["place_ranks"][:4]:
+        lab = f"{r['rank']}위" if r["rank"] else "5위 밖"
+        chg = ""
+        if r["prev"] is not None and r["rank"] is not None:
+            cc, pp = (r["rank"] or 6), (r["prev"] or 6)
+            chg = (" <span class='text-emerald-600 text-xs font-bold'>⬆️</span>" if cc < pp
+                   else (" <span class='text-rose-500 text-xs font-bold'>⬇️</span>" if cc > pp else ""))
+        rank_rows += (f"<div class='flex justify-between text-sm py-1.5 border-b border-slate-100'>"
+                      f"<span class='text-slate-600'>{esc(r['keyword'])}</span>"
+                      f"<span class='font-bold text-slate-800'>{lab}{chg}</span></div>")
+    rank_box = ((f"<div class='mb-4'><div class='text-xs font-bold text-slate-500 mb-1'>지도 노출 순위(분리 추적)</div>{rank_rows}</div>")
+                if rank_rows else "")
+    # 체크리스트
+    chk = ""
+    for i in s["checklist"]:
+        if i["done"] is True:
+            ic, cls = "✅", "text-slate-500"
+        elif i["done"] is False:
+            ic, cls = "⬜", "text-slate-700 font-semibold"
+        else:
+            ic, cls = "👀", "text-slate-600"
+        chk += (f"<details class='py-1.5 border-b border-slate-100'><summary class='cursor-pointer text-sm {cls} select-none'>"
+                f"{ic} {esc(i['label'])} <span class='text-[11px] text-slate-400 font-normal'>— {esc(i['why'])}</span></summary>"
+                f"<div class='text-xs text-slate-500 mt-1 pl-6'>{esc(i['how'])}</div></details>")
+    # 리뷰 요청 키트
+    rv = ""
+    for idx, r in enumerate(s["reviews"]):
+        rv += (f"<details class='bg-slate-50 rounded-xl px-3.5 py-2.5 mb-1.5'>"
+               f"<summary class='cursor-pointer text-sm font-semibold text-slate-700 select-none'>💬 {esc(r['where'])}</summary>"
+               f"<div class='text-sm text-slate-600 whitespace-pre-wrap mt-2'>{esc(r['text'])}</div>"
+               f"<textarea id='rv{idx}' class='hidden'>{esc(r['text'])}</textarea>"
+               f"<button onclick=\"omCopy(document.getElementById('rv{idx}').value);this.textContent='✅ 복사됨'\" "
+               "class='mt-2 px-3 py-1.5 bg-white border border-slate-200 text-slate-600 text-xs font-bold rounded-lg'>📋 복사</button></details>")
+    _tl = _ensure_track_link(t)
+    qr = (f"<div class='flex items-center gap-3 mt-3 bg-indigo-50/60 rounded-xl p-3'>"
+          f"<img src='/me/qr/{_tl['code']}.png' class='w-20 h-20 rounded-lg bg-white p-1 border border-slate-100' alt='QR'>"
+          "<div class='text-xs text-slate-600'>이 QR을 카운터에 두면 손님이 바로 내 플레이스로 가요.<br>"
+          f"<a href='/me/review-card.png' download class='text-indigo-600 font-bold'>⬇ 리뷰 요청 카드(인쇄용)</a> · "
+          f"<a href='/me/qr/{_tl['code']}.png' download class='text-indigo-600 font-bold'>⬇ QR 저장</a></div></div>") if _tl else ""
+    return (f"<div class='{fw} mt-5'>"
+            "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>📍 플레이스 최적화 (매장)</h2>"
+            f"<p class='text-sm text-slate-400 mb-4'>동네매장은 지도 상위노출이 방문에 직결돼요 · 정보 완성 {s['done']}/{s['known']}"
+            " · 리뷰는 <b>실제 방문 손님</b>에게만 정당하게 요청해요(가짜 리뷰 금지).</p>"
+            + rank_box
+            + "<div class='grid sm:grid-cols-2 gap-5'>"
+            f"<div><div class='text-xs font-bold text-slate-500 mb-1'>정보 완성도 체크리스트</div>{chk}</div>"
+            f"<div><div class='text-xs font-bold text-slate-500 mb-1'>리뷰 요청 키트</div>{rv}{qr}</div>"
+            "</div></div>")
 
 
 def _calendar_card(t, plan: str) -> str:
