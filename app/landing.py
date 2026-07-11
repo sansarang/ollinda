@@ -230,13 +230,29 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
      }else{box.innerHTML='';setDemoReady(true,'');}
    }catch(e){if(fin||seq!==_gseq)return;fin=true;clearTimeout(to);clearInterval(st);
      box.innerHTML='';setDemoReady(true,'');}}
- if(pf)pf.addEventListener('change',()=>{var files=pf.files||[];
-   document.getElementById('d_photoname').textContent=files.length?('✓ '+files.length+'장 선택'):'';
-   var pv=document.getElementById('d_preview');pv.innerHTML='';
-   if(files.length){pv.classList.remove('hidden');
-     Array.from(files).slice(0,8).forEach(function(f){var im=document.createElement('img');im.src=URL.createObjectURL(f);im.className='h-24 w-24 object-cover rounded-lg flex-shrink-0';pv.appendChild(im);});
-   }else{pv.classList.add('hidden');}
-   demoGuess();});
+ // 사진 관리(개선2) — 개별 삭제(×)·추가(+)·장수 실시간 갱신. 0장이면 초기 상태로.
+ function dpChanged(){demoGuess();}   // 사진 목록 변경 시 동작(다음 커밋에서 '분석 동의'로 교체)
+ var DP=[];
+ function dpSync(){try{var dt=new DataTransfer();DP.forEach(function(f){dt.items.add(f);});pf.files=dt.files;}catch(e){}}
+ function dpReset(){var gb=document.getElementById('d_guessbox');if(gb)gb.innerHTML='';
+   var c=document.getElementById('d_confirmed'),v=document.getElementById('d_vision');
+   if(c)c.value='';if(v)v.value='';_gseq++;setDemoReady(true,'');}
+ function dpRender(){var pv=document.getElementById('d_preview');if(!pv)return;
+   var nm=document.getElementById('d_photoname');if(nm)nm.textContent=DP.length?('✓ '+DP.length+'장 선택'):'';
+   pv.innerHTML='';
+   if(!DP.length){pv.classList.add('hidden');dpReset();return;}
+   pv.classList.remove('hidden');
+   DP.slice(0,10).forEach(function(f,i){var w=document.createElement('div');w.className='relative flex-shrink-0 pt-1.5 pr-1.5';
+     var im=document.createElement('img');im.src=URL.createObjectURL(f);im.className='h-24 w-24 object-cover rounded-lg';w.appendChild(im);
+     var x=document.createElement('button');x.type='button';x.setAttribute('aria-label','사진 삭제');x.textContent='×';
+     x.className='absolute top-0 right-0 w-5 h-5 rounded-full bg-slate-700 text-white text-xs leading-none flex items-center justify-center';
+     x.onclick=function(){DP.splice(i,1);dpSync();dpRender();if(DP.length)dpChanged();};
+     w.appendChild(x);pv.appendChild(w);});
+   var add=document.createElement('button');add.type='button';add.onclick=function(){pf.click();};
+   add.className='h-24 w-24 flex-shrink-0 rounded-lg border-2 border-dashed border-slate-300 text-slate-400 text-2xl mt-1.5';
+   add.textContent='＋';add.setAttribute('aria-label','사진 추가');pv.appendChild(add);}
+ if(pf)pf.addEventListener('change',function(){Array.from(pf.files||[]).forEach(function(f){DP.push(f);});
+   dpSync();dpRender();if(DP.length)dpChanged();});
  df.addEventListener('submit',async e=>{e.preventDefault();
   var sb=document.getElementById('d_submit');if(sb&&sb.disabled)return;   // 확인 전 Enter 제출 방지
   const box=document.getElementById('demoResult');
