@@ -141,14 +141,16 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
      +'<div class="text-slate-700">이 사진, <b>'+esc(guess)+'</b>(으)로 보여요. 맞나요?</div>'
      +'<div class="flex gap-2 mt-2"><button type="button" data-g="ok" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold">맞아요</button>'
      +'<button type="button" data-g="fix" class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 text-xs font-bold">수정할게요</button></div></div>';
+   function confirmedLine(v){return '<div class="text-xs text-indigo-600 font-bold py-1 truncate cursor-pointer" '
+     +'title="'+esc(v)+'" onclick="this.classList.toggle(\'truncate\')">확인됨: '+esc(v)+'</div>';}
    box.querySelector('[data-g=ok]').onclick=function(){if(c)c.value=guess;
-     box.innerHTML='<div class="text-xs text-indigo-600 font-bold py-1">확인됨: '+esc(guess)+'</div>';
+     box.innerHTML=confirmedLine(guess);   // 1줄 요약(넘치면 … · 탭하면 전체)
      onDone&&onDone();};
    box.querySelector('[data-g=fix]').onclick=function(){
      box.innerHTML='<div class="flex gap-2"><input id="'+cid+'_edit" value="'+esc(guess)+'" class="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400">'
        +'<button type="button" class="px-3 rounded-xl bg-indigo-600 text-white text-xs font-bold">저장</button></div>';
      box.querySelector('button').onclick=function(){var nv=document.getElementById(cid+'_edit').value.trim();
-       if(c)c.value=nv;box.innerHTML=nv?('<div class="text-xs text-indigo-600 font-bold py-1">확인됨: '+esc(nv)+'</div>'):'';
+       if(c)c.value=nv;box.innerHTML=nv?confirmedLine(nv):'';
        onDone&&onDone();};};
  };
  // 업종별 스마트 질문 렌더(PHASE 3) — 무료·유료 공용. 답은 window.__intakeAnswers에 수집.
@@ -162,19 +164,21 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
      var d=await r.json();var qs=d.questions||[];if(!qs.length){box.innerHTML='';return;}
      var prev=window.__intakeAnswers||{};                       // 질문 교체 시 답변 유지(초기화 금지)
      var oldExp=(document.getElementById(expId)||{}).value||'';
-     var h='<details open class="bg-slate-50 border border-slate-200 rounded-xl p-3"><summary class="text-xs font-bold text-slate-600 cursor-pointer select-none">'
+     // 기본 접힘(컴팩트) — 첫 화면엔 사진·업종·목적·버튼만. 선택 입력이라 원하면 펼침.
+     var h='<details class="bg-slate-50 border border-slate-200 rounded-xl p-3"><summary class="text-xs font-bold text-slate-600 cursor-pointer select-none">'
        +'더 좋은 글 만들기 <span class="text-slate-400 font-normal">('+esc(d.hint||'선택')+')</span></summary>'
-       +'<div class="mt-2 grid grid-cols-2 gap-2">';   // 질문 2×2 — 모바일 포함(세로 4줄→2줄)
+       +'<div class="mt-2 grid grid-cols-2 gap-2 items-end">';   // 질문 2×2, 셀 하단 정렬(높이 통일)
      qs.forEach(function(q,i){
-       h+='<div><div class="text-xs font-semibold text-slate-600 mb-1">'+esc(q.q)+'</div>';
+       // 라벨 1줄 고정(truncate, 전체는 title) — 2줄 넘침으로 그리드 지저분해지는 것 방지
+       h+='<div><div class="text-xs font-semibold text-slate-600 mb-1 truncate" title="'+esc(q.q)+'">'+esc(q.q)+'</div>';
        if(q.type==='choice'){h+='<div class="flex flex-wrap gap-1.5">'+(q.options||[]).map(function(o){
          var on=((prev[q.id]||'').split(', ').indexOf(o)>=0);
-         return '<button type="button" data-iq="'+esc(q.id)+'" data-v="'+esc(o)+'" class="iq-opt px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 text-xs font-semibold'+(on?' ring-2 ring-indigo-400 bg-indigo-50':'')+'">'+esc(o)+'</button>';}).join('')+'</div>';}
-       else{h+='<input data-iqt="'+esc(q.id)+'" value="'+esc(prev[q.id]||'')+'" placeholder="'+esc(q.ph||'')+'" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400">';}
+         return '<button type="button" data-iq="'+esc(q.id)+'" data-v="'+esc(o)+'" class="iq-opt px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 text-xs font-semibold'+(on?' ring-2 ring-indigo-400 bg-indigo-50':'')+'">'+esc(o)+'</button>';}).join('')+'</div>';}
+       else{h+='<input data-iqt="'+esc(q.id)+'" value="'+esc(prev[q.id]||'')+'" placeholder="'+esc(q.ph||'')+'" class="w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm outline-none focus:border-indigo-400">';}
        h+='</div>';});
      var ex=d.experience||{};
-     h+='<div class="col-span-2"><div class="text-xs font-semibold text-indigo-600 mb-1">'+esc(ex.q||'')+'</div>'
-       +'<input id="'+expId+'" value="'+esc(oldExp)+'" placeholder="'+esc(ex.ph||'')+'" class="w-full rounded-lg border border-indigo-200 px-3 py-2 text-sm outline-none focus:border-indigo-400"></div>';
+     h+='<div class="col-span-2"><div class="text-xs font-semibold text-indigo-600 mb-1 truncate" title="'+esc(ex.q||'')+'">'+esc(ex.q||'')+'</div>'
+       +'<input id="'+expId+'" value="'+esc(oldExp)+'" placeholder="'+esc(ex.ph||'')+'" class="w-full rounded-lg border border-indigo-200 px-2.5 py-2 text-sm outline-none focus:border-indigo-400"></div>';
      h+='</div></details>';
      box.innerHTML=h;window.__intakeAnswers=prev;
      box.querySelectorAll('.iq-opt').forEach(function(b){b.onclick=function(){
@@ -447,9 +451,9 @@ def _hero_demo_card() -> str:
     <div class="flex items-center gap-2 text-slate-800 font-bold text-sm mb-1">{_icon('camera', 'w-4 h-4 text-indigo-600')} 내 사진으로 지금 만들어보기</div>
     <p class="text-xs text-slate-400 mb-3">사진 올리고 업종만 고르면 <b class="text-slate-600">진짜로 생성</b>해서 바로 보여드려요 · 가입 없이</p>
     <div id="d_target_hint" class="hidden bg-[#EEF2FF] text-indigo-700 text-xs font-bold rounded-xl px-3 py-2 mb-2"></div>
-    <form id="demoForm" class="space-y-2.5">
+    <form id="demoForm" class="space-y-2">
      <input type=hidden id="d_target_kw"><input type=hidden id="d_target_vol">
-     <label class="block bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl px-4 py-4 text-center cursor-pointer hover:border-indigo-300 transition">
+     <label class="block bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl px-4 py-3 text-center cursor-pointer hover:border-indigo-300 transition">
        <span class="text-slate-800 font-bold text-sm inline-flex items-center gap-2">{_icon('camera', 'w-4 h-4 text-indigo-600')} 사진 올리기</span>
        <span class="block text-slate-400 text-xs mt-0.5">가게·상품 사진 (여러 장 가능 · 선택)</span>
        <input id="d_photo" type="file" accept="image/*" multiple class="hidden"><span id="d_photoname" class="block text-indigo-600 text-xs mt-1 font-semibold"></span></label>

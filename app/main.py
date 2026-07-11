@@ -490,6 +490,7 @@ def _teaser_html(pieces, brief, asset_id, remaining: int = 0,
                         "'실제 경험 글'(D.I.A.+)이 돼서 훨씬 구체적으로 좋아져요.</div>"
                         "<button type=button onclick=\"var q=document.getElementById('d_questions');"
                         "var i=document.getElementById('d_ind');if(q&&i&&window.intakeQuestionsUI)intakeQuestionsUI(q,i.value,'local','','d_exp');"
+                        "setTimeout(function(){var dt=q&&q.querySelector('details');if(dt)dt.open=true;},700);"   # 기본접힘 → 유도 시 펼침
                         "var t=document.getElementById('herodemo');if(t)t.scrollIntoView({behavior:'smooth',block:'center'});\" "
                         "class='w-full py-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-sm font-bold transition'>"
                         f"정보 넣고 다시 만들기 (미리보기 {remaining}회 남음) →</button></div>")
