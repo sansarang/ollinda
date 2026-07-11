@@ -249,20 +249,10 @@ def _parse_sections(raw: str, headers: list[str]) -> dict:
 
 
 def _call_llm(prompt: str, model: str = MODEL, max_tokens: int = 1200) -> str:
-    """공용 Claude 호출. 키 없으면 골격 검증용 더미(형식 유지)."""
-    import os
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        return ("[제목]\n[샘플] " + prompt[:30].replace("\n", " ")
-                + "\n[메타설명]\n샘플 메타설명\n[본문]\n## 소제목\n샘플 본문 (이미지: 메인사진)\n"
-                "[이미지배치]\n- 서론: 메인사진\n[키워드]\n샘플,키워드,지역")
-    import anthropic
-    client = anthropic.Anthropic()
-    resp = client.messages.create(
-        model=model, max_tokens=max_tokens,
-        thinking={"type": "adaptive"},
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return next((b.text for b in resp.content if b.type == "text"), "")
+    """공용 Claude 호출 — app.llm.call로 위임(리팩토링 #2, 동작 불변).
+    9개 모듈이 이 이름을 역수입하므로 시그니처·이름은 유지한다."""
+    from app import llm
+    return llm.call(prompt, model, max_tokens)
 
 
 class MarketplaceGenerator(Generator):
