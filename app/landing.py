@@ -160,10 +160,9 @@ def _hero() -> str:
   <p class="reveal mt-6 text-lg text-slate-300 max-w-2xl mx-auto">동네 사장님도, <b class="text-white">쿠팡·11번가 셀러</b>도 사진만 올리세요. AI가 <b class="text-white">인스타·블로그·유튜브·X</b> 콘텐츠를 만들고,
    <b class="text-white">검색 상위</b>에 띄워 <b class="text-white">매장 방문·상세페이지 구매</b>로 연결합니다.</p>
   <p class="reveal mt-3 text-sm text-slate-400 max-w-xl mx-auto">✔ 2026 최신 알고리즘 반영 &nbsp;·&nbsp; ✔ 없는 가격·스펙 안 지어내는 정직한 글 &nbsp;·&nbsp; ✔ 실검색량 키워드로 상위노출</p>
-  <div class="reveal mt-8 flex flex-col sm:flex-row gap-3 justify-center">
-   <a href="/login/kakao" class="flex items-center justify-center px-8 py-4 rounded-2xl font-extrabold text-lg" style="background:#FEE500;color:#191600">💬 카카오로 시작하기</a>
-   <a href="/login/google" class="flex items-center justify-center gap-2 px-8 py-4 rounded-2xl font-extrabold text-lg bg-white text-slate-700 shadow-lg"><svg width="22" height="22" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg> 구글로 시작하기</a></div>
-  <p class="reveal mt-4 text-sm text-slate-400">이메일로 <a href="/signup" class="text-white underline font-semibold">회원가입</a> (인증 없이 바로) · 이미 회원이면 <a href="/login" class="text-white underline font-semibold">로그인</a></p>
+  <div class="reveal mt-8 flex justify-center">
+   <a href="/login/kakao" class="flex items-center justify-center px-10 py-4 rounded-2xl font-extrabold text-lg shadow-lg" style="background:#FEE500;color:#191600">💬 카카오로 무료 시작</a></div>
+  <p class="reveal mt-4 text-xs text-slate-500">구글 <a href="/login/google" class="text-slate-300 underline">간편가입</a> · 이메일 <a href="/signup" class="text-slate-300 underline">회원가입</a> · 이미 회원이면 <a href="/login" class="text-slate-300 underline">로그인</a></p>
  </div></section>"""
 
 
@@ -219,7 +218,7 @@ def _demo_widget() -> str:
 
 def _stats() -> str:
     items = [("5", "개 채널 동시"), ("1", "장 사진이면 끝"), ("100", "점 상위노출 점검"), ("2", "개 모드 자동분기")]
-    cells = "".join(f"<div class='reveal text-center'><div class='text-5xl font-extrabold grad-text' data-count='{n}'>0</div>"
+    cells = "".join(f"<div class='reveal text-center'><div class='text-5xl font-extrabold grad-text' data-count='{n}'>{n}</div>"
                     f"<div class='text-sm text-slate-500 mt-2 font-medium'>{l}</div></div>" for n, l in items)
     return f"<section class='max-w-5xl mx-auto px-5 py-16'><div class='grid grid-cols-2 sm:grid-cols-4 gap-8'>{cells}</div></section>"
 
@@ -266,7 +265,7 @@ def _results() -> str:
           "<div class='text-xs font-bold text-fuchsia-300 mb-3'>성과 실측 · 내 손님 추적</div>"
           "<div class='flex items-center gap-4'><div class='qrpulse rounded-lg'>" + qr + "</div>"
           "<div><div class='text-4xl font-extrabold grad-text'><span data-count='37'>0</span>회</div>"
-          "<div class='text-slate-400 text-sm'>이 콘텐츠 보고 온 손님</div></div></div>"
+          "<div class='text-slate-400 text-sm'>이 콘텐츠 보고 온 손님 <span class='text-slate-500'>(예시)</span></div></div></div>"
           "<p class='text-slate-400 text-sm mt-3'>QR·링크로 <b class='text-white'>실제 유입이 숫자로</b> 잡혀요.</p></div>")
     c4 = ("<div class='reveal glass rounded-3xl p-6 flex flex-col'>"
           "<div class='text-xs font-bold text-emerald-300 mb-3'>사진 자동 보정 · 실제 전/후</div>"
@@ -447,19 +446,10 @@ def _footer() -> str:
     <div class="text-slate-400 text-xs">Location</div><div>(우)50510 경남 양산시 주남로 288<br>영산대학교 양산캠퍼스 산학협력관 309호</div>
    </div>
    <div>
-    <details class="bg-white/5 rounded-2xl p-4">
-     <summary class="cursor-pointer font-bold text-white flex items-center gap-2">🏅 개발자 포트폴리오 <span class="text-xs text-slate-400">(보안전문가)</span></summary>
-     <div class="mt-3 text-sm text-slate-300 space-y-2">
-      <p class="font-semibold text-white">Jung Young Jin — 보안전문가 / 풀스택·AI 개발자</p>
-      <ul class="space-y-1 text-slate-300 list-disc pl-5">
-       <li>정보보안기사 · 침해사고 대응(DFIR)·모의해킹(웹/시스템) 다수 수행</li>
-       <li>OWASP Top 10 기반 취약점 진단 및 시큐어코딩 컨설팅</li>
-       <li>AI 멀티에이전트 자동화 시스템 설계·구축 (LLM·비전·TTS·영상)</li>
-       <li>FastAPI·OAuth·결제·멀티테넌트 SaaS 아키텍처 풀스택 개발</li>
-       <li>제조(프레스 금형) 도메인 + 보안 + AI 융합 — 현장형 솔루션 전문</li>
-      </ul>
-      <p class="text-xs text-slate-400">"공격자의 시선으로 만들고, 사장님의 매출로 증명합니다."</p>
-     </div></details>
+    <div class="bg-white/5 rounded-2xl p-4 text-sm text-slate-300">
+      <p class="font-semibold text-white mb-1">올린다는 이렇게 만들었습니다</p>
+      <p class="text-slate-400 text-xs">실제 소상공인·중고차 매장 현장 요구에서 출발해, AI(글·비전·TTS·영상)와 네이버 상위노출 노하우를 결합해 개발했습니다.</p>
+     </div>
     <div class="mt-4 flex gap-3 text-sm">
      <a href="#contact" class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20">문의하기</a>
      <a href="mailto:{CONTACT_EMAIL}" class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20">이메일</a>
