@@ -69,7 +69,7 @@ _HEAD = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <link rel=canonical href="__BASE__/">
 <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css" rel=stylesheet>
 <script src="https://cdn.tailwindcss.com"></script>
-<script type=application/ld+json>{"@context":"https://schema.org","@type":"SoftwareApplication","name":"올린다","applicationCategory":"BusinessApplication","offers":{"@type":"Offer","price":"39000","priceCurrency":"KRW"}}</script>
+<script type=application/ld+json>{"@context":"https://schema.org","@type":"SoftwareApplication","name":"올린다","applicationCategory":"BusinessApplication","offers":{"@type":"Offer","price":"29000","priceCurrency":"KRW"}}</script>
 """.replace("__BASE__", BASE) + _STYLE + """</head><body class="bg-white text-slate-800 overflow-x-hidden pb-20 sm:pb-0">"""
 
 _FOOT = """
@@ -343,14 +343,18 @@ def _features() -> str:
 
 
 def _pricing() -> str:
-    plans = [("베이직", "월 39,000원", "월 8건 · 처음 시작용",
-              ["사진만 올리면 5채널 생성", "검색 상위노출 최적화", "사진 자동 보정 + 이미지 SEO", "복사·통째로 다운로드"],
+    from app import config as _cfg
+    b, p = _cfg.PRICE_BASIC, _cfg.PRICE_PRO
+    by, py = _cfg.yearly_monthly_equiv(b), _cfg.yearly_monthly_equiv(p)   # 연결제 월 환산가(약 30%↓)
+    af = _cfg.AGENCY_FROM
+    plans = [("베이직", f"월 {b:,}원", f"월 8건 · 처음 시작용 · 연결제 시 월 {by:,}원",
+              ["사진만 올리면 5채널 생성", "검색 상위노출에 유리한 구조로 작성", "사진 자동 보정 + 이미지 SEO", "복사·통째로 다운로드"],
               "basic", False),
-             ("프로", "월 79,000원", "무제한 · 성과까지",
+             ("프로", f"월 {p:,}원", f"무제한 · 성과까지 · 연결제 시 월 {py:,}원",
               ["콘텐츠 무제한 생성", "⭐ 순위 성장 추적 + 경쟁 추월", "⭐ 성과 실측(QR·유입 집계)", "영상 BGM · 셀러 판매 QR", "우선 생성 · 다중 가게"],
               "pro", True),
-             ("대행", "문의", "맡기고 싶다면",
-              ["올린다 팀이 운영까지 대행", "정기 발행 · 성과 리포트", "카톡 1:1 관리"],
+             ("대행", f"월 {af//10000}만원~", "사진만 보내면 발행까지 대행",
+              ["카톡으로 사진만 보내면 끝", "올린다 팀이 발행까지 운영 대행", "정기 발행 · 성과 리포트", "카톡 1:1 관리"],
               "agency", False)]
     cards = ""
     for name, price, sub, feats, key, hot in plans:
@@ -359,13 +363,16 @@ def _pricing() -> str:
         lis = "".join(f"<li class='flex gap-2 items-start'><span class='text-indigo-500 mt-0.5'>✓</span><span>{f}</span></li>" for f in feats)
         btn = "grad-btn text-white" if hot else "bg-slate-100 hover:bg-slate-200"
         href = "#contact" if key == "agency" else f"/billing?plan={key}"
-        cta = "도입 문의" if key == "agency" else "구독 시작"
+        cta = "카톡으로 신청" if key == "agency" else "구독 시작"
+        # 연결제(약 30%↓) 보조 링크 — basic/pro만
+        annual = ("" if key == "agency" else
+                  f"<a href='/billing?plan={key}_yearly' class='block text-center text-xs text-indigo-500 font-bold mt-2 hover:underline'>연 결제로 30% 아끼기 →</a>")
         cards += (f"<div class='reveal card-hover {wrap} bg-white rounded-3xl p-8 flex flex-col'>{tag}"
                   f"<div class='font-bold text-lg text-slate-500'>{name}</div>"
                   f"<div class='text-3xl font-extrabold mt-3 mb-1'>{price}</div>"
                   f"<div class='text-xs text-slate-400 mb-3'>{sub}</div>"
                   f"<ul class='space-y-2.5 text-sm text-slate-600 flex-1 mt-2'>{lis}</ul>"
-                  f"<a href='{href}' class='{btn} mt-7 text-center px-4 py-3.5 rounded-2xl font-bold'>{cta}</a></div>")
+                  f"<a href='{href}' class='{btn} mt-7 text-center px-4 py-3.5 rounded-2xl font-bold'>{cta}</a>{annual}</div>")
     return f"<section id='pricing' class='bg-slate-50 py-20'><div class='max-w-5xl mx-auto px-5'><h2 class='reveal text-3xl sm:text-4xl font-extrabold text-center mb-3'>합리적인 요금</h2><p class='reveal text-center text-slate-500 mb-14'>대행사 1/5 가격 — 손님 2~3명만 더 와도 본전.</p><div class='grid sm:grid-cols-3 gap-6 items-stretch pt-3'>{cards}</div></div></section>"
 
 

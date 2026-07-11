@@ -346,6 +346,23 @@ def _ym() -> str:
     return datetime.utcnow().strftime("%Y%m")
 
 
+def record_perf_event(tenant_id: str, keyword: str, rank: int) -> None:
+    """성과형 과금 스텁 — 1페이지(상위 N위) 진입 이벤트 기록. 실제 과금 로직은 추후(성장 PHASE 3)."""
+    try:
+        with _conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS performance_events("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, keyword TEXT, "
+                      "rank INTEGER, at TEXT, billed INTEGER DEFAULT 0)")
+            # 같은 키워드 중복 방지(미청구분만)
+            ex = c.execute("SELECT id FROM performance_events WHERE tenant_id=? AND keyword=? AND billed=0",
+                           (tenant_id, keyword)).fetchone()
+            if not ex:
+                c.execute("INSERT INTO performance_events(tenant_id,keyword,rank,at) VALUES(?,?,?,?)",
+                          (tenant_id, keyword, rank, _now()))
+    except Exception:
+        pass
+
+
 def schedule_report(tenant_id: str, keyword: str, baseline_rank, due_at: str, channel: str = "email") -> None:
     """7일 순위 리포트 예약 — 발행 시 baseline 기록, due_at에 발송(성장 PHASE 2)."""
     try:

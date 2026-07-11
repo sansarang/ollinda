@@ -27,6 +27,8 @@ def on_publish(tenant, piece) -> None:
             return
         cur = place.rank(kw, getattr(tenant, "name", ""))   # 현재 순위(무키/실패 None)
         db.save_rank_snapshot(tenant.id, kw, cur)
+        if cur and 0 < cur <= config.PERFORMANCE_RANK_THRESHOLD:   # 1페이지 진입 → 성과형 과금 이벤트(스텁)
+            db.record_perf_event(tenant.id, kw, cur)
         due = (datetime.utcnow() + timedelta(days=config.REPORT_AFTER_DAYS)).isoformat()
         db.schedule_report(tenant.id, kw, cur, due)
     except Exception:
