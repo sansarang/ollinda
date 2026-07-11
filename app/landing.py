@@ -63,10 +63,12 @@ def _icon(name: str, cls: str = "w-6 h-6") -> str:
             f'stroke-linecap="round" stroke-linejoin="round" class="{cls}">{_ICON_PATHS.get(name, "")}</svg>')
 
 
-def _icon_chip(name: str, tone: str = "indigo") -> str:
-    """카드 상단 아이콘 칩 — 보라/회색만(색 절제)."""
-    c = ("bg-indigo-50 text-indigo-600" if tone == "indigo" else "bg-slate-100 text-slate-500")
-    return f"<div class='w-11 h-11 rounded-xl {c} flex items-center justify-center mb-4'>{_icon(name, 'w-5 h-5')}</div>"
+def _icon_chip(name: str, tone: str = "indigo", size: str = "") -> str:
+    """카드 상단 아이콘 — 연보라 원형 배경(#EEF2FF)으로 시선 유도(색 절제 유지)."""
+    c = ("bg-[#EEF2FF] text-indigo-600" if tone == "indigo" else "bg-slate-100 text-slate-500")
+    if size == "lg":
+        return f"<div class='w-14 h-14 rounded-full {c} flex items-center justify-center mb-4'>{_icon(name, 'w-6 h-6')}</div>"
+    return f"<div class='w-11 h-11 rounded-full {c} flex items-center justify-center mb-4'>{_icon(name, 'w-5 h-5')}</div>"
 
 
 _STYLE = """
@@ -82,6 +84,14 @@ body{font-family:'Pretendard','Apple SD Gothic Neo',system-ui,sans-serif;-webkit
 .rise3{animation:rise 3s ease-in-out .8s infinite}
 .baclip{animation:baclip 5s ease-in-out infinite}@keyframes baclip{0%,14%{clip-path:inset(0 0 0 0)}50%,64%{clip-path:inset(0 100% 0 0)}100%{clip-path:inset(0 0 0 0)}}
 .badiv{animation:badiv 5s ease-in-out infinite}@keyframes badiv{0%,14%{left:100%}50%,64%{left:0}100%{left:100%}}
+/* 히어로 — 밝은 톤 유지 + 은은한 보라 그라데이션·도트 패턴(밋밋함 해소) */
+.hero-bg{background:
+ radial-gradient(60% 45% at 50% 0%,rgba(99,102,241,.10),transparent 70%),
+ radial-gradient(40% 35% at 85% 20%,rgba(99,102,241,.06),transparent 70%),
+ linear-gradient(180deg,#EEF2FF 0%,#FFFFFF 62%)}
+.hero-dots{background-image:radial-gradient(rgba(99,102,241,.14) 1px,transparent 1px);background-size:22px 22px;
+ -webkit-mask-image:linear-gradient(180deg,#000 0%,transparent 55%);mask-image:linear-gradient(180deg,#000 0%,transparent 55%)}
+.card-hi{background:#F5F3FF;border:1px solid #DDD6FE;border-radius:16px}   /* 강조 카드(연보라) */
 </style>"""
 
 _HEAD = """<!doctype html><html lang=ko><head><meta charset=utf-8>
@@ -185,9 +195,10 @@ def _nav() -> str:
 
 def _hero() -> str:
     return f"""
-<section class="bg-white">
- <div class="max-w-6xl mx-auto px-5 pt-20 pb-16 text-center">
-  <div class="reveal inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-500 mb-8">
+<section class="relative hero-bg overflow-hidden">
+ <div class="hero-dots absolute inset-x-0 top-0 h-96 pointer-events-none"></div>
+ <div class="relative max-w-6xl mx-auto px-5 pt-20 pb-16 text-center">
+  <div class="reveal inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white border border-indigo-100 text-xs font-semibold text-indigo-600 mb-8">
    소상공인 · 온라인 셀러 전용 · AI 마케팅 자동화</div>
   <h1 class="reveal text-4xl sm:text-6xl font-bold tracking-tight leading-[1.12] text-slate-900">
    네이버에서 우리 가게,<br><span class="text-indigo-600">검색 상위에 뜨게</span></h1>
@@ -197,7 +208,7 @@ def _hero() -> str:
   <div class="reveal mt-10 flex justify-center">
    <a href="/login/kakao" class="flex items-center justify-center px-10 py-4 rounded-2xl font-extrabold text-lg" style="background:#FEE500;color:#191600">카카오로 무료 시작</a></div>
   <p class="reveal mt-4 text-xs text-slate-400">구글 <a href="/login/google" class="text-slate-500 underline">간편가입</a> · 이메일 <a href="/signup" class="text-slate-500 underline">회원가입</a> · 이미 회원이면 <a href="/login" class="text-slate-500 underline">로그인</a></p>
-  <div class="reveal mt-12 max-w-md mx-auto card p-5 text-left">
+  <div class="reveal mt-12 max-w-md mx-auto bg-white border-2 border-indigo-200 rounded-2xl shadow-sm p-5 text-left">
    <div class="flex items-center gap-2 text-slate-800 font-bold text-sm mb-3">{_icon('search', 'w-4 h-4 text-indigo-600')} 내 가게 네이버 순위 즉시 진단</div>
    <div class="flex gap-2">
      <input id="rc_region" placeholder="지역(부산 동구)" class="w-1/3 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400">
@@ -250,8 +261,8 @@ def _video() -> str:
 def _demo_widget() -> str:
     inp = "w-full rounded-xl border border-slate-200 px-4 py-3 text-slate-800 outline-none focus:border-indigo-400"
     return f"""
-<section class="bg-[#F9FAFB] pb-20"><div class="max-w-3xl mx-auto px-5">
- <div class="card p-6 sm:p-8 text-left">
+<section id="demo" class="bg-[#F9FAFB] py-20"><div class="max-w-3xl mx-auto px-5">
+ <div class="bg-white border-2 border-indigo-200 rounded-2xl shadow-sm p-6 sm:p-8 text-left">
   <div class="text-center mb-5"><div class="text-slate-900 font-bold text-lg">내 사진으로 지금 만들어보기</div>
    <p class="text-slate-500 text-sm mt-1.5">사진 올리고 업종만 고르면 <b class="text-slate-800">진짜로 생성</b>해서 바로 보여드려요 · 가입 없이</p></div>
   <form id="demoForm" class="space-y-3">
@@ -315,10 +326,11 @@ def _results() -> str:
             "<div class='w-5 rounded-t bg-indigo-300 rise2'></div>"
             "<div class='w-5 rounded-t bg-indigo-600 rise3'></div>"
             "<div class='flex-1'></div><span class='text-emerald-600'>" + _icon("arrowup", "w-8 h-8") + "</span></div>")
-    c1 = ("<div class='reveal card p-6'>"
-          "<div class='text-xs font-bold text-slate-400 mb-3'>순위 성장 추적</div>" + bars +
+    c1 = ("<div class='reveal card-hi p-6'>"
+          "<div class='text-xs font-bold text-indigo-500 mb-3'>순위 성장 추적</div>" + bars +
           "<div class='flex items-center justify-between'><span class='font-semibold text-slate-800'>부산 동구 썬팅</span>"
-          "<span class='text-emerald-600 font-extrabold text-sm'>네이버 2위 · 3계단 상승</span></div>"
+          "<span class='text-sm'><b class='text-indigo-600 text-2xl font-bold align-middle'>2위</b> "
+          "<span class='text-emerald-600 font-extrabold'>· 3계단 상승</span></span></div>"
           "<p class='text-slate-500 text-sm mt-2'>내 순위가 <b class='text-slate-800'>오르는 게 매주 숫자로</b> 보여요.</p></div>")
     c2 = ("<div class='reveal card p-6'>"
           "<div class='text-xs font-bold text-slate-400 mb-3'>경쟁 추월</div>"
@@ -330,7 +342,7 @@ def _results() -> str:
     c3 = ("<div class='reveal card p-6'>"
           "<div class='text-xs font-bold text-slate-400 mb-3'>성과 실측 · 내 손님 추적</div>"
           "<div class='flex items-center gap-4'><div class='rounded-lg border border-slate-200 p-1'>" + qr + "</div>"
-          "<div><div class='text-4xl font-bold text-indigo-600'><span data-count='37'>0</span>회</div>"
+          "<div><div class='text-5xl font-bold text-indigo-600'><span data-count='37'>0</span><span class='text-xl'>회</span></div>"
           "<div class='text-slate-500 text-sm'>이 콘텐츠 보고 온 손님 <span class='text-slate-400'>(예시)</span></div></div></div>"
           "<p class='text-slate-500 text-sm mt-3'>QR·링크로 <b class='text-slate-800'>실제 유입이 숫자로</b> 잡혀요.</p></div>")
     c4 = ("<div class='reveal card p-6 flex flex-col'>"
@@ -533,7 +545,7 @@ def _contact() -> str:
 
 def _cta() -> str:
     return """
-<section id="cta" class="bg-white py-28">
+<section id="cta" class="bg-[#F5F3FF] py-28">
  <div class="max-w-3xl mx-auto px-5 text-center">
   <h2 class="reveal text-4xl sm:text-5xl font-bold leading-tight text-slate-900">오늘 사진 한 장,<br><span class="text-indigo-600">내일 손님으로</span></h2>
   <p class="reveal mt-6 text-slate-500 text-lg">지금 시작하면 첫 콘텐츠 세트를 무료로 만들어 드립니다.</p>
@@ -632,8 +644,7 @@ def _why_rank() -> str:
         ("package", "쿠팡·스토어", "검색 최적화 상품명 3안 + 상세페이지 + 마켓 태그"),
     ]
     cards = "".join(
-        f"<div class='reveal card p-5'>"
-        f"<div class='text-indigo-600 mb-3'>{_icon(ic, 'w-6 h-6')}</div><div class='font-bold mb-1 text-slate-900'>{t}</div>"
+        f"<div class='reveal card p-5'>{_icon_chip(ic)}<div class='font-bold mb-1 text-slate-900'>{t}</div>"
         f"<p class='text-sm text-slate-500 leading-relaxed'>{d}</p></div>" for ic, t, d in chans)
     return f"""
 <section class="bg-white py-24">
@@ -642,10 +653,10 @@ def _why_rank() -> str:
   <h2 class="reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900">왜 우리 콘텐츠는 <span class="text-indigo-600">상위에 뜰까요?</span></h2>
   <p class="reveal text-center text-slate-500 mb-12 max-w-2xl mx-auto">그냥 글이 아닙니다. 채널마다 <b class="text-slate-800">노출 알고리즘이 다르다</b>는 걸 알고, 각각 다르게 최적화해서 만듭니다.</p>
   <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">{cards}</div>
-  <div class="reveal card p-6 text-center">
+  <div class="reveal card-hi p-6 text-center">
    <div class="text-sm text-slate-500 mb-1">네이버 검색광고 <b class="text-slate-800">실검색량</b> 연동</div>
-   <div class="text-lg sm:text-xl font-bold text-slate-900">지어낸 키워드가 아니라, <span class="text-indigo-600">‘셀프네일 월 4,540회’</span>처럼 진짜 뜨는 키워드로 씁니다</div>
-   <div class="text-xs text-slate-400 mt-2">검색량 500~5,000 롱테일(경쟁↓·전환↑)을 실측으로 골라 반영</div>
+   <div class="text-lg sm:text-xl font-bold text-slate-900">지어낸 키워드가 아니라, <span class="text-indigo-600 text-xl sm:text-2xl">‘셀프네일 월 4,540회’</span>처럼 진짜 뜨는 키워드로 씁니다</div>
+   <div class="text-xs text-slate-400 mt-2">검색량 <b class="text-indigo-600 text-sm font-bold">500~5,000</b> 롱테일(경쟁↓·전환↑)을 실측으로 골라 반영</div>
   </div>
  </div></section>"""
 
@@ -659,10 +670,9 @@ def _rank_loop() -> str:
         ("refresh", "4. 추적·학습", "발행 전후 순위를 자동 추적 — <b class='text-slate-800'>오른 키워드는 더 밀고, 정체는 앵글 재도전</b>을 앱이 먼저 제안", "프로"),
     ]
     cards = "".join(
-        f"<div class='reveal card p-5'>"
-        f"<div class='text-indigo-600 mb-3'>{_icon(ic, 'w-6 h-6')}</div>"
+        f"<div class='reveal {'card-hi' if i == 0 else 'card'} p-5'>{_icon_chip(ic)}"
         f"<div class='font-bold mb-1 text-slate-900'>{t} <span class='text-[10px] text-indigo-500 font-normal'>{plan}</span></div>"
-        f"<p class='text-sm text-slate-500 leading-relaxed'>{d}</p></div>" for ic, t, d, plan in steps)
+        f"<p class='text-sm text-slate-500 leading-relaxed'>{d}</p></div>" for i, (ic, t, d, plan) in enumerate(steps))
     return f"""
 <section class="bg-[#F9FAFB] py-24">
  <div class="max-w-6xl mx-auto px-5">
