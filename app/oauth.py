@@ -106,13 +106,17 @@ def authorize_url(channel: Channel, tenant_id: str) -> str:
         return "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(q)
     if channel == Channel.X:
         ver = _x_verifier(state)
+        # PKCE S256: challenge = base64url(sha256(verifier)). verifier는 SECRET+state로만 도출 가능하므로
+        # authorize URL이 노출돼도(challenge만 보임) SECRET 없이는 verifier를 복원할 수 없다(B12).
+        challenge = base64.urlsafe_b64encode(
+            hashlib.sha256(ver.encode()).digest()).decode().rstrip("=")
         q = {
             "client_id": os.environ["X_CLIENT_ID"],
             "redirect_uri": redirect_uri(),
             "response_type": "code",
             "scope": "tweet.read tweet.write users.read offline.access",
             "state": state,
-            "code_challenge": ver, "code_challenge_method": "plain",
+            "code_challenge": challenge, "code_challenge_method": "S256",
         }
         return "https://x.com/i/oauth2/authorize?" + urlencode(q)
     raise ValueError(f"unsupported channel: {channel}")

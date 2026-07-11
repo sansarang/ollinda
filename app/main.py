@@ -611,7 +611,7 @@ def signup_post(request: Request, email: str = Form(""), pw: str = Form("")):
         h, salt = auth.hash_pw(pw)
         u = db.create_user(email=email, pw_hash=h, salt=salt)
         resp = RedirectResponse("/me", status_code=303)
-        resp.set_cookie(auth.COOKIE, auth.make_session(u["id"]), max_age=5184000, httponly=True, samesite="lax")
+        resp.set_cookie(auth.COOKIE, auth.make_session(u["id"]), max_age=5184000, httponly=True, samesite="lax", secure=auth.cookie_secure())
         return resp
     except Exception as e:
         import traceback, logging
@@ -657,7 +657,7 @@ def login_post(email: str = Form(""), pw: str = Form("")):
     if not u or not auth.verify_pw(pw, u["salt"] or "", u["pw_hash"] or ""):
         return RedirectResponse("/login?err=1", status_code=303)
     resp = RedirectResponse("/me", status_code=303)
-    resp.set_cookie(auth.COOKIE, auth.make_session(u["id"]), max_age=5184000, httponly=True, samesite="lax")
+    resp.set_cookie(auth.COOKIE, auth.make_session(u["id"]), max_age=5184000, httponly=True, samesite="lax", secure=auth.cookie_secure())
     return resp
 
 

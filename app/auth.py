@@ -20,6 +20,12 @@ if not _secret:
     )
 SECRET = _secret.encode()
 COOKIE = "shop_session"
+SESSION_TTL = 60 * 24 * 3600   # 세션 유효기간 60일(쿠키 max-age와 동일)
+
+
+def cookie_secure() -> bool:
+    """HTTPS 배포(SHOPCAST_BASE=https…)에서만 Secure 쿠키. 로컬 http 개발은 False 유지."""
+    return os.environ.get("SHOPCAST_BASE", "").startswith("https")
 
 
 # ── 비밀번호 ──
@@ -48,8 +54,11 @@ def read_session(cookie: str | None) -> str | None:
         uid, ts, sig = cookie.rsplit(".", 2)
         raw = f"{uid}.{ts}"
         good = hmac.new(SECRET, raw.encode(), hashlib.sha256).hexdigest()
-        if hmac.compare_digest(good, sig):
-            return uid
+        if not hmac.compare_digest(good, sig):
+            return None
+        if int(time.time()) - int(ts) > SESSION_TTL:   # 만료된 세션 거부(B14)
+            return None
+        return uid
     except Exception:
         pass
     return None

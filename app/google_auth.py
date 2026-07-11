@@ -22,7 +22,7 @@ def _instant_signup(name: str = "구글회원"):
     GOOGLE_CLIENT_ID/SECRET을 넣으면 이 폴백 대신 실제 OAuth 동의창으로 진행됨."""
     u = db.create_user(email=f"g_{uuid.uuid4().hex[:12]}@ollinda.guest", name=name)
     resp = RedirectResponse("/me", status_code=303)
-    resp.set_cookie(auth.COOKIE, auth.make_session(u["id"]), max_age=5184000, httponly=True, samesite="lax")
+    resp.set_cookie(auth.COOKIE, auth.make_session(u["id"]), max_age=5184000, httponly=True, samesite="lax", secure=auth.cookie_secure())
     return resp
 
 AUTHORIZE = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -70,7 +70,7 @@ def make_router() -> APIRouter:
         except Exception:
             return RedirectResponse("/?err=구글_실패")
         resp = RedirectResponse("/me", status_code=303)
-        resp.set_cookie(auth.COOKIE, auth.make_session(user["id"]), max_age=5184000, httponly=True, samesite="lax")
+        resp.set_cookie(auth.COOKIE, auth.make_session(user["id"]), max_age=5184000, httponly=True, samesite="lax", secure=auth.cookie_secure())
         return resp
 
     return r

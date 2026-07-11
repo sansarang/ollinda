@@ -20,7 +20,7 @@ def _instant_signup(name: str = "카카오회원"):
     KAKAO_REST_KEY를 넣으면 이 폴백 대신 실제 카카오 로그인으로 진행됨."""
     u = db.create_user(email=f"k_{uuid.uuid4().hex[:12]}@ollinda.guest", name=name)
     resp = RedirectResponse("/me", status_code=303)
-    resp.set_cookie(auth.COOKIE, auth.make_session(u["id"]), max_age=5184000, httponly=True, samesite="lax")
+    resp.set_cookie(auth.COOKIE, auth.make_session(u["id"]), max_age=5184000, httponly=True, samesite="lax", secure=auth.cookie_secure())
     return resp
 
 AUTHORIZE = "https://kauth.kakao.com/oauth/authorize"
@@ -67,7 +67,7 @@ def make_router() -> APIRouter:
         except Exception as e:
             return RedirectResponse(f"/?err=카카오_실패")
         resp = RedirectResponse("/me", status_code=303)
-        resp.set_cookie(auth.COOKIE, auth.make_session(user["id"]), max_age=5184000, httponly=True, samesite="lax")
+        resp.set_cookie(auth.COOKIE, auth.make_session(user["id"]), max_age=5184000, httponly=True, samesite="lax", secure=auth.cookie_secure())
         return resp
 
     return r
