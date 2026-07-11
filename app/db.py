@@ -19,8 +19,13 @@ DB_PATH = os.environ.get("SHOPCAST_DB", "shopcast.sqlite")
 
 
 def _conn() -> sqlite3.Connection:
-    c = sqlite3.connect(DB_PATH)
+    c = sqlite3.connect(DB_PATH, timeout=5.0)
     c.row_factory = sqlite3.Row
+    try:
+        c.execute("PRAGMA journal_mode=WAL")     # 동시 읽기/쓰기 허용(백그라운드 스레드 대비, B8)
+        c.execute("PRAGMA busy_timeout=5000")    # 잠금 대기 5초(database is locked 완화)
+    except Exception:
+        pass
     return c
 
 
@@ -334,11 +339,27 @@ def set_user_tenant(uid: str, tid: str) -> None:
 
 def incr_user_free(uid: str, n: int = 1) -> None:
     with _conn() as c:
-        c.execute("UPDATE users SET free_used = COALESCE(free_used,0) + ? WHERE id=?", (n, uid))
+        c.execute("UPDATE users SET free_used = MAX(0, COALESCE(free_used,0) + ?) WHERE id=?", (n, uid))
 
 
 def _ym() -> str:
     return datetime.utcnow().strftime("%Y%m")
+
+
+def claim_once(key: str) -> bool:
+    """멱등 키를 최초 1회만 True 반환. 이미 처리된 키면 False(결제 이중청구 방지, B10)."""
+    if not key:
+        return True
+    try:
+        with _conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS idempotency(key TEXT PRIMARY KEY, at TEXT)")
+            c.execute("INSERT INTO idempotency(key, at) VALUES(?,?)",
+                      (key, datetime.utcnow().isoformat()))
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    except Exception:
+        return True   # 스토리지 오류 시 결제 흐름을 막지 않음(관대 처리)
 
 
 def month_usage(uid: str) -> int:
@@ -351,12 +372,13 @@ def month_usage(uid: str) -> int:
 
 
 def incr_month_usage(uid: str, n: int = 1) -> None:
-    """이번 달 사용량 +n (월 바뀌면 리셋 후 카운트)."""
+    """이번 달 사용량 +n (월 바뀌면 리셋 후 카운트). 단일 UPDATE로 원자적 처리(B6)."""
     ym = _ym()
     with _conn() as c:
-        r = c.execute("SELECT usage_month, month_used FROM users WHERE id=?", (uid,)).fetchone()
-        cur = (r["month_used"] or 0) if r and (r["usage_month"] or "") == ym else 0
-        c.execute("UPDATE users SET usage_month=?, month_used=? WHERE id=?", (ym, cur + n, uid))
+        c.execute(
+            "UPDATE users SET month_used = MAX(0, CASE WHEN usage_month = ? "
+            "THEN COALESCE(month_used,0) + ? ELSE ? END), usage_month = ? WHERE id=?",
+            (ym, n, n, ym, uid))
 
 
 def list_users() -> list[dict]:

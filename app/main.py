@@ -101,6 +101,44 @@ def _record_usage(owner: dict | None) -> None:
     elif plan != "agency":
         db.incr_month_usage(owner["id"])
 
+
+def _refund_usage(owner: dict | None) -> None:
+    """생성 실패 시 선예약(_record_usage)한 사용량 원복(B7). db 함수가 0 미만으로 내려가지 않게 클램프."""
+    if not owner:
+        return
+    plan = owner.get("plan") or "free"
+    if plan == "free":
+        db.incr_user_free(owner["id"], -1)
+    elif plan != "agency":
+        db.incr_month_usage(owner["id"], -1)
+
+
+# ── 업로드 검증(B9) ──────────────────────────────────────
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024   # 사진 1장 최대 25MB
+_ALLOWED_IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".gif", ".bmp"}
+_ALLOWED_IMG_CT = {"image/jpeg", "image/png", "image/webp", "image/heic",
+                   "image/heif", "image/gif", "image/bmp"}
+
+
+async def _read_image_uploads(photos, limit: int = 10) -> list[tuple[bytes, str]]:
+    """업로드 사진을 형식·크기 검증하며 읽는다. 이미지 아님/빈파일/초대형은 제외(B9)."""
+    out: list[tuple[bytes, str]] = []
+    for ph in (photos if isinstance(photos, list) else [photos] if photos else []):
+        fn = getattr(ph, "filename", "") or ""
+        if not fn:
+            continue
+        ext = os.path.splitext(fn)[1].lower()
+        ct = (getattr(ph, "content_type", "") or "").lower()
+        if ext not in _ALLOWED_IMG_EXT and ct not in _ALLOWED_IMG_CT:
+            continue
+        data = await ph.read()
+        if not data or len(data) > MAX_UPLOAD_BYTES:
+            continue
+        out.append((data, fn))
+        if len(out) >= limit:
+            break
+    return out
+
 # OAuth 연결 지원 채널(자동 발행 가능한 것만)
 CONNECTABLE = [Channel.INSTAGRAM, Channel.YOUTUBE, Channel.X]
 CHANNEL_LABEL = {Channel.INSTAGRAM: "📷 인스타그램", Channel.YOUTUBE: "▶️ 유튜브", Channel.X: "𝕏 (트위터)"}
@@ -220,11 +258,7 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
     if db.demo_ip_count(ip) >= 2:                    # 무료 미리보기 2회 → 그다음 가입 유도
         return JSONResponse({"require_signup": True,
                              "message": "무료 미리보기 2회를 다 보셨어요! 가입하면 5채널 전부 + 영상까지 무료로 만들어드려요 🎁"})
-    imgs = []
-    for f in (photos if isinstance(photos, list) else []):
-        if getattr(f, "filename", ""):
-            imgs.append((await f.read(), f.filename))
-    imgs = imgs[:10]
+    imgs = await _read_image_uploads(photos)
     full_note = (note or "").strip()
     if purpose.strip():                              # 목적 → 생성 프롬프트에 반영(글·영상 톤↑)
         full_note = (full_note + f" | 콘텐츠 목적: {purpose.strip()}").strip(" |")
@@ -2538,6 +2572,8 @@ def billing_success(request: Request, plan: str = "pro", customerKey: str = "", 
         return RedirectResponse("/login", status_code=303)
     if not (authKey and customerKey):
         return RedirectResponse("/billing/fail", status_code=303)
+    if not db.claim_once("toss:" + authKey):     # 새로고침·프리페치 이중청구 방지(B10)
+        return RedirectResponse("/me?ok=이미 처리된 결제예요 🎉", status_code=303)
     issued = pay.issue_billing_key(authKey, customerKey)
     if issued.get("error") or not issued.get("billingKey"):
         return HTMLResponse(_subscriber_page("결제 등록 실패",
@@ -3416,9 +3452,9 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
     block = _quota_block(owner)
     if block:
         return page("이용 안내", block)
-    files = [(await ph.read(), ph.filename or "photo.jpg") for ph in photos if ph.filename]
+    files = await _read_image_uploads(photos)
     if not files:
-        return HTMLResponse("<p>사진을 한 장 이상 올려주세요.</p>", status_code=400)
+        return HTMLResponse("<p>이미지 파일을 한 장 이상 올려주세요. (jpg·png·webp·heic, 최대 25MB)</p>", status_code=400)
     # 사진 설명·목적·요청(최대 50자)을 메모에 합쳐 AI 생성 품질↑
     parts = []
     if photo_desc.strip():
@@ -3436,6 +3472,7 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
     # 생성은 시간이 오래 걸려(전략가→3채널→SEO편집) 요청을 붙잡으면 서버 타임아웃(500).
     # → 백그라운드 스레드에서 생성하고 요청은 즉시 반환. 완료되면 대시보드에 자동 표시.
     _ind = s_industry.strip()
+    _record_usage(owner)                           # 쿼터 선예약 — 동시 업로드로 한도 우회 방지(B7)
 
     def _bg_generate():
         try:
@@ -3444,9 +3481,10 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
                 from app.industries import ensure_profile
                 ensure_profile(_ind)
             made = ingest_upload(tenant, files, full_note)
-            if made:
-                _record_usage(owner)               # 성공 시에만 사용량 차감
+            if not made:
+                _refund_usage(owner)               # 생성 결과 없음 → 예약 원복
         except Exception:
+            _refund_usage(owner)                   # 실패 → 예약 원복
             import logging
             logging.exception("[upload-bg] 생성 실패 tenant=%s", tenant.id)
     import threading
