@@ -114,7 +114,13 @@ def _autopilot(tenant: Tenant, pieces: list[ContentPiece]) -> None:
         if not pub.supports_auto_publish:        # 네이버 등 반자동은 자동 발행 제외
             continue
         score = (p.payload.get("ranking_audit") or {}).get("score") or 0
-        if level == 1 and score < 85:            # 점수 미달 → 예외(검수 큐로 남김)
+        min_auto = 85 if level == 1 else 70      # 완전자동(2)도 최소 점수 게이트(C4)
+        if score < min_auto:                     # 점수 미달 → 예외(검수 큐로 남김)
+            continue
+        # 표시광고법 위험표현이 감지되면 완전자동이라도 사람 검수로 보류(C4)
+        _txt = " ".join(str(p.payload.get(k, "")) for k in
+                        ("text", "body", "title", "subtitle", "narration", "hook_strategy"))
+        if any(r in _txt for r in seo.RISKY_EXPRESSIONS):
             continue
         if pub.validate(p):                      # 채널 규칙 위반 → 예외
             continue

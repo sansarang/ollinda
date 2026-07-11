@@ -30,6 +30,7 @@ def polish(tenant, piece, threshold: int = 80) -> bool:
             prompt = (
                 "너는 네이버 상위노출을 전문으로 하는 'SEO 편집장'이다. 아래 블로그 초안의 "
                 "'검수 지적사항'을 모두 해결해 재작성하라. 사실 왜곡·과장 금지, 자연스럽게.\n\n"
+                f"{seo.FACTS_RULE}\n"
                 f"[핵심 키워드] {kw} (제목 맨앞·첫문장·본문 2회↑ 자연 포함)\n"
                 f"[검수 지적사항]\n{issues}\n"
                 "[필수] 제목 22~35자·키워드 맨앞, 첫문장에 키워드, '## 자주 묻는 질문'(Q&A 3쌍), "
@@ -52,7 +53,8 @@ def polish(tenant, piece, threshold: int = 80) -> bool:
         else:  # caption
             prompt = (
                 "너는 인스타 전환을 잘 만드는 'SEO/카피 편집장'이다. 아래 캡션의 지적사항을 "
-                "해결해 다시 써라. 과장 금지, 이모지 적당히, 해시태그 8~12개 유지.\n\n"
+                "해결해 다시 써라. 과장 금지, 이모지 적당히, 해시태그 3~5개만(과다 시 도달↓).\n\n"
+                f"{seo.FACTS_RULE}\n"
                 f"[핵심 키워드] {kw}\n[검수 지적사항]\n{issues}\n\n[원본]\n{piece.payload.get('text','')}\n\n"
                 "재작성한 캡션만 출력(머리표 없이)."
             )

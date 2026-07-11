@@ -25,7 +25,7 @@ def revise_piece(piece: ContentPiece, instruction: str) -> ContentPiece:
         cur = f"[제목]\n{p.get('title','')}\n[본문]\n{p.get('body','')}"
         prompt = (f"[가게] {gname} ({prof.name})\n[페르소나] {prof.persona}\n"
                   f"[기존 블로그 글]\n{cur}\n\n[사용자 수정 지시] {instruction}\n\n"
-                  f"{seo.BLOG_DIRECTIVES}\n\n수정 지시를 반영해 다시 써라. 형식 그대로:\n"
+                  f"{seo.FACTS_RULE}\n{seo.BLOG_DIRECTIVES}\n\n수정 지시를 반영해 다시 써라. 형식 그대로:\n"
                   "[제목]\n..\n[메타설명]\n..\n[본문]\n..\n[키워드]\n..")
         raw = _call_llm(prompt, MODEL, 3000)
         d = _parse_sections(raw, ["제목", "메타설명", "본문", "키워드"])
@@ -47,7 +47,7 @@ def revise_piece(piece: ContentPiece, instruction: str) -> ContentPiece:
                f"자막:{p.get('subtitle','')}\n내레이션:{p.get('narration','')}")
         prompt = (f"[가게] {gname} ({prof.name})\n[페르소나] {prof.persona}\n"
                   f"[기존 숏 기획]\n{cur}\n\n[사용자 수정 지시] {instruction}\n\n"
-                  f"{seo.SHORT_DIRECTIVES}\n\n형식 그대로:\n[제목]\n..\n[훅]\n..\n[내레이션]\n..\n[자막]\n..")
+                  f"{seo.FACTS_RULE}\n{seo.SHORT_DIRECTIVES}\n\n형식 그대로:\n[제목]\n..\n[훅]\n..\n[내레이션]\n..\n[자막]\n..")
         raw = _call_llm(prompt, MODEL, 1200)
         d = _parse_sections(raw, ["제목", "훅", "내레이션", "자막"])
         if d.get("제목"):
@@ -65,7 +65,7 @@ def revise_piece(piece: ContentPiece, instruction: str) -> ContentPiece:
         directive = seo.CAPTION_DIRECTIVES if piece.kind == ContentKind.CAPTION else seo.X_DIRECTIVES
         prompt = (f"[가게] {gname} ({prof.name})\n[페르소나] {prof.persona}\n"
                   f"[기존 글]\n{p.get('text','')}\n\n[사용자 수정 지시] {instruction}\n\n"
-                  f"{directive}\n\n수정 지시를 반영해 다시 써라. 한 덩어리 텍스트로만 출력.")
+                  f"{seo.FACTS_RULE}\n{directive}\n\n수정 지시를 반영해 다시 써라. 한 덩어리 텍스트로만 출력.")
         new = _call_llm(prompt, MODEL, 800)
         p["text"] = new[:280] if piece.kind == ContentKind.X_POST else new
 
@@ -106,7 +106,7 @@ def autofix_instruction(audit: dict, kind: str) -> str:
         elif "훅" in w:
             tips.append("0~3초 강한 훅 추가")
         elif "해시태그" in w:
-            tips.append("해시태그 8개 이상으로")
+            tips.append("해시태그 3~5개로(과다 시 도달↓)")
         elif "남발" in w:
             tips.append("키워드 반복 줄이기")
     return " / ".join(dict.fromkeys(tips)) or "전반적으로 더 자연스럽고 성과나게 다듬어줘"

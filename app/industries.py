@@ -417,6 +417,8 @@ def industry_brief(p: IndustryProfile) -> str:
                      + p.example_copy)
     if p.viral_hooks:
         parts.append(p.viral_hooks)
+    if p.cautions:      # 표시광고법·업종 규정 — 전 채널(블로그·쇼츠·X·마켓)에 주의 전달(C3)
+        parts.append("[⚠️ 표시광고법·업종 규정 — 반드시 준수, 위반 표현 금지] " + " / ".join(p.cautions))
     return ("\n".join(parts) + "\n") if parts else ""
 
 
