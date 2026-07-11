@@ -598,11 +598,27 @@ async def intake_guess(request: Request, industry: str = Form(""),
     os.makedirs(tmp, exist_ok=True)
     paths = []
     try:
+        # 축소·정규화(버그1 수정): 원본(수 MB·HEIC)을 그대로 vision에 보내면 다중 사진에서
+        # 분석이 18초+ 걸리거나 실패 → 1280px JPEG로 변환(EXIF 회전 반영) 후 분석. 실패 시 원본.
+        try:
+            from pillow_heif import register_heif_opener
+            register_heif_opener()
+        except Exception:
+            pass
+        from PIL import Image as _Im, ImageOps as _IOps
+        import io as _io
         for i, (data, fname) in enumerate(files[:6]):
-            ext = (os.path.splitext(fname or "")[1] or ".jpg")[:5]
-            p = os.path.join(tmp, f"g{i}{ext}")
-            with open(p, "wb") as f:
-                f.write(data)
+            p = os.path.join(tmp, f"g{i}.jpg")
+            try:
+                im = _Im.open(_io.BytesIO(data))
+                im = _IOps.exif_transpose(im).convert("RGB")
+                im.thumbnail((1280, 1280))
+                im.save(p, "JPEG", quality=82)
+            except Exception:
+                ext = (os.path.splitext(fname or "")[1] or ".jpg")[:5]
+                p = os.path.join(tmp, f"g{i}{ext}")
+                with open(p, "wb") as f:
+                    f.write(data)
             paths.append(p)
         return JSONResponse(smart_intake.guess_from_photos(paths, industry.strip()))
     finally:

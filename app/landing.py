@@ -202,10 +202,24 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
    var st=setInterval(function(){var l=document.getElementById('d_gpg_l'),b=document.getElementById('d_gpg_b');
      if(!l||!b){clearInterval(st);return;}si=Math.min(si+1,stages.length-1);w=Math.min(w+22,90);
      l.textContent=stages[si];b.style.width=w+'%';},2200);
+   // 타임아웃(버그1): 장수 비례(25s + 4s/장, 최대 45s) — 다중 사진 업로드·분석 현실 반영
+   var n=Math.min(files.length,6),tmo=Math.min(45000,25000+4000*n);
    var to=setTimeout(function(){if(fin||seq!==_gseq)return;fin=true;clearInterval(st);
-     box.innerHTML='';setDemoReady(true,'사진 확인이 오래 걸려 건너뛰었어요 — 바로 만들 수 있어요');},18000);
+     box.innerHTML='';setDemoReady(true,'사진 확인이 오래 걸려 건너뛰었어요 — 바로 만들 수 있어요');},tmo);
    var fd=new FormData();fd.append('industry',(document.getElementById('d_ind')||{}).value||'');
-   Array.from(files).slice(0,6).forEach(function(f){fd.append('photos',f);});
+   // 업로드 가속(버그1): 전송 전 1280px JPEG로 축소(모바일 수 MB 원본 → 수백 KB). 실패 시 원본.
+   async function shrink(f){try{if(!/^image\//.test(f.type||''))return f;
+     var bmp=await createImageBitmap(f);var mx=Math.max(bmp.width,bmp.height);
+     if(mx<=1280&&f.size<1500000)return f;
+     var s=Math.min(1,1280/mx),cv=document.createElement('canvas');
+     cv.width=Math.round(bmp.width*s);cv.height=Math.round(bmp.height*s);
+     cv.getContext('2d').drawImage(bmp,0,0,cv.width,cv.height);
+     var b=await new Promise(function(r){cv.toBlob(r,'image/jpeg',0.85);});
+     return b?new File([b],(f.name||'p').replace(/\.[^.]+$/,'')+'.jpg',{type:'image/jpeg'}):f;
+   }catch(e){return f;}}
+   var small=await Promise.all(Array.from(files).slice(0,6).map(shrink));
+   if(fin||seq!==_gseq)return;
+   small.forEach(function(f){fd.append('photos',f);});
    try{var r=await fetch('/api/intake/guess',{method:'POST',body:fd});var d=await r.json();
      if(fin||seq!==_gseq)return;fin=true;clearTimeout(to);clearInterval(st);
      if(d.guess){
