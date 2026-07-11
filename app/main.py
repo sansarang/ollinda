@@ -436,6 +436,8 @@ async def api_rank_check(request: Request):
     """온보딩/랜딩 '내 가게 현재 순위 즉시진단'(결제 트리거, 성장 PHASE 1).
     업종+지역+상호 → 네이버 현재 순위 + CTA 프레임. 로그인 tenant면 baseline 저장."""
     from app.services import diagnose
+    from app import ratelimit
+    from app.config import RANK_RATE_PER_MIN, RANK_RATE_PER_HOUR, RANK_CACHE_TTL
     try:
         form = await request.form()
         industry = (form.get("industry") or "").strip()
@@ -445,7 +447,24 @@ async def api_rank_check(request: Request):
         industry = region = name = ""
     if not (industry or name):
         return JSONResponse({"error": "업종 또는 상호를 입력해주세요."}, status_code=400)
+
+    # ── 앞단 게이트 ① 동일 상호+지역 TTL 캐시 → 네이버 콜 자체를 절감(레이트리밋과 별개) ──
+    ckey = f"{industry}|{region}|{name}".lower()
+    cached = ratelimit.cache_get(ckey, RANK_CACHE_TTL)
+    if cached is not None:
+        return JSONResponse(cached)                      # 캐시 히트 = 네이버 콜 0 → 한도 미차감
+
+    # ── 앞단 게이트 ② 캐시 미스(=네이버 호출 발생)만 IP 레이트리밋 ──
+    ip = (request.headers.get("cf-connecting-ip")
+          or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+          or (request.client.host if request.client else "") or "unknown")
+    if not ratelimit.allow(ip, RANK_RATE_PER_MIN, RANK_RATE_PER_HOUR):
+        return JSONResponse(
+            {"error": "순위 진단이 잠깐 몰렸어요 🙏 1~2분 뒤 다시 눌러주시면 바로 열려요!"},
+            status_code=429)
+
     result = diagnose.diagnose_rank(industry, region, name)
+    ratelimit.cache_set(ckey, result)                    # 같은 가게 반복 진단은 캐시로
     u = auth.current_user(request)
     if u and u.get("tenant_id"):
         diagnose.save_baseline(u["tenant_id"], result)   # before/after 기준점

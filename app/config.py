@@ -40,3 +40,8 @@ PLANS = {
 
 # 성과형(1페이지 진입 시 과금) — 스텁: 임계 순위 도달 이벤트 기록용
 PERFORMANCE_RANK_THRESHOLD = int(os.environ.get("SHOPCAST_PERF_RANK", "10"))  # 1페이지(상위 10위) 진입
+
+# 순위진단(/api/rank-check) 남용 방지 — 스캔당 네이버 API 최대 4콜이라 IP 레이트리밋 + TTL 캐시
+RANK_RATE_PER_MIN = int(os.environ.get("SHOPCAST_RANK_RPM", "5"))     # 동일 IP 분당 허용(넉넉히: 자기 가게+경쟁사 몇 개)
+RANK_RATE_PER_HOUR = int(os.environ.get("SHOPCAST_RANK_RPH", "20"))   # 동일 IP 시간당 허용
+RANK_CACHE_TTL = int(os.environ.get("SHOPCAST_RANK_CACHE_TTL", "3600"))  # 동일 상호+지역 캐시 1시간(네이버 콜 절감)
