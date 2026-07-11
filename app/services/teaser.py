@@ -59,14 +59,16 @@ def run_teaser(industry: str, biz_type: str, note: str,
     asset.note = asset.note + brief_to_directive(brief)
     brief_pub = {k: v for k, v in brief.items() if not k.startswith("_")}
 
-    # 텍스트 3채널은 즉시(빠름), 영상(SHORT)은 백그라운드로 → 타임아웃 없이 가입자와 동일하게 제공
+    # 영상(SHORT)을 텍스트보다 '먼저' 백그라운드 시작 — 글 쓰는 60~90초 동안 병렬 렌더
+    # (기존엔 텍스트 완료 후 시작이라 영상 대기가 순차로 30~60초 추가됐음, 무료UX 수정3-b)
+    _spawn_video(t, asset, paths)                                    # 🎬 영상(비동기·병렬)
+    # 텍스트 3채널은 즉시(빠름)
     kinds = [ContentKind.CAPTION, ContentKind.BLOG, ContentKind.X_POST]
     pieces = generate_for(t, asset, kinds, images=(paths or None))   # ✍️ 카피
     for p in pieces:
         p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value, p.payload)
         p.payload["brief"] = brief_pub
         db.save_piece(p)
-    _spawn_video(t, asset, paths)                                    # 🎬 영상(비동기)
     return t.id, asset.id, pieces, brief_pub
 
 

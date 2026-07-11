@@ -384,46 +384,61 @@ def _teaser_html(pieces, brief, asset_id, remaining: int = 0,
                + "".join(f"<img src='{u}' class='h-24 w-24 object-cover rounded-lg flex-shrink-0'>" for u in thumbs)
                + "</div>") if thumbs else "")
 
-    def card(label, inner):
-        return (f"<div class='bg-white border border-slate-200 rounded-2xl p-4'>"
-                f"<div class='font-bold text-sm text-slate-700 mb-1'>{label}</div>{inner}</div>")
+    def card(label, badge, inner, hi=False):
+        """채널 카드 — 모바일: 가로 스와이프(80% 폭·스냅), 데스크탑: 2×2 그리드(무료UX 수정1)."""
+        ring = "border-2 border-indigo-300" if hi else "border border-slate-200"
+        return (f"<div class='bg-white {ring} rounded-2xl p-4 min-w-[80%] snap-center flex-shrink-0 "
+                f"md:min-w-0 md:flex-shrink'>"
+                f"<div class='flex items-center justify-between mb-2'>"
+                f"<span class='font-bold text-sm text-slate-700'>{label}</span>"
+                f"<span class='text-[10px] font-bold text-indigo-500'>{badge}</span></div>{inner}</div>")
 
-    fade = ("<div class='relative -mt-16 h-16 pointer-events-none' "
-            "style='background:linear-gradient(180deg,rgba(255,255,255,0),#fff 85%)'></div>")
-    lock_line = ("<div class='flex items-center justify-between mt-1'>"
-                 "<span class='text-xs text-slate-400'>…전체 글·복사는 가입 후 (무료 2회)</span>"
-                 "<a href='/login/kakao' class='text-xs font-bold text-indigo-600'>전체 받기 →</a></div>")
+    def blur_lock(next_chunk: str, cta: str = "가입하면 전체 공개") -> str:
+        """맛보기 경계(수정2) — 이어지는 내용을 블러로 보여주고 오버레이 CTA. '완성은 못 보게'."""
+        return ("<div class='relative mt-1' aria-hidden='true'>"
+                f"<div class='text-xs text-slate-400 whitespace-pre-wrap select-none pointer-events-none' "
+                f"style='filter:blur(5px);max-height:88px;overflow:hidden'>{esc(next_chunk)}</div>"
+                "<div class='absolute inset-0 flex items-center justify-center' "
+                "style='background:linear-gradient(180deg,rgba(255,255,255,.25),rgba(255,255,255,.92) 80%)'>"
+                f"<a href='/login/kakao' class='bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold "
+                f"px-3.5 py-2 rounded-xl'>{cta} →</a></div></div>")
+
     cards = []
-    # ① 네이버 블로그 — 대부분 공개(품질 증명). 끝부분 페이드 + 복사·다운로드는 가입 후.
-    blog = by.get("blog")
-    if blog:
-        body = _re.sub(r"\[사진\d+\]", "", blog.payload.get("body", "")).strip()
-        shown = body[: max(400, int(len(body) * 0.8))]           # 약 80% 공개(최소 400자)
-        cards.append(card("네이버 블로그 <span class='text-[10px] text-indigo-500 font-bold'>미리보기</span>",
-            f"<div class='font-bold text-slate-800 text-sm mb-1'>{esc(blog.payload.get('title',''))}</div>"
-            f"<div class='text-slate-600 text-xs whitespace-pre-wrap max-h-72 overflow-hidden'>{esc(shown)}</div>"
-            + fade + lock_line))
-    # ② 인스타그램 — 공개(두 번째 맛보기). 복사는 가입 후.
-    cap = by.get("caption")
-    if cap:
-        cards.append(card("인스타그램 <span class='text-[10px] text-indigo-500 font-bold'>미리보기</span>",
-            f"<div class='text-slate-700 text-sm whitespace-pre-wrap max-h-56 overflow-hidden'>{esc(cap.payload.get('text',''))}</div>"
-            + fade + lock_line))
-    # ③ 영상 — 8초 워터마크 미리보기만(완성본·다운로드는 가입 후)
-    cards.append(card("유튜브 쇼츠 · 릴스 <span class='text-[10px] text-indigo-500 font-bold'>8초 미리보기</span>",
+    # ① 영상 — 첫 카드·강조(최강 훅, 수정3). 병렬 렌더 + 기대감 진행표시, 8초 워터마크 미리보기.
+    cards.append(card("유튜브 쇼츠 · 릴스", "8초 미리보기",
         f"<div id='tvid' data-a='{asset_id}'>"
-        "<div class='text-slate-500 text-sm py-6 text-center'>내 사진으로 영상 만드는 중… <span class='text-slate-400'>(30~60초, 자동으로 나타나요)</span>"
+        "<div class='py-5 text-center'>"
+        "<div class='text-sm font-bold text-slate-700'>영상까지 자동으로 만들어지고 있어요</div>"
+        "<div class='text-xs text-slate-400 mt-1'>첫 3초 훅 · 음성 나레이션 · 자막까지 — 완성되면 여기 바로 떠요</div>"
         "<div class='w-full h-1.5 bg-slate-100 rounded-full overflow-hidden mt-3'><div class='h-full bg-indigo-400' style='width:100%;animation:tvp 1.4s ease-in-out infinite'></div></div></div></div>"
         "<style>@keyframes tvp{0%,100%{opacity:.35}50%{opacity:1}}</style>"
         "<script>(function(){var el=document.getElementById('tvid');if(!el||el._p)return;el._p=1;var a=el.dataset.a,n=0;"
-        "var iv=setInterval(async function(){n++;if(n>45){clearInterval(iv);el.innerHTML=\"<div class='text-slate-500 text-sm py-4 text-center'>영상은 가입 후 '내 작업실'에서 완성본으로 받을 수 있어요</div>\";return;}"
+        "var iv=setInterval(async function(){n++;if(n>80){clearInterval(iv);el.innerHTML=\"<div class='text-slate-500 text-sm py-4 text-center'>영상은 가입 후 '내 작업실'에서 완성본으로 받을 수 있어요</div>\";return;}"
         "try{var r=await fetch('/api/demo/video/'+a);var d=await r.json();if(d.ready){clearInterval(iv);"
-        "el.innerHTML='<video src=\"'+d.url+'\" controls autoplay muted loop playsinline class=\"w-full rounded-xl bg-black\" style=\"max-height:440px\"></video>'"
+        "el.innerHTML='<video src=\"'+d.url+'\" controls autoplay muted loop playsinline class=\"w-full rounded-xl bg-black\" style=\"max-height:300px\"></video>'"
         "+'<div class=\"flex items-center justify-between mt-2\"><span class=\"text-xs text-slate-400\">완성본(전체 길이·워터마크 없음)은 가입 후</span>"
-        "<a href=\"/login/kakao\" class=\"text-xs font-bold text-indigo-600\">완성본 받기 →</a></div>';}}catch(e){}},3000);})();</script>"))
+        "<a href=\"/login/kakao\" class=\"text-xs font-bold text-indigo-600\">완성본 받기 →</a></div>';}}catch(e){}},3000);})();</script>",
+        hi=True))
+    # ② 네이버 블로그 — 앞 ~32%만 선명(품질 증명), 이어지는 부분 블러+오버레이(수정2: 완성은 못 보게)
+    blog = by.get("blog")
+    if blog:
+        body = _re.sub(r"\[사진\d+\]", "", blog.payload.get("body", "")).strip()
+        cut = max(250, int(len(body) * 0.32))
+        shown, hidden = body[:cut], body[cut:cut + 260]
+        cards.append(card("네이버 블로그", "도입부 미리보기",
+            f"<div class='font-bold text-slate-800 text-sm mb-1'>{esc(blog.payload.get('title',''))}</div>"
+            f"<div class='text-slate-600 text-xs whitespace-pre-wrap max-h-36 overflow-hidden'>{esc(shown)}</div>"
+            + blur_lock(hidden, "이어지는 본문은 가입 후")))
+    # ③ 인스타그램 — 첫 훅만, 나머지 블러(수정2)
+    cap = by.get("caption")
+    if cap:
+        txt = (cap.payload.get("text") or "").strip()
+        cards.append(card("인스타그램", "훅 미리보기",
+            f"<div class='text-slate-700 text-sm whitespace-pre-wrap'>{esc(txt[:110])}</div>"
+            + blur_lock(txt[110:110 + 200])))
     # ④ 잠긴 채널 — 실제로 생성된 것만 '생성 완료'로 정직하게 표기(무료경계 PHASE 5)
-    x_label = ("X (트위터) 단문 — 생성 완료, 가입하면 열려요" if by.get("x_post")
-               else "X (트위터) 단문 — 가입 후 생성")
+    x_label = ("X (트위터) — 생성 완료, 가입하면 열려요" if by.get("x_post")
+               else "X (트위터) — 가입 후 생성")
     locked_items = "".join(
         f"<div class='flex items-center gap-2 text-sm text-slate-500 py-1.5 border-b border-slate-100'>"
         f"<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' class='w-4 h-4 text-slate-400'>"
@@ -432,10 +447,13 @@ def _teaser_html(pieces, brief, asset_id, remaining: int = 0,
                   "인스타 캐러셀 카드 — 가입 후 생성",
                   "영상 완성본 + 피드 규격(1:1·4:5) — 가입 후",
                   "전체 다운로드(ZIP) · 네이버 발행 도우미 — 가입 후"])
-    cards.append(card("나머지 채널",
+    cards.append(card("+ 나머지 채널", "가입하면 전부",
         locked_items + "<div class='text-xs text-slate-400 mt-2'>가입하면 5채널 전부 + 완성본 다운로드 (무료 2회)</div>"))
 
-    grid = "<div class='grid md:grid-cols-2 gap-3 mb-4'>" + "".join(cards) + "</div>"
+    # 모바일: 가로 스와이프 캐러셀(스냅) / 데스크탑: 2×2 그리드 — "한 번에 이 만큼" 임팩트(수정1)
+    grid = ("<div class='flex gap-3 overflow-x-auto snap-x snap-mandatory pb-2 -mx-1 px-1 "
+            "md:grid md:grid-cols-2 md:overflow-visible mb-2'>" + "".join(cards) + "</div>"
+            "<div class='md:hidden text-center text-[10px] text-slate-400 mb-3'>← 옆으로 넘겨서 채널별 결과 보기 →</div>")
     # 손실 프레이밍(전환 PHASE 2) — 진단의 미노출 키워드로 만든 글이면 실측 검색량 근거로
     loss = ""
     if target_kw:
@@ -467,8 +485,9 @@ def _teaser_html(pieces, brief, asset_id, remaining: int = 0,
                "<a href='/login/kakao' class='block text-center py-3.5 rounded-xl font-extrabold mb-2' style='background:#FEE500;color:#191600'>카카오로 가입하고 전체 받기 (무료 2회)</a>"
                "<a href='/login/google' class='block text-center py-3 rounded-xl font-bold bg-white border border-slate-200 text-slate-700'>구글로 가입</a>")
     return ("<div class='bg-[#F9FAFB] border border-slate-200 rounded-2xl p-4'>"
-            "<div class='text-center text-slate-900 font-extrabold text-lg mb-1'>방금 만든 결과 — 미리보기</div>"
-            "<div class='text-center text-slate-500 text-xs mb-3'>글 품질은 그대로 보여드려요. 완성본·전체 채널은 가입 후 무료 2회로 받으세요.</div>"
+            "<div class='text-center mb-1'><span class='inline-block bg-[#EEF2FF] text-indigo-600 text-[10px] font-bold px-2.5 py-1 rounded-full'>5채널 동시 생성</span></div>"
+            "<div class='text-center text-slate-900 font-extrabold text-lg mb-1'>사진 한 장으로 이 모든 게 완성됐어요</div>"
+            "<div class='text-center text-slate-500 text-xs mb-3'>영상·블로그·인스타·X·캐러셀 — 도입부 미리보기예요. 전체는 가입 후 무료 2회.</div>"
             + photos + grid + cta + "</div>")
 
 
