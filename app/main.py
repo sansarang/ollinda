@@ -251,7 +251,10 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
         used = u.get("free_used") or 0
         free = (u.get("plan") or "free") == "free"
         if free and used >= FREE_LIMIT:
-            return JSONResponse({"limit": True, "message": f"무료 {FREE_LIMIT}회를 모두 사용했어요. 요금제로 무제한 이용하세요."})
+            from app import config as _cfg
+            return JSONResponse({"limit": True,
+                                 "message": (f"무료 {FREE_LIMIT}회를 모두 사용했어요. 방금 만든 품질 그대로 계속하려면 "
+                                             f"베이직 월 {_cfg.PRICE_BASIC:,}원 — 순위 추적·경쟁사 비교까지 열려요.")})
         left = (FREE_LIMIT - used) if free else None
         return JSONResponse({"go_dashboard": True,
                              "message": "내 작업실에서 사진을 올리면 바로 만들어드려요!"
@@ -1506,6 +1509,26 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                  "style='background:linear-gradient(120deg,#334155,#4338ca)'>"
                  f"<div><div class='text-xs text-white/70'>내 플랜</div>"
                  f"<div class='font-bold'>{_pn} · {_usage}</div></div>{_upbtn}</div>")
+    # 무료 소진 → 결제 유도(전환 PHASE 3) — 방금 만든 품질 근거 + 유료 기능 맛보기(사실만, 과장 없음)
+    _upsell = ""
+    if (not _is_owner(u)) and _plan == "free" and (u.get("free_used") or 0) >= FREE_LIMIT:
+        from app import config as _cfg2
+        _perks = "".join(
+            f"<div class='flex items-center gap-2 text-sm text-slate-600 py-1'>"
+            f"<span class='w-1.5 h-1.5 rounded-full bg-indigo-500 flex-shrink-0'></span>{p}</div>"
+            for p in [f"콘텐츠 계속 생성 (베이직 월 8건 · 프로 무제한)",
+                      "순위 성장 추적 — 발행 전후 '5위→2위' 자동 비교",
+                      "경쟁사 추적 — 옆집 대비 내 순위 매일 자동 체크",
+                      "블로그 발행 자동 확인 + 주간 성과 리포트"])
+        _upsell = ("<div class='bg-white border-2 border-indigo-200 rounded-2xl p-5 mb-4'>"
+                   "<div class='font-extrabold text-slate-900 mb-1'>무료 2회를 다 쓰셨어요</div>"
+                   "<p class='text-sm text-slate-500 mb-3'>방금 만든 그 품질 그대로 계속 — "
+                   f"<b class='text-slate-800'>베이직 월 {_cfg2.PRICE_BASIC:,}원</b>이면 이런 게 열려요.</p>"
+                   + _perks +
+                   "<div class='flex gap-2 mt-3'>"
+                   "<a href='/billing?plan=basic' class='flex-1 text-center bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition'>베이직 시작</a>"
+                   f"<a href='/billing?plan=pro' class='flex-1 text-center bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-xl transition'>프로 (월 {_cfg2.PRICE_PRO:,}원)</a></div>"
+                   "<p class='text-xs text-slate-400 mt-2'>연 결제 시 약 30% 할인 · 언제든 해지 가능</p></div>")
     _sname = t.name if (t.name and t.name not in ("카카오회원", "구글회원", "회원", "내 가게")) else ""
     greeting = ("<div class='mb-6'>"
                 + (f"<div class='inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-700 text-sm font-bold px-3 py-1.5 rounded-full mb-3'>🏪 {esc(_sname)}</div>" if _sname else "")
@@ -1701,7 +1724,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                       "<div class='flex-1 min-w-0'><div class='text-xs font-bold text-indigo-500 mb-0.5'>오늘의 액션</div>"
                       f"<div class='text-sm text-slate-700 font-medium'>{_act['text']}</div></div>"
                       f"<a href='{_act['href']}' class='flex-shrink-0 bg-indigo-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-indigo-700 transition'>{_act['cta']}</a></div>")
-            main_inner = (greeting + _notice_html + _coach + _calendar_card(t, _plan)
+            main_inner = (greeting + _upsell + _notice_html + _coach + _calendar_card(t, _plan)
                           + _blog_nudge + upload_section
                           + "<div class='mt-5'></div>" + _store_info_card(t))
     # 🆕 새로 추가한 '빈 새 가게'면 실수 대비 '뒤로가기(취소)' 배너
