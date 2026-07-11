@@ -244,6 +244,8 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
                    biz_type: str = Form("local"), marketplace: str = Form(""),
                    search_kw: str = Form(""), purpose: str = Form(""),
                    target_kw: str = Form(""), target_vol: str = Form(""),
+                   confirmed: str = Form(""), vision_analysis: str = Form(""),
+                   answers: str = Form(""), experience: str = Form(""),
                    photos: list[UploadFile] = File(None)):
     """랜딩 데모 — 미가입자는 '실제 생성 티저(흐리게)'로 가입 유도. 로그인 회원은 작업실로."""
     u = auth.current_user(request)
@@ -280,9 +282,16 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
         target_vol_n = 0
     if target_kw:
         full_note = (full_note + f" | 타겟 키워드(미노출 진단): '{target_kw}' — 제목·첫문장에 자연스럽게 반영").strip(" |")
+    # 스마트 입력(콘텐츠생성 PHASE 4) — 확인된 사진내용·질문답·경험을 생성에 구조 주입
+    from app.services import smart_intake
+    intake = {"confirmed": confirmed.strip()[:120],
+              "analysis": (vision_analysis or "").strip()[:4000],
+              "answers": smart_intake.parse_answers(answers),
+              "experience": experience.strip()[:200]}
+    _level = smart_intake.enrichment_level(intake["confirmed"], intake["answers"], intake["experience"])
     try:
         from app.services import teaser as teaser_svc
-        _t, _a, pieces, brief = teaser_svc.run_teaser(industry, biz_type, full_note, imgs)
+        _t, _a, pieces, brief = teaser_svc.run_teaser(industry, biz_type, full_note, imgs, intake=intake)
     except Exception:
         import logging
         logging.exception("[teaser] 실패")
@@ -293,7 +302,8 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
     remaining = max(0, 2 - db.demo_ip_count(ip))
     return JSONResponse({"teaser": True,
                          "teaser_html": _teaser_html(pieces, brief, _a, remaining,
-                                                     target_kw=target_kw, target_vol=target_vol_n)})
+                                                     target_kw=target_kw, target_vol=target_vol_n,
+                                                     enrichment=_level)})
 
 
 def _img_thumb_data_uri(path, max_px: int = 640) -> str:
@@ -326,7 +336,7 @@ def _img_thumb_data_uri(path, max_px: int = 640) -> str:
 
 
 def _teaser_html(pieces, brief, asset_id, remaining: int = 0,
-                 target_kw: str = "", target_vol: int = 0) -> str:
+                 target_kw: str = "", target_vol: int = 0, enrichment: str = "bare") -> str:
     """미가입 무료 체험 결과 — '보여주되 다 주지 않는다'(전환 PHASE 1·2).
     블로그 글은 대부분 노출(품질 증명 = 미끼), 영상은 8초 워터마크 미리보기,
     5채널 중 2개(블로그+인스타)만 공개 — 완성본·다운로드·발행·전체 채널은 가입 뒤(훅).
@@ -4711,7 +4721,9 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
                  s_biz: str = Form(""), s_region: str = Form(""), s_tel: str = Form(""),
                  s_buy: str = Form(""), s_address: str = Form(""), photo_desc: str = Form(""),
                  s_map: str = Form(""), s_market: str = Form(""), s_brand: str = Form(""),
-                 s_search: str = Form(""), target_kw: str = Form(""), angle: str = Form("")):
+                 s_search: str = Form(""), target_kw: str = Form(""), angle: str = Form(""),
+                 confirmed: str = Form(""), vision_analysis: str = Form(""),
+                 answers: str = Form(""), experience: str = Form("")):
     tenant, _ = db.get_tenant_by_token(token)
     if not tenant:
         return HTMLResponse("<p>잘못된 링크입니다.</p>", status_code=404)
@@ -4761,9 +4773,15 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
             if _ind:
                 from app.industries import ensure_profile
                 ensure_profile(_ind)
+            from app.services import smart_intake as _si
+            _intake = {"confirmed": confirmed.strip()[:120],
+                       "analysis": (vision_analysis or "").strip()[:4000],
+                       "answers": _si.parse_answers(answers),
+                       "experience": experience.strip()[:200]}
             made = ingest_upload(tenant, files, full_note,
                                  target_kw=target_kw.strip()[:40],
-                                 angle=(angle.strip() if angle.strip() in ("review", "howto", "price") else ""))
+                                 angle=(angle.strip() if angle.strip() in ("review", "howto", "price") else ""),
+                                 intake=_intake)
             if not made:
                 _refund_usage(owner)               # 생성 결과 없음 → 예약 원복
         except Exception:

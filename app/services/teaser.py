@@ -10,13 +10,17 @@ from app.domain.models import AssetType, ContentKind
 
 
 def run_teaser(industry: str, biz_type: str, note: str,
-               images: list[tuple[bytes, str]] | None = None):
-    """(tenant_id, asset_id, pieces, brief) — 텍스트 3채널 실제 생성. images=여러 장 지원."""
+               images: list[tuple[bytes, str]] | None = None,
+               intake: dict | None = None):
+    """(tenant_id, asset_id, pieces, brief) — 텍스트 3채널 실제 생성. images=여러 장 지원.
+    intake(스마트 입력, PHASE 4): {confirmed, analysis, answers, experience} — 확인된 사진내용·
+    질문답·경험을 note에 구조 주입(D.I.A.+ 재료). analysis 있으면 vision 재호출 생략(비용 1콜 유지)."""
     from app.services.generate import generate_for
     from app.generators.strategist import build_brief, brief_to_directive
 
     industry = (industry or "").strip() or "우리 가게"
     biz_type = biz_type if biz_type in ("local", "seller", "hybrid") else "local"
+    intake = intake or {}
     t = db.create_tenant(f"{industry[:16]} 미리보기", industry, "", biz_type)
     db.mark_tenant_demo(t.id)
 
@@ -32,9 +36,19 @@ def run_teaser(industry: str, biz_type: str, note: str,
             storage.mirror_to_r2(_p)
     except Exception:
         pass
+    # 스마트 입력 블록 — 사용자가 확인·입력한 '사실'을 note 맨 앞에(전략가·생성기가 최우선 참조)
+    try:
+        from app.services import smart_intake
+        block = smart_intake.build_intake_note(industry, intake.get("confirmed", ""),
+                                               intake.get("answers"), intake.get("experience", ""))
+        if block:
+            note = (block + "\n" + (note or "")).strip()
+    except Exception:
+        pass
     asset = db.create_asset(t.id, AssetType.IMAGE, paths[0] if paths else "", note or "")
     if paths:
-        analysis = vision.analyze(paths[0], industry)   # 대표(첫) 사진 분석
+        # 선추측 단계에서 이미 분석했으면 재호출 생략(같은 사진, 비용 절감)
+        analysis = (intake.get("analysis") or "").strip() or vision.analyze(paths[0], industry)
         note_add = f"\n\n[사진 {len(paths)}장 · 캐러셀]" if len(paths) > 1 else ""
         asset.note = f"{note}{note_add}" + (f"\n\n[사진 분석]\n{analysis}" if analysis else "")
 
