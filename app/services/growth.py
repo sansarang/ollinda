@@ -30,6 +30,11 @@ def on_publish(tenant, piece) -> None:
         # 매장형: 플레이스 노출 순위 분리 추적(성장 PHASE 8)
         if (getattr(tenant, "biz_type", "local") or "local") in ("local", "hybrid"):
             db.save_place_rank(tenant.id, kw, cur)
+        # 블로그 연결 시: blog_id 정확 매칭 순위도 병행 스냅샷(블로그등록 PHASE 3)
+        if getattr(tenant, "blog_id", ""):
+            from app.services import blogrank
+            br = blogrank.blog_rank(kw, tenant.blog_id)
+            db.save_rank_snapshot(tenant.id, kw, br["rank"], kind="blog_search")
         if cur and 0 < cur <= config.PERFORMANCE_RANK_THRESHOLD:   # 1페이지 진입 → 성과형 과금 이벤트(스텁)
             db.record_perf_event(tenant.id, kw, cur)
         due = (datetime.utcnow() + timedelta(days=config.REPORT_AFTER_DAYS)).isoformat()

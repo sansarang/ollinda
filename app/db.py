@@ -120,10 +120,20 @@ def _now() -> str:
     return datetime.utcnow().isoformat()
 
 
-def get_prev_rank(tenant_id: str, keyword: str) -> "int | None":
-    """이 키워드의 '오늘 이전' 마지막 순위(변화 계산용). 같은 날 재조회에도 안정. 없으면 None."""
+def get_prev_rank(tenant_id: str, keyword: str, kind: str = "") -> "int | None":
+    """이 키워드의 '오늘 이전' 마지막 순위(변화 계산용). 같은 날 재조회에도 안정. 없으면 None.
+    kind 지정 시 해당 소스(blog|place|blog_search)만 — 미지정은 기존 동작(전체) 유지."""
     today = _now()[:10]
     with _conn() as c:
+        if kind:
+            try:
+                r = c.execute("SELECT rank FROM rank_snapshots WHERE tenant_id=? AND keyword=? "
+                              "AND checked_at NOT LIKE ? AND COALESCE(kind,'blog')=? "
+                              "ORDER BY checked_at DESC LIMIT 1",
+                              (tenant_id, keyword, today + "%", kind)).fetchone()
+                return (r["rank"] if r else None)
+            except sqlite3.OperationalError:
+                pass
         r = c.execute("SELECT rank FROM rank_snapshots WHERE tenant_id=? AND keyword=? "
                       "AND checked_at NOT LIKE ? ORDER BY checked_at DESC LIMIT 1",
                       (tenant_id, keyword, today + "%")).fetchone()

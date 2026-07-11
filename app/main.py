@@ -1491,7 +1491,15 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                     "function st(it){var r=it.rank;return (r===null)?'<span class=\"text-slate-400\">조회불가</span>':(r>=1?('<span class=\"text-emerald-600 font-bold\">네이버 지역 '+r+'위</span>'):'<span class=\"text-slate-400\">5위 밖</span>');}"
                     "function chg(it){var c=it.rank,p=it.prev;if(c===null)return '';if(p===null||p===undefined)return '<span class=\"text-indigo-500 text-xs font-bold ml-2\">🆕 첫 측정</span>';var cc=(c===0?6:c),pp=(p===0?6:p);if(cc<pp)return '<span class=\"text-emerald-600 text-xs font-bold ml-2\">⬆️ '+(pp-cc)+'계단</span>';if(cc>pp)return '<span class=\"text-rose-500 text-xs font-bold ml-2\">⬇️ '+(cc-pp)+'계단</span>';return '<span class=\"text-slate-400 text-xs ml-2\">— 유지</span>';}"
                     "function riv(it){if(it.rank===1)return '<div class=\"text-xs text-emerald-600 mt-1 font-semibold\">👑 이 키워드 1위!</div>';if(it.rank>1&&it.rival)return '<div class=\"text-xs text-amber-600 mt-1\">🎯 <b>'+it.rival+'</b>만 넘으면 '+(it.rank-1)+'위</div>';if((it.rank===0)&&it.leader)return '<div class=\"text-xs text-slate-400 mt-1\">현재 1위: '+it.leader+' — 콘텐츠 꾸준히 올리면 진입해요</div>';return '';}"
-                    "b.innerHTML=d.items.map(function(it){return '<div class=\"border-b border-slate-100 py-2.5\"><div class=\"flex items-center justify-between\"><span class=\"text-slate-700 font-medium\">'+it.kw+'</span><span class=\"whitespace-nowrap\">'+st(it)+chg(it)+'</span></div>'+riv(it)+'</div>';}).join('');"
+                    "function bl(it){if(it.blog_rank===undefined)return '';var r=it.blog_rank,p=it.blog_prev,s;"
+                    "if(r===null)s='<span class=\"text-slate-400\">조회불가</span>';"
+                    "else if(r>=1)s='<span class=\"text-emerald-600 font-bold\">블로그탭 '+r+'위</span>'+(it.blog_url?' <a href=\"'+it.blog_url+'\" target=_blank class=\"text-xs text-slate-400\">↗</a>':'');"
+                    "else s='<span class=\"text-slate-400\">30위 밖</span>';"
+                    "var c='';if(r!==null&&p!==null&&p!==undefined){var cc=(r===0?31:r),pp=(p===0?31:p);"
+                    "if(cc<pp)c=' <span class=\"text-emerald-600 text-xs font-bold\">⬆️'+(pp-cc)+'</span>';else if(cc>pp)c=' <span class=\"text-rose-500 text-xs font-bold\">⬇️'+(cc-pp)+'</span>';}"
+                    "return '<div class=\"flex items-center justify-between mt-1\"><span class=\"text-xs text-slate-400\">📝 내 블로그(정확 매칭)</span><span class=\"text-sm whitespace-nowrap\">'+s+c+'</span></div>';}"
+                    "b.innerHTML=d.items.map(function(it){return '<div class=\"border-b border-slate-100 py-2.5\"><div class=\"flex items-center justify-between\"><span class=\"text-slate-700 font-medium\">'+it.kw+'</span><span class=\"whitespace-nowrap\">'+st(it)+chg(it)+'</span></div>'+bl(it)+riv(it)+'</div>';}).join('')"
+                    "+(d.blog_connected?'':'<div class=\"mt-3 text-xs text-slate-400\">💡 <a href=\"#blog\" class=\"font-bold text-emerald-600\">내 블로그를 연결</a>하면 블로그탭 순위도 정확히 추적해요.</div>');"
                     "}catch(e){b.innerHTML='<span class=\"text-rose-400\">조회 실패</span>';}})();</script></div>")
         # 🎯 성과 실측 — 추적 링크/QR로 '이 콘텐츠 보고 온 손님' 집계
         _tl = _ensure_track_link(t)
@@ -1801,15 +1809,26 @@ def my_rank(request: Request):
             for k in (p.payload.get("target_keywords") or []):
                 if k and k not in kws:
                     kws.append(k)
+    # blog_id 연결 시: 블로그검색 결과에서 내 블로그 '정확 식별'(상호매칭 오탐 없음, 블로그등록 PHASE 3)
+    bid = getattr(t, "blog_id", "") or ""
     items = []
     for k in kws[:5]:
         det = place.rank_detail(k, t.name)
         cur = det["rank"]
         prev = db.get_prev_rank(t.id, k)            # 오늘 이전 순위(변화 계산)
         db.save_rank_snapshot(t.id, k, cur)         # 오늘 순위 기록
-        items.append({"kw": k, "rank": cur, "prev": prev,
-                      "rival": det["rival"], "leader": det["leader"]})
-    return JSONResponse({"items": items, "configured": place.configured()})
+        item = {"kw": k, "rank": cur, "prev": prev,
+                "rival": det["rival"], "leader": det["leader"]}
+        if bid:
+            from app.services import blogrank
+            br = blogrank.blog_rank(k, bid)
+            item["blog_rank"] = br["rank"]          # 1~30 | 0=미노출 | None=조회불가
+            item["blog_prev"] = db.get_prev_rank(t.id, k, kind="blog_search")
+            item["blog_url"] = br["url"]
+            db.save_rank_snapshot(t.id, k, br["rank"], kind="blog_search")
+        items.append(item)
+    return JSONResponse({"items": items, "configured": place.configured(),
+                         "blog_connected": bool(bid)})
 
 
 def _kfont(size: int):
