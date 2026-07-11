@@ -186,6 +186,12 @@ def _startup() -> None:
         for key in ACTIVE_INDUSTRIES:
             p = PROFILES[key]
             db.create_tenant(name=f"데모 {p.name}", industry=p.name, region="수원")
+    try:                                # 경쟁사 일일 자동 스캔(apscheduler 미설치 시 graceful)
+        from app import scheduler
+        scheduler.start()
+    except Exception:
+        import logging
+        logging.exception("[startup] 스케줄러 기동 실패 — 자동 스캔 없이 계속")
 
 
 @app.get("/health")
@@ -469,6 +475,31 @@ async def api_rank_check(request: Request):
     if u and u.get("tenant_id"):
         diagnose.save_baseline(u["tenant_id"], result)   # before/after 기준점
     return JSONResponse(result)
+
+
+# ══ 신규기능①: 경쟁사 추적기 ══
+@app.post("/api/competitor/scan")
+def competitor_scan_now(request: Request):
+    """수동 스캔 트리거 — 등록 경쟁사 전부 즉시 조회(플랜 한도 차감, PHASE 3)."""
+    from app import gating
+    from app.services import competitor
+    u = auth.current_user(request)
+    blk = gating.check_limit(u, "competitor_scans")
+    if blk:
+        return JSONResponse(blk, status_code=(401 if blk.get("need_signup") else 402))
+    t = _ensure_user_tenant(u)
+    comps = db.list_competitors(t.id)
+    if not comps:
+        return JSONResponse({"error": "먼저 경쟁사를 등록해 주세요.", "empty": True}, status_code=200)
+    scans = []
+    for comp in comps:
+        try:
+            scans.append(competitor.scan_competitor(t, comp))
+        except Exception:
+            import logging
+            logging.exception("[competitor] 수동 스캔 실패 id=%s", comp.get("id"))
+    gating.consume(u, "competitor_scans")
+    return JSONResponse({"scans": scans, "usage": gating.usage_summary(db.get_user(u["id"]), "competitor_scans")})
 
 
 def _short_region(addr: str) -> str:
