@@ -137,7 +137,9 @@ class BlogDraftGenerator(Generator):
             f"{seo.speaker_frame(strat.key)}\n"
             f"{seo.keywords_line(kws)}\n{closing}\n\n"
             f"{seo.BLOG_DIRECTIVES}\n{seo.BLOG_SELL_STRUCT}\n{seo.COPY_PSYCH}\n{seo.FACTS_RULE}\n"
-            "[실경험 강화 · D.I.A.+ 핵심] 위 '사진 분석'의 구체 사실(색·질감·전후 변화·차종/제품·수치)을 "
+            + (seo.blog_angle_directive(getattr(asset, "angle", "")) + "\n"
+               if getattr(asset, "angle", "") else "")
+            + "[실경험 강화 · D.I.A.+ 핵심] 위 '사진 분석'의 구체 사실(색·질감·전후 변화·차종/제품·수치)을 "
             "1인칭 경험담('직접 해보니','만져보니','시공하고 나니')으로 녹여라. 추상적 미사여구·일반론 금지, 손에 잡히듯 구체적으로.\n"
             "[필수 섹션] ① '## 자주 묻는 질문'(Q&A 정확히 3쌍) ② 가격대/영업시간/찾아오는길을 마크다운 표(| 항목 | 내용 |) 1개.\n"
             f"[키워드 밀도] 핵심키워드 '{kw0}'는 본문에 정확히 3~5회만(남발=저품질 추락). 첫 문장에 반드시 1회. "

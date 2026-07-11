@@ -70,6 +70,31 @@ def product_keywords(note: str = "", brand: str = "", limit: int = 10) -> list[s
     return _apply_volume(out, limit, hints=heads)
 
 
+# 스마트블록 의도별 앵글 3종 — 같은 키워드로 다른 블록 진입(성장 PHASE 7)
+BLOG_ANGLES = {
+    "review": "[앵글=후기형] 통합검색 '후기' 스마트블록을 노려라. 제목·본문을 1인칭 실제 후기 중심으로"
+              "(직접 겪은 상황→과정→만족/아쉬움→추천). 별점·재방문 의사 등 경험 신호를 담아라.",
+    "howto":  "[앵글=방법·과정형] '방법/과정' 스마트블록·지식스니펫을 노려라. 단계별(1·2·3) 과정·소요시간·"
+              "주의점을 구체 수치로. Q&A 소제목으로 '어떻게'에 정확히 답하라.",
+    "price":  "[앵글=가격·비용형] '가격/비용' 스마트블록을 노려라. 가격대·구성·비교 기준을 표로 정리"
+              "(단, 입력에 없는 금액은 지어내지 말고 '문의/상담' 유도). 왜 이 가격이 합리적인지 근거 제시.",
+}
+
+
+def blog_angle_directive(angle: str) -> str:
+    """의도별 앵글 지시문(후기/방법/가격) — 없으면 빈 문자열."""
+    return BLOG_ANGLES.get(angle or "", "")
+
+
+def posting_cadence_tip(days_since_last: int | None, weekly_target: int = 3) -> str:
+    """C-Rank '활동 지속성' 코칭 — 주 N회 발행 권장. 발행 캘린더 안내(성장 PHASE 7)."""
+    if days_since_last is None:
+        return f"C-Rank는 '꾸준함'에 가점을 줘요. 같은 주제로 주 {weekly_target}회 발행을 목표로 시작해요."
+    if days_since_last >= 3:
+        return f"{days_since_last}일째 새 글이 없어요. 발행 간격이 벌어지면 C-Rank 신뢰가 식어요 — 오늘 한 편 올려요."
+    return f"좋아요! 이 페이스(주 {weekly_target}회)를 유지하면 같은 주제 전문성이 쌓여 상위노출에 유리해져요."
+
+
 def keyword_plan(industry_name: str, region: str, note: str = "", axis: str = "local", brand: str = "") -> dict:
     """대표키워드 1개(제목) + 롱테일 2~3개(본문 소제목) + 실검색량 여부('추정') — 성장 PHASE 5.
     지역+업종+의도 3요소 조합, 실검색량 500~5,000 롱테일 우선(searchad 주경로, 무키 시 규칙 폴백=추정)."""

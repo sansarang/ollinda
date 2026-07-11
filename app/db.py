@@ -64,7 +64,8 @@ def init_db() -> None:
                          ("biz_type", "TEXT DEFAULT 'local'"), ("marketplace", "TEXT"),
                          ("buy_url", "TEXT"), ("search_kw", "TEXT"), ("brand_name", "TEXT"),
                          ("publish_schedule", "INTEGER DEFAULT 0"), ("is_demo", "INTEGER DEFAULT 0"),
-                         ("lat", "REAL"), ("lon", "REAL")]:      # 가게 좌표(사진 GPS 지오태그)
+                         ("lat", "REAL"), ("lon", "REAL"),        # 가게 좌표(사진 GPS 지오태그)
+                         ("topic_axis", "TEXT")]:                 # 전문 주제 축(C-Rank 주제 집중, 성장 PHASE 7)
             try:
                 c.execute(f"ALTER TABLE tenants ADD COLUMN {col} {ddl}")
             except sqlite3.OperationalError:
