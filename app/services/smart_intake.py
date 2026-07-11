@@ -112,6 +112,8 @@ def _questions_from_profile(prof) -> list[dict]:
     for i, item in enumerate(sig[:2]):
         # 라벨은 신호 핵심어만(1줄) — 긴 설명형 질문은 그리드에서 2줄로 넘쳐 지저분(컴팩트 개선)
         short = item[:16].rstrip()
+        if len(item) > 16 and " " in short:
+            short = short.rsplit(" ", 1)[0]          # 단어 중간 잘림 방지("신선함"→"신선?" 어색)
         out.append({"id": f"sig{i}", "q": f"{short}?",
                     "type": "text", "ph": "실제로 어떤지 한 줄로 (모르면 비워두세요)"})
     pains = [s.strip() for s in re.split(r"[,·/]", getattr(prof, "pain_points", "") or "") if s.strip()]
