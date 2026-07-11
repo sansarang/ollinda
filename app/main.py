@@ -405,17 +405,19 @@ def _teaser_html(pieces, brief, asset_id, remaining: int = 0,
                + "</div>") if thumbs else "")
 
     def card(label, badge, inner, hi=False):
-        """채널 카드 — 모바일: 가로 스와이프(80% 폭·스냅), 데스크탑: 2×2 그리드(무료UX 수정1)."""
+        """채널 카드 — 모바일: 가로 스와이프(80% 폭·스냅), 데스크탑: auto-fit 그리드(3~4열).
+        flex-col + 마지막 요소 mt-auto로 같은 행 카드 높이·하단 CTA 정렬 통일."""
         ring = "border-2 border-indigo-300" if hi else "border border-slate-200"
         return (f"<div class='bg-white {ring} rounded-2xl p-4 min-w-[80%] snap-center flex-shrink-0 "
-                f"md:min-w-0 md:flex-shrink'>"
+                f"md:min-w-0 md:flex-shrink flex flex-col'>"
                 f"<div class='flex items-center justify-between mb-2'>"
                 f"<span class='font-bold text-sm text-slate-700'>{label}</span>"
                 f"<span class='text-[10px] font-bold text-indigo-500'>{badge}</span></div>{inner}</div>")
 
     def blur_lock(next_chunk: str, cta: str = "가입하면 전체 공개") -> str:
-        """맛보기 경계(수정2) — 이어지는 내용을 블러로 보여주고 오버레이 CTA. '완성은 못 보게'."""
-        return ("<div class='relative mt-1' aria-hidden='true'>"
+        """맛보기 경계(수정2) — 이어지는 내용을 블러로 보여주고 오버레이 CTA. '완성은 못 보게'.
+        mt-auto: flex-col 카드에서 하단 고정 → 같은 행 카드들의 CTA 라인 정렬."""
+        return ("<div class='relative mt-auto pt-1' aria-hidden='true'>"
                 f"<div class='text-xs text-slate-400 whitespace-pre-wrap select-none pointer-events-none' "
                 f"style='filter:blur(5px);max-height:88px;overflow:hidden'>{esc(next_chunk)}</div>"
                 "<div class='absolute inset-0 flex items-center justify-center' "
@@ -468,11 +470,11 @@ def _teaser_html(pieces, brief, asset_id, remaining: int = 0,
                   "영상 완성본 + 피드 규격(1:1·4:5) — 가입 후",
                   "전체 다운로드(ZIP) · 네이버 발행 도우미 — 가입 후"])
     cards.append(card("+ 나머지 채널", "가입하면 전부",
-        locked_items + "<div class='text-xs text-slate-400 mt-2'>가입하면 5채널 전부 + 완성본 다운로드 (무료 2회)</div>"))
+        locked_items + "<div class='text-xs text-slate-400 mt-auto pt-2'>가입하면 5채널 전부 + 완성본 다운로드 (무료 2회)</div>"))
 
-    # 모바일: 가로 스와이프 캐러셀(스냅) / 데스크탑: 2×2 그리드 — "한 번에 이 만큼" 임팩트(수정1)
-    grid = ("<div class='flex gap-3 overflow-x-auto snap-x snap-mandatory pb-2 -mx-1 px-1 "
-            "md:grid md:grid-cols-2 md:overflow-visible mb-2'>" + "".join(cards) + "</div>"
+    # 모바일: 가로 스와이프 캐러셀(스냅) / 데스크탑: .tz-grid = auto-fit(minmax 280px) 3~4열 자동
+    grid = ("<div class='tz-grid flex gap-3 overflow-x-auto snap-x snap-mandatory pb-2 -mx-1 px-1 mb-2'>"
+            + "".join(cards) + "</div>"
             "<div class='md:hidden text-center text-[10px] text-slate-400 mb-3'>← 옆으로 넘겨서 채널별 결과 보기 →</div>")
     # 손실 프레이밍(전환 PHASE 2) — 진단의 미노출 키워드로 만든 글이면 실측 검색량 근거로
     loss = ""

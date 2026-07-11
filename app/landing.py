@@ -95,6 +95,9 @@ body{font-family:'Pretendard','Apple SD Gothic Neo',system-ui,sans-serif;-webkit
 /* 무료 결과 확장(가로 레이아웃): 좁은 위젯 칸을 탈출해 뷰포트 기준 넓게(최대 1160px) 중앙 정렬 */
 .result-expanded{width:100vw;margin-left:calc(50% - 50vw);padding:0 16px}
 .result-inner{max-width:1160px;margin:0 auto}
+/* 채널 카드 그리드: 데스크탑 auto-fit(화면 폭 따라 3~4열 자동), 모바일(<768px)은 가로 스와이프 유지 */
+@media(min-width:768px){.tz-grid{display:grid !important;
+ grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;align-items:stretch;overflow:visible}}
 </style>"""
 
 _HEAD = """<!doctype html><html lang=ko><head><meta charset=utf-8>
