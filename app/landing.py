@@ -606,6 +606,28 @@ def _why_rank() -> str:
  </div></section>"""
 
 
+def _rank_loop() -> str:
+    """상위노출 실행 루프(상위노출 PHASE 6) — '진단만 하고 끝? 실제로 올려드립니다' 셀링포인트."""
+    steps = [
+        ("🔍", "1. 진단", "네이버 실측으로 <b class='text-white'>놓치는 키워드</b>(월 검색량 포함)를 찾아요", "무료"),
+        ("✍️", "2. 타겟 생성", "그 키워드를 겨냥한 글을 바로 만들어요 — 후기·방법·가격 <b class='text-white'>앵글 3종</b>으로 여러 검색블록 진입", "무료체험 → 플랜"),
+        ("📅", "3. 발행 일관성", "발행 캘린더가 <b class='text-white'>주 N회 페이스</b>를 잡아줘요(C-Rank 지속성 신호) + 블로그 연결 시 실제 발행 자동 확인", "베이직·프로"),
+        ("📈", "4. 추적·학습", "발행 전후 순위를 자동 추적 — <b class='text-white'>오른 키워드는 더 밀고, 정체는 앵글 재도전</b>을 앱이 먼저 제안", "프로"),
+    ]
+    cards = "".join(
+        f"<div class='reveal card-hover bg-slate-900/60 border border-white/10 rounded-2xl p-5'>"
+        f"<div class='text-2xl mb-2'>{e}</div><div class='font-bold mb-1'>{t} <span class='text-[10px] text-indigo-300 font-normal'>{plan}</span></div>"
+        f"<p class='text-sm text-slate-400 leading-relaxed'>{d}</p></div>" for e, t, d, plan in steps)
+    return f"""
+<section class="bg-slate-950 text-white py-20">
+ <div class="max-w-6xl mx-auto px-5">
+  <h2 class="reveal text-3xl sm:text-4xl font-extrabold text-center mb-3">진단만 하고 끝? <span class="grad-text">올린다는 실제로 올려드립니다</span></h2>
+  <p class="reveal text-center text-slate-400 mb-10 max-w-2xl mx-auto">순위 보여주기로 끝나는 서비스가 아니에요. <b class="text-white">진단 → 타겟 글 → 꾸준한 발행 → 추적·학습</b> 루프를 앱이 돌립니다.</p>
+  <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">{cards}</div>
+  <p class="reveal text-center text-xs text-slate-500 mt-6">※ 정직 원칙: 가짜 순위·"무조건 1위" 보장은 하지 않습니다. 실측 순위와 사실 기반 코칭만 제공해요.</p>
+ </div></section>"""
+
+
 def _copy_compare() -> str:
     """'그냥 글' vs '팔리는 글' before/after(#4)."""
     before = ("안녕하세요~ 저희 루마썬팅입니다 😊<br>오늘도 열심히 시공했어요!<br>"
@@ -654,7 +676,7 @@ def render() -> str:
     # 성과증명 → 정직성(상단) → 요금 → FAQ → 마지막 CTA
     return (_HEAD + _ga() + _seo_jsonld() + _nav()
             + _hero() + _video() + _demo_widget()
-            + _problem() + _why_rank() + _results() + _honesty()
+            + _problem() + _why_rank() + _rank_loop() + _results() + _honesty()
             + _stats() + _copy_compare() + _modes() + _features() + _new_features()
             + _pricing() + _faq() + _contact() + _cta() + _footer()
             + _sticky_cta() + _FOOT)

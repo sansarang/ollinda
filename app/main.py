@@ -1209,8 +1209,10 @@ def link_qr(code: str):
 
 
 def _daily_action(t) -> dict:
-    """능동 코칭 — '오늘의 액션 1개'. DB만 사용(빠름). 상태 기반 우선순위."""
+    """능동 코칭 — '오늘의 액션 1개'. 상위노출 루프 기반 우선순위(상위노출 PHASE 6):
+    ① 첫 콘텐츠 ② 발행 공백 ③ 정체 키워드 앵글 재도전 ④ 오르는 키워드 더 밀기 ⑤ 유입 성과 ⑥ 기본."""
     import datetime
+    from urllib.parse import quote as _q
     sets = db.list_sets(tenant_id=t.id, limit=50)
     links = db.list_links(t.id)
     clicks = sum(int(l.get("clicks") or 0) for l in links)
@@ -1233,10 +1235,20 @@ def _daily_action(t) -> dict:
     if days >= 3:
         return {"emoji": "📅", "text": f"{days}일째 새 콘텐츠가 없어요. 꾸준함이 상위노출의 1순위예요 — 오늘 하나 올려요!",
                 "cta": "새 콘텐츠 만들기", "href": "/me"}
+    # 🔄 정체 키워드 — 앵글 바꿔 재도전(상위노출 PHASE 3·6)
+    try:
+        from app.services import ranktrack
+        stag = ranktrack.stagnant_keywords(t.id, limit=1)
+        if stag:
+            s = stag[0]
+            return {"emoji": "🔄", "text": f"‘{esc(s['keyword'])}’가 정체 중이에요. {s['retry_label']} 앵글로 바꿔 다른 검색블록을 노려봐요.",
+                    "cta": "앵글 바꿔 만들기", "href": s["href"]}
+    except Exception:
+        pass
     if improving:
         k = improving[0]["keyword"]
         return {"emoji": "📈", "text": f"‘{esc(k)}’ 순위가 오르고 있어요! 이 기세로 하나 더 올리면 상위 굳히기 각이에요.",
-                "cta": "이어서 만들기", "href": "/me"}
+                "cta": "이 키워드 더 밀기", "href": "/me?target_kw=" + _q(k)}
     if clicks > 0:
         return {"emoji": "🎯", "text": f"추적 링크 클릭 {clicks}회 — 콘텐츠가 실제 손님을 부르고 있어요. 계속 올려요!",
                 "cta": "성과 보기", "href": "/me?tab=report"}
@@ -1513,6 +1525,35 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                     "b.innerHTML=d.items.map(function(it){return '<div class=\"border-b border-slate-100 py-2.5\"><div class=\"flex items-center justify-between\"><span class=\"text-slate-700 font-medium\">'+it.kw+'</span><span class=\"whitespace-nowrap\">'+st(it)+chg(it)+'</span></div>'+bl(it)+riv(it)+'</div>';}).join('')"
                     "+(d.blog_connected?'':'<div class=\"mt-3 text-xs text-slate-400\">💡 <a href=\"#blog\" class=\"font-bold text-emerald-600\">내 블로그를 연결</a>하면 블로그탭 순위도 정확히 추적해요.</div>');"
                     "}catch(e){b.innerHTML='<span class=\"text-rose-400\">조회 실패</span>';}})();</script></div>")
+        # 🔁 상위노출 루프 진행상황(상위노출 PHASE 6) — 진단→타겟생성→발행일관성→순위변화 한눈에
+        _loopbox = ""
+        try:
+            from app.services import pubcal as _pc
+            _wp2 = _pc.week_plan(t, _plan)
+            _n_pub = len(db.list_blog_publishes(t.id, limit=30))
+            _n_imp = len(db.improving_keywords(t.id))
+            _has_diag = bool((t.industry or "").strip())
+
+            def _step(num, emoji, label, state, sub):
+                on = "border-emerald-300 bg-emerald-50" if state else "border-slate-200 bg-white"
+                return (f"<div class='flex-1 min-w-[130px] rounded-2xl border {on} p-3'>"
+                        f"<div class='text-[10px] font-bold text-slate-400'>STEP {num}</div>"
+                        f"<div class='text-sm font-extrabold text-slate-800'>{emoji} {label}</div>"
+                        f"<div class='text-[11px] text-slate-500 mt-0.5'>{sub}</div></div>")
+            _loopbox = (f"<div class='{_fw} mb-5'>"
+                        "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>🔁 상위노출 실행 루프</h2>"
+                        "<p class='text-sm text-slate-400 mb-4'>진단 → 타겟 글 → 꾸준한 발행 → 순위 추적·학습. 올린다가 이 루프를 돌려요.</p>"
+                        "<div class='flex gap-2.5 flex-wrap'>"
+                        + _step(1, "🔍", "진단", _has_diag, "놓치는 키워드 찾기" if _has_diag else "가게 정보를 설정하세요")
+                        + _step(2, "✍️", "타겟 생성", len(db.list_sets(tenant_id=t.id, limit=1)) > 0,
+                                "미노출 키워드 겨냥 글")
+                        + _step(3, "📅", "발행 일관성", _wp2["done"] >= 1,
+                                f"이번 주 {_wp2['done']}/{_wp2['target']}회" + (" · 발행확인 " + str(_n_pub) + "건" if _n_pub else ""))
+                        + _step(4, "📈", "추적·학습", _n_imp > 0,
+                                f"오른 키워드 {_n_imp}개 → 다음 글에 강화" if _n_imp else "순위 자동추적 중")
+                        + "</div></div>")
+        except Exception:
+            _loopbox = ""
         # 🎯 진단→생성 연결(상위노출 PHASE 1): 놓치는 키워드 → '이 키워드 잡는 글 만들기'
         _missbox = ""
         if (t.industry or "").strip():
@@ -1556,7 +1597,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 f"<div class='text-xs text-slate-400 mt-1.5'>→ {esc(_tl.get('label',''))}(으)로 연결돼요</div>"
                 f"<a href='/me/qr/{_tl['code']}.png' download='ollinda-qr.png' class='inline-block mt-2 text-xs font-bold text-indigo-500'>⬇ QR 이미지 저장</a>"
                 "</div></div></div>")
-        main_inner = (_sbadge + stats_row + _missbox + _growth_card(t, _fw)
+        main_inner = (_sbadge + stats_row + _loopbox + _missbox + _growth_card(t, _fw)
                       + _blog_connect_card(t, _fw) + _place_card(t, _fw)
                       + _trackbox + _rankbox + _kwbox)
     else:                                                 # ✨ 만들기 (기본) — 완성되면 여기(만들기 대시보드)에 결과 표시
