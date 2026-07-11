@@ -67,7 +67,8 @@ def init_db() -> None:
                          ("lat", "REAL"), ("lon", "REAL"),        # 가게 좌표(사진 GPS 지오태그)
                          ("topic_axis", "TEXT"),                  # 전문 주제 축(C-Rank 주제 집중, 성장 PHASE 7)
                          ("naver_blog_url", "TEXT"),              # 사용자 네이버 블로그 URL(블로그등록 PHASE 1)
-                         ("blog_id", "TEXT")]:                    # 정규화된 블로그 아이디(RSS·순위매칭용)
+                         ("blog_id", "TEXT"),                     # 정규화된 블로그 아이디(RSS·순위매칭용)
+                         ("parking", "TEXT")]:                    # 주차 안내(블로그템플릿 PHASE 1 고정정보)
             try:
                 c.execute(f"ALTER TABLE tenants ADD COLUMN {col} {ddl}")
             except sqlite3.OperationalError:
@@ -225,7 +226,8 @@ def _row_to_tenant(r: sqlite3.Row) -> Tenant:
                   publish_schedule=g("publish_schedule", 0) or 0,
                   lat=(r["lat"] if "lat" in keys else None), lon=(r["lon"] if "lon" in keys else None),
                   topic_axis=g("topic_axis"),
-                  naver_blog_url=g("naver_blog_url"), blog_id=g("blog_id"))
+                  naver_blog_url=g("naver_blog_url"), blog_id=g("blog_id"),
+                  parking=g("parking"))
 
 
 def set_tenant_coords(tid: str, lat: float, lon: float) -> None:
@@ -238,6 +240,19 @@ def set_tenant_coords(tid: str, lat: float, lon: float) -> None:
         return
     with _conn() as c:
         c.execute("UPDATE tenants SET lat=?, lon=? WHERE id=?", (lat, lon, tid))
+
+
+def update_store_info(tid: str, phone: str, address: str, hours: str,
+                      parking: str, map_url: str) -> None:
+    """매장 고정정보 저장(블로그템플릿 PHASE 1) — 한 번 입력하면 모든 글에 재사용."""
+    with _conn() as c:
+        try:
+            c.execute("UPDATE tenants SET phone=?, address=?, hours=?, parking=?, map_url=? WHERE id=?",
+                      (phone.strip(), address.strip(), hours.strip(), parking.strip(),
+                       map_url.strip(), tid))
+        except sqlite3.OperationalError:      # parking 컬럼 없던 구DB — 기존 필드만
+            c.execute("UPDATE tenants SET phone=?, address=?, hours=?, map_url=? WHERE id=?",
+                      (phone.strip(), address.strip(), hours.strip(), map_url.strip(), tid))
 
 
 def set_topic_axis(tid: str, axis: str) -> None:

@@ -59,6 +59,7 @@ class Tenant:
     phone: str = ""           # 연락처(블로그 자동 삽입)
     address: str = ""         # 주소(장소 블록)
     hours: str = ""           # 영업시간
+    parking: str = ""         # 주차 안내(블로그 고정정보 블록 재사용)
     map_url: str = ""         # 네이버 지도 링크
     autonomy: int = 0         # 0=수동검수 1=점수게이트 자동 2=완전자동
     # ── 사업형태(분류축) — strategies.py가 사용 ──

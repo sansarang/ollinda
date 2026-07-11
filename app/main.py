@@ -1635,7 +1635,9 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                       "<div class='flex-1 min-w-0'><div class='text-xs font-bold text-indigo-500 mb-0.5'>오늘의 액션</div>"
                       f"<div class='text-sm text-slate-700 font-medium'>{_act['text']}</div></div>"
                       f"<a href='{_act['href']}' class='flex-shrink-0 bg-indigo-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-indigo-700 transition'>{_act['cta']}</a></div>")
-            main_inner = greeting + _notice_html + _coach + _calendar_card(t, _plan) + _blog_nudge + upload_section
+            main_inner = (greeting + _notice_html + _coach + _calendar_card(t, _plan)
+                          + _blog_nudge + upload_section
+                          + "<div class='mt-5'></div>" + _store_info_card(t))
     # 🆕 새로 추가한 '빈 새 가게'면 실수 대비 '뒤로가기(취소)' 배너
     if t.name == "새 가게" and len(db.list_user_stores(u["id"])) > 1 and not db.list_sets(tenant_id=t.id):
         _backban = ("<div class='flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-5'>"
@@ -1717,6 +1719,12 @@ def my_store(request: Request, name: str = Form(""), industry: str = Form(""), r
                                     status_code=303)
         return RedirectResponse("/me?err=" + _q(f"설정은 저장했어요. 블로그는 연결 못했어요 — {v['error']}"),
                                 status_code=303)
+    # 온보딩 유도(블로그템플릿 PHASE 1): 매장형인데 고정정보가 비면 매장 정보 입력 권유
+    t2 = db.get_tenant(t.id)
+    if (biz_type or "local") != "seller" and t2 and not ((t2.address or "").strip() and (t2.phone or "").strip()):
+        from urllib.parse import quote as _q2
+        return RedirectResponse("/me?ok=" + _q2("설정 저장! 아래 '🏪 매장 정보'(주소·전화·영업시간·주차)까지 채우면 "
+                                                "모든 블로그 글에 자동으로 들어가요"), status_code=303)
     return RedirectResponse("/me?ok=설정을 저장했어요", status_code=303)
 
 
@@ -1960,6 +1968,51 @@ async def api_blog_angle_variant(request: Request):
     lab = {"review": "후기형", "howto": "방법·과정형", "price": "가격·비용형"}[angle]
     return JSONResponse({"ok": True, "asset_id": piece.asset_id,
                          "msg": f"{lab} 앵글 글을 만들고 있어요 (20~40초). '내 콘텐츠'에서 확인하세요."})
+
+
+@app.post("/me/store-info")
+def my_store_info(request: Request, phone: str = Form(""), address: str = Form(""),
+                  hours: str = Form(""), parking: str = Form(""), map_url: str = Form(""),
+                  buy_url: str = Form(""), search_kw: str = Form("")):
+    """매장 고정정보 저장(블로그템플릿 PHASE 1) — 한 번 입력 → 모든 블로그 글 마무리에 재사용."""
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    t = _ensure_user_tenant(u)
+    db.update_store_info(t.id, phone, address, hours, parking, map_url)
+    if (buy_url.strip() or search_kw.strip()):     # 셀러 구매정보(있을 때만 갱신)
+        db.update_tenant_classification(t.id, t.biz_type or "local", t.marketplace or "",
+                                        buy_url.strip() or t.buy_url,
+                                        search_kw.strip() or t.search_kw, t.brand_name or "")
+    return RedirectResponse("/me?ok=매장 정보를 저장했어요 — 이제 모든 블로그 글에 자동으로 들어가요",
+                            status_code=303)
+
+
+def _store_info_card(t) -> str:
+    """🏪 매장 정보 카드 — 한 번 입력하면 모든 글 마무리 고정정보 블록에 재사용."""
+    inp = "w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
+    seller = (getattr(t, "biz_type", "local") or "local") in ("seller", "hybrid")
+    filled = sum(1 for v in (t.phone, t.address, t.hours, getattr(t, "parking", ""), t.map_url)
+                 if (v or "").strip())
+    seller_rows = ""
+    if seller:
+        seller_rows = (
+            f"<input name=buy_url value=\"{esc(t.buy_url or '')}\" placeholder='🔗 구매 링크(스토어/상세페이지)' class='{inp}'>"
+            f"<input name=search_kw value=\"{esc(t.search_kw or '')}\" placeholder='🔎 검색어 유도 (예: 쿠팡에서 폴딩박스)' class='{inp}'>")
+    return (f"<details {'open' if filled < 2 else ''} class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5 mb-5'>"
+            f"<summary class='cursor-pointer select-none font-extrabold text-slate-900'>🏪 매장 정보 "
+            f"<span class='text-xs text-slate-400 font-normal'>({filled}/5 입력됨 · 한 번 입력하면 모든 글에 자동 삽입)</span></summary>"
+            "<p class='text-xs text-slate-400 mt-1 mb-3'>블로그 글 마무리 '찾아오는 길' 블록에 재사용돼요. "
+            "지도는 텍스트가 아니라 네이버 <b>장소 컴포넌트</b>로 넣도록 발행 화면에서 안내해 드려요.</p>"
+            "<form method=post action='/me/store-info' class='grid sm:grid-cols-2 gap-2'>"
+            f"<input name=address value=\"{esc(t.address or '')}\" placeholder='📍 주소' class='{inp} sm:col-span-2'>"
+            f"<input name=phone value=\"{esc(t.phone or '')}\" placeholder='📞 전화번호' class='{inp}'>"
+            f"<input name=hours value=\"{esc(t.hours or '')}\" placeholder='🕒 영업시간 (예: 매일 10-21시, 월 휴무)' class='{inp}'>"
+            f"<input name=parking value=\"{esc(getattr(t, 'parking', '') or '')}\" placeholder='🅿️ 주차 (예: 가게 앞 2대, 공영주차장 3분)' class='{inp}'>"
+            f"<input name=map_url value=\"{esc(t.map_url or '')}\" placeholder='🗺 네이버 플레이스 URL' class='{inp}'>"
+            + seller_rows +
+            "<button class='bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 rounded-xl sm:col-span-2 transition'>저장</button>"
+            "</form></details>")
 
 
 @app.post("/me/topic-axis")
