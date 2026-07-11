@@ -70,6 +70,20 @@ def product_keywords(note: str = "", brand: str = "", limit: int = 10) -> list[s
     return _apply_volume(out, limit, hints=heads)
 
 
+def keyword_plan(industry_name: str, region: str, note: str = "", axis: str = "local", brand: str = "") -> dict:
+    """대표키워드 1개(제목) + 롱테일 2~3개(본문 소제목) + 실검색량 여부('추정') — 성장 PHASE 5.
+    지역+업종+의도 3요소 조합, 실검색량 500~5,000 롱테일 우선(searchad 주경로, 무키 시 규칙 폴백=추정)."""
+    try:
+        from app.services import searchad
+        estimated = not searchad.configured()
+    except Exception:
+        estimated = True
+    kws = target_keywords(industry_name, region, note, limit=10, axis=axis, brand=brand)
+    headline = kws[0] if kws else (f"{region} {industry_name}").strip()
+    longtail = [k for k in kws[1:] if k and k != headline][:3]
+    return {"headline": headline, "longtail": longtail, "keywords": kws, "estimated": estimated}
+
+
 def target_keywords(industry_name: str, region: str, note: str = "", limit: int = 10,
                     axis: str = "local", brand: str = "") -> list[str]:
     """키워드 세트. axis='product'면 상품/후기축(셀러), 'both'면 지역+상품 병합, 기본은 지역축."""
