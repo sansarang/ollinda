@@ -17,3 +17,5 @@ qrcode[pil]                    # 추적 링크 QR 생성(성과 실측)
 piexif                         # 사진 EXIF·GPS 메타(이미지 SEO)
 pillow-heif                    # HEIC(아이폰 기본 포맷) 업로드 디코딩
 apscheduler                    # 경쟁사 일일 자동 스캔(신규기능)
+playwright                     # 인쇄물 HTML→이미지/PDF 렌더(신규기능)
+jinja2                         # 인쇄물 HTML 템플릿

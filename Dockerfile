@@ -9,6 +9,9 @@ WORKDIR /srv
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# 인쇄물 생성용 Chromium(Playwright) + 시스템 의존성. 실패해도 빌드 계속(런타임 graceful).
+RUN python -m playwright install --with-deps chromium || echo "playwright chromium 설치 건너뜀(런타임 graceful)"
+
 COPY app ./app
 
 # 영속 데이터(가능하면 디스크 마운트). 기본은 컨테이너 내부.
