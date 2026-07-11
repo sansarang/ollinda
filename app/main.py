@@ -243,6 +243,7 @@ _DEMO_HITS: dict = {}   # ip -> [timestamps] (무료 체험 rate limit)
 async def api_demo(request: Request, industry: str = Form(""), note: str = Form(""),
                    biz_type: str = Form("local"), marketplace: str = Form(""),
                    search_kw: str = Form(""), purpose: str = Form(""),
+                   target_kw: str = Form(""), target_vol: str = Form(""),
                    photos: list[UploadFile] = File(None)):
     """랜딩 데모 — 미가입자는 '실제 생성 티저(흐리게)'로 가입 유도. 로그인 회원은 작업실로."""
     u = auth.current_user(request)
@@ -268,6 +269,14 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
     full_note = (note or "").strip()
     if purpose.strip():                              # 목적 → 생성 프롬프트에 반영(글·영상 톤↑)
         full_note = (full_note + f" | 콘텐츠 목적: {purpose.strip()}").strip(" |")
+    # 진단→생성 연결: 진단의 미노출 키워드가 넘어오면 그 키워드를 겨냥해 생성 + 손실 프레이밍(전환 PHASE 2)
+    target_kw = (target_kw or "").strip()[:40]
+    try:
+        target_vol_n = max(0, int(float(target_vol or 0)))
+    except Exception:
+        target_vol_n = 0
+    if target_kw:
+        full_note = (full_note + f" | 타겟 키워드(미노출 진단): '{target_kw}' — 제목·첫문장에 자연스럽게 반영").strip(" |")
     try:
         from app.services import teaser as teaser_svc
         _t, _a, pieces, brief = teaser_svc.run_teaser(industry, biz_type, full_note, imgs)
@@ -279,7 +288,9 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
         return JSONResponse({"require_signup": True, "message": "지금 생성이 잠시 붐벼요. 잠깐 뒤 다시 시도해 주세요 🙏"})
     db.incr_demo_ip(ip)
     remaining = max(0, 2 - db.demo_ip_count(ip))
-    return JSONResponse({"teaser": True, "teaser_html": _teaser_html(pieces, brief, _a, remaining)})
+    return JSONResponse({"teaser": True,
+                         "teaser_html": _teaser_html(pieces, brief, _a, remaining,
+                                                     target_kw=target_kw, target_vol=target_vol_n)})
 
 
 def _img_thumb_data_uri(path, max_px: int = 640) -> str:
@@ -311,8 +322,12 @@ def _img_thumb_data_uri(path, max_px: int = 640) -> str:
         return ""
 
 
-def _teaser_html(pieces, brief, asset_id, remaining: int = 0) -> str:
-    """미가입 무료 체험 결과 — 전체 공개(흐림 없음) + 복사·다운로드 + 내 사진으로 만든 실제 영상. 2회 후 가입 유도."""
+def _teaser_html(pieces, brief, asset_id, remaining: int = 0,
+                 target_kw: str = "", target_vol: int = 0) -> str:
+    """미가입 무료 체험 결과 — '보여주되 다 주지 않는다'(전환 PHASE 1·2).
+    블로그 글은 대부분 노출(품질 증명 = 미끼), 영상은 8초 워터마크 미리보기,
+    5채널 중 2개(블로그+인스타)만 공개 — 완성본·다운로드·발행·전체 채널은 가입 뒤(훅).
+    정직성: 잠긴 채널도 '실제로 생성됨'만 표기, 가짜 급함 없이 남은 무료 횟수만 표시."""
     import re as _re
     by = {p.kind.value: p for p in pieces}
     imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
@@ -321,83 +336,132 @@ def _teaser_html(pieces, brief, asset_id, remaining: int = 0) -> str:
                + "".join(f"<img src='{u}' class='h-24 w-24 object-cover rounded-lg flex-shrink-0'>" for u in thumbs)
                + "</div>") if thumbs else "")
 
-    def copy_btn(cid, text):
-        return (f"<textarea id='{cid}' class='hidden'>{esc(text)}</textarea>"
-                f"<button type=button onclick=\"omCopy(document.getElementById('{cid}').value);this.textContent='✅ 복사됨'\" "
-                "class='mt-2 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg'>📋 복사</button>")
-
     def card(label, inner):
-        return f"<div class='bg-white rounded-2xl p-4 shadow-sm'><div class='font-bold text-sm text-slate-700 mb-1'>{label}</div>{inner}</div>"
+        return (f"<div class='bg-white border border-slate-200 rounded-2xl p-4'>"
+                f"<div class='font-bold text-sm text-slate-700 mb-1'>{label}</div>{inner}</div>")
 
+    fade = ("<div class='relative -mt-16 h-16 pointer-events-none' "
+            "style='background:linear-gradient(180deg,rgba(255,255,255,0),#fff 85%)'></div>")
+    lock_line = ("<div class='flex items-center justify-between mt-1'>"
+                 "<span class='text-xs text-slate-400'>…전체 글·복사는 가입 후 (무료 2회)</span>"
+                 "<a href='/login/kakao' class='text-xs font-bold text-indigo-600'>전체 받기 →</a></div>")
     cards = []
-    cap = by.get("caption")
-    if cap:
-        cards.append(card("📷 인스타그램",
-            f"<div class='text-slate-700 text-sm whitespace-pre-wrap max-h-56 overflow-y-auto'>{esc(cap.payload.get('text',''))}</div>"
-            + copy_btn("t_cap", cap.payload.get("text", ""))))
+    # ① 네이버 블로그 — 대부분 공개(품질 증명). 끝부분 페이드 + 복사·다운로드는 가입 후.
     blog = by.get("blog")
     if blog:
         body = _re.sub(r"\[사진\d+\]", "", blog.payload.get("body", "")).strip()
-        cards.append(card("📝 네이버 블로그",
+        shown = body[: max(400, int(len(body) * 0.8))]           # 약 80% 공개(최소 400자)
+        cards.append(card("네이버 블로그 <span class='text-[10px] text-indigo-500 font-bold'>미리보기</span>",
             f"<div class='font-bold text-slate-800 text-sm mb-1'>{esc(blog.payload.get('title',''))}</div>"
-            f"<div class='text-slate-600 text-xs whitespace-pre-wrap max-h-56 overflow-y-auto'>{esc(body)}</div>"
-            + copy_btn("t_blog", (blog.payload.get('title', '') + "\n\n" + body))))
-    x = by.get("x_post")
-    if x:
-        cards.append(card("𝕏 X (트위터)",
-            f"<div class='text-slate-700 text-sm whitespace-pre-wrap'>{esc(x.payload.get('text',''))}</div>"
-            + copy_btn("t_x", x.payload.get("text", ""))))
-    short = next((p for p in pieces if p.kind.value == "short" and p.payload.get("video_path")), None)
-    if short:
-        v = f"/d/{asset_id}/f/{os.path.basename(short.payload['video_path'])}"
-        cards.append(card("▶️ 유튜브 쇼츠 · 릴스 <span class='text-xs text-emerald-600'>(내 사진으로 만든 영상)</span>",
-            f"<video src='{v}' controls autoplay muted loop playsinline class='w-full rounded-xl bg-black' style='max-height:440px'></video>"
-            f"<a href='{v}' download class='inline-block mt-2 px-3 py-1.5 bg-emerald-500 text-white text-xs font-bold rounded-lg'>⬇ 영상 다운로드</a>"))
-    else:
-        cards.append(card("▶️ 유튜브 쇼츠 · 릴스 <span class='text-xs text-emerald-600'>(내 사진으로 만든 영상)</span>",
-            f"<div id='tvid' data-a='{asset_id}'>"
-            "<div class='text-slate-500 text-sm py-6 text-center'>🎬 영상 만드는 중… <span class='text-slate-400'>(30~60초, 자동으로 나타나요)</span>"
-            "<div class='w-full h-1.5 bg-slate-100 rounded-full overflow-hidden mt-3'><div class='h-full bg-emerald-400' style='width:100%;animation:tvp 1.4s ease-in-out infinite'></div></div></div></div>"
-            "<style>@keyframes tvp{0%,100%{opacity:.35}50%{opacity:1}}</style>"
-            "<script>(function(){var el=document.getElementById('tvid');if(!el||el._p)return;el._p=1;var a=el.dataset.a,n=0;"
-            "var iv=setInterval(async function(){n++;if(n>45){clearInterval(iv);el.innerHTML=\"<div class='text-slate-500 text-sm py-4 text-center'>영상은 가입 후 '내 작업실'에서 받을 수 있어요</div>\";return;}"
-            "try{var r=await fetch('/api/demo/video/'+a);var d=await r.json();if(d.ready){clearInterval(iv);"
-            "el.innerHTML='<video src=\"'+d.url+'\" controls autoplay muted loop playsinline class=\"w-full rounded-xl bg-black\" style=\"max-height:440px\"></video>'"
-            "+'<a href=\"'+d.url+'\" download class=\"inline-block mt-2 px-3 py-1.5 bg-emerald-500 text-white text-xs font-bold rounded-lg\">⬇ 영상 다운로드</a>';}}catch(e){}},3000);})();</script>"))
+            f"<div class='text-slate-600 text-xs whitespace-pre-wrap max-h-72 overflow-hidden'>{esc(shown)}</div>"
+            + fade + lock_line))
+    # ② 인스타그램 — 공개(두 번째 맛보기). 복사는 가입 후.
+    cap = by.get("caption")
+    if cap:
+        cards.append(card("인스타그램 <span class='text-[10px] text-indigo-500 font-bold'>미리보기</span>",
+            f"<div class='text-slate-700 text-sm whitespace-pre-wrap max-h-56 overflow-hidden'>{esc(cap.payload.get('text',''))}</div>"
+            + fade + lock_line))
+    # ③ 영상 — 8초 워터마크 미리보기만(완성본·다운로드는 가입 후)
+    cards.append(card("유튜브 쇼츠 · 릴스 <span class='text-[10px] text-indigo-500 font-bold'>8초 미리보기</span>",
+        f"<div id='tvid' data-a='{asset_id}'>"
+        "<div class='text-slate-500 text-sm py-6 text-center'>내 사진으로 영상 만드는 중… <span class='text-slate-400'>(30~60초, 자동으로 나타나요)</span>"
+        "<div class='w-full h-1.5 bg-slate-100 rounded-full overflow-hidden mt-3'><div class='h-full bg-indigo-400' style='width:100%;animation:tvp 1.4s ease-in-out infinite'></div></div></div></div>"
+        "<style>@keyframes tvp{0%,100%{opacity:.35}50%{opacity:1}}</style>"
+        "<script>(function(){var el=document.getElementById('tvid');if(!el||el._p)return;el._p=1;var a=el.dataset.a,n=0;"
+        "var iv=setInterval(async function(){n++;if(n>45){clearInterval(iv);el.innerHTML=\"<div class='text-slate-500 text-sm py-4 text-center'>영상은 가입 후 '내 작업실'에서 완성본으로 받을 수 있어요</div>\";return;}"
+        "try{var r=await fetch('/api/demo/video/'+a);var d=await r.json();if(d.ready){clearInterval(iv);"
+        "el.innerHTML='<video src=\"'+d.url+'\" controls autoplay muted loop playsinline class=\"w-full rounded-xl bg-black\" style=\"max-height:440px\"></video>'"
+        "+'<div class=\"flex items-center justify-between mt-2\"><span class=\"text-xs text-slate-400\">완성본(전체 길이·워터마크 없음)은 가입 후</span>"
+        "<a href=\"/login/kakao\" class=\"text-xs font-bold text-indigo-600\">완성본 받기 →</a></div>';}}catch(e){}},3000);})();</script>"))
+    # ④ 잠긴 채널 — 실제로 생성된 것만 정직하게 안내(X는 이미 생성됨, 나머지는 가입 후 생성)
+    locked_items = "".join(
+        f"<div class='flex items-center gap-2 text-sm text-slate-500 py-1.5 border-b border-slate-100'>"
+        f"<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' class='w-4 h-4 text-slate-400'>"
+        f"<rect x='3' y='11' width='18' height='11' rx='2'/><path d='M7 11V7a5 5 0 0 1 10 0v4'/></svg>{t}</div>"
+        for t in ["X (트위터) 단문 — 생성 완료, 가입하면 열려요",
+                  "인스타 캐러셀 카드 — 가입 후 생성",
+                  "영상 완성본 + 피드 규격(1:1·4:5) — 가입 후",
+                  "전체 다운로드(ZIP) · 네이버 발행 도우미 — 가입 후"])
+    cards.append(card("나머지 채널",
+        locked_items + "<div class='text-xs text-slate-400 mt-2'>가입하면 5채널 전부 + 완성본 다운로드 (무료 2회)</div>"))
 
     grid = "<div class='grid md:grid-cols-2 gap-3 mb-4'>" + "".join(cards) + "</div>"
-    zip_btn = f"<a href='/d/{asset_id}.zip' class='block text-center bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-xl mb-3'>⬇ 전체 다운로드 (글+사진+영상 ZIP)</a>"
+    # 손실 프레이밍(전환 PHASE 2) — 진단의 미노출 키워드로 만든 글이면 실측 검색량 근거로
+    loss = ""
+    if target_kw:
+        vol_txt = f" — 그 검색량(월 {target_vol:,}회)" if target_vol else ""
+        loss = (f"<div class='bg-white border border-indigo-200 rounded-xl px-4 py-3 mb-3 text-sm text-slate-700'>"
+                f"이 글은 진단에서 <b>미노출</b>로 나온 <b>'{esc(target_kw)}'</b>를 겨냥했어요. "
+                f"지금 발행하면{vol_txt} 잡으러 갈 수 있어요.</div>")
     if remaining > 0:
-        cta = (f"<div class='text-center text-white text-sm'>무료 체험 <b class='text-emerald-300'>{remaining}회</b> 남았어요 · 마음껏 만들어보세요!</div>"
-               "<div class='text-center text-slate-400 text-xs mt-1'>2회 다 쓰면 가입하고 무제한으로 계속 만들 수 있어요</div>")
+        cta = (loss
+               + "<a href='/login/kakao' class='block text-center py-3.5 rounded-xl font-extrabold mb-2' style='background:#FEE500;color:#191600'>"
+               "이 글 전체 + 영상 + 5채널 받기 → 무료 가입</a>"
+               f"<div class='text-center text-slate-500 text-sm'>가입하면 <b class='text-indigo-600'>무료 2회</b> 전체 생성 · "
+               f"미리보기 <b class='text-indigo-600'>{remaining}회</b> 남음</div>")
     else:
-        cta = ("<div class='text-center text-emerald-300 text-sm font-bold mb-2'>무료 체험 2회를 다 쓰셨어요! 마음에 드셨죠? 😊</div>"
-               "<a href='/login/kakao' class='block text-center py-3 rounded-xl font-extrabold mb-2' style='background:#FEE500;color:#191600'>💬 카카오로 가입하고 계속 만들기</a>"
-               "<a href='/login/google' class='block text-center py-3 rounded-xl font-bold bg-white text-slate-700'>구글로 가입</a>")
-    return ("<div class='rounded-2xl p-4' style='background:rgba(255,255,255,.06)'>"
-            "<div class='text-center text-white font-extrabold text-lg mb-1'>✨ 방금 만든 결과 (전체 공개)</div>"
-            "<div class='text-center text-slate-300 text-xs mb-3'>글은 복사, 사진·영상은 다운로드해서 바로 쓰세요</div>"
-            + photos + grid + zip_btn + cta + "</div>")
+        cta = (loss
+               + "<div class='text-center text-slate-700 text-sm font-bold mb-2'>무료 미리보기 2회를 다 보셨어요 — 방금 그 품질 그대로, 가입하면 전체를 받아요</div>"
+               "<a href='/login/kakao' class='block text-center py-3.5 rounded-xl font-extrabold mb-2' style='background:#FEE500;color:#191600'>카카오로 가입하고 전체 받기 (무료 2회)</a>"
+               "<a href='/login/google' class='block text-center py-3 rounded-xl font-bold bg-white border border-slate-200 text-slate-700'>구글로 가입</a>")
+    return ("<div class='bg-[#F9FAFB] border border-slate-200 rounded-2xl p-4'>"
+            "<div class='text-center text-slate-900 font-extrabold text-lg mb-1'>방금 만든 결과 — 미리보기</div>"
+            "<div class='text-center text-slate-500 text-xs mb-3'>글 품질은 그대로 보여드려요. 완성본·전체 채널은 가입 후 무료 2회로 받으세요.</div>"
+            + photos + grid + cta + "</div>")
+
+
+def _make_demo_preview(vp: str) -> str | None:
+    """데모 영상 → 첫 8초 + 워터마크 미리보기(전환 PHASE 1). 완성본은 가입 후.
+    성공 시 preview 경로, 실패 None."""
+    out = os.path.join(os.path.dirname(vp), "preview_" + os.path.basename(vp))
+    if os.path.exists(out):
+        return out
+    import subprocess
+    try:
+        from app.generators.video import _font_path
+        font = _font_path() or ""
+        fontclause = f":fontfile='{font}'" if font else ""
+        vf = (f"drawtext=text='올린다 미리보기':fontcolor=white:fontsize=46{fontclause}"
+              ":box=1:boxcolor=black@0.45:boxborderw=16:x=(w-text_w)/2:y=140")
+        tmp = out + ".tmp.mp4"
+        r = subprocess.run(["ffmpeg", "-y", "-i", vp, "-t", "8", "-vf", vf,
+                            "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
+                            "-c:a", "aac", "-movflags", "+faststart", tmp],
+                           capture_output=True, timeout=90)
+        if r.returncode == 0 and os.path.exists(tmp):
+            os.replace(tmp, out)                 # 반쯤 쓰인 파일 서빙 방지
+            return out
+    except Exception:
+        pass
+    return None
 
 
 @app.get("/api/demo/video/{asset_id}")
 def demo_video_status(asset_id: str):
-    """미가입 데모 영상 폴링 — 백그라운드 렌더 완료되면 URL 반환."""
+    """미가입 데모 영상 폴링 — 완성되면 '8초 워터마크 미리보기'만 제공(완성본은 가입 후)."""
     if not db.asset_is_demo(asset_id):
         return JSONResponse({"ready": False})
     for p in db.get_set_pieces(asset_id):
         vp = p.payload.get("video_path")
         if p.kind.value == "short" and vp and os.path.exists(vp):
-            return JSONResponse({"ready": True, "url": f"/d/{asset_id}/f/{os.path.basename(vp)}"})
+            pv = os.path.join(os.path.dirname(vp), "preview_" + os.path.basename(vp))
+            if os.path.exists(pv):
+                return JSONResponse({"ready": True, "url": f"/d/{asset_id}/f/{os.path.basename(pv)}"})
+            import threading
+            threading.Thread(target=_make_demo_preview, args=(vp,), daemon=True).start()
+            return JSONResponse({"ready": False})    # 다음 폴링에서 미리보기 서빙
     return JSONResponse({"ready": False})
 
 
 @app.get("/d/{asset_id}/f/{fname}")
 def demo_media(asset_id: str, fname: str):
-    """데모(무료 체험) 미디어 — is_demo 자산만 공개 서빙."""
+    """데모(무료 체험) 미디어 — is_demo 자산만 공개 서빙.
+    영상 완성본은 게이팅(전환 PHASE 1): mp4는 preview_* 미리보기만 공개."""
     import re
     if not db.asset_is_demo(asset_id) or not re.fullmatch(r"[A-Za-z0-9._-]+", fname):
         return HTMLResponse(status_code=404)
+    if fname.lower().endswith(".mp4") and not fname.startswith("preview_"):
+        return HTMLResponse("영상 완성본은 가입 후 '내 작업실'에서 받을 수 있어요.", status_code=403)
     pieces = db.get_set_pieces(asset_id)
     if not pieces:
         return HTMLResponse(status_code=404)
@@ -412,10 +476,12 @@ def demo_media(asset_id: str, fname: str):
 
 
 @app.get("/d/{asset_id}.zip")
-def demo_zip(asset_id: str):
-    """데모 전체 ZIP(글+사진+영상) — is_demo 자산만."""
+def demo_zip(asset_id: str, request: Request):
+    """데모 전체 ZIP(글+사진+영상) — 완성본 다운로드는 가입 필요(전환 PHASE 1)."""
     if not db.asset_is_demo(asset_id):
         return HTMLResponse(status_code=404)
+    if not auth.current_user(request):
+        return RedirectResponse("/login?next=/me", status_code=303)
     pieces = db.get_set_pieces(asset_id)
     if not pieces:
         return HTMLResponse(status_code=404)
