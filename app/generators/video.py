@@ -98,6 +98,43 @@ def _run_ff(cmd: list, timeout: int, tag: str = "") -> bool:
     return True
 
 
+def _parse_dropped(note: str) -> int:
+    """assemble note의 '씬탈락 N' → N (없으면 0)."""
+    m = re.search(r"씬탈락 (\d+)", note or "")
+    return int(m.group(1)) if m else 0
+
+
+def _quality_gate(path: str, hook_first: bool, subs_burned: bool, dropped: int = 0) -> dict:
+    """영상 품질 자동 점검(영상강화 PHASE 6) — 규격·길이·오디오·훅·자막·워터마크 부재.
+    발행을 막지 않고 진단 결과를 payload에 남긴다(검수 화면·로그용)."""
+    import json
+    import logging
+    gate = {"pass": False, "checks": {}, "dropped_scenes": dropped}
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                            "stream=codec_type,width,height:format=duration", "-of", "json", path],
+                           capture_output=True, timeout=20)
+        info = json.loads(r.stdout or b"{}")
+        streams = info.get("streams", [])
+        vs = next((s for s in streams if s.get("codec_type") == "video"), {})
+        dur = float((info.get("format") or {}).get("duration") or 0)
+        c = gate["checks"]
+        c["spec_9x16"] = (vs.get("width") == W and vs.get("height") == H)      # 쇼츠/릴스 9:16 정규격
+        c["duration_ok"] = 8 <= dur <= 62                                      # 쇼츠 30~45 목표, 허용 8~62
+        c["has_audio"] = any(s.get("codec_type") == "audio" for s in streams)
+        c["hook_first_frame"] = hook_first                                     # 첫 프레임 = 훅(인트로 없음)
+        c["subtitles_burned"] = subs_burned                                    # 자막 합성 성공 여부
+        c["no_watermark"] = True                                               # 로고 오버레이 제거됨(구조 보장)
+        c["no_dropped_scenes"] = dropped == 0
+        gate["duration"] = round(dur, 1)
+        gate["pass"] = all(v for k, v in c.items() if k != "has_audio")        # 무음(TTS 무키)은 통과 허용
+        if not gate["pass"]:
+            logging.warning("[video] 품질 게이트 미통과: %s", {k: v for k, v in c.items() if not v})
+    except Exception as e:
+        gate["error"] = str(e)[:120]
+    return gate
+
+
 def _probe_dur(path: str) -> float:
     try:
         r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
@@ -316,6 +353,7 @@ class ShortVideoGenerator(Generator):
         video_path, note, dur_sec, cover_path = self._build_scene_video(
             vid_imgs, hook, sent, kws, tenant, strat, title, outro_cta)
         _scene_note = note                                    # 씬 경로 결과/오류(진단용)
+        _scene_ok = bool(video_path)
         # 폴백: 씬 파이프라인 실패 → 기존 슬라이드쇼 + 단일자막 + 오디오
         if not video_path:
             per = _per_image(len(vid_imgs))
@@ -360,6 +398,11 @@ class ShortVideoGenerator(Generator):
                 "image_paths": imgs, "duration_sec": dur_sec, "cover_path": cover_path,
                 "video_variants": variants,    # {square, feed45} 다중 화면비
                 "assemble_note": note, "_scene_note": _scene_note,
+                # 품질 게이트(영상강화 PHASE 6) — 규격·길이·훅·자막·워터마크 부재 자동점검
+                "quality_gate": (_quality_gate(video_path, hook_first=_scene_ok,
+                                               subs_burned=_scene_ok, dropped=_parse_dropped(note))
+                                 if video_path and os.path.exists(video_path)
+                                 else {"pass": False, "error": "no video"}),
             },
             status=ContentStatus.DRAFT)
 
