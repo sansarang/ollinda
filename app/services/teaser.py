@@ -43,6 +43,7 @@ def run_teaser(industry: str, biz_type: str, note: str,
                                                intake.get("answers"), intake.get("experience", ""))
         if block:
             note = (block + "\n" + (note or "")).strip()
+        smart_intake.record_insight(industry, intake.get("answers"), intake.get("experience", ""))
     except Exception:
         pass
     asset = db.create_asset(t.id, AssetType.IMAGE, paths[0] if paths else "", note or "")

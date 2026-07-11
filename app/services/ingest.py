@@ -30,6 +30,7 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
                                                 intake.get("answers"), intake.get("experience", ""))
         if _block:
             note = (_block + "\n" + (note or "")).strip()
+        smart_intake.record_insight(tenant.industry, intake.get("answers"), intake.get("experience", ""))
     except Exception:
         pass
     # 텍스트는 즉시(빠름), 영상(SHORT)+릴스+캐러셀은 비동기 → 요청이 타임아웃 없이 바로 끝남

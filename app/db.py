@@ -622,6 +622,21 @@ def incr_month_usage(uid: str, n: int = 1) -> None:
             (ym, n, n, ym, uid))
 
 
+# ── 스마트 입력 인사이트(콘텐츠생성 보강 — viral_hooks 점진 보강용 스텁) ──
+def save_intake_insight(industry: str, answers: dict, experience: str = "") -> None:
+    """업종별 스마트질문 답변 축적. TODO(viral_hooks): N건 쌓이면 업종 viral_hooks 생성 재료로."""
+    try:
+        with _conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS intake_insights("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT, industry TEXT, "
+                      "answers TEXT, experience TEXT, created_at TEXT)")
+            c.execute("INSERT INTO intake_insights(industry, answers, experience, created_at) VALUES(?,?,?,?)",
+                      ((industry or "").strip()[:60], json.dumps(answers or {}, ensure_ascii=False),
+                       experience, _now()))
+    except Exception:
+        pass
+
+
 # ── 블로그 발행 기록(블로그등록 PHASE 2) ──
 def record_blog_publish(tenant_id: str, piece_id: str, url: str, published_at: str = "",
                         matched_by: str = "manual", score: float = 1.0, post_title: str = "") -> None:

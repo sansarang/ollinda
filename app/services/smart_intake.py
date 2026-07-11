@@ -64,19 +64,41 @@ _QUESTION_BANK: dict[str, list[dict]] = {
     ],
 }
 
-# 범용(미정의 업종) — 어떤 업종이든 D.I.A.+ 재료가 되는 3개
+# 범용(미정의 업종) — 어떤 업종이든 D.I.A.+ 재료가 되는 기본 2개(나머지는 프로필에서 변환 생성)
 _GENERIC_QUESTIONS = [
     {"id": "price", "q": "가격대는요?", "type": "text", "ph": "예: 3만원대 (없으면 비워두세요)"},
     {"id": "duration", "q": "소요 시간·기간은요?", "type": "text", "ph": "예: 당일 1시간"},
-    {"id": "strength", "q": "우리 가게만의 강점 하나는요?", "type": "text", "ph": "예: 10년 경력, 정품만 사용"},
 ]
 
-# 경험 유도(공통 1개) — D.I.A.+ 1차 경험의 핵심 재료
+# 경험 유도(공통 1개, 항상 포함) — '왜/과정' 질문(SEO_CURRENT §5: vision은 결과만 보고
+# 과정·이유를 못 본다). D.I.A.+ 1차 경험의 핵심 재료라 모든 업종에서 필수.
 EXPERIENCE_QUESTION = {
     "id": "experience",
-    "q": "손님이 왜 만족했나요? 또는 작업하며 신경 쓴 포인트는요?",
+    "q": "손님이 왜 만족했나요? 또는 작업하며 특별히 신경 쓴 점은요?",
     "type": "text", "ph": "한 줄이면 충분해요. 예: 기포 없애려고 유리 물세척만 20분 했어요",
 }
+
+
+def _questions_from_profile(prof) -> list[dict]:
+    """업종 프로필 → '그 가게의 실제 값'을 묻는 질문 변환(SEO_CURRENT §2·5 반영).
+    - trust_signals("필름 등급 데이터, 보증기간, …") → 항목별 실제 값 질문
+      ("보증기간은 어떻게 되나요?") — 신뢰 신호를 추상 지시("녹여라")가 아닌 실측값으로.
+    - pain_points(고객 고민) → PAS 재료 질문("이번 손님은 왜 오셨어요?")."""
+    out: list[dict] = []
+    if getattr(prof, "key", "generic") == "generic":
+        # GENERIC(프로필 없음)의 모호한 신호("실제 사진, 후기")는 변환하지 않음 — 강점 질문으로 대체
+        return [{"id": "strength", "q": "우리 가게만의 강점 하나는요?", "type": "text",
+                 "ph": "예: 10년 경력, 정품만 사용"}]
+    sig = [s.strip() for s in re.split(r"[,·/]", getattr(prof, "trust_signals", "") or "") if s.strip()]
+    for i, item in enumerate(sig[:2]):
+        short = item[:24]
+        out.append({"id": f"sig{i}", "q": f"'{short}' — 우리 가게는 실제로 어떤가요?",
+                    "type": "text", "ph": "예: 실제 값·기간·숫자로 (모르면 비워두세요)"})
+    pains = [s.strip() for s in re.split(r"[,·/]", getattr(prof, "pain_points", "") or "") if s.strip()]
+    if pains:
+        out.append({"id": "pain", "q": f"이번 손님은 왜 오셨어요? (예: {pains[0][:20]})",
+                    "type": "text", "ph": "손님이 겪던 문제 한 줄 — PAS 도입의 재료가 돼요"})
+    return out
 
 
 def questions_for(industry: str, biz_type: str = "local", purpose: str = "",
@@ -89,12 +111,9 @@ def questions_for(industry: str, biz_type: str = "local", purpose: str = "",
     prof = resolve_industry(industry)
     qs = [q for q in _QUESTION_BANK.get(prof.key, []) if q["id"] not in known]
     if not qs:
-        qs = list(_GENERIC_QUESTIONS)
-        # AI/프리셋 프로필의 신뢰 신호 → "우리 가게에 해당되는 것" 선택형(그 가게의 실제 값 수집)
-        sig = [s.strip() for s in re.split(r"[,·/]", prof.trust_signals or "") if s.strip()][:4]
-        if sig:
-            qs.append({"id": "signals", "q": "우리 가게에 해당되는 걸 골라주세요", "type": "choice",
-                       "options": sig})
+        # 프리셋 뱅크가 없는 업종(AI 생성/GENERIC 프로필) — trust_signals·pain_points를
+        # '실제 값 질문'으로 변환(SEO_CURRENT §5: 신뢰 신호가 추상 표현으로만 쓰이던 병목 해소)
+        qs = _questions_from_profile(prof) + [q for q in _GENERIC_QUESTIONS if q["id"] not in known]
     qs = qs[:4]
     # 목적별 미세 조정 — 이벤트·할인 목적이면 이벤트 질문을 앞으로
     if "이벤트" in (purpose or "") or "할인" in (purpose or ""):
@@ -162,6 +181,21 @@ def build_intake_note(industry: str, confirmed: str = "", answers: dict | None =
         "\n[반영 규칙] 위 정보는 사장님이 직접 확인·입력한 사실이다. 본문의 구체 수치·경험 문장은 "
         "반드시 여기서 가져와 1인칭으로 생생하게 서술하라(예: '기포 없애려고 물세척만 20분 했습니다'). "
         "위에 없는 가격·수치·스펙은 지어내지 마라 — 없으면 그 항목은 생략하고 '문의' 유도로.\n")
+
+
+def record_insight(industry: str, answers: dict | None = None, experience: str = "") -> None:
+    """스마트질문 답변 축적(SEO_CURRENT §2 — AI 생성 업종 프로필엔 viral_hooks가 없음).
+    ※ 스텁: 지금은 저장만 한다. TODO(viral_hooks): 같은 업종 답변·경험담이 N건 쌓이면
+    이를 근거로 해당 업종의 viral_hooks(잘 터지는 오프닝 앵글)를 생성해
+    industry_profiles에 보강한다 — 실제 사장님 데이터 기반이라 날조 없는 훅이 된다."""
+    answers = {k: v for k, v in (answers or {}).items() if (v or "").strip()}
+    if not (answers or (experience or "").strip()):
+        return
+    try:
+        from app import db
+        db.save_intake_insight(industry, answers, (experience or "").strip()[:200])
+    except Exception:
+        pass
 
 
 def enrichment_level(confirmed: str = "", answers: dict | None = None, experience: str = "") -> str:
