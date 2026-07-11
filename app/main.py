@@ -322,6 +322,10 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
             from app.services import teaser as teaser_svc
             _t, _a, pieces, brief = teaser_svc.run_teaser(industry, biz_type, full_note, imgs, intake=intake)
             if not pieces:
+                # 전 채널 실패 — generate_for가 개별 예외를 삼키므로, LLM 1회 프로브로
+                # 진짜 원인(401/크레딧/429)을 끌어올려 분류(진단 가능하게). 무키면 더미라 통과.
+                from app import llm as _llm
+                _llm.call("ping", max_tokens=16)
                 raise RuntimeError("no pieces")
             if not _dev:
                 db.incr_demo_ip(ip)                  # 개발자 IP는 카운터 미소모
@@ -330,11 +334,23 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
                                 target_kw=target_kw, target_vol=target_vol_n, enrichment=_level)
             with _demo_jobs_lock:
                 _demo_jobs[job] = {"status": "done", "html": html, "ts": _time.time()}
-        except Exception:
+        except Exception as e:
             import logging
             logging.exception("[teaser] 실패 job=%s", job)
+            # 에러 분류(진단용) — 원인 유실 방지: 폴링 응답에 coarse 카테고리로 노출(상세는 로그)
+            en, es = type(e).__name__, str(e).lower()
+            if "authentication" in es or en == "AuthenticationError":
+                cat = "auth"
+            elif "credit" in es or "billing" in es or "purchase" in es:
+                cat = "credit"
+            elif en == "RateLimitError" or "rate_limit" in es or "429" in es:
+                cat = "rate"
+            elif en == "RuntimeError" and "no pieces" in es:
+                cat = "no_pieces"
+            else:
+                cat = en[:40]
             with _demo_jobs_lock:
-                _demo_jobs[job] = {"status": "error", "ts": _time.time()}
+                _demo_jobs[job] = {"status": "error", "cat": cat, "ts": _time.time()}
     threading.Thread(target=_run_demo, daemon=True).start()
     return JSONResponse({"job": job})
 
@@ -357,7 +373,12 @@ def api_demo_result(job: str):
     if j["status"] == "running":
         return JSONResponse({"ready": False})
     if j["status"] == "error":
-        return JSONResponse({"error": "생성에 문제가 있었어요. 잠시 후 다시 시도해 주세요.", "retry": True})
+        cat = j.get("cat", "")
+        msg = {"auth": "AI 생성 서비스 연결에 문제가 있어요 — 운영자가 확인 중이에요. 잠시 후 다시 시도해 주세요.",
+               "credit": "AI 생성 서비스 점검 중이에요 — 운영자가 확인 중이에요. 잠시 후 다시 시도해 주세요.",
+               "rate": "지금 생성이 몰렸어요. 1~2분 뒤 다시 시도해 주세요."}.get(
+            cat, "생성에 문제가 있었어요. 잠시 후 다시 시도해 주세요.")
+        return JSONResponse({"error": msg, "retry": True, "code": cat})
     return JSONResponse({"ready": True, "teaser": True, "teaser_html": j.get("html", "")})
 
 
