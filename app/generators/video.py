@@ -206,7 +206,9 @@ class ShortVideoGenerator(Generator):
             f"{format_directive(fmt)}\n"
             f"{seo.keywords_line(kws)}\n\n"
             f"{seo.SHORT_DIRECTIVES_SELLER if strat.key == 'seller' else seo.SHORT_DIRECTIVES}\n"
-            f"{seo.HOOK_RULE}\n{seo.VIDEO_SCRIPT_CRAFT}\n{seo.PLATFORM_YOUTUBE}\n{seo.PLATFORM_REEL}\n{seo.COPY_PSYCH}\n{seo.FACTS_RULE}\n\n"
+            f"{seo.HOOK_RULE}\n{seo.VIDEO_SCRIPT_CRAFT}\n{seo.PLATFORM_YOUTUBE}\n{seo.PLATFORM_REEL}\n{seo.COPY_PSYCH}\n{seo.FACTS_RULE}\n"
+            f"[검색 진입] 제목과 0~3초 첫 자막에 검색 키워드('{kws[0] if kws else prof.name}')를 자연스럽게 포함(쇼츠 검색 노출).\n"
+            "[루프] 마지막 장면이 첫 장면과 자연스럽게 이어지게(끝→처음 루프 = 재생 반복 → 재노출). 길이 30~45초 목표.\n\n"
             "위 규칙으로 인스타 릴스/유튜브 쇼츠를 기획하라. 아래 형식 그대로(대괄호 머리표 유지):\n"
             "[제목]\n(후킹 제목)\n[길이]\n(예: 25초)\n[플랫폼]\n(인스타 릴스/유튜브 쇼츠)\n"
             "[훅]\n(0~3초에 띄울 강한 한 줄, 12자 내외)\n"
@@ -706,9 +708,11 @@ class ShortVideoGenerator(Generator):
         bgm = bgm_lib.pick()
         out = os.path.join(out_dir, f"short_{uuid.uuid4().hex}.mp4")
         if bgm:
-            # 목소리 full + BGM 22%, amix normalize=0(볼륨 안 깎임) → loudnorm -14 LUFS(소셜 표준, 크게 들림)
-            fc = ("[1:a]volume=1.0[v];[2:a]volume=0.22[b];"
-                  "[v][b]amix=inputs=2:duration=first:normalize=0[m];"
+            # 목소리 full + BGM 사이드체인 더킹(내레이션 구간 BGM 자동 감쇄 → 명료도↑, 무음 구간 펌핑 방지, PHASE 11)
+            # → loudnorm -14 LUFS(소셜 표준). sidechaincompress 실패 시 _add_audio/폴백이 무음이라도 확정 저장
+            fc = ("[1:a]volume=1.0,asplit=2[v][vkey];[2:a]volume=0.30[b];"
+                  "[b][vkey]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=300[bd];"
+                  "[v][bd]amix=inputs=2:duration=first:normalize=0[m];"
                   "[m]loudnorm=I=-14:TP=-1.5:LRA=11[a]")
             cmd = ["ffmpeg", "-y", "-i", video, "-i", full_wav, "-stream_loop", "-1", "-i", bgm,
                    "-filter_complex", fc, "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-ar", "44100",
