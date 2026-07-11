@@ -125,9 +125,11 @@ class BlogDraftGenerator(Generator):
                        + (f" 구매 안내: {buy}" if buy else "") + place)
         else:
             place = (f" 네이버 지도 링크: {tenant.map_url}" if getattr(tenant, "map_url", "") else "")
-            closing = ("[마무리] 글 끝에 '찾아오는길(지도)·영업시간·연락처' + "
-                       f"'네이버에서 \"{tenant.name}\" 검색 → 플레이스에서 찜·예약·길찾기' 행동 유도."
-                       + place)
+            closing = ("[마무리] 글 끝에 '찾아오는길(지도)·영업시간·전화' + "
+                       f"'네이버에서 \"{tenant.name}\" 검색 → 플레이스 저장·방문자리뷰·예약·전화' 행동 유도"
+                       "(저장·리뷰·예약은 플레이스 순위의 핵심 신호). "
+                       f"본문에서 업체명은 반드시 '{tenant.name}', 지역은 '{tenant.region}'으로 일관 표기"
+                       "(플레이스 등록정보와 일치 = 상호 신뢰 신호)." + place)
         prompt = (
             f"[가게] {tenant.name} (업종: {prof.name}, 지역: {tenant.region})\n"
             f"[사업형태] {strat.label} — {strat.goal}\n"

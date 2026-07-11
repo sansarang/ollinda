@@ -81,6 +81,10 @@ def init_db() -> None:
                   "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, keyword TEXT, "
                   "rank INTEGER, checked_at TEXT)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_rank_tk ON rank_snapshots(tenant_id, keyword, checked_at)")
+        try:      # 블로그 키워드 순위 vs 플레이스 노출 순위 분리 추적(성장 PHASE 8)
+            c.execute("ALTER TABLE rank_snapshots ADD COLUMN kind TEXT DEFAULT 'blog'")
+        except sqlite3.OperationalError:
+            pass
         # 다중 가게 — 한 사용자가 여러 가게(tenant)를 등록·전환
         c.execute("CREATE TABLE IF NOT EXISTS user_stores("
                   "user_id TEXT, tenant_id TEXT, created_at TEXT, PRIMARY KEY(user_id, tenant_id))")
@@ -128,17 +132,33 @@ def improving_keywords(tenant_id: str, limit: int = 5) -> list[dict]:
     return out[:limit]
 
 
-def save_rank_snapshot(tenant_id: str, keyword: str, rank: "int | None") -> None:
-    """순위 스냅샷 기록(하루 1개로 제한 — 같은 날 재조회는 갱신)."""
+def save_place_rank(tenant_id: str, keyword: str, rank: "int | None") -> None:
+    """플레이스 노출 순위 스냅샷(블로그 키워드 순위와 분리 추적, 성장 PHASE 8)."""
+    save_rank_snapshot(tenant_id, keyword, rank, kind="place")
+
+
+def save_rank_snapshot(tenant_id: str, keyword: str, rank: "int | None", kind: str = "blog") -> None:
+    """순위 스냅샷 기록(하루 1개로 제한 — 같은 날 재조회는 갱신). kind=blog|place로 분리 추적."""
     if rank is None:
         return
     today = _now()[:10]
     with _conn() as c:
-        ex = c.execute("SELECT id FROM rank_snapshots WHERE tenant_id=? AND keyword=? AND checked_at LIKE ?",
-                       (tenant_id, keyword, today + "%")).fetchone()
+        try:      # 같은 날 dedup은 kind별로 분리(blog/place 충돌 방지, PHASE 8)
+            ex = c.execute("SELECT id FROM rank_snapshots WHERE tenant_id=? AND keyword=? "
+                           "AND checked_at LIKE ? AND COALESCE(kind,'blog')=?",
+                           (tenant_id, keyword, today + "%", kind)).fetchone()
+        except sqlite3.OperationalError:
+            ex = c.execute("SELECT id FROM rank_snapshots WHERE tenant_id=? AND keyword=? AND checked_at LIKE ?",
+                           (tenant_id, keyword, today + "%")).fetchone()
         if ex:
             c.execute("UPDATE rank_snapshots SET rank=?, checked_at=? WHERE id=?", (rank, _now(), ex["id"]))
         else:
+            try:
+                c.execute("INSERT INTO rank_snapshots(tenant_id, keyword, rank, checked_at, kind) VALUES(?,?,?,?,?)",
+                          (tenant_id, keyword, rank, _now(), kind))
+                return
+            except sqlite3.OperationalError:
+                pass
             c.execute("INSERT INTO rank_snapshots(tenant_id, keyword, rank, checked_at) VALUES(?,?,?,?)",
                       (tenant_id, keyword, rank, _now()))
 
