@@ -34,6 +34,26 @@ def price_id(plan: str) -> str:
     return os.environ.get("PADDLE_PRICE_" + (plan or "self").upper(), "") or os.environ.get("PADDLE_PRICE_SELF", "")
 
 
+def plan_for_price_id(pid: str) -> str | None:
+    """웹훅의 price id를 서버에 설정된 PADDLE_PRICE_* 와 역매칭해 플랜명 반환(없으면 None).
+    클라이언트가 보낸 custom_data.plan을 신뢰하지 않기 위한 서버측 검증(B4)."""
+    if not pid:
+        return None
+    for k, v in os.environ.items():
+        if k.startswith("PADDLE_PRICE_") and v and hmac.compare_digest(v, pid):
+            return k[len("PADDLE_PRICE_"):].lower()
+    return None
+
+
+def plan_from_event(data: dict) -> str | None:
+    """웹훅 data.items[].price.id 들을 순회하며 서버 검증된 플랜명을 찾는다."""
+    for it in (data.get("items") or []):
+        plan = plan_for_price_id(str((it.get("price") or {}).get("id") or ""))
+        if plan:
+            return plan
+    return None
+
+
 def verify_webhook(sig_header: str, raw_body: str) -> bool:
     """Paddle-Signature(ts=..;h1=..) HMAC-SHA256 검증. 재생공격 방지(5분)."""
     secret = os.environ.get("PADDLE_WEBHOOK_SECRET", "")

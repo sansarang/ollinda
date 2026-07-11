@@ -74,6 +74,31 @@ def r2_media_url(tenant_id: str, fname: str) -> str | None:
     return os.environ["R2_PUBLIC_URL"].rstrip("/") + f"/{tenant_id}/{fname}"
 
 
+def public_url_for(local_path: str) -> str | None:
+    """로컬 경로에 대응하는 R2 공개 URL. 로컬 파일이 삭제돼도 발행·서빙에 사용(B5)."""
+    if not (r2_configured() and local_path):
+        return None
+    return os.environ["R2_PUBLIC_URL"].rstrip("/") + "/" + _key_for(local_path)
+
+
+def ensure_local(local_path: str) -> str | None:
+    """로컬 파일이 있으면 그대로, 없으면 R2에서 내려받아 복원(바이트 업로드형 발행용, 예: 유튜브). 실패 시 None(B5)."""
+    if not local_path:
+        return None
+    if os.path.exists(local_path):
+        return local_path
+    if not r2_configured():
+        return None
+    try:
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        _r2().download_file(os.environ["R2_BUCKET"], _key_for(local_path), local_path)
+        return local_path if os.path.exists(local_path) else None
+    except Exception:
+        import logging
+        logging.exception("[r2] 복원 실패 %s", local_path)
+        return None
+
+
 def save_upload(data: bytes, filename: str, tenant_id: str) -> str:
     """업로드 바이트를 tenant별 폴더에 저장(+R2 미러) 후 로컬 경로 반환."""
     ext = os.path.splitext(filename)[1].lower() or ".bin"

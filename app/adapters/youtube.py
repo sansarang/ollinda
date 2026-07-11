@@ -40,7 +40,8 @@ class YouTubePublisher(Publisher):
         from app import oauth
 
         token = oauth.refresh_youtube_token(account.refresh_token_enc) or account.access_token_enc
-        video_path = content.payload.get("video_path")
+        from app import storage as _st
+        video_path = _st.ensure_local(content.payload.get("video_path"))   # 로컬 삭제 시 R2에서 복원(B5)
         if not video_path or not os.path.exists(video_path):
             return PublishResult(ok=False, error="업로드할 영상 파일 없음")
         title = (content.payload.get("title") or "")[:95]

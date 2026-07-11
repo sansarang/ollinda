@@ -82,7 +82,7 @@ def _reassemble_short(piece: ContentPiece) -> None:
     if not imgs:
         return
     gen = ShortVideoGenerator()
-    vp, note = gen._assemble(imgs, p.get("subtitle", ""), piece.tenant_id, _per_image(len(imgs)))
+    vp, note = gen._assemble_legacy(imgs, p.get("subtitle", ""), piece.tenant_id, _per_image(len(imgs)))
     vp, _tts, _bgm, anote = gen._add_audio(vp, p.get("narration", ""), piece.tenant_id)
     p["video_path"] = vp
     p["assemble_note"] = note

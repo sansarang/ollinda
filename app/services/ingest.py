@@ -196,6 +196,15 @@ def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: di
         if _st.r2_configured():
             paths = set()
             for pc in db.get_set_pieces(asset.id):     # 사진은 save_upload가 이미 R2 미러함
+                # 로컬 삭제 전 발행용 R2 공개 URL을 payload에 각인(인스타 URL 발행이 삭제 후에도 동작, B5)
+                _vu = _st.public_url_for(pc.payload.get("video_path"))
+                _iu = _st.public_url_for(pc.payload.get("image_path"))
+                if _vu or _iu:
+                    if _vu:
+                        pc.payload["video_url"] = _vu
+                    if _iu:
+                        pc.payload["image_url"] = _iu
+                    db.save_piece(pc)
                 paths.add(pc.payload.get("video_path"))
                 paths.add(pc.payload.get("image_path"))
                 paths.add(pc.payload.get("cover_path"))

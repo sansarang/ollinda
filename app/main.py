@@ -2580,10 +2580,15 @@ async def paddle_webhook(request: Request):
     data = ev.get("data", {}) or {}
     cd = data.get("custom_data") or {}
     uid = cd.get("user_id")
-    plan = cd.get("plan", "pro")
     if uid and db.get_user(uid):
         from datetime import datetime, timedelta
         if etype in ("subscription.activated", "subscription.created", "transaction.completed"):
+            # 플랜은 custom_data.plan(클라 조작 가능)이 아니라 실제 결제된 price id로 서버 검증(B4)
+            plan = pay_paddle.plan_from_event(data)
+            if not plan:
+                import logging
+                logging.warning("paddle webhook: price id 매칭 실패 — 플랜 변경 보류 uid=%s", uid)
+                return JSONResponse({"ok": True, "note": "unrecognized price id"}, status_code=200)
             db.set_user_plan(uid, plan)
             exp = (datetime.utcnow() + timedelta(days=32)).isoformat()
             try:
@@ -3728,15 +3733,22 @@ def review_done(pid: str):
 
 
 # ── 미디어 서빙 ──────────────────────────────────────────
+def _serve_media(path: str, url_key: str = "", payload: dict | None = None):
+    """로컬 파일 우선, 없으면 R2 공개 URL로 302 리다이렉트(로컬 삭제 후에도 서빙·발행 유지, B5)."""
+    if path and os.path.exists(path):
+        return FileResponse(path)
+    url = storage.public_url_for(path) or ((payload or {}).get(url_key) if url_key else None)
+    if url:
+        return RedirectResponse(url, status_code=302)
+    return HTMLResponse(status_code=404)
+
+
 @app.get("/asset/{pid}")
 def asset_image(pid: str):
     p = db.get_piece(pid)
     if not p:
         return HTMLResponse(status_code=404)
-    path = p.payload.get("image_path")
-    if not path or not os.path.exists(path):
-        return HTMLResponse(status_code=404)
-    return FileResponse(path)
+    return _serve_media(p.payload.get("image_path"), "image_url", p.payload)
 
 
 @app.get("/asset/{pid}/{idx}")
@@ -3745,9 +3757,9 @@ def asset_image_idx(pid: str, idx: int):
     if not p:
         return HTMLResponse(status_code=404)
     paths = p.payload.get("image_paths") or [p.payload.get("image_path")]
-    if idx < 0 or idx >= len(paths) or not paths[idx] or not os.path.exists(paths[idx]):
+    if idx < 0 or idx >= len(paths) or not paths[idx]:
         return HTMLResponse(status_code=404)
-    return FileResponse(paths[idx])
+    return _serve_media(paths[idx])
 
 
 @app.get("/video/{pid}")
@@ -3756,6 +3768,6 @@ def asset_video(pid: str):
     if not p:
         return HTMLResponse(status_code=404)
     path = p.payload.get("video_path")
-    if not path or not os.path.exists(path):
-        return HTMLResponse(status_code=404)
-    return FileResponse(path, media_type="video/mp4")
+    if path and os.path.exists(path):
+        return FileResponse(path, media_type="video/mp4")
+    return _serve_media(path, "video_url", p.payload)   # 로컬 삭제 시 R2 리다이렉트(B5)
