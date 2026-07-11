@@ -628,6 +628,139 @@ def competitors_page(request: Request):
     return HTMLResponse(_subscriber_page("", inner))
 
 
+# ══ 신규기능②: 인쇄물 자동 생성 ══
+@app.post("/api/print/generate")
+async def print_generate(request: Request):
+    """인쇄물 생성 — 타입·항목·사진 → 렌더 → URL. print_items 한도 차감(PHASE 7)."""
+    import asyncio
+    import json as _json
+    from app import gating
+    from app.services import printable
+    u = auth.current_user(request)
+    blk = gating.check_limit(u, "print_items")
+    if blk:
+        return JSONResponse(blk, status_code=(401 if blk.get("need_signup") else 402))
+    t = _ensure_user_tenant(u)
+    form = await request.form()
+    ptype = (form.get("type") or "menu").strip()
+    if ptype not in printable.PRINT_TYPES:
+        ptype = "menu"
+    note = (form.get("note") or "").strip()
+    try:
+        items = _json.loads(form.get("items") or "[]")
+        if not isinstance(items, list):
+            items = []
+    except Exception:
+        items = []
+    # 사진(선택) — 저장 + 보정
+    photo_path = ""
+    ph = form.get("photo")
+    if ph is not None and getattr(ph, "filename", ""):
+        data = await ph.read()
+        if data and len(data) <= MAX_UPLOAD_BYTES:
+            photo_path = storage.save_upload(data, ph.filename, t.id)
+            try:
+                from app.media import photo_boost
+                photo_boost.enhance_all([photo_path], t.industry, None)
+            except Exception:
+                pass
+
+    res = await asyncio.to_thread(printable.generate, ptype, t, items, note, photo_path, "png")
+    if not res.get("ok"):
+        return JSONResponse({"error": res.get("error", "생성 실패")}, status_code=200)
+    jid = db.save_print_job(t.id, ptype, res.get("path", ""), res.get("url") or "",
+                            res.get("copy", {}).get("label", ""))
+    gating.consume(u, "print_items")
+    return JSONResponse({"ok": True, "id": jid, "download": f"/print/file/{jid}",
+                         "label": res.get("copy", {}).get("label", ""),
+                         "usage": gating.usage_summary(db.get_user(u["id"]), "print_items")})
+
+
+@app.get("/api/print/list")
+def print_list(request: Request):
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"items": []})
+    t = _ensure_user_tenant(u)
+    jobs = [{"id": j["id"], "label": j.get("label") or j.get("ptype"), "ptype": j.get("ptype"),
+             "download": f"/print/file/{j['id']}", "created_at": j.get("created_at")}
+            for j in db.list_print_jobs(t.id)]
+    return JSONResponse({"items": jobs})
+
+
+@app.get("/print/file/{jid}")
+def print_file(jid: str, request: Request):
+    """인쇄물 다운로드 — 소유권 확인 후 로컬/ R2 서빙(PHASE 7)."""
+    j = db.get_print_job(jid)
+    if not j:
+        return HTMLResponse(status_code=404)
+    u = auth.current_user(request)
+    t = _ensure_user_tenant(u) if u else None
+    if not (t and j.get("tenant_id") == t.id):
+        return HTMLResponse("<p>권한이 없어요.</p>", status_code=403)
+    path = j.get("path") or ""
+    if path and os.path.exists(path):
+        return FileResponse(path, filename=f"{j.get('label') or 'print'}.png")
+    if j.get("url"):
+        return RedirectResponse(j["url"], status_code=302)
+    return HTMLResponse("<p>파일을 찾을 수 없어요.</p>", status_code=404)
+
+
+@app.get("/me/print", response_class=HTMLResponse)
+def print_page(request: Request):
+    """인쇄물 생성 페이지(PHASE 7). 타입 선택·항목 입력·생성·다운로드·한도."""
+    from app import gating
+    from app.services import printable
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    t = _ensure_user_tenant(u)
+    usage = gating.usage_summary(db.get_user(u["id"]), "print_items")
+    used_label = ("무제한" if usage["limit"] == -1 else f"{usage['used']}/{usage['limit']}장")
+    jobs = db.list_print_jobs(t.id, limit=12)
+
+    type_opts = "".join(f"<option value='{k}'>{esc(v['label'])}</option>" for k, v in printable.PRINT_TYPES.items())
+    made = "".join(
+        f"<a href='/print/file/{j['id']}' target='_blank' class='flex items-center justify-between bg-white border border-slate-100 rounded-xl px-4 py-2.5 mb-2 hover:shadow-sm'>"
+        f"<span class='text-sm text-slate-700'>🖨️ {esc(j.get('label') or j.get('ptype'))}</span>"
+        f"<span class='text-xs text-indigo-600 font-bold'>다운로드 ↓</span></a>"
+        for j in jobs) or "<div class='text-sm text-slate-400 text-center py-4'>아직 만든 인쇄물이 없어요.</div>"
+
+    upgrade = ("" if usage["limit"] == -1 or usage["remaining"] > 0 else
+               "<a href='/#pricing' class='block text-center bg-indigo-600 text-white font-bold py-3 rounded-xl mt-3'>업그레이드하고 더 만들기 →</a>")
+
+    inner = (
+        f"<a href='/me' class='text-sm text-slate-500 font-bold'>← 내 작업실</a>"
+        "<div class='flex items-center justify-between mt-2 mb-1'>"
+        "<h1 class='text-2xl font-extrabold'>🖨️ 인쇄물 만들기</h1>"
+        f"<span class='text-xs text-slate-400'>이번 달 {used_label}</span></div>"
+        "<p class='text-slate-500 text-sm mb-5'>메뉴판·가격표·전단지·POP을 사진 한 장과 항목만으로. (가격은 입력하신 그대로, 지어내지 않아요)</p>"
+        "<div class='bg-white rounded-2xl border border-slate-100 p-5 mb-4'>"
+        f"<select id='p_type' class='w-full rounded-xl border px-3 py-2.5 mb-2 text-sm bg-white'>{type_opts}</select>"
+        "<input id='p_note' placeholder='제목/이벤트 메모(선택, 예: 봄맞이 신메뉴)' class='w-full rounded-xl border px-3 py-2.5 mb-2 text-sm outline-none'>"
+        "<div id='p_items'></div>"
+        "<button onclick='addRow()' class='text-xs text-indigo-600 font-bold mb-2'>+ 항목 추가</button>"
+        "<label class='block text-xs text-slate-500 mb-1'>대표 사진(선택)</label>"
+        "<input id='p_photo' type='file' accept='image/*' class='w-full text-xs mb-3'>"
+        "<button onclick='genPrint()' class='w-full grad-btn text-white font-bold py-3 rounded-xl'>인쇄물 생성</button>"
+        "<div id='p_msg' class='text-sm mt-2'></div></div>"
+        "<div class='font-bold text-slate-700 mb-2'>내가 만든 인쇄물</div>" + made + upgrade +
+        "<script>"
+        "function addRow(){var d=document.getElementById('p_items');var r=document.createElement('div');r.className='flex gap-2 mb-2';"
+        "r.innerHTML='<input class=\"pn flex-1 rounded-lg border px-3 py-2 text-sm\" placeholder=\"항목명\"><input class=\"pp w-28 rounded-lg border px-3 py-2 text-sm\" placeholder=\"가격\">';d.appendChild(r);}"
+        "addRow();addRow();"
+        "async function genPrint(){var msg=document.getElementById('p_msg');msg.textContent='생성 중… (10~20초)';"
+        "var items=[];document.querySelectorAll('#p_items > div').forEach(function(row){var n=row.querySelector('.pn').value,p=row.querySelector('.pp').value;if(n)items.push({name:n,price:p});});"
+        "var fd=new FormData();fd.append('type',document.getElementById('p_type').value);fd.append('note',document.getElementById('p_note').value);fd.append('items',JSON.stringify(items));"
+        "var ph=document.getElementById('p_photo').files[0];if(ph)fd.append('photo',ph);"
+        "try{var r=await fetch('/api/print/generate',{method:'POST',body:fd});var d=await r.json();"
+        "if(d.ok){msg.innerHTML='✅ 완성! <a href=\"'+d.download+'\" target=\"_blank\" class=\"text-indigo-600 underline font-bold\">다운로드</a>';setTimeout(function(){location.reload();},1200);}"
+        "else{msg.textContent=d.error||'생성 실패';msg.className='text-sm mt-2 text-rose-500';if(d.upgrade)location.href='/#pricing';}}"
+        "catch(e){msg.textContent='생성 실패 — 잠시 후 다시';}}"
+        "</script>")
+    return HTMLResponse(_subscriber_page("", inner))
+
+
 def _short_region(addr: str) -> str:
     """전체 주소 → '부산 동구' / '부산 동구 초량동'처럼 짧은 지역(키워드용)."""
     toks = (addr or "").split()
@@ -1408,7 +1541,8 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
     from app import landing
     _navitems = [("🏠", "홈", "/me", "create"), ("📄", "내 콘텐츠", "/me?tab=content", "content"),
                  ("📊", "리포트", "/me?tab=report", "report"),
-                 ("🥊", "경쟁사", "/me/competitors", "competitors")]
+                 ("🥊", "경쟁사", "/me/competitors", "competitors"),
+                 ("🖨️", "인쇄물", "/me/print", "print")]
 
     def _navlink(i, l, h, key):
         cls = ("bg-indigo-50 text-indigo-700" if key == active

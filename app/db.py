@@ -592,6 +592,37 @@ def list_competitors_all_active() -> list[dict]:
         return []
 
 
+def save_print_job(tenant_id: str, ptype: str, path: str, url: str = "", label: str = "") -> str:
+    """인쇄물 생성 기록(신규기능②). 테이블 자동 생성."""
+    jid = uuid.uuid4().hex[:12]
+    with _conn() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS print_jobs("
+                  "id TEXT PRIMARY KEY, tenant_id TEXT, ptype TEXT, label TEXT, "
+                  "path TEXT, url TEXT, created_at TEXT)")
+        c.execute("INSERT INTO print_jobs(id,tenant_id,ptype,label,path,url,created_at) VALUES(?,?,?,?,?,?,?)",
+                  (jid, tenant_id, ptype, label, path, url, _now()))
+    return jid
+
+
+def list_print_jobs(tenant_id: str, limit: int = 50) -> list[dict]:
+    try:
+        with _conn() as c:
+            rows = c.execute("SELECT * FROM print_jobs WHERE tenant_id=? ORDER BY created_at DESC LIMIT ?",
+                             (tenant_id, limit)).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.OperationalError:
+        return []
+
+
+def get_print_job(jid: str) -> Optional[dict]:
+    try:
+        with _conn() as c:
+            r = c.execute("SELECT * FROM print_jobs WHERE id=?", (jid,)).fetchone()
+        return dict(r) if r else None
+    except sqlite3.OperationalError:
+        return None
+
+
 def save_competitor_snapshot(competitor_id: str, keyword: str, my_rank, competitor_rank) -> None:
     with _conn() as c:
         c.execute("INSERT INTO competitor_snapshots(competitor_id,keyword,my_rank,competitor_rank,checked_at) "
