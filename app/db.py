@@ -65,7 +65,9 @@ def init_db() -> None:
                          ("buy_url", "TEXT"), ("search_kw", "TEXT"), ("brand_name", "TEXT"),
                          ("publish_schedule", "INTEGER DEFAULT 0"), ("is_demo", "INTEGER DEFAULT 0"),
                          ("lat", "REAL"), ("lon", "REAL"),        # 가게 좌표(사진 GPS 지오태그)
-                         ("topic_axis", "TEXT")]:                 # 전문 주제 축(C-Rank 주제 집중, 성장 PHASE 7)
+                         ("topic_axis", "TEXT"),                  # 전문 주제 축(C-Rank 주제 집중, 성장 PHASE 7)
+                         ("naver_blog_url", "TEXT"),              # 사용자 네이버 블로그 URL(블로그등록 PHASE 1)
+                         ("blog_id", "TEXT")]:                    # 정규화된 블로그 아이디(RSS·순위매칭용)
             try:
                 c.execute(f"ALTER TABLE tenants ADD COLUMN {col} {ddl}")
             except sqlite3.OperationalError:
@@ -195,7 +197,9 @@ def _row_to_tenant(r: sqlite3.Row) -> Tenant:
                   marketplace=g("marketplace"), buy_url=g("buy_url"),
                   search_kw=g("search_kw"), brand_name=g("brand_name"),
                   publish_schedule=g("publish_schedule", 0) or 0,
-                  lat=(r["lat"] if "lat" in keys else None), lon=(r["lon"] if "lon" in keys else None))
+                  lat=(r["lat"] if "lat" in keys else None), lon=(r["lon"] if "lon" in keys else None),
+                  topic_axis=g("topic_axis"),
+                  naver_blog_url=g("naver_blog_url"), blog_id=g("blog_id"))
 
 
 def set_tenant_coords(tid: str, lat: float, lon: float) -> None:
@@ -208,6 +212,16 @@ def set_tenant_coords(tid: str, lat: float, lon: float) -> None:
         return
     with _conn() as c:
         c.execute("UPDATE tenants SET lat=?, lon=? WHERE id=?", (lat, lon, tid))
+
+
+def set_tenant_blog(tid: str, url: str, blog_id: str) -> None:
+    """네이버 블로그 연결 저장(빈 값이면 연결 해제). 블로그등록 PHASE 1."""
+    with _conn() as c:
+        try:
+            c.execute("UPDATE tenants SET naver_blog_url=?, blog_id=? WHERE id=?",
+                      ((url or "").strip(), (blog_id or "").strip(), tid))
+        except sqlite3.OperationalError:
+            pass
 
 
 def update_tenant_profile(tid: str, phone: str, address: str, hours: str, map_url: str) -> None:

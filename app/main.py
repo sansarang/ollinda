@@ -1331,6 +1331,8 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         f"<input type=hidden id=sf_address name=address value=\"{esc(t.address)}\">"
         f"<input type=hidden id=sf_phone name=phone value=\"{esc(t.phone)}\">"
         + biz_toggle
+        + "<div class='mt-1'><div class='text-xs font-semibold text-slate-500 mb-1'>📝 네이버 블로그 (선택 — 연결하면 발행확인·순위추적이 정확해요)</div>"
+        f"<input name=naver_blog value=\"{esc(getattr(t, 'naver_blog_url', '') or '')}\" placeholder='https://blog.naver.com/내아이디 또는 아이디' class='{inp}'></div>"
         + "<button class='w-full bg-indigo-600 text-white font-bold py-3.5 rounded-xl text-base'>완료하고 시작하기 →</button></form>"
         "<p class='text-xs text-slate-400 mt-2'>검색하면 상호·업종·주소가 자동 입력돼요. 없으면 직접 입력하세요.</p>"
         + place_js)
@@ -1512,7 +1514,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 f"<div class='text-xs text-slate-400 mt-1.5'>→ {esc(_tl.get('label',''))}(으)로 연결돼요</div>"
                 f"<a href='/me/qr/{_tl['code']}.png' download='ollinda-qr.png' class='inline-block mt-2 text-xs font-bold text-indigo-500'>⬇ QR 이미지 저장</a>"
                 "</div></div></div>")
-        main_inner = _sbadge + stats_row + _trackbox + _rankbox + _kwbox
+        main_inner = _sbadge + stats_row + _blog_connect_card(t, _fw) + _trackbox + _rankbox + _kwbox
     else:                                                 # ✨ 만들기 (기본) — 완성되면 여기(만들기 대시보드)에 결과 표시
         active = "create"
         _made = (request.query_params.get("made") or "").strip()
@@ -1521,6 +1523,14 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             _rh = _result_html(u, _made, back_href="/me", back_label="＋ 새로 만들기 ↓")
             if _rh:
                 _made_html = f"<div class='{_fw} mb-6'>{_rh}</div>"
+        # 📝 블로그 미연결 유도(온보딩 완료자) — 연결하면 발행확인·순위매칭 정확
+        _blog_nudge = ""
+        if not getattr(t, "blog_id", ""):
+            _blog_nudge = ("<div class='flex items-center gap-3 bg-emerald-50 border border-emerald-100 rounded-2xl p-4 mb-5'>"
+                           "<span class='text-2xl'>📝</span>"
+                           "<div class='flex-1 min-w-0 text-sm text-slate-700'><b>내 네이버 블로그를 연결</b>하면 "
+                           "발행 여부 자동 확인 + 내 블로그 순위 추적이 정확해져요. (공개 RSS만 사용)</div>"
+                           "<a href='/me?tab=report#blog' class='flex-shrink-0 bg-emerald-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-emerald-700 transition'>연결하기</a></div>")
         if _made_html:
             main_inner = _made_html + upload_section
         else:
@@ -1530,7 +1540,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                       "<div class='flex-1 min-w-0'><div class='text-xs font-bold text-indigo-500 mb-0.5'>오늘의 액션</div>"
                       f"<div class='text-sm text-slate-700 font-medium'>{_act['text']}</div></div>"
                       f"<a href='{_act['href']}' class='flex-shrink-0 bg-indigo-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-indigo-700 transition'>{_act['cta']}</a></div>")
-            main_inner = greeting + _coach + upload_section
+            main_inner = greeting + _coach + _blog_nudge + upload_section
     # 🆕 새로 추가한 '빈 새 가게'면 실수 대비 '뒤로가기(취소)' 배너
     if t.name == "새 가게" and len(db.list_user_stores(u["id"])) > 1 and not db.list_sets(tenant_id=t.id):
         _backban = ("<div class='flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-5'>"
@@ -1588,7 +1598,7 @@ def my_store(request: Request, name: str = Form(""), industry: str = Form(""), r
              biz_type: str = Form("local"), phone: str = Form(""), address: str = Form(""),
              marketplace: str = Form(""), brand_name: str = Form(""),
              search_kw: str = Form(""), buy_url: str = Form(""), map_url: str = Form(""),
-             lat: str = Form(""), lon: str = Form("")):
+             lat: str = Form(""), lon: str = Form(""), naver_blog: str = Form("")):
     u = auth.current_user(request)
     if not u:
         return RedirectResponse("/login", status_code=303)
@@ -1601,7 +1611,65 @@ def my_store(request: Request, name: str = Form(""), industry: str = Form(""), r
     if industry.strip():
         from app.industries import ensure_profile
         ensure_profile(industry.strip())
+    # 온보딩에서 네이버 블로그(선택) 입력 시 — 검증 성공만 저장, 실패는 설정 저장은 유지하고 안내
+    if naver_blog.strip() and not getattr(t, "blog_id", ""):
+        from app.services import blogsync
+        from urllib.parse import quote as _q
+        v = blogsync.verify_blog(naver_blog)
+        if v["ok"]:
+            db.set_tenant_blog(t.id, v["url"], v["blog_id"])
+            return RedirectResponse("/me?ok=" + _q(f"설정 저장 + 블로그 '{v['title'] or v['blog_id']}' 연결 완료!"),
+                                    status_code=303)
+        return RedirectResponse("/me?err=" + _q(f"설정은 저장했어요. 블로그는 연결 못했어요 — {v['error']}"),
+                                status_code=303)
     return RedirectResponse("/me?ok=설정을 저장했어요", status_code=303)
+
+
+@app.post("/me/blog")
+def my_blog_connect(request: Request, blog: str = Form("")):
+    """내 네이버 블로그 연결(블로그등록 PHASE 1) — URL/아이디 유연 입력 → 정규화 + RSS 실존 검증.
+    빈 값 제출 = 연결 해제. 검증 실패 시 저장하지 않고 정직하게 안내."""
+    from urllib.parse import quote as _q
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    t = _ensure_user_tenant(u)
+    from app.services import blogsync
+    raw = (blog or "").strip()
+    if not raw:                                      # 연결 해제
+        db.set_tenant_blog(t.id, "", "")
+        return RedirectResponse("/me?tab=report&ok=" + _q("블로그 연결을 해제했어요"), status_code=303)
+    v = blogsync.verify_blog(raw)
+    if not v["ok"]:
+        return RedirectResponse("/me?tab=report&err=" + _q(v["error"]), status_code=303)
+    db.set_tenant_blog(t.id, v["url"], v["blog_id"])
+    msg = f"블로그 '{v['title'] or v['blog_id']}' 연결 완료! 이제 발행 확인·순위 매칭이 정확해져요"
+    return RedirectResponse("/me?tab=report&ok=" + _q(msg), status_code=303)
+
+
+def _blog_connect_card(t, fw: str) -> str:
+    """'내 네이버 블로그 연결' 카드 — 연결 전(입력 폼) / 연결 후(현황+해제)."""
+    inp = "flex-1 border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
+    if getattr(t, "blog_id", ""):
+        return (f"<div class='{fw} mt-5'>"
+                "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>📝 내 네이버 블로그</h2>"
+                f"<p class='text-sm text-slate-400 mb-3'>연결됨 · 공개 RSS로 발행 여부와 순위를 추적해요.</p>"
+                "<div class='flex items-center gap-3 flex-wrap'>"
+                f"<a href='{esc(t.naver_blog_url)}' target=_blank rel=noopener "
+                "class='inline-flex items-center gap-2 bg-emerald-50 text-emerald-700 font-bold text-sm px-4 py-2.5 rounded-xl'>"
+                f"✅ blog.naver.com/{esc(t.blog_id)} ↗</a>"
+                "<form method=post action='/me/blog' onsubmit=\"return confirm('블로그 연결을 해제할까요? 발행 확인·순위 매칭이 꺼져요.')\">"
+                "<input type=hidden name=blog value=''>"
+                "<button class='text-xs text-slate-400 hover:text-rose-500 font-semibold'>연결 해제</button></form>"
+                "</div></div>")
+    return (f"<div class='{fw} mt-5'>"
+            "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>📝 내 네이버 블로그 연결</h2>"
+            "<p class='text-sm text-slate-400 mb-3'>네이버는 발행 API가 없어 직접 발행하시죠? "
+            "블로그 주소를 등록하면 <b>실제 발행 확인 · 내 블로그 순위 추적</b>이 정확해져요.</p>"
+            "<form method=post action='/me/blog' class='flex gap-2'>"
+            f"<input name=blog placeholder='https://blog.naver.com/내아이디 또는 아이디만' class='{inp}'>"
+            "<button class='px-5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm whitespace-nowrap'>연결</button></form>"
+            "<p class='text-xs text-slate-400 mt-2'>공개 RSS(공식 제공)로만 확인해요 — 비밀번호·로그인이 필요 없어요.</p></div>")
 
 
 @app.post("/me/place-news")

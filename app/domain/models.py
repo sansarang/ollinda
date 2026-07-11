@@ -70,6 +70,9 @@ class Tenant:
     publish_schedule: int = 0  # 대행 운영: 주간 발행 목표 횟수(0=미설정)
     lat: Optional[float] = None  # 가게 위도(사진 GPS 지오태그)
     lon: Optional[float] = None  # 가게 경도
+    topic_axis: str = ""      # 전문 주제 축 — 이 블로그가 밀 핵심 주제/키워드군(C-Rank)
+    naver_blog_url: str = ""  # 사용자 네이버 블로그 URL(수동 발행 추적의 기준점)
+    blog_id: str = ""         # 정규화된 네이버 블로그 아이디(RSS·검색결과 정확 식별)
     created_at: Optional[datetime] = None
 
 
