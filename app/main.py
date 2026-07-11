@@ -239,6 +239,26 @@ app.include_router(google_router())
 _DEMO_HITS: dict = {}   # ip -> [timestamps] (무료 체험 rate limit)
 
 
+def _client_ip(request: Request) -> str:
+    return (request.headers.get("cf-connecting-ip")
+            or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+            or (request.client.host if request.client else "") or "unknown")
+
+
+def _is_dev_ip(ip: str) -> bool:
+    """개발자 IP 예외 — SHOPCAST_DEV_IPS(콤마 구분)에 등록된 IP만 무료 한도 미적용.
+    하드코딩 금지·환경변수 전용. 일반 사용자는 기존 한도 그대로(전체 무제한 금지)."""
+    devs = {x.strip() for x in os.environ.get("SHOPCAST_DEV_IPS", "").split(",") if x.strip()}
+    return bool(devs) and ip in devs
+
+
+@app.get("/api/whoami")
+def api_whoami(request: Request):
+    """접속 IP 확인 — SHOPCAST_DEV_IPS에 넣을 값 확인용."""
+    ip = _client_ip(request)
+    return JSONResponse({"ip": ip, "dev": _is_dev_ip(ip)})
+
+
 @app.post("/api/demo")
 async def api_demo(request: Request, industry: str = Form(""), note: str = Form(""),
                    biz_type: str = Form("local"), marketplace: str = Form(""),
@@ -249,10 +269,11 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
                    photos: list[UploadFile] = File(None)):
     """랜딩 데모 — 미가입자는 '실제 생성 티저(흐리게)'로 가입 유도. 로그인 회원은 작업실로."""
     u = auth.current_user(request)
+    _dev = _is_dev_ip(_client_ip(request))           # 개발자 IP — 무료 한도 미적용(env 등록 IP만)
     if u:                                            # 로그인 회원 → 작업실에서 실제 생성
         used = u.get("free_used") or 0
         free = (u.get("plan") or "free") == "free"
-        if free and used >= FREE_LIMIT:
+        if free and used >= FREE_LIMIT and not _dev:
             from app import config as _cfg
             return JSONResponse({"limit": True,
                                  "message": (f"무료 {FREE_LIMIT}회를 모두 사용했어요. 방금 만든 품질 그대로 계속하려면 "
@@ -264,10 +285,8 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
     # 미로그인 → 실제 생성 후 '흐리게' 미리보기(티저)로 가입 유도
     if not (industry or "").strip():
         return JSONResponse({"require_signup": True, "message": "업종/상품을 입력하면 실제로 만들어 보여드려요!"})
-    ip = (request.headers.get("cf-connecting-ip")
-          or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-          or (request.client.host if request.client else "") or "unknown")
-    if db.demo_ip_count(ip) >= 2:                    # 무료 미리보기 2회 → 그다음 가입 유도
+    ip = _client_ip(request)
+    if not _dev and db.demo_ip_count(ip) >= 2:       # 무료 미리보기 2회 → 그다음 가입 유도(개발자 IP 예외)
         return JSONResponse({"require_signup": True,
                              "message": "무료 미리보기 2회를 다 보셨어요! 가입하면 5채널 전부 + 영상까지 무료로 만들어드려요 🎁"})
     imgs = await _read_image_uploads(photos)
@@ -304,8 +323,9 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
             _t, _a, pieces, brief = teaser_svc.run_teaser(industry, biz_type, full_note, imgs, intake=intake)
             if not pieces:
                 raise RuntimeError("no pieces")
-            db.incr_demo_ip(ip)
-            remaining = max(0, 2 - db.demo_ip_count(ip))
+            if not _dev:
+                db.incr_demo_ip(ip)                  # 개발자 IP는 카운터 미소모
+            remaining = 2 if _dev else max(0, 2 - db.demo_ip_count(ip))
             html = _teaser_html(pieces, brief, _a, remaining,
                                 target_kw=target_kw, target_vol=target_vol_n, enrichment=_level)
             with _demo_jobs_lock:
