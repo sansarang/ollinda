@@ -2652,6 +2652,62 @@ def kit(request: Request, asset_id: str):
     return HTMLResponse(_subscriber_page("발행 소재", body))
 
 
+def _naver_component_guide(tenant, blog, sec: str) -> str:
+    """네이버 지도·장소 컴포넌트 삽입 가이드(블로그템플릿 PHASE 3) — 모바일 우선.
+    지도는 텍스트가 아니라 네이버 '장소' 컴포넌트로 넣어야 플레이스 연결·지역SEO에 유리.
+    본문 [여기 네이버 지도 넣기] 마커 위치에서 쓰는 3스텝 + 요소별 개별 복사."""
+    from app.services import blogtpl
+    body = blog.payload.get("body") or ""
+    is_local = (getattr(tenant, "biz_type", "local") or "local") in ("local", "hybrid")
+    if not is_local and blogtpl.MAP_MARKER not in body:
+        return ""
+    name = (getattr(tenant, "name", "") or "").strip()
+    region = (getattr(tenant, "region", "") or "").strip()
+    place_q = f"{name} {region}".strip() or name          # 장소 검색용 상호+지역
+    big = ("w-full flex items-center justify-between gap-2 rounded-2xl px-4 py-3.5 text-sm font-bold "
+           "transition active:scale-[.99]")               # 모바일 큰 터치 버튼
+
+    def _copy_row(idx, emoji, label, value):
+        if not (value or "").strip():
+            return ""
+        return (f"<div class='flex items-center gap-2 mb-2'>"
+                f"<div class='flex-1 min-w-0 bg-slate-50 rounded-xl px-3.5 py-3 text-sm'>"
+                f"<span class='text-[11px] font-bold text-slate-400 block'>{emoji} {label}</span>"
+                f"<span class='text-slate-700 break-all'>{esc(value)}</span></div>"
+                f"<textarea id='cg{idx}' class='hidden'>{esc(value)}</textarea>"
+                f"<button onclick=\"omCopy(document.getElementById('cg{idx}').value);this.textContent='✅';"
+                "var b=this;setTimeout(function(){b.textContent='복사';},1500)\" "
+                "class='flex-shrink-0 w-16 py-3 bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold rounded-xl transition'>복사</button></div>")
+
+    # 스텝 진행 표시(①→②→③) + 큰 복사 버튼
+    steps = ("<div class='flex items-center gap-1.5 mb-3'>"
+             + "".join(f"<div class='flex-1 text-center'><div class='w-7 h-7 mx-auto rounded-full bg-emerald-600 text-white text-sm font-bold flex items-center justify-center'>{n}</div>"
+                       f"<div class='text-[10px] text-slate-500 mt-1 leading-tight'>{s}</div></div>"
+                       + ("<div class='w-4 h-px bg-slate-300 -mt-4'></div>" if n < 3 else "")
+                       for n, s in [(1, "네이버 글쓰기에서<br><b>장소</b> 버튼"), (2, "아래 상호<br><b>붙여넣기</b>"), (3, "내 가게<br><b>선택</b>")])
+             + "</div>")
+    place_link = ""
+    if (getattr(tenant, "map_url", "") or "").strip():
+        place_link = (f"<a href='{esc(tenant.map_url)}' target=_blank rel=noopener "
+                      f"class='{big} bg-emerald-50 text-emerald-700 border border-emerald-200 mb-2'>"
+                      "<span>🔗 내 플레이스 열어 확인</span><span>↗</span></a>")
+    rows = (_copy_row(1, "🔎", "장소 검색용 (장소 버튼에 붙여넣기)", place_q)
+            + _copy_row(2, "📞", "전화번호 (네이버가 자동으로 전화 연결 링크 처리 — 텍스트면 충분)",
+                        getattr(tenant, "phone", ""))
+            + _copy_row(3, "🕒", "영업시간", getattr(tenant, "hours", ""))
+            + _copy_row(4, "🅿️", "주차 안내", getattr(tenant, "parking", "")))
+    return (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-1'>🗺 지도는 <span class='text-emerald-600'>네이버 장소 컴포넌트</span>로!</div>"
+            "<p class='text-xs text-slate-500 mb-3'>본문의 <b>[여기 네이버 지도 넣기]</b> 자리에 장소 컴포넌트를 넣으면 "
+            "글이 내 플레이스와 연결돼 지역 검색에 유리해요. 링크 텍스트보다 훨씬 좋아요.</p>"
+            + steps
+            + f"<textarea id='cgq' class='hidden'>{esc(place_q)}</textarea>"
+            f"<button onclick=\"omCopy(document.getElementById('cgq').value);this.querySelector('span').textContent='✅ 복사됨 — 이제 네이버 장소 버튼에 붙여넣기'\" "
+            f"class='{big} bg-emerald-600 hover:bg-emerald-700 text-white mb-3'><span>📋 '{esc(place_q)}' 복사</span><span>→</span></button>"
+            + place_link
+            + "<details class='mt-1'><summary class='text-xs font-bold text-slate-500 cursor-pointer select-none'>연락처·영업시간·주차 개별 복사 ▾</summary>"
+            f"<div class='mt-2'>{rows}</div></details></div>")
+
+
 def _internal_link_box(blog, sec: str) -> str:
     """내부링크 안내 — 같은 주제 축의 '발행 확인된' 내 글을 본문 끝에 링크로 넣도록 제안."""
     rel = blog.payload.get("related_posts") or []
@@ -2803,6 +2859,8 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
            + "<li>🎬 직접 찍은 동영상까지 넣으면 D.I.A.+ 가점.</li>"
            + "<li>⚡ 발행 직후 <b>서치어드바이저에 URL 색인 요청</b>하면 검색 반영이 수일→수시간으로 빨라져요.</li></ul>"
            f"<a href='https://searchadvisor.naver.com/console/board/registration' target='_blank' rel='noopener' class='{cbtn} bg-slate-900 hover:bg-slate-800 inline-block'>🔗 서치어드바이저 색인 요청 →</a></div>")
+        # 🗺 네이버 장소 컴포넌트 가이드(블로그템플릿 PHASE 3) — 고정정보 블록 위치
+        + _naver_component_guide(tenant, blog, sec)
         # 내부링크 제안(상위노출 PHASE 4) — 같은 주제 발행글 서로 링크(주제 응집도 = C-Rank 신호)
         + _internal_link_box(blog, sec)
         # 앵글 변형(상위노출 PHASE 4) — 같은 소재로 다른 스마트블록 진입
