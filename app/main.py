@@ -431,6 +431,27 @@ def place_search(q: str = ""):
     return JSONResponse({"items": place.search(q), "configured": place.configured()})
 
 
+@app.post("/api/rank-check")
+async def api_rank_check(request: Request):
+    """온보딩/랜딩 '내 가게 현재 순위 즉시진단'(결제 트리거, 성장 PHASE 1).
+    업종+지역+상호 → 네이버 현재 순위 + CTA 프레임. 로그인 tenant면 baseline 저장."""
+    from app.services import diagnose
+    try:
+        form = await request.form()
+        industry = (form.get("industry") or "").strip()
+        region = (form.get("region") or "").strip()
+        name = (form.get("name") or "").strip()
+    except Exception:
+        industry = region = name = ""
+    if not (industry or name):
+        return JSONResponse({"error": "업종 또는 상호를 입력해주세요."}, status_code=400)
+    result = diagnose.diagnose_rank(industry, region, name)
+    u = auth.current_user(request)
+    if u and u.get("tenant_id"):
+        diagnose.save_baseline(u["tenant_id"], result)   # before/after 기준점
+    return JSONResponse(result)
+
+
 def _short_region(addr: str) -> str:
     """전체 주소 → '부산 동구' / '부산 동구 초량동'처럼 짧은 지역(키워드용)."""
     toks = (addr or "").split()
