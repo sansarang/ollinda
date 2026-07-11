@@ -1573,6 +1573,16 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                            "<div class='flex-1 min-w-0 text-sm text-slate-700'><b>내 네이버 블로그를 연결</b>하면 "
                            "발행 여부 자동 확인 + 내 블로그 순위 추적이 정확해져요. (공개 RSS만 사용)</div>"
                            "<a href='/me?tab=report#blog' class='flex-shrink-0 bg-emerald-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-emerald-700 transition'>연결하기</a></div>")
+        # 🔔 앱내 알림(발행 리마인더 등) — 보여주고 읽음 처리
+        _notices = db.unread_notices(t.id)
+        _notice_html = ""
+        if _notices:
+            _notice_html = "".join(
+                "<div class='flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-3'>"
+                f"<span class='text-xl'>🔔</span><div class='flex-1 text-sm text-amber-800'>{esc(n.get('text') or '')}</div>"
+                "<a href='/me' class='flex-shrink-0 bg-amber-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>오늘 만들기</a></div>"
+                for n in _notices[:2])
+            db.mark_notices_read(t.id)
         if _made_html:
             main_inner = _made_html + upload_section
         else:
@@ -1582,7 +1592,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                       "<div class='flex-1 min-w-0'><div class='text-xs font-bold text-indigo-500 mb-0.5'>오늘의 액션</div>"
                       f"<div class='text-sm text-slate-700 font-medium'>{_act['text']}</div></div>"
                       f"<a href='{_act['href']}' class='flex-shrink-0 bg-indigo-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-indigo-700 transition'>{_act['cta']}</a></div>")
-            main_inner = greeting + _coach + _blog_nudge + upload_section
+            main_inner = greeting + _notice_html + _coach + _calendar_card(t, _plan) + _blog_nudge + upload_section
     # 🆕 새로 추가한 '빈 새 가게'면 실수 대비 '뒤로가기(취소)' 배너
     if t.name == "새 가게" and len(db.list_user_stores(u["id"])) > 1 and not db.list_sets(tenant_id=t.id):
         _backban = ("<div class='flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-5'>"
@@ -1855,6 +1865,50 @@ def _blog_connect_card(t, fw: str) -> str:
             f"<input name=blog placeholder='https://blog.naver.com/내아이디 또는 아이디만' class='{inp}'>"
             "<button class='px-5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm whitespace-nowrap'>연결</button></form>"
             "<p class='text-xs text-slate-400 mt-2'>공개 RSS(공식 제공)로만 확인해요 — 비밀번호·로그인이 필요 없어요.</p></div>")
+
+
+@app.post("/me/topic-axis")
+def my_topic_axis(request: Request, topic_axis: str = Form("")):
+    """'전문 주제 축' 저장 — 이 블로그가 밀 핵심 주제/키워드군(C-Rank 주제 집중)."""
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    t = _ensure_user_tenant(u)
+    db.set_topic_axis(t.id, topic_axis)
+    return RedirectResponse("/me?ok=전문 주제 축을 저장했어요 — 발행 캘린더 제안에 반영돼요", status_code=303)
+
+
+def _calendar_card(t, plan: str) -> str:
+    """📅 발행 캘린더 카드(상위노출 PHASE 2) — 이번 주 진행률 + 남은 슬롯 제안 + 주제 축."""
+    from app.services import pubcal
+    wp = pubcal.week_plan(t, plan)
+    # 진행률 도트(●=완료 ○=남음)
+    dots = "".join("<span class='w-3.5 h-3.5 rounded-full bg-emerald-500 inline-block'></span>"
+                   for _ in range(min(wp["done"], wp["target"])))
+    dots += "".join("<span class='w-3.5 h-3.5 rounded-full bg-slate-200 inline-block'></span>"
+                    for _ in range(wp["remaining"]))
+    basis_note = "" if wp["basis"] == "published" else " <span class='text-[10px] text-slate-400'>(발행확인 전엔 생성 기준)</span>"
+    sug_html = ""
+    for s in wp["suggestions"][:3]:
+        sug_html += (f"<a href='{s['href']}' class='flex items-center justify-between bg-white border border-slate-100 "
+                     "rounded-xl px-3.5 py-2.5 mb-1.5 hover:border-indigo-300 hover:shadow-sm transition'>"
+                     f"<div class='text-sm'><b class='text-slate-700'>{esc(s['topic'])}</b> "
+                     f"<span class='text-xs text-indigo-500 font-bold'>{s['angle_label']}</span>"
+                     f"<div class='text-[11px] text-slate-400'>{esc(s['why'])}</div></div>"
+                     "<span class='text-xs font-bold text-indigo-600 whitespace-nowrap'>만들기 →</span></a>")
+    axis = esc(getattr(t, "topic_axis", "") or "")
+    inp = "flex-1 border border-slate-200 rounded-xl px-3 py-2 text-sm"
+    axis_form = ("<details class='mt-2'><summary class='text-xs text-slate-400 cursor-pointer select-none'>"
+                 f"🧭 전문 주제 축 {('· <b class=\"text-slate-600\">' + axis + '</b>') if axis else '설정(권장)'} — 같은 주제 꾸준함이 C-Rank 신호</summary>"
+                 "<form method=post action='/me/topic-axis' class='flex gap-2 mt-2'>"
+                 f"<input name=topic_axis value=\"{axis}\" placeholder='예: 부산 썬팅, 열차단 필름 (쉼표로 여러 개)' class='{inp}'>"
+                 "<button class='px-4 bg-slate-900 text-white rounded-xl text-xs font-bold'>저장</button></form></details>")
+    return ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5 mb-5'>"
+            "<div class='flex items-center justify-between mb-2'>"
+            f"<h2 class='font-extrabold text-slate-900'>📅 발행 캘린더 · 이번 주 {wp['done']}/{wp['target']}{basis_note}</h2>"
+            f"<div class='flex items-center gap-1'>{dots}</div></div>"
+            f"<p class='text-xs text-slate-500 mb-3'>{esc(wp['coach'])}</p>"
+            + sug_html + axis_form + "</div>")
 
 
 @app.post("/me/place-news")

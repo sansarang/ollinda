@@ -63,6 +63,10 @@ def plan_limit(plan: str, feature: str) -> int:
 
 # ── 상위노출 실행 루프(상위노출 PHASE 1~6) ──
 TARGET_CONTENT_SUGGEST = int(os.environ.get("SHOPCAST_TARGET_SUGGEST", "3"))  # 미노출→타겟 콘텐츠 제안 수
+# 발행 캘린더(PHASE 2) — 플랜별 주간 권장 발행 수(가게 publish_schedule 설정이 우선)
+PLAN_WEEKLY_TARGET = {"free": 1, "basic": 2, "pro": 3, "self": 3, "agency": 5}
+REMIND_GAP_DAYS = int(os.environ.get("SHOPCAST_REMIND_GAP", "3"))    # 발행 공백 며칠부터 리마인더
+RANK_TRACK_KEYWORDS = int(os.environ.get("SHOPCAST_TRACK_KW", "5"))  # 가게당 자동추적 키워드 수(PHASE 3)
 
 # ── 블로그 추적(블로그등록 PHASE 4) — 발행 일관성·주간 리포트 ──
 BLOG_WEEKLY_TARGET = int(os.environ.get("SHOPCAST_BLOG_WEEKLY", "3"))   # 기본 주 3회(C-Rank 지속성)

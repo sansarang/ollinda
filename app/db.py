@@ -100,6 +100,11 @@ def init_db() -> None:
                   "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, week TEXT, "
                   "data TEXT, sent_email INTEGER DEFAULT 0, created_at TEXT)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_weekrep ON weekly_reports(tenant_id, week)")
+        # 앱내 알림(상위노출 PHASE 2) — 발행 리마인더 등. read=0 이면 대시보드 배너 표시
+        c.execute("CREATE TABLE IF NOT EXISTS notices("
+                  "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, kind TEXT, "
+                  "text TEXT, read INTEGER DEFAULT 0, created_at TEXT)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_notices_t ON notices(tenant_id, read)")
         # ── 신규기능①: 경쟁사 추적기 ──
         c.execute("CREATE TABLE IF NOT EXISTS competitors("
                   "id TEXT PRIMARY KEY, tenant_id TEXT, name TEXT, region TEXT, "
@@ -232,6 +237,100 @@ def set_tenant_coords(tid: str, lat: float, lon: float) -> None:
         return
     with _conn() as c:
         c.execute("UPDATE tenants SET lat=?, lon=? WHERE id=?", (lat, lon, tid))
+
+
+def set_topic_axis(tid: str, axis: str) -> None:
+    """'전문 주제 축' 저장 — 이 블로그가 밀 핵심 주제/키워드군(C-Rank 주제 집중, 상위노출 PHASE 2)."""
+    with _conn() as c:
+        try:
+            c.execute("UPDATE tenants SET topic_axis=? WHERE id=?", ((axis or "").strip()[:120], tid))
+        except sqlite3.OperationalError:
+            pass
+
+
+# ── 앱내 알림(상위노출 PHASE 2) ──
+def add_notice(tenant_id: str, kind: str, text: str) -> None:
+    """같은 종류의 미읽음 알림이 있으면 중복 생성하지 않음(리마인더 도배 방지)."""
+    try:
+        with _conn() as c:
+            ex = c.execute("SELECT id FROM notices WHERE tenant_id=? AND kind=? AND read=0",
+                           (tenant_id, kind)).fetchone()
+            if ex:
+                c.execute("UPDATE notices SET text=?, created_at=? WHERE id=?", (text, _now(), ex["id"]))
+            else:
+                c.execute("INSERT INTO notices(tenant_id, kind, text, created_at) VALUES(?,?,?,?)",
+                          (tenant_id, kind, text, _now()))
+    except sqlite3.OperationalError:
+        pass
+
+
+def unread_notices(tenant_id: str, limit: int = 5) -> list[dict]:
+    try:
+        with _conn() as c:
+            rows = c.execute("SELECT * FROM notices WHERE tenant_id=? AND read=0 "
+                             "ORDER BY created_at DESC LIMIT ?", (tenant_id, limit)).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.OperationalError:
+        return []
+
+
+def mark_notices_read(tenant_id: str) -> None:
+    try:
+        with _conn() as c:
+            c.execute("UPDATE notices SET read=1 WHERE tenant_id=?", (tenant_id,))
+    except sqlite3.OperationalError:
+        pass
+
+
+def publish_activity(tenant_id: str) -> dict:
+    """발행 일관성 원자료 — 마지막 발행/생성일·이번 주 발행 수·최근 4주 주별 수.
+    '발행'은 blog_publishes(확인된 실제 발행)+publications, 폴백으로 콘텐츠 생성일 사용."""
+    from datetime import datetime, timedelta
+    now = datetime.utcnow()
+    week_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    dates: list[str] = []
+    with _conn() as c:
+        try:
+            dates += [r["published_at"] for r in c.execute(
+                "SELECT published_at FROM blog_publishes WHERE tenant_id=?", (tenant_id,)).fetchall()]
+        except sqlite3.OperationalError:
+            pass
+        dates += [r["published_at"] for r in c.execute(
+            "SELECT p.published_at FROM publications p JOIN content_pieces cp ON p.content_id=cp.id "
+            "WHERE cp.tenant_id=?", (tenant_id,)).fetchall()]
+        created = [r["created_at"] for r in c.execute(
+            "SELECT created_at FROM content_pieces WHERE tenant_id=? AND kind='blog'", (tenant_id,)).fetchall()]
+    pub_dates = sorted([d for d in dates if d], reverse=True)
+    basis = "published"
+    if not pub_dates:                       # 발행 기록이 없으면 생성 활동으로 폴백(라벨로 구분)
+        pub_dates = sorted([d for d in created if d], reverse=True)
+        basis = "created"
+    counts = [0, 0, 0, 0]
+    for d in pub_dates:
+        try:
+            dt = datetime.fromisoformat(d[:19])
+        except Exception:
+            continue
+        for i in range(4):
+            lo = week_start - timedelta(weeks=i)
+            if lo <= dt < lo + timedelta(weeks=1):
+                counts[i] += 1
+                break
+    last = pub_dates[0] if pub_dates else ""
+    gap = None
+    if last:
+        try:
+            gap = (now - datetime.fromisoformat(last[:19])).days
+        except Exception:
+            gap = None
+    streak = 0
+    for i in range(4):
+        if counts[i] > 0:
+            streak += 1
+        elif i > 0:
+            break
+    return {"basis": basis, "last_at": last, "gap_days": gap,
+            "this_week": counts[0], "week_counts": list(reversed(counts)), "streak_weeks": streak}
 
 
 def set_tenant_blog(tid: str, url: str, blog_id: str) -> None:

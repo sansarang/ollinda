@@ -33,6 +33,9 @@ def start() -> None:
         sch.add_job(_weekly_blog_report, "cron",
                     day_of_week=_cfg.WEEKLY_REPORT_DOW, hour=_cfg.WEEKLY_REPORT_HOUR, minute=10,
                     id="weekly_blog_report", replace_existing=True)
+        # 발행 리마인더(상위노출 PHASE 2) — 공백 N일이면 앱내+이메일(카톡 스텁), 매일 저녁
+        sch.add_job(_publish_reminder, "cron", hour=18, minute=0,
+                    id="publish_reminder", replace_existing=True)
         sch.start()
         _scheduler = sch
         logging.info("[scheduler] 경쟁사 일일 자동 스캔 등록(매일 %02d:00 KST)", hour)
@@ -40,6 +43,15 @@ def start() -> None:
                      _cfg.WEEKLY_REPORT_DOW, _cfg.WEEKLY_REPORT_HOUR)
     except Exception:
         logging.exception("[scheduler] 기동 실패 — 자동 스캔 없이 계속")
+
+
+def _publish_reminder() -> None:
+    """발행 공백 리마인더(상위노출 PHASE 2)."""
+    try:
+        from app.services import pubcal
+        pubcal.remind_stale_tenants()
+    except Exception:
+        logging.exception("[scheduler] 발행 리마인더 실패")
 
 
 def _weekly_blog_report() -> None:
