@@ -560,7 +560,8 @@ def demo_zip(asset_id: str, request: Request):
 
 # ══ 스마트 입력 엔진(콘텐츠생성 개선 PHASE 1~3) — 무료·유료 공용 ══
 @app.get("/api/intake/questions")
-def intake_questions(request: Request, industry: str = "", biz_type: str = "local", purpose: str = ""):
+def intake_questions(request: Request, industry: str = "", biz_type: str = "local", purpose: str = "",
+                     hint: str = ""):
     """업종·목적 맞춤 스마트 질문 3~4개 + 경험 유도 1개(전부 선택 입력).
     미정의 업종(프리셋·캐시 없음)은 ensure_profile로 AI 프로필을 1회 생성해 캐시
     (industry_profiles 재사용) → 빵집 같은 업종도 맞춤 질문. 재요청은 LLM 0콜(캐시)."""
@@ -570,6 +571,12 @@ def intake_questions(request: Request, industry: str = "", biz_type: str = "loca
     if not industry:
         return JSONResponse({"questions": [], "experience": smart_intake.EXPERIENCE_QUESTION,
                              "hint": "업종을 입력하면 맞춤 질문을 보여드려요"})
+    # 상호명 입력 커버(버그2): '파리바게뜨'처럼 프로필 매칭 실패 시 사진 추측(hint)에서 업종 추론
+    q_industry = industry
+    if resolve_industry(industry).key == "generic" and (hint or "").strip():
+        inferred = smart_intake.infer_industry_from_text(hint)
+        if inferred:
+            q_industry = inferred
     preparing = False
     if resolve_industry(industry).key == "generic":
         # 신규 업종 ~20초 지연 개선: 즉시 중립 질문 반환 + 프로필은 백그라운드 생성(방식 b).
@@ -578,9 +585,9 @@ def intake_questions(request: Request, industry: str = "", biz_type: str = "loca
         ip = (request.headers.get("cf-connecting-ip")
               or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
               or (request.client.host if request.client else "") or "unknown")
-        if ratelimit.allow("intakeq:" + ip, 4, 20):    # 미가입 LLM 콜 남용 방지(캐시 히트는 소모 없음)
-            preparing = _spawn_profile_gen(industry)
-    out = smart_intake.questions_for(industry, biz_type, purpose)
+        if q_industry == industry and ratelimit.allow("intakeq:" + ip, 4, 20):
+            preparing = _spawn_profile_gen(industry)   # 추론도 실패한 진짜 신규 업종만 AI 생성
+    out = smart_intake.questions_for(q_industry, biz_type, purpose)
     if preparing:
         out["preparing_custom"] = True                 # (정보용) 맞춤 질문 준비 중 — 다음 조회부터 적용
     return JSONResponse(out)

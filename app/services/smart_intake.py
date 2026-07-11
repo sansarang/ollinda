@@ -143,6 +143,22 @@ def questions_for(industry: str, biz_type: str = "local", purpose: str = "",
             "hint": "안 넣어도 되지만, 넣으면 글이 훨씬 구체적으로 좋아져요"}
 
 
+def infer_industry_from_text(text: str) -> str:
+    """텍스트(vision 분석·사진 추측)에서 업종 추론 — 프리셋 별칭 스캔(버그2: 상호명 입력 커버).
+    예: '베이커리 제품 소개' → cafe 프로필('베이커리' 별칭). 최장 별칭 매칭 우선. 없으면 ''."""
+    from app.industries import PROFILES
+    t = (text or "").lower()
+    if not t:
+        return ""
+    best, best_len = "", 0
+    for p in PROFILES.values():
+        for a in list(p.aliases) + [p.name]:
+            a = a.lower()
+            if len(a) >= 2 and a in t and len(a) > best_len:
+                best, best_len = p.name, len(a)
+    return best
+
+
 # ── vision 선추측(PHASE 2) ─────────────────────────────
 def guess_from_photos(paths: list[str], industry: str = "") -> dict:
     """사진 → {guess(확인용 한 줄), analysis(전체 분석)}. 무키/실패 시 guess=''.
@@ -162,7 +178,9 @@ def guess_from_photos(paths: list[str], industry: str = "") -> dict:
             if len(line) >= 5:
                 guess = line
                 break
-    return {"guess": guess[:120], "analysis": analysis}
+    # 사진 기반 업종 추론(버그2) — 상호명만 입력해도 질문을 업종에 맞출 수 있게
+    return {"guess": guess[:120], "analysis": analysis,
+            "industry_guess": infer_industry_from_text(analysis)}
 
 
 # ── 답변 → 생성 주입 블록(PHASE 4) ─────────────────────

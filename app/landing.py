@@ -152,26 +152,30 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
        onDone&&onDone();};};
  };
  // 업종별 스마트 질문 렌더(PHASE 3) — 무료·유료 공용. 답은 window.__intakeAnswers에 수집.
+ // hint: 사진 추측 텍스트(버그2 — 상호명 입력 시 서버가 업종 추론). 재렌더 시 기존 답변 보존.
  window.__intakeAnswers={};
- window.intakeQuestionsUI=async function(box,industry,bizType,purpose,expId){
+ window.intakeQuestionsUI=async function(box,industry,bizType,purpose,expId,hint){
    if(!box)return;
    if(!(industry||'').trim()){box.innerHTML='';return;}
    try{
-     var r=await fetch('/api/intake/questions?industry='+encodeURIComponent(industry)+'&biz_type='+(bizType||'local')+'&purpose='+encodeURIComponent(purpose||''));
+     var r=await fetch('/api/intake/questions?industry='+encodeURIComponent(industry)+'&biz_type='+(bizType||'local')+'&purpose='+encodeURIComponent(purpose||'')+'&hint='+encodeURIComponent(hint||''));
      var d=await r.json();var qs=d.questions||[];if(!qs.length){box.innerHTML='';return;}
+     var prev=window.__intakeAnswers||{};                       // 질문 교체 시 답변 유지(초기화 금지)
+     var oldExp=(document.getElementById(expId)||{}).value||'';
      var h='<details open class="bg-slate-50 border border-slate-200 rounded-xl p-3"><summary class="text-xs font-bold text-slate-600 cursor-pointer select-none">'
        +'더 좋은 글 만들기 <span class="text-slate-400 font-normal">('+esc(d.hint||'선택')+')</span></summary><div class="mt-2 space-y-2">';
      qs.forEach(function(q,i){
        h+='<div><div class="text-xs font-semibold text-slate-600 mb-1">'+esc(q.q)+'</div>';
        if(q.type==='choice'){h+='<div class="flex flex-wrap gap-1.5">'+(q.options||[]).map(function(o){
-         return '<button type="button" data-iq="'+esc(q.id)+'" data-v="'+esc(o)+'" class="iq-opt px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 text-xs font-semibold">'+esc(o)+'</button>';}).join('')+'</div>';}
-       else{h+='<input data-iqt="'+esc(q.id)+'" placeholder="'+esc(q.ph||'')+'" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400">';}
+         var on=((prev[q.id]||'').split(', ').indexOf(o)>=0);
+         return '<button type="button" data-iq="'+esc(q.id)+'" data-v="'+esc(o)+'" class="iq-opt px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 text-xs font-semibold'+(on?' ring-2 ring-indigo-400 bg-indigo-50':'')+'">'+esc(o)+'</button>';}).join('')+'</div>';}
+       else{h+='<input data-iqt="'+esc(q.id)+'" value="'+esc(prev[q.id]||'')+'" placeholder="'+esc(q.ph||'')+'" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400">';}
        h+='</div>';});
      var ex=d.experience||{};
      h+='<div><div class="text-xs font-semibold text-indigo-600 mb-1">'+esc(ex.q||'')+'</div>'
-       +'<input id="'+expId+'" placeholder="'+esc(ex.ph||'')+'" class="w-full rounded-lg border border-indigo-200 px-3 py-2 text-sm outline-none focus:border-indigo-400"></div>';
+       +'<input id="'+expId+'" value="'+esc(oldExp)+'" placeholder="'+esc(ex.ph||'')+'" class="w-full rounded-lg border border-indigo-200 px-3 py-2 text-sm outline-none focus:border-indigo-400"></div>';
      h+='</div></details>';
-     box.innerHTML=h;window.__intakeAnswers={};
+     box.innerHTML=h;window.__intakeAnswers=prev;
      box.querySelectorAll('.iq-opt').forEach(function(b){b.onclick=function(){
        var k=b.dataset.iq;var on=b.classList.toggle('ring-2');b.classList.toggle('ring-indigo-400');b.classList.toggle('bg-indigo-50');
        var cur=(window.__intakeAnswers[k]||'').split(', ').filter(Boolean);
@@ -182,6 +186,13 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
  };
  const df=document.getElementById('demoForm');if(!df)return;
  const pf=document.getElementById('d_photo');
+ // 질문 갱신(버그2) — 업종 입력/사진 추측 변경 시 hint(사진 추측) 포함해 재조회
+ window.demoQs=function(){window.intakeQuestionsUI&&intakeQuestionsUI(
+   document.getElementById('d_questions'),
+   (document.getElementById('d_ind')||{}).value||'',
+   (document.querySelector('input[name=d_biz]:checked')||{}).value||'local',
+   (document.getElementById('d_purpose')||{}).value||'',
+   'd_exp', window.__indGuess||'');};
  // 생성버튼 가드(버그2) — 사진 확인 응답 전엔 비활성 + 이유 문구. 실패·타임아웃 시 건너뛰기 폴백.
  function setDemoReady(ok,msg){var b=document.getElementById('d_submit'),h=document.getElementById('d_submit_hint');
    if(b)b.disabled=!ok;if(h){h.textContent=msg||'';h.classList.toggle('hidden',!msg);}}
@@ -222,6 +233,8 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
    small.forEach(function(f){fd.append('photos',f);});
    try{var r=await fetch('/api/intake/guess',{method:'POST',body:fd});var d=await r.json();
      if(fin||seq!==_gseq)return;fin=true;clearTimeout(to);clearInterval(st);
+     window.__indGuess=(d.industry_guess||d.guess||'');
+     if(d.industry_guess)window.demoQs&&demoQs();   // 사진이 알려준 업종으로 질문 갱신(상호명 입력 커버)
      if(d.guess){
        window.intakeConfirmUI(box,d.guess,d.analysis||'','d_confirmed','d_vision',
          function(){setDemoReady(true,'');});
@@ -445,10 +458,10 @@ def _hero_demo_card() -> str:
      <!-- 업종칸은 항상 빈칸 시작(하드코딩 금지) — 값이 채워지는 유일한 경로는
           fillDemo(): 순위진단 위젯에 사용자가 직접 입력한 업종 복사(그것도 빈칸일 때만) -->
      <input id="d_ind" placeholder="업종/상품 (예: 꽃집, 헬스장, 캠핑 폴딩박스...)" class="{inp}"
-       onblur="window.intakeQuestionsUI&&intakeQuestionsUI(document.getElementById('d_questions'),this.value,(document.querySelector('input[name=d_biz]:checked')||{{}}).value,(document.getElementById('d_purpose')||{{}}).value,'d_exp')">
+       onblur="window.demoQs&&demoQs()"
+       oninput="clearTimeout(window.__dqt);window.__dqt=setTimeout(function(){{window.demoQs&&demoQs();}},800)">
      <div id="d_questions"></div>
-     <select id="d_purpose" class="{inp} bg-white"
-       onchange="window.intakeQuestionsUI&&intakeQuestionsUI(document.getElementById('d_questions'),(document.getElementById('d_ind')||{{}}).value,(document.querySelector('input[name=d_biz]:checked')||{{}}).value,this.value,'d_exp')">
+     <select id="d_purpose" class="{inp} bg-white" onchange="window.demoQs&&demoQs()">
        <option value="">무슨 목적으로 만들까요? (선택)</option>
        <option value="방문 유도">매장 방문·예약 유도</option>
        <option value="판매 전환">구매·판매 전환</option>
