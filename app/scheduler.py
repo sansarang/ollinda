@@ -36,6 +36,9 @@ def start() -> None:
         # 발행 리마인더(상위노출 PHASE 2) — 공백 N일이면 앱내+이메일(카톡 스텁), 매일 저녁
         sch.add_job(_publish_reminder, "cron", hour=18, minute=0,
                     id="publish_reminder", replace_existing=True)
+        # 순위 자동추적(상위노출 PHASE 3) — tenant×타겟키워드 일일 스냅샷(아침, 스캔과 시차)
+        sch.add_job(_rank_track, "cron", hour=7, minute=30,
+                    id="rank_track_daily", replace_existing=True)
         sch.start()
         _scheduler = sch
         logging.info("[scheduler] 경쟁사 일일 자동 스캔 등록(매일 %02d:00 KST)", hour)
@@ -43,6 +46,15 @@ def start() -> None:
                      _cfg.WEEKLY_REPORT_DOW, _cfg.WEEKLY_REPORT_HOUR)
     except Exception:
         logging.exception("[scheduler] 기동 실패 — 자동 스캔 없이 계속")
+
+
+def _rank_track() -> None:
+    """순위 자동추적(상위노출 PHASE 3) — 발행 전후 비교·학습 루프의 원천 데이터."""
+    try:
+        from app.services import ranktrack
+        ranktrack.track_all()
+    except Exception:
+        logging.exception("[scheduler] 순위 자동추적 실패")
 
 
 def _publish_reminder() -> None:

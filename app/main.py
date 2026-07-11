@@ -1556,7 +1556,8 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 f"<div class='text-xs text-slate-400 mt-1.5'>→ {esc(_tl.get('label',''))}(으)로 연결돼요</div>"
                 f"<a href='/me/qr/{_tl['code']}.png' download='ollinda-qr.png' class='inline-block mt-2 text-xs font-bold text-indigo-500'>⬇ QR 이미지 저장</a>"
                 "</div></div></div>")
-        main_inner = _sbadge + stats_row + _missbox + _blog_connect_card(t, _fw) + _trackbox + _rankbox + _kwbox
+        main_inner = (_sbadge + stats_row + _missbox + _growth_card(t, _fw)
+                      + _blog_connect_card(t, _fw) + _trackbox + _rankbox + _kwbox)
     else:                                                 # ✨ 만들기 (기본) — 완성되면 여기(만들기 대시보드)에 결과 표시
         active = "create"
         _made = (request.query_params.get("made") or "").strip()
@@ -1876,6 +1877,56 @@ def my_topic_axis(request: Request, topic_axis: str = Form("")):
     t = _ensure_user_tenant(u)
     db.set_topic_axis(t.id, topic_axis)
     return RedirectResponse("/me?ok=전문 주제 축을 저장했어요 — 발행 캘린더 제안에 반영돼요", status_code=303)
+
+
+def _growth_card(t, fw: str) -> str:
+    """📈 순위 성장 그래프 + 코칭(상위노출 PHASE 3) — 잘 되는 키워드는 더 밀고, 정체는 앵글 재도전."""
+    from app.services import ranktrack
+    from urllib.parse import quote as _q
+    deltas = ranktrack.rank_deltas(t.id)
+    if not deltas:
+        return ""
+    _src_lab = {"blog_search": "블로그탭", "place": "플레이스", "blog": "지역검색"}
+
+    def _spark(history: list) -> str:
+        """순위 미니 그래프 — 낮은 순위(1위)가 높은 막대. 0(미노출)은 최하 취급."""
+        bars = ""
+        for r in history[-8:]:
+            v = 31 if not r else r
+            h = max(4, int(34 * (31 - min(v, 31)) / 30))
+            color = "bg-emerald-400" if r else "bg-slate-200"
+            bars += f"<div class='w-2 rounded-t {color}' style='height:{h}px'></div>"
+        return f"<div class='flex items-end gap-0.5 h-9'>{bars}</div>"
+
+    rows = ""
+    for d in deltas:
+        f_lab = f"{d['first']}위" if d["first"] else "미노출"
+        l_lab = f"{d['last']}위" if d["last"] else "미노출"
+        badge = {"up": f"<span class='text-emerald-600 font-extrabold'>{f_lab} → {l_lab} ⬆️</span>",
+                 "enter": f"<span class='text-emerald-600 font-extrabold'>미노출 → {l_lab} 진입 🎉</span>",
+                 "down": f"<span class='text-rose-500 font-bold'>{f_lab} → {l_lab} ⬇️</span>",
+                 "flat": f"<span class='text-slate-500 font-bold'>{l_lab} 유지</span>"}[d["dir"]]
+        rows += ("<div class='flex items-center justify-between border-b border-slate-100 py-2.5 gap-3'>"
+                 f"<div class='min-w-0'><div class='text-sm font-bold text-slate-700 truncate'>{esc(d['keyword'])} "
+                 f"<span class='text-[10px] text-slate-400 font-normal'>{_src_lab.get(d['kind'], '')}</span></div>"
+                 f"<div class='text-xs mt-0.5'>{badge}</div></div>" + _spark(d["history"]) + "</div>")
+    # 코칭: 오른 키워드 = 더 밀기 / 정체 = 앵글 재도전
+    coach = ""
+    imp = db.improving_keywords(t.id)
+    if imp:
+        k = imp[0]["keyword"]
+        coach += ("<a href='/me?target_kw=" + _q(k) + "' class='flex items-center justify-between bg-emerald-50 rounded-xl px-3.5 py-2.5 mt-3 hover:bg-emerald-100 transition'>"
+                  f"<span class='text-sm text-slate-700'>📈 <b>'{esc(k)}'</b> 잘 되고 있어요 — 이 키워드 글 하나 더 밀어요</span>"
+                  "<span class='text-xs font-bold text-emerald-600 whitespace-nowrap'>더 밀기 →</span></a>")
+    for s in ranktrack.stagnant_keywords(t.id, limit=2):
+        coach += (f"<a href='{s['href']}' class='flex items-center justify-between bg-amber-50 rounded-xl px-3.5 py-2.5 mt-2 hover:bg-amber-100 transition'>"
+                  f"<span class='text-sm text-slate-700'>🔄 <b>'{esc(s['keyword'])}'</b> 정체 중 — "
+                  f"{s['prev_label']} 대신 <b>{s['retry_label']}</b> 앵글로 재도전</span>"
+                  "<span class='text-xs font-bold text-amber-600 whitespace-nowrap'>앵글 바꿔 만들기 →</span></a>")
+    return (f"<div class='{fw} mt-5'>"
+            "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>📈 순위 성장</h2>"
+            "<p class='text-sm text-slate-400 mb-3'>자동 추적 스냅샷 기준 · 실측만 표시(참고용, 위치·기기별 차이)</p>"
+            + rows + coach + "</div>")
 
 
 def _calendar_card(t, plan: str) -> str:

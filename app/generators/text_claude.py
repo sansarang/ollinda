@@ -212,6 +212,8 @@ class BlogDraftGenerator(Generator):
                      "tags": tags, "seo_keywords": tags, "target_keywords": kws,
                      "keyword_density": kdens,
                      "biz_type": strat.key, "closing": strat.closing, "buy_block": buy,
+                     "angle": getattr(asset, "angle", "") or "",
+                     "target_kw": tkw,
                      "raw": raw, "image_path": imgs[0], "image_paths": imgs},
             status=ContentStatus.DRAFT)
 
