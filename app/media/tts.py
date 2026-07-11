@@ -29,6 +29,70 @@ def synthesize(text: str, out_dir: str) -> str | None:
     return _elevenlabs(text, out_dir) or _gemini(text, out_dir)
 
 
+def synthesize_timed(text: str, out_dir: str) -> tuple[str | None, list]:
+    """text → (mp3, [(word, start_sec, end_sec)]) — ElevenLabs /with-timestamps의
+    character-level 타임스탬프를 단어 단위로 합침(카라오케 자막 실측 싱크, 영상강화 PHASE 2).
+    타임스탬프 실패/무키 시 (일반 합성 mp3, []) — 호출부가 글자수 근사로 폴백."""
+    if not text.strip():
+        return None, []
+    r = _elevenlabs_timed(text, out_dir)
+    if r:
+        return r
+    return synthesize(text, out_dir), []
+
+
+def _chars_to_words(chars: list, starts: list, ends: list) -> list:
+    """character 타임스탬프 → [(word, start, end)] (공백 기준 단어 병합)."""
+    words, cur, w_start, w_end = [], "", None, None
+    for ch, s, e in zip(chars, starts, ends):
+        if str(ch).isspace():
+            if cur:
+                words.append((cur, w_start, w_end))
+                cur, w_start = "", None
+            continue
+        if not cur:
+            w_start = s
+        cur += ch
+        w_end = e
+    if cur:
+        words.append((cur, w_start, w_end))
+    return words
+
+
+def _elevenlabs_timed(text: str, out_dir: str) -> "tuple[str, list] | None":
+    key = os.environ.get("ELEVENLABS_API_KEY")
+    if not key:
+        return None
+    import requests
+    voice = os.environ.get("ELEVENLABS_VOICE_ID", EL_DEFAULT_VOICE)
+    out = os.path.join(out_dir, f"tts_{uuid.uuid4().hex}.mp3")
+    global LAST_ERR
+    try:
+        r = requests.post(f"https://api.elevenlabs.io/v1/text-to-speech/{voice}/with-timestamps",
+                          headers={"xi-api-key": key, "Content-Type": "application/json"},
+                          json={"text": text, "model_id": "eleven_multilingual_v2",
+                                "voice_settings": {"stability": 0.4, "similarity_boost": 0.8,
+                                                   "style": 0.35, "use_speaker_boost": True}}, timeout=90)
+        if r.status_code != 200:
+            LAST_ERR = f"elevenlabs timed {r.status_code}"
+            return None
+        d = r.json()
+        audio = d.get("audio_base64")
+        al = d.get("alignment") or d.get("normalized_alignment") or {}
+        if not audio:
+            return None
+        os.makedirs(out_dir, exist_ok=True)
+        with open(out, "wb") as f:
+            f.write(base64.b64decode(audio))
+        words = _chars_to_words(al.get("characters") or [],
+                                al.get("character_start_times_seconds") or [],
+                                al.get("character_end_times_seconds") or [])
+        return (out, words) if os.path.exists(out) else None
+    except Exception as e:
+        LAST_ERR = repr(e)[:200]
+        return None
+
+
 def _gemini(text: str, out_dir: str) -> str | None:
     key = os.environ.get("GEMINI_API_KEY")
     if not (key and shutil.which("ffmpeg")):

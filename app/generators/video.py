@@ -122,7 +122,9 @@ def _ts(sec: float) -> str:
 
 
 def _build_ass(scenes, kws, theme_key, out) -> str:
-    """본문 씬을 단어 단위 카라오케 자막(.ass)으로 — 말하는 단어가 차오르며 강조(프로 시그니처)."""
+    """본문 씬을 단어 단위 카라오케 자막(.ass)으로 — 말하는 단어가 차오르며 강조(프로 시그니처).
+    영상강화 PHASE 2: ① 실측 타이밍(ElevenLabs with-timestamps) 있으면 글자수 근사 대신 사용
+    ② 폰트 78 + 외곽선/그림자 강화(모바일 가독) ③ 하단 안전영역 밖(MarginV 380) ④ 키워드 색+굵기 강조."""
     sung, unsung = "&H00FFFFFF", "&H00B8B8B8"
     theme = _ass_color(_theme_rgb(theme_key))
     kws_low = [k.lower() for k in (kws or []) if k and len(k) >= 2]
@@ -132,32 +134,51 @@ def _build_ass(scenes, kws, theme_key, out) -> str:
         "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
         "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, "
         "Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: Cap,Pretendard,72,{sung},{unsung},&H00141014,&H64000000,-1,0,0,0,100,100,0,0,"
-        "1,6,3,2,90,90,360,1\n\n"
+        # 폰트 78·외곽선 7·그림자 4 — 밝은 배경 사진 위에서도 대비 확보(작은 폰 화면 기준)
+        f"Style: Cap,Pretendard,78,{sung},{unsung},&H00101014,&H78000000,-1,0,0,0,100,100,0,0,"
+        "1,7,4,2,80,80,380,1\n\n"
         "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
 
     def _cw(s):   # 글자 폭 가중치(한글/한자=1, 그 외=0.55) — 줄 길이 계산용
         return sum(1.0 if ("가" <= c <= "힣" or "一" <= c <= "鿿") else 0.55 for c in s)
 
-    LINE_BUDGET = 11.0     # 한 줄 최대(한글 11자 ≈ 폭 900px @ 폰트72) — 넘치면 다음 줄로
+    def _word_cs(words, dur, word_times):
+        """단어별 강조 시간(센티초) — 실측 타이밍 우선, 없으면 글자수 근사."""
+        if word_times and len(word_times) == len(words):
+            cs_list = []
+            for j, (_w, s, e) in enumerate(word_times):
+                nxt = word_times[j + 1][1] if j + 1 < len(word_times) else dur   # 다음 단어 시작까지(간격 포함)
+                try:
+                    cs_list.append(max(8, int(round((float(nxt) - float(s)) * 100))))
+                except Exception:
+                    return None
+            return cs_list
+        return None
+
+    LINE_BUDGET = 10.0     # 한 줄 최대(한글 10자 ≈ 폭 880px @ 폰트78) — 넘치면 다음 줄로
     lines = []
-    for start, dur, text in scenes:
+    for sc in scenes:
+        start, dur, text = sc[0], sc[1], sc[2]
+        word_times = sc[3] if len(sc) > 3 else []
         words = [w for w in re.split(r"\s+", (text or "").strip()) if w]
         if not words:
             continue
+        measured = _word_cs(words, dur, word_times)
         tot = sum(max(1, len(w)) for w in words)
         body = ""
         line_w = 0.0
-        for w in words:
+        for wi, w in enumerate(words):
             ww = _cw(w)
             if line_w > 0 and line_w + 0.55 + ww > LINE_BUDGET:   # 단어 단위 줄바꿈(띄어쓰기 보존)
                 body = body.rstrip() + "\\N"
                 line_w = 0.0
-            cs = max(8, int(round(dur * 100 * len(w) / tot)))   # 단어별 강조 시간(센티초)
+            cs = (measured[wi] if measured
+                  else max(8, int(round(dur * 100 * len(w) / tot))))   # 실측 or 글자수 근사
             wl = w.lower()
             hot = any((k in wl) or (wl in k) for k in kws_low) if kws_low else False
-            if hot:   # 키워드는 테마색으로 강조
-                body += "{\\1c" + theme + "\\k" + str(cs) + "}" + w + "{\\1c" + sung + "} "
+            if hot:   # 키워드는 테마색 + 굵기·크기 강조
+                body += ("{\\1c" + theme + "\\b1\\fscx106\\fscy106\\k" + str(cs) + "}" + w
+                         + "{\\1c" + sung + "\\b0\\fscx100\\fscy100} ")
             else:
                 body += "{\\k" + str(cs) + "}" + w + " "
             line_w += ww + 0.55
@@ -236,7 +257,7 @@ class ShortVideoGenerator(Generator):
             f"{format_directive(fmt)}\n"
             f"{seo.keywords_line(kws)}\n\n"
             f"{seo.SHORT_DIRECTIVES_SELLER if strat.key == 'seller' else seo.SHORT_DIRECTIVES}\n"
-            f"{seo.HOOK_RULE}\n{seo.VIDEO_SCRIPT_CRAFT}\n{seo.PLATFORM_YOUTUBE}\n{seo.PLATFORM_REEL}\n{seo.COPY_PSYCH}\n{seo.FACTS_RULE}\n"
+            f"{seo.HOOK_RULE}\n{seo.VIDEO_SCRIPT_CRAFT}\n{seo.SUBTITLE_DENSITY}\n{seo.PLATFORM_YOUTUBE}\n{seo.PLATFORM_REEL}\n{seo.COPY_PSYCH}\n{seo.FACTS_RULE}\n"
             f"[검색 진입] 제목과 0~3초 첫 자막에 검색 키워드('{kws[0] if kws else prof.name}')를 자연스럽게 포함(쇼츠 검색 노출).\n"
             "[루프] 마지막 장면이 첫 장면과 자연스럽게 이어지게(끝→처음 루프 = 재생 반복 → 재노출). 길이 30~45초 목표.\n\n"
             "위 규칙으로 인스타 릴스/유튜브 쇼츠를 기획하라. 아래 형식 그대로(대괄호 머리표 유지):\n"
@@ -389,16 +410,17 @@ class ShortVideoGenerator(Generator):
             if v and aw:
                 vclips.append(v); awavs.append(aw); t += hdur
             # 1) 본문 씬들 — 자막은 ASS 카라오케로 별도(여기선 영상+켄번스+색보정만)
+            #    ElevenLabs with-timestamps 실측 단어 타이밍(있으면) → 카라오케 싱크 정확(영상강화 PHASE 2)
             for i, text in enumerate(sentences):
                 img = visuals[i % len(visuals)]
-                seg_tts = tts_lib.synthesize(text, work)
+                seg_tts, word_times = tts_lib.synthesize_timed(text, work)
                 td = _probe_dur(seg_tts) if seg_tts else 0
                 # 음성이 있으면 씬 길이 = 음성 길이(+여유). 9초로 자르지 않음 → 긴 문장 나레이션 끊김·자막불일치 방지
                 sdur = min(15.0, max(MIN_SCENE, td + 0.4)) if td > 0.3 else self._clamp(len(text) * 0.13 + 1.2)
                 v = self._scene_video(img, sdur, i, os.path.join(work, f"v{i}.mp4"))
                 aw = self._audio_segment(seg_tts, sdur, os.path.join(work, f"a{i}.wav"))
                 if v and aw:
-                    ass_scenes.append((t, sdur, text))
+                    ass_scenes.append((t, sdur, text, word_times))
                     vclips.append(v); awavs.append(aw); t += sdur
             # 2) 아웃트로 CTA 카드(무음) — 셀러는 판매 QR(추적링크) 삽입 → 스캔 시 성과 집계
             qr_url = ""
