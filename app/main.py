@@ -408,8 +408,20 @@ def _teaser_html(pieces, brief, asset_id, remaining: int = 0,
         loss = (f"<div class='bg-white border border-indigo-200 rounded-xl px-4 py-3 mb-3 text-sm text-slate-700'>"
                 f"이 글은 진단에서 <b>미노출</b>로 나온 <b>'{esc(target_kw)}'</b>를 겨냥했어요. "
                 f"지금 발행하면{vol_txt} 잡으러 갈 수 있어요.</div>")
+    # 정보 부실 → 재생성 유도(전환 PHASE 6): "더 주면 이렇게 좋아져요" — 사실 기반(D.I.A.+ 근거)
+    enrich_nudge = ""
+    if enrichment == "bare" and remaining > 0:
+        enrich_nudge = ("<div class='bg-white border border-slate-200 rounded-xl px-4 py-3 mb-3 text-sm'>"
+                        "<div class='font-bold text-slate-700 mb-0.5'>이번 글은 사진만으로 만들었어요</div>"
+                        "<div class='text-slate-500 text-xs mb-2'>가격·소요시간·경험 한 줄만 넣으면 네이버가 좋아하는 "
+                        "'실제 경험 글'(D.I.A.+)이 돼서 훨씬 구체적으로 좋아져요.</div>"
+                        "<button type=button onclick=\"var q=document.getElementById('d_questions');"
+                        "var i=document.getElementById('d_ind');if(q&&i&&window.intakeQuestionsUI)intakeQuestionsUI(q,i.value,'local','','d_exp');"
+                        "var t=document.getElementById('herodemo');if(t)t.scrollIntoView({behavior:'smooth',block:'center'});\" "
+                        "class='w-full py-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-sm font-bold transition'>"
+                        f"정보 넣고 다시 만들기 (미리보기 {remaining}회 남음) →</button></div>")
     if remaining > 0:
-        cta = (loss
+        cta = (loss + enrich_nudge
                + "<a href='/login/kakao' class='block text-center py-3.5 rounded-xl font-extrabold mb-2' style='background:#FEE500;color:#191600'>"
                "이 글 전체 + 영상 + 5채널 받기 → 무료 가입</a>"
                f"<div class='text-center text-slate-500 text-sm'>가입하면 <b class='text-indigo-600'>무료 2회</b> 전체 생성 · "
