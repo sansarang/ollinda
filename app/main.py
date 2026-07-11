@@ -4636,8 +4636,11 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "") 
         <p class='text-xs text-slate-400 mt-1.5'>💡 <b class='text-slate-500'>끌어서</b> 순서 변경 · <b class='text-slate-500'>＋</b> 로 여러 장 추가 · 올린 순서대로 영상·블로그에 배치돼요</p></div>
       <div><label class='{lb}'>4. 목적 <span class='text-slate-400 font-normal text-xs'>(선택)</span></label>
         <div class='flex flex-wrap gap-2'>{chips}</div></div>
-      <div><label class='{lb}'>5. 사진 설명·요청 <span class='text-slate-400 font-normal text-xs'>(선택 · AI가 더 정확해져요)</span></label>
-        <input name=photo_desc maxlength=120 placeholder='이 사진은? (예: 겨울 열차단 썬팅, 시공 완료된 검은 SUV)' class='{inp} mb-2'>
+      <div><label class='{lb}'>5. 사진 확인·정보 <span class='text-slate-400 font-normal text-xs'>(선택 · 넣을수록 글이 구체적으로 좋아져요)</span></label>
+        <input type=hidden name=confirmed id=pg_confirmed><input type=hidden name=vision_analysis id=pg_vision>
+        <input type=hidden name=answers id=pg_answers><input type=hidden name=experience id=pg_experience>
+        <div id=pg_guess class='mb-2'></div>
+        <div id=pg_questions class='mb-2'></div>
         <input name=note maxlength=50 oninput="var c=document.getElementById('reqc');if(c)c.textContent=this.value.length+'/50';" placeholder='꼭 반영할 요청 (예: 급매 강조 / 차분한 톤)' class='{inp}'>
         <div class='text-right text-xs text-slate-400 mt-1'><span id=reqc>0/50</span></div></div>
       <button class='w-full py-4 rounded-2xl text-white font-extrabold text-lg shadow-xl shadow-indigo-500/30 hover:shadow-indigo-500/50 transition' style='background:linear-gradient(120deg,#6366f1,#8b5cf6,#ec4899)'>✨ 5채널 콘텐츠 생성하기</button>
@@ -4667,7 +4670,22 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "") 
           "add.className='aspect-square rounded-xl border-2 border-dashed border-slate-300 text-slate-400 hover:border-indigo-400 hover:text-indigo-500 flex flex-col items-center justify-center transition';"
           "add.ondragover=function(e){e.preventDefault();};add.ondrop=function(e){e.preventDefault();pmDrop(PM.f.length);};"
           "add.innerHTML=\"<span class='text-2xl leading-none'>＋</span><span class='text-[10px] mt-0.5'>사진 추가</span>\";pv.appendChild(add);pmSync();}"
-          "(function(){var inp=document.getElementById('up_photos');if(inp){inp.addEventListener('change',function(){Array.from(inp.files||[]).forEach(function(x){PM.f.push(x);});pmRender();});pmRender();}bizFields((document.getElementById('s_biz')||{}).value||'local');})();"
+          # 유료 폼 스마트 입력(콘텐츠생성 PHASE 7) — AI 선추측 확인 + 업종별 질문(공용 헬퍼 재사용)
+          "async function paidGuess(){var box=document.getElementById('pg_guess');if(!box||!PM.f.length)return;"
+          "box.innerHTML='<div class=\"text-xs text-slate-400 py-1\">사진 확인 중…</div>';"
+          "var fd=new FormData();fd.append('industry',(document.getElementById('s_industry')||{}).value||'');"
+          "PM.f.slice(0,6).forEach(function(f){fd.append('photos',f);});"
+          "try{var r=await fetch('/api/intake/guess',{method:'POST',body:fd});var d=await r.json();"
+          "if(window.intakeConfirmUI)intakeConfirmUI(box,d.guess||'',d.analysis||'','pg_confirmed','pg_vision');}catch(e){box.innerHTML='';}}"
+          "function paidQuestions(){var i=(document.getElementById('s_industry')||{}).value||'';"
+          "var p=(document.querySelector('input[name=purpose]:checked')||{}).value||'';"
+          "if(window.intakeQuestionsUI)intakeQuestionsUI(document.getElementById('pg_questions'),i,(document.getElementById('s_biz')||{}).value||'local',p,'pg_exp');}"
+          "(function(){var inp=document.getElementById('up_photos');if(inp){inp.addEventListener('change',function(){Array.from(inp.files||[]).forEach(function(x){PM.f.push(x);});pmRender();paidGuess();});pmRender();}bizFields((document.getElementById('s_biz')||{}).value||'local');"
+          "setTimeout(paidQuestions,300);"     # 저장된 업종으로 최초 질문 로드(프리필: 매장정보는 고정블록이라 안 물음)
+          "document.querySelectorAll('input[name=purpose]').forEach(function(r){r.addEventListener('change',paidQuestions);});"
+          "var f=document.querySelector('form[action$=\"/upload\"]');"
+          "if(f)f.addEventListener('submit',function(){var a=document.getElementById('pg_answers');if(a)a.value=JSON.stringify(window.__intakeAnswers||{});"
+          "var e1=document.getElementById('pg_exp'),e2=document.getElementById('pg_experience');if(e1&&e2)e2.value=e1.value||'';});})();"
           "function fillStore(d){document.getElementById('s_name').value=d.name||'';document.getElementById('s_industry').value=d.industry||'';"
           "var bz=(d.type==='seller')?'seller':'local';document.getElementById('s_biz').value=bz;bizFields(bz);"
           "document.getElementById('s_region').value=d.region||'';document.getElementById('s_tel').value=d.tel||'';if(d.buy_url){document.getElementById('s_buy').value=d.buy_url;}"
@@ -4677,6 +4695,7 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "") 
           "var rb=document.querySelector('input[name=biztype][value=\"'+bz+'\"]');if(rb)rb.checked=true;"
           "var kind=(bz==='seller')?'📦 온라인 셀러':'🏪 동네 매장';"
           "document.getElementById('lk_result').innerHTML='<span class=\"text-emerald-600 font-semibold\">✓ '+(d.name||'')+' · '+(d.industry||'')+(d.region?(' · '+d.region):'')+' 선택됨 (저장)</span>';"
+          "if(typeof paidQuestions==='function')paidQuestions();"
           "try{if(d.name){var fd2=new FormData();fd2.append('name',d.name||'');fd2.append('industry',d.industry||'');fd2.append('region',d.region||'');fd2.append('biz_type',bz);fd2.append('phone',d.tel||'');fd2.append('address',d.address||'');fd2.append('map_url',d.map_url||'');if(d.buy_url)fd2.append('buy_url',d.buy_url);if(d.lat)fd2.append('lat',d.lat);if(d.lon)fd2.append('lon',d.lon);if(d.market)fd2.append('marketplace',d.market);if(d.brand)fd2.append('brand_name',d.brand);if(d.search_kw)fd2.append('search_kw',d.search_kw);fetch('/me/store',{method:'POST',body:fd2});}}catch(_){}}"
           "function pickCand(i){var c=(window.__cands||[])[i];if(c){c.type='local';fillStore(c);}}"
           "async function lookupStore(){var q=document.getElementById('lk_q').value.trim();if(!q)return;"
