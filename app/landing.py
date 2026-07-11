@@ -178,8 +178,12 @@ def _hero() -> str:
    fd.append('industry',document.getElementById('rc_ind').value);fd.append('name',document.getElementById('rc_name').value);
    try{{var r=await fetch('/api/rank-check',{{method:'POST',body:fd}});var d=await r.json();
    if(d.error){{o.textContent=d.error;return;}}
-   o.innerHTML='<b class="text-white">'+d.headline+'</b><br><span class="text-slate-400">'+d.subline+'</span><br>'
-     +'<a href="/login/kakao" class="text-emerald-300 underline font-bold">'+d.cta+' →</a>'
+   var rows='';
+   (d.caught||[]).forEach(function(s){{rows+='<div class="flex justify-between bg-emerald-500/15 rounded px-2 py-1 mt-1"><span class="text-slate-200">'+s.keyword+'</span><span class="text-emerald-300 font-bold">'+s.rank+'위 ✅</span></div>';}});
+   (d.missing||[]).forEach(function(s){{var v=s.volume?(' <span class="text-slate-400">월 '+s.volume.toLocaleString()+'회</span>'):'';rows+='<div class="flex justify-between bg-amber-500/10 rounded px-2 py-1 mt-1"><span class="text-slate-300">'+s.keyword+v+'</span><span class="text-amber-300 font-bold">미노출</span></div>';}});
+   o.innerHTML='<b class="text-white">'+d.headline+'</b>'+rows
+     +'<div class="text-slate-400 mt-2">'+d.subline+'</div>'
+     +'<a href="/login/kakao" class="inline-block text-emerald-300 underline font-bold mt-1">'+d.cta+' →</a>'
      +(d.estimated?' <span class="text-amber-300 text-xs">(추정)</span>':'');
    }}catch(e){{o.textContent='조회 실패 — 잠시 후 다시';}}}}
   </script>

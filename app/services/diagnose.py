@@ -1,52 +1,146 @@
 """
 온보딩/랜딩 '내 가게 현재 순위 즉시진단' — 결제 트리거(성장 PHASE 1).
-업종+지역+상호만으로 네이버 지역검색 현재 순위를 보여주고, 낮거나 미노출이면 CTA로 연결.
-키 없음/실패 시 규칙 기반 폴백('추정' 표기). 결과를 tenant baseline으로 저장 가능.
+넓은→좁은 롱테일 키워드 3~5개를 각각 조회해, 네이버 지역검색 5건 한계 안에서도
+'어느 키워드에서 몇 위인지'를 최대한 수집한다. 미노출 키워드는 가짜 순위 없이 '기회'로 표기하고,
+실검색량(SearchAd)을 붙여 '놓치는 검색량'을 손실 프레이밍한다.
+
+정직성: 6위 이하(5위 밖)는 임의 숫자 금지 → '미노출'. '무조건 1위' 보장 금지 → '상위노출 목표'.
+크롤링 금지 — 공식 지역검색 API 범위 내에서만.
 """
 from __future__ import annotations
 
 from app.services import place
 
+MAX_SCAN = 4   # 스캔 키워드 상한(네이버 Local API 호출 수 제한)
+
+
+def _rank_keywords(region: str, industry: str) -> list[str]:
+    """넓은→좁은 [지역+업종] 키워드 생성(중복 제거, 최대 MAX_SCAN)."""
+    region, industry = (region or "").strip(), (industry or "").strip()
+    if not industry:
+        return []
+    toks = [t for t in region.split() if t]
+    cands: list[str] = []
+    if not toks:
+        cands.append(industry)                                  # 지역 모르면 업종만
+    else:
+        cands.append(f"{toks[0]} {industry}")                   # 시/도(넓음): '부산 중고차'
+        if len(toks) >= 2:
+            cands.append(f"{toks[0]} {toks[1]} {industry}")     # 구(중간): '부산 동구 중고차'
+        if len(toks) >= 3 or (len(toks) >= 1 and toks[-1] != toks[0]):
+            cands.append(f"{toks[-1]} {industry}")              # 동/역(롱테일): '초량동 중고차'
+        cands.append(f"{region} {industry}")                    # 풀
+    # 중복 제거(순서 유지) + 상한
+    out, seen = [], set()
+    for k in cands:
+        k = " ".join(k.split())
+        if k and k not in seen:
+            seen.add(k)
+            out.append(k)
+    return out[:MAX_SCAN]
+
+
+def _volumes(keywords: list[str]) -> dict:
+    """키워드 → 월 검색량(total). 무키/실패 시 빈 dict. 공백제거 키로 매칭."""
+    try:
+        from app.services import searchad
+        rows = searchad.keyword_volumes(keywords)
+        return {(r.get("keyword") or "").replace(" ", ""): r.get("total", 0) for r in rows}
+    except Exception:
+        return {}
+
 
 def diagnose_rank(industry: str, region: str, name: str) -> dict:
-    """반환: {keyword, rank(int|None), estimated(bool), headline, subline, cta}."""
+    """다중 키워드 스캔 결과. 반환:
+    {keyword, rank, estimated, headline, subline, cta,
+     scan:[{keyword,rank,volume,status}], caught:[...], missing:[...], missed_volume}
+    status: 'top'(1~5위) | 'missing'(5위 밖) | 'unknown'(조회불가). 하위호환 위해 top-level 필드 유지."""
     industry, region, name = (industry or "").strip(), (region or "").strip(), (name or "").strip()
-    keyword = (f"{region} {industry}").strip() or industry or "내 지역 업종"
-    detail = place.rank_detail(keyword, name) if name else {"rank": None}
-    rank = detail.get("rank")
-    rival = detail.get("rival") or ""
+    keywords = _rank_keywords(region, industry)
+    primary = keywords[-1] if keywords else (f"{region} {industry}".strip() or industry or "내 지역 업종")
 
-    if rank is None:
-        # 조회 불가(무키/네트워크) → 규칙 기반 추정(정직하게 '추정' 표기)
+    # 상호 없으면 순위 조회 불가 → 정직한 추정 폴백(검색량은 붙여 기회 제시)
+    if not name or not keywords:
         return {
-            "keyword": keyword, "rank": None, "estimated": True,
-            "headline": f"'{keyword}' 검색에서 우리 가게, 아직 상위에 없을 가능성이 커요",
-            "subline": "대부분의 소상공인 블로그·플레이스는 상위 노출 구조가 아니에요. (실측은 연결 후 정확히)",
-            "cta": "올린다로 상위노출 구조 만들기",
+            "keyword": primary, "rank": None, "estimated": True,
+            "scan": [], "caught": [], "missing": [], "missed_volume": 0,
+            "headline": f"'{primary}' 등에서 우리 가게, 아직 상위에 없을 가능성이 커요",
+            "subline": "상호까지 입력하면 키워드별 실제 순위를 바로 보여드려요.",
+            "cta": "올린다로 상위노출 시작하기",
         }
-    if rank == 0:
+
+    vol = _volumes(keywords)
+    scan, any_measured = [], False
+    for kw in keywords:
+        rank = place.rank(kw, name)            # 1~5 / 0(5위밖) / None(조회불가)
+        v = vol.get(kw.replace(" ", ""), None)
+        if rank is None:
+            status = "unknown"
+        elif rank == 0:
+            status = "missing"                 # 5위 밖 — 가짜 순위 절대 안 만듦
+            any_measured = True
+        else:
+            status = "top"
+            any_measured = True
+        scan.append({"keyword": kw, "rank": rank, "volume": v, "status": status})
+
+    caught = [s for s in scan if s["status"] == "top"]
+    missing = [s for s in scan if s["status"] == "missing"]
+    missed_volume = sum(s["volume"] for s in missing if s["volume"])
+
+    # 전부 unknown = 조회 자체 실패(무키/네트워크) → 추정
+    if not any_measured:
         return {
-            "keyword": keyword, "rank": 0, "estimated": False,
-            "headline": f"'{keyword}' 검색 상위 5위 안에 우리 가게가 안 보여요",
-            "subline": "지금은 손님이 검색해도 우리 가게를 찾기 어려운 상태예요.",
-            "cta": "지금 상위 진입 시작하기",
+            "keyword": primary, "rank": None, "estimated": True,
+            "scan": scan, "caught": [], "missing": [], "missed_volume": 0,
+            "headline": f"'{primary}' 등에서 우리 가게, 아직 상위에 없을 가능성이 커요",
+            "subline": "대부분의 소상공인은 상위 노출 구조가 아니에요. (실측은 연결 후 정확히)",
+            "cta": "올린다로 상위노출 시작하기",
         }
-    # 노출은 되나 상위가 아님 → 추월 프레임
-    over = f" 바로 위 '{rival}'만 넘으면 돼요." if rival else ""
+
+    # 하위호환: 대표 순위 = 가장 잘 잡힌 키워드
+    best = min(caught, key=lambda s: s["rank"]) if caught else None
+    top_rank = best["rank"] if best else 0
+
+    def _mv(v):
+        return f"(월 {v:,}회 검색)" if v else ""
+
+    if caught:
+        lead = f"'{best['keyword']}' {best['rank']}위"
+        more = f" 외 {len(caught) - 1}개 키워드 상위 노출 중" if len(caught) > 1 else " 상위 노출 중!"
+        headline = f"🎯 {lead}{more}"
+    else:
+        headline = "아직 상위 노출된 키워드가 없어요 — 기회가 큽니다"
+
+    # 놓치는 키워드(검색량 큰 순)로 손실 프레이밍
+    miss_sorted = sorted(missing, key=lambda s: -(s["volume"] or 0))
+    if miss_sorted:
+        top_miss = miss_sorted[0]
+        sub = f"'{top_miss['keyword']}'{_mv(top_miss['volume'])}는 아직 놓치고 있어요."
+        if missed_volume:
+            sub += f" 미노출 키워드 합계 월 {missed_volume:,}회 검색을 놓치는 중."
+    else:
+        sub = "잡은 키워드를 더 넓혀 상위노출을 늘릴 수 있어요."
+
+    cta = (f"놓치는 검색 월 {missed_volume:,}회 잡으러 가기" if missed_volume
+           else ("상위 유지·강화하기" if top_rank == 1 else "상위노출 시작하기"))
+
     return {
-        "keyword": keyword, "rank": rank, "estimated": False,
-        "headline": f"'{keyword}' 검색 현재 {rank}위" + (" — 상위권!" if rank <= 2 else ""),
-        "subline": (f"올린다로 콘텐츠를 쌓으면 더 위로 올라갈 수 있어요.{over}"
-                    if rank > 1 else "이미 최상위! 유지·강화가 중요해요."),
-        "cta": ("1위 도전하기" if rank > 1 else "상위 유지·강화하기"),
+        "keyword": primary, "rank": top_rank, "estimated": False,
+        "scan": scan, "caught": caught, "missing": missing, "missed_volume": missed_volume,
+        "headline": headline, "subline": sub, "cta": cta,
     }
 
 
 def save_baseline(tenant_id: str, result: dict) -> None:
-    """진단 결과를 rank_snapshots에 baseline으로 저장 — before/after 기준점(PHASE 1·2)."""
+    """실측된 키워드 순위를 rank_snapshots에 baseline으로 저장 — before/after 기준점(PHASE 1·2).
+    미노출(5위 밖)·조회불가는 저장 안 함(가짜 순위 방지)."""
     try:
         from app import db
-        if result.get("rank") is not None and not result.get("estimated"):
-            db.save_rank_snapshot(tenant_id, result.get("keyword", ""), result.get("rank"))
+        if result.get("estimated"):
+            return
+        for s in (result.get("caught") or []):
+            if s.get("rank"):
+                db.save_rank_snapshot(tenant_id, s.get("keyword", ""), s["rank"])
     except Exception:
         pass
