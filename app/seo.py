@@ -280,6 +280,24 @@ RISKY_EXPRESSIONS = [
     "초대박", "역대급", "클릭", "꼭 사세요",
 ]
 
+# 감점이 아니라 '발행 차단' 대상 — 의료광고법·자동차관리법 위반 소지가 큰 단정 표현(PHASE 7)
+HARD_BLOCK_EXPRESSIONS = [
+    "완치", "부작용 없", "부작용없", "무통", "100% 효과", "영구적", "재발 없",
+    "완전무사고", "무사고 보장", "침수 아님 보장",
+]
+
+
+def hard_block_hits(text: str) -> list[str]:
+    """발행 차단 대상 표현 탐지(감점 아님). 하나라도 걸리면 자동발행 보류(PHASE 7)."""
+    t = text or ""
+    return [w for w in HARD_BLOCK_EXPRESSIONS if w in t]
+
+
+def _money_nums(s: str) -> set:
+    """텍스트에서 '금액·%·수치+단위'를 정규화 추출(콤마·공백 제거). 날조 탐지용(PHASE 7)."""
+    raw = re.findall(r"(\d[\d,]*)\s*(원|만원|%|퍼센트|만|천원)", s or "")
+    return {num.replace(",", "") + unit for num, unit in raw}
+
 
 def keywords_line(kws: list[str]) -> str:
     return "[타겟 키워드(이 키워드로 검색 상위·전환을 노림)] " + ", ".join(kws) if kws else ""
@@ -289,12 +307,20 @@ def keywords_line(kws: list[str]) -> str:
 _EXPERIENCE_WORDS = ["후기", "직접", "경험", "먹어보", "써보", "방문", "가봤", "시공해", "느꼈"]
 
 
-def quality_audit(channel: str, kind: str, payload: dict) -> dict:
+def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> dict:
     """분석된 랭킹 요인 기준으로 콘텐츠를 채점(0~100) + 개선 경고.
-    휴리스틱(공식 알고리즘 비공개) — 상위노출 확률을 높이는 방향 점검."""
+    휴리스틱(공식 알고리즘 비공개) — 상위노출 확률을 높이는 방향 점검.
+    source(입력 메모+사진분석)가 주어지면 입력에 없는 금액·수치 날조를 기계적으로 탐지(PHASE 7)."""
     text = (payload.get("body") or payload.get("text") or "")
     warnings: list[str] = []
     score = 100
+
+    # 사실 검증: 출력의 금액·%·수치가 입력에 존재하는지 대조(LLM 0콜 날조 탐지)
+    if source:
+        fabricated = [n for n in _money_nums(text) if n not in _money_nums(source)]
+        if fabricated:
+            warnings.append(f"입력에 없는 수치/금액 {fabricated[:4]} → 날조 의심(제거 권장)")
+            score -= min(20, 8 * len(fabricated))
 
     # 공통: 저품질/과장 표현
     hits = [w for w in RISKY_EXPRESSIONS if w in text]

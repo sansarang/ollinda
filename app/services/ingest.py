@@ -70,7 +70,7 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
     for p in pieces:
         p.payload.setdefault("image_path", paths[0])
         p.payload.setdefault("biz_type", getattr(tenant, "biz_type", "local") or "local")
-        p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value, p.payload)
+        p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value, p.payload, source=asset.note)
         polish(tenant, p)                                       # 🔍 SEO 편집장(저점수만 리라이트)
         p.payload["reach"] = reach.estimate(p.channel.value, p.kind.value, p.payload)
         p.payload["brief"] = brief_public
@@ -122,6 +122,8 @@ def _autopilot(tenant: Tenant, pieces: list[ContentPiece]) -> None:
                         ("text", "body", "title", "subtitle", "narration", "hook_strategy"))
         if any(r in _txt for r in seo.RISKY_EXPRESSIONS):
             continue
+        if seo.hard_block_hits(_txt):            # 의료광고법·자동차관리법 위반 단정 표현 → 자동발행 절대 금지(PHASE 7)
+            continue
         if pub.validate(p):                      # 채널 규칙 위반 → 예외
             continue
         db.set_piece_status(p.id, ContentStatus.APPROVED)
@@ -147,7 +149,7 @@ def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: di
     for p in shorts:
         p.payload.setdefault("image_path", paths[0])
         p.payload.setdefault("biz_type", getattr(tenant, "biz_type", "local") or "local")
-        p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value, p.payload)
+        p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value, p.payload, source=asset.note)
         p.payload["reach"] = reach.estimate(p.channel.value, p.kind.value, p.payload)
         p.payload["brief"] = brief_public
         p.payload["experts"] = ["🎯 전략가", "✍️ 카피라이터", "🎬 영상감독"]
@@ -169,7 +171,7 @@ def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: di
                  "duration_sec": short.payload.get("duration_sec", 0), "is_reel": True,
                  "target_keywords": short.payload.get("target_keywords", [])},
         status=ContentStatus.DRAFT)
-    reel.payload["ranking_audit"] = seo.quality_audit(reel.channel.value, reel.kind.value, reel.payload)
+    reel.payload["ranking_audit"] = seo.quality_audit(reel.channel.value, reel.kind.value, reel.payload, source=asset.note)
     reel.payload["reach"] = reach.estimate(reel.channel.value, reel.kind.value, reel.payload)
     db.save_piece(reel)
     # 𝕏 X에도 같은 숏폼 영상 첨부(글 + 영상)
