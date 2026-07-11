@@ -403,25 +403,32 @@ def _modes() -> str:
 
 
 def _features() -> str:
-    feats = [("camera", "사진 한 장 → 5채널", "인스타·네이버·유튜브·릴스·X를 한 번에."),
-             ("video", "글 → 영상 + 단어자막", "문장이 곧 장면. 말하는 단어가 차오르는 카라오케 자막·AI음성·켄번스 자동."),
-             ("image", "인스타 캐러셀 자동", "사진 1장 → 정보 슬라이드 카드 묶음(저장·도달↑)."),
-             ("grid", "쇼츠·릴스·피드 규격", "9:16·1:1·4:5 자동 출력으로 모든 채널 커버."),
-             ("store", "소상공인·셀러 자동분기", "매장은 지도·방문, 셀러는 구매링크·검색어로 자동 전환."),
-             ("target", "검색 상위노출 + 점수", "C-Rank·D.I.A·릴스 알고리즘 반영, 100점 점검."),
-             ("tag", "업종 무제한 자동", "어떤 업종이든 AI가 맞춤 톤 자동 생성."),
-             ("link", "계정 1회 연결 자동발행", "비번 없이 연결, 발행 누르면 끝."),
-             ("chart", "순위 성장 추적", "네이버 순위가 오르는 걸 매주 ‘5위→2위’로 확인."),
-             ("trophy", "경쟁 추월 + 성과 실측", "옆집 대비 순위 + QR·링크로 실제 유입 손님 집계."),
-             ("wand", "사진 자동 보정", "폰 사진을 전문가 톤으로. 음식은 먹음직하게 자동."),
-             ("cpu", "쓸수록 똑똑해짐", "순위 오른 키워드를 학습해 다음 콘텐츠를 더 강하게.")]
-    cards = "".join(f"<div class='reveal card p-6'>{_icon_chip(ic)}"
-                    f"<div class='font-bold text-lg mb-1.5 text-slate-900'>{t}</div><p class='text-slate-500 text-sm'>{d}</p></div>"
-                    for ic, t, d in feats)
+    """핵심 4개는 크게, 나머지 8개는 한 줄 리스트로 압축(12카드 밋밋함 해소)."""
+    core = [("camera", "사진 한 장 → 5채널", "인스타·네이버·유튜브·릴스·X를 한 번에."),
+            ("video", "글 → 영상 + 단어자막", "문장이 곧 장면. 말하는 단어가 차오르는 카라오케 자막·AI음성·켄번스 자동."),
+            ("target", "검색 상위노출 + 점수", "C-Rank·D.I.A·릴스 알고리즘 반영, 100점 점검."),
+            ("chart", "순위 성장 추적", "네이버 순위가 오르는 걸 매주 ‘5위→2위’로 확인.")]
+    rest = [("image", "인스타 캐러셀 자동", "사진 1장 → 정보 슬라이드(저장·도달↑)"),
+            ("grid", "쇼츠·릴스·피드 규격", "9:16·1:1·4:5 자동 출력"),
+            ("store", "소상공인·셀러 자동분기", "지도·방문 ↔ 구매링크·검색어 자동 전환"),
+            ("tag", "업종 무제한 자동", "어떤 업종이든 맞춤 톤 자동 생성"),
+            ("link", "계정 1회 연결 자동발행", "비번 없이 연결, 발행 누르면 끝"),
+            ("trophy", "경쟁 추월 + 성과 실측", "옆집 대비 순위 + QR 유입 집계"),
+            ("wand", "사진 자동 보정", "폰 사진을 전문가 톤으로, 음식은 먹음직하게"),
+            ("cpu", "쓸수록 똑똑해짐", "순위 오른 키워드를 학습해 다음 콘텐츠 강화")]
+    big = "".join(f"<div class='reveal card p-7'>{_icon_chip(ic, size='lg')}"
+                  f"<div class='font-bold text-xl mb-2 text-slate-900'>{t}</div><p class='text-slate-500 text-sm'>{d}</p></div>"
+                  for ic, t, d in core)
+    small = "".join(f"<div class='reveal flex items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3'>"
+                    f"<span class='flex-shrink-0 w-9 h-9 rounded-full bg-[#EEF2FF] text-indigo-600 flex items-center justify-center'>{_icon(ic, 'w-4 h-4')}</span>"
+                    f"<div class='min-w-0'><div class='font-bold text-sm text-slate-800'>{t}</div>"
+                    f"<div class='text-xs text-slate-400 truncate'>{d}</div></div></div>"
+                    for ic, t, d in rest)
     return (f"<section id='features' class='bg-[#F9FAFB] py-24'><div class='max-w-6xl mx-auto px-5'>"
             f"<h2 class='reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900'>올린다가 <span class='text-indigo-600'>다 합니다</span></h2>"
             f"<p class='reveal text-center text-slate-500 mb-14'>생성부터 최적화·발행·관리까지.</p>"
-            f"<div class='grid sm:grid-cols-2 lg:grid-cols-4 gap-5'>{cards}</div></div></section>")
+            f"<div class='grid sm:grid-cols-2 lg:grid-cols-4 gap-5'>{big}</div>"
+            f"<div class='grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-5'>{small}</div></div></section>")
 
 
 def _new_features() -> str:
