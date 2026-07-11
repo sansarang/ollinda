@@ -111,8 +111,10 @@ class BlogDraftGenerator(Generator):
         strat = resolve_strategy(tenant)
         kws = seo.target_keywords(prof.name, tenant.region, asset.note,
                                   axis=strat.keyword_axis, brand=tenant.brand_name)
+        kplan = seo.keyword_plan(prof.name, tenant.region, asset.note,
+                                 axis=strat.keyword_axis, brand=tenant.brand_name)   # 대표+롱테일(PHASE 6)
         buy = buy_block(tenant)
-        kw0 = kws[0] if kws else prof.name
+        kw0 = kplan.get("headline") or (kws[0] if kws else prof.name)
         if strat.closing == "buy":
             closing = ("[마무리] 글 끝은 '구매 유도'로. 상세페이지/스토어로 자연스럽게 연결하고 찜·후기를 권하라."
                        + (f" 구매 안내 문구: {buy}" if buy else ""))
@@ -138,8 +140,11 @@ class BlogDraftGenerator(Generator):
             "[실경험 강화 · D.I.A.+ 핵심] 위 '사진 분석'의 구체 사실(색·질감·전후 변화·차종/제품·수치)을 "
             "1인칭 경험담('직접 해보니','만져보니','시공하고 나니')으로 녹여라. 추상적 미사여구·일반론 금지, 손에 잡히듯 구체적으로.\n"
             "[필수 섹션] ① '## 자주 묻는 질문'(Q&A 정확히 3쌍) ② 가격대/영업시간/찾아오는길을 마크다운 표(| 항목 | 내용 |) 1개.\n"
-            f"[키워드 밀도] 핵심키워드 '{kw0}'는 본문에 정확히 3~5회만(남발=저품질 추락). 첫 문장에 반드시 1회.\n"
-            f"사진 {len(imgs)}장 → 본문 문단 사이에 [사진1]..[사진{len(imgs)}]를 순서대로 한 번씩(한 줄 단독) 배치.\n\n"
+            f"[키워드 밀도] 핵심키워드 '{kw0}'는 본문에 정확히 3~5회만(남발=저품질 추락). 첫 문장에 반드시 1회. "
+            "반복 대신 유의어·연관어로 확장.\n"
+            + (f"[롱테일 소제목] '{', '.join(kplan['longtail'])}' 를 ## 소제목에 하나씩 자연 배치 "
+               "(스마트블록 후기/방법/가격 다중진입 노림).\n" if kplan.get("longtail") else "")
+            + f"사진 {len(imgs)}장 → 본문 문단 사이에 [사진1]..[사진{len(imgs)}]를 순서대로 한 번씩(한 줄 단독) 배치.\n\n"
             "아래 형식 그대로(대괄호 머리표 유지) 출력:\n"
             f"[제목후보]\n(3줄. 각 줄 '{kw0}'를 맨 앞에 + 서로 다른 각도(후기형/정보형/혜택형), 22~35자 롱테일, 숫자·혜택으로 클릭 유도)\n"
             "[메타설명]\n(150자 내외, 클릭 유도)\n"
