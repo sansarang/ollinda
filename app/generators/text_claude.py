@@ -115,6 +115,12 @@ class BlogDraftGenerator(Generator):
                                  axis=strat.keyword_axis, brand=tenant.brand_name)   # 대표+롱테일(PHASE 6)
         buy = buy_block(tenant)
         kw0 = kplan.get("headline") or (kws[0] if kws else prof.name)
+        # 🎯 진단→생성 연결(상위노출 PHASE 1): 진단에서 고른 미노출 키워드가 있으면 그 키워드가 대표
+        tkw = (getattr(asset, "target_kw", "") or "").strip()
+        if tkw:
+            kw0 = tkw
+            kws = list(dict.fromkeys([tkw] + kws))[:10]
+            kplan["longtail"] = [k for k in kplan.get("longtail", []) if k != tkw][:3]
         if strat.closing == "buy":
             closing = ("[마무리] 글 끝은 '구매 유도'로. 상세페이지/스토어로 자연스럽게 연결하고 찜·후기를 권하라."
                        + (f" 구매 안내 문구: {buy}" if buy else ""))

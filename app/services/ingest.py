@@ -15,8 +15,11 @@ from app.strategies import resolve_strategy, ordered_kinds, kind_rank
 
 
 def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
-                  kinds: list[ContentKind] | None = None) -> list[ContentPiece]:
-    """files: [(bytes, filename), ...] 여러 장. 1소스(여러 사진) → 멀티채널 생성."""
+                  kinds: list[ContentKind] | None = None,
+                  target_kw: str = "", angle: str = "") -> list[ContentPiece]:
+    """files: [(bytes, filename), ...] 여러 장. 1소스(여러 사진) → 멀티채널 생성.
+    target_kw: 진단에서 고른 미노출 키워드 — 블로그 제목·본문이 이 키워드를 겨냥(상위노출 PHASE 1).
+    angle: 후기형(review)/방법형(howto)/가격형(price) 앵글 — 스마트블록 다중진입용."""
     # 텍스트는 즉시(빠름), 영상(SHORT)+릴스+캐러셀은 비동기 → 요청이 타임아웃 없이 바로 끝남
     kinds = kinds or [ContentKind.CAPTION, ContentKind.BLOG, ContentKind.X_POST]
     # 사업형태 전략에 따라 생성 순서 정렬 (셀러=영상 우선, 소상공인=블로그 우선)
@@ -47,6 +50,16 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
         pass
     # 대표 Asset(첫 장)에 메모 기록 — 나머지 장은 images로 전달
     asset = db.create_asset(tenant.id, AssetType.IMAGE, paths[0], note)
+    # 🎯 진단→생성 연결(상위노출 PHASE 1): 타겟 키워드·앵글을 asset에 실어 생성기로 전달
+    target_kw = (target_kw or "").strip()
+    if target_kw:
+        asset.target_kw = target_kw
+        asset.note = (f"[타겟 키워드 — 순위 진단에서 선택된 미노출 키워드] '{target_kw}' "
+                      "이 키워드로 검색하는 사람이 찾는 답을 주는 글로 작성하라. "
+                      "제목·첫문장·소제목에 자연스럽게 반영(같은 단어 도배 금지, 유의어로 확장).\n"
+                      + asset.note)
+    if angle in ("review", "howto", "price"):
+        asset.angle = angle
     # 👁 비전: 대표 사진을 실제 분석해 생성 프롬프트에 반영(키 없으면 ""). DB엔 원본 메모 유지.
     analysis = vision.analyze_all(paths, tenant.industry)   # 준 사진 전부를 보고 분석(1장만 반영되던 것 강화)
     if analysis:

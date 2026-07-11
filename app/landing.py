@@ -181,8 +181,11 @@ def _hero() -> str:
    var rows='';
    (d.caught||[]).forEach(function(s){{rows+='<div class="flex justify-between bg-emerald-500/15 rounded px-2 py-1 mt-1"><span class="text-slate-200">'+s.keyword+'</span><span class="text-emerald-300 font-bold">'+s.rank+'위 ✅</span></div>';}});
    (d.missing||[]).forEach(function(s){{var v=s.volume?(' <span class="text-slate-400">월 '+s.volume.toLocaleString()+'회</span>'):'';rows+='<div class="flex justify-between bg-amber-500/10 rounded px-2 py-1 mt-1"><span class="text-slate-300">'+s.keyword+v+'</span><span class="text-amber-300 font-bold">미노출</span></div>';}});
+   var mk='';
+   (d.targets||[]).forEach(function(tg){{var v=tg.volume?(' (월 '+tg.volume.toLocaleString()+'회)':'');
+     mk+='<a href="'+tg.make_href+'" class="block bg-emerald-500/20 hover:bg-emerald-500/30 rounded-lg px-3 py-2 mt-1.5 text-emerald-200 font-bold text-sm transition">✍️ '+tg.keyword+v+' — 이 키워드 잡는 글 만들기 →</a>';}});
    o.innerHTML='<b class="text-white">'+d.headline+'</b>'+rows
-     +'<div class="text-slate-400 mt-2">'+d.subline+'</div>'
+     +'<div class="text-slate-400 mt-2">'+d.subline+'</div>'+mk
      +'<a href="/login/kakao" class="inline-block text-emerald-300 underline font-bold mt-1">'+d.cta+' →</a>'
      +(d.estimated?' <span class="text-amber-300 text-xs">(추정)</span>':'');
    }}catch(e){{o.textContent='조회 실패 — 잠시 후 다시';}}}}

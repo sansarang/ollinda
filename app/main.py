@@ -470,6 +470,14 @@ async def api_rank_check(request: Request):
             status_code=429)
 
     result = diagnose.diagnose_rank(industry, region, name)
+    # 진단→생성 연결(상위노출 PHASE 1): 미노출 키워드(검색량 큰 순) 상위 3개 = 타겟 콘텐츠 제안
+    from app import config as _cfg
+    from urllib.parse import quote as _q
+    miss_sorted = sorted(result.get("missing") or [], key=lambda s: -(s.get("volume") or 0))
+    result["targets"] = [
+        {"keyword": s["keyword"], "volume": s.get("volume"),
+         "make_href": "/me?target_kw=" + _q(s["keyword"])}
+        for s in miss_sorted[:_cfg.TARGET_CONTENT_SUGGEST]]
     ratelimit.cache_set(ckey, result)                    # 같은 가게 반복 진단은 캐시로
     u = auth.current_user(request)
     if u and u.get("tenant_id"):
@@ -1425,10 +1433,14 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 + (f"<div class='inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-700 text-sm font-bold px-3 py-1.5 rounded-full mb-3'>🏪 {esc(_sname)}</div>" if _sname else "")
                 + "<div class='text-2xl sm:text-3xl font-extrabold text-slate-900 leading-tight'>사진만 올리면 "
                 "<span style='background:linear-gradient(120deg,#6366f1,#ec4899);-webkit-background-clip:text;background-clip:text;color:transparent'>5채널 콘텐츠</span>가 완성돼요</div></div>")
+    # 🎯 진단→생성 연결(상위노출 PHASE 1): ?target_kw=미노출키워드&angle=review|howto|price
+    _tkw = (request.query_params.get("target_kw") or "").strip()[:40]
+    _angle = (request.query_params.get("angle") or "").strip()
+    _angle = _angle if _angle in ("review", "howto", "price") else ""
     upload_section = ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6 sm:p-7'>"
                       "<div class='mb-5'><div class='text-lg font-extrabold text-slate-900'>✨ 콘텐츠 만들기</div>"
                       "<div class='text-sm text-slate-400'>가게 이름·사진만 있으면 끝</div></div>"
-                      + _upload_form_html(t, tok) + "</div>")
+                      + _upload_form_html(t, tok, target_kw=_tkw, angle=_angle) + "</div>")
     content = ("<div id='myContent' class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5'>"
                "<h2 class='font-bold text-slate-900 mb-1'>📋 내 콘텐츠</h2>"
                "<p class='text-xs text-slate-400 mb-3'>‘보기’를 누르면 결과가 나와요.</p>" + hist + "</div>")
@@ -1501,6 +1513,28 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                     "b.innerHTML=d.items.map(function(it){return '<div class=\"border-b border-slate-100 py-2.5\"><div class=\"flex items-center justify-between\"><span class=\"text-slate-700 font-medium\">'+it.kw+'</span><span class=\"whitespace-nowrap\">'+st(it)+chg(it)+'</span></div>'+bl(it)+riv(it)+'</div>';}).join('')"
                     "+(d.blog_connected?'':'<div class=\"mt-3 text-xs text-slate-400\">💡 <a href=\"#blog\" class=\"font-bold text-emerald-600\">내 블로그를 연결</a>하면 블로그탭 순위도 정확히 추적해요.</div>');"
                     "}catch(e){b.innerHTML='<span class=\"text-rose-400\">조회 실패</span>';}})();</script></div>")
+        # 🎯 진단→생성 연결(상위노출 PHASE 1): 놓치는 키워드 → '이 키워드 잡는 글 만들기'
+        _missbox = ""
+        if (t.industry or "").strip():
+            import json as _json
+            _diag_payload = _json.dumps({"industry": t.industry or "", "region": t.region or "",
+                                         "name": t.name or ""}, ensure_ascii=False)
+            _missbox = (f"<div class='{_fw} mt-5'>"
+                        "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>🎯 놓치는 키워드</h2>"
+                        "<p class='text-sm text-slate-400 mb-4'>미노출 키워드를 찾아 바로 그 키워드를 겨냥한 글로 연결해요. 진단은 무료예요.</p>"
+                        "<div id='missbox' class='text-sm'><div class='flex items-center gap-2 text-slate-400'>"
+                        "<div class='w-4 h-4 border-2 border-slate-200 border-t-amber-500 rounded-full animate-spin'></div>진단 중…</div></div>"
+                        f"<script>(async function(){{var b=document.getElementById('missbox');if(!b)return;var td={_diag_payload};"
+                        "try{var fd=new FormData();fd.append('industry',td.industry);fd.append('region',td.region);fd.append('name',td.name);"
+                        "var d=await (await fetch('/api/rank-check',{method:'POST',body:fd})).json();"
+                        "if(d.error){b.innerHTML='<span class=\"text-slate-400\">'+d.error+'</span>';return;}"
+                        "if(!d.targets||!d.targets.length){b.innerHTML='<span class=\"text-emerald-600 font-bold\">지금 잡을 미노출 키워드가 없어요 — 잡은 키워드를 유지·강화해요 💪</span>';return;}"
+                        "b.innerHTML=d.targets.map(function(tg){var v=tg.volume?('<span class=\"text-xs text-slate-400 ml-1\">월 '+tg.volume.toLocaleString()+'회 검색</span>'):'';"
+                        "return '<div class=\"flex items-center justify-between bg-amber-50 rounded-xl px-3.5 py-2.5 mb-2\">"
+                        "<div><span class=\"font-bold text-slate-700\">'+tg.keyword+'</span>'+v+' <span class=\"text-xs text-amber-600 font-bold\">미노출</span></div>"
+                        "<a href=\"'+tg.make_href+'\" class=\"bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition whitespace-nowrap\">✍️ 이 키워드 잡는 글 만들기</a></div>';}).join('')"
+                        "+(d.missed_volume?'<div class=\"text-xs text-slate-400 mt-1\">미노출 키워드 합계 월 '+d.missed_volume.toLocaleString()+'회 검색을 놓치는 중이에요.</div>':'');"
+                        "}catch(e){b.innerHTML='<span class=\"text-rose-400\">진단 실패</span>';}})();</script></div>")
         # 🎯 성과 실측 — 추적 링크/QR로 '이 콘텐츠 보고 온 손님' 집계
         _tl = _ensure_track_link(t)
         _clicks = sum(int(l.get("clicks") or 0) for l in db.list_links(t.id))
@@ -1522,7 +1556,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 f"<div class='text-xs text-slate-400 mt-1.5'>→ {esc(_tl.get('label',''))}(으)로 연결돼요</div>"
                 f"<a href='/me/qr/{_tl['code']}.png' download='ollinda-qr.png' class='inline-block mt-2 text-xs font-bold text-indigo-500'>⬇ QR 이미지 저장</a>"
                 "</div></div></div>")
-        main_inner = _sbadge + stats_row + _blog_connect_card(t, _fw) + _trackbox + _rankbox + _kwbox
+        main_inner = _sbadge + stats_row + _missbox + _blog_connect_card(t, _fw) + _trackbox + _rankbox + _kwbox
     else:                                                 # ✨ 만들기 (기본) — 완성되면 여기(만들기 대시보드)에 결과 표시
         active = "create"
         _made = (request.query_params.get("made") or "").strip()
@@ -3904,9 +3938,19 @@ def oauth_callback(code: str = "", state: str = "", error: str = ""):
 
 
 # ── 사장님 업로드 ────────────────────────────────────────
-def _upload_form_html(tenant, token: str) -> str:
-    """모던·간결 생성 카드 — 가게이름/링크 자동인식 + 사진 + 형태 + 목적 → 5채널 생성."""
+def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "") -> str:
+    """모던·간결 생성 카드 — 가게이름/링크 자동인식 + 사진 + 형태 + 목적 → 5채널 생성.
+    target_kw/angle: 진단→생성 연결(상위노출 PHASE 1) — 이 키워드/앵글을 겨냥한 글 생성."""
     bt = (tenant.biz_type or "local")
+    _angle_lab = {"review": "후기형", "howto": "방법·과정형", "price": "가격·비용형"}.get(angle, "")
+    target_banner = ""
+    if target_kw:
+        target_banner = ("<div class='flex items-center gap-2.5 bg-amber-50 border border-amber-200 rounded-2xl p-3.5'>"
+                         "<span class='text-xl'>🎯</span><div class='text-sm text-slate-700'>"
+                         f"이번 글은 <b>'{esc(target_kw)}'</b> 키워드를 겨냥해요"
+                         + (f" · <b>{_angle_lab}</b> 앵글" if _angle_lab else "")
+                         + " — 제목·본문에 자연스럽게 반영돼요.</div>"
+                         "<a href='/me' class='ml-auto text-xs text-slate-400 hover:text-slate-600 whitespace-nowrap'>해제 ×</a></div>")
     inp = ("w-full border border-slate-200 rounded-xl px-4 py-3 text-sm "
            "focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition")
     chips = "".join(
@@ -3940,6 +3984,8 @@ def _upload_form_html(tenant, token: str) -> str:
                       if _nm else "2. 내 가게 / 상품 정보")
     form = f"""<form method=post action='/u/{token}/upload' enctype='multipart/form-data' onsubmit='return showGen(event)' class='space-y-6'>
       <input type=hidden name=s_name id=s_name value="{_nm}"><input type=hidden name=s_industry id=s_industry value="{_ind0}"><input type=hidden name=s_biz id=s_biz value='{bt}'>
+      <input type=hidden name=target_kw value="{esc(target_kw)}"><input type=hidden name=angle value="{esc(angle)}">
+      {target_banner}
       <div><label class='{lb}'>1. 어떤 장사인가요?</label>{biz_toggle}</div>
       <details {_store_open} class='rounded-2xl border border-slate-100 bg-slate-50/50 p-4'><summary id=storeSummary class='{lb} mb-0 cursor-pointer select-none'>{_store_summary}</summary>
         <div id=lk_hint2 class='text-xs text-indigo-500 font-semibold mt-3 mb-1.5'></div>
@@ -4063,7 +4109,7 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
                  s_biz: str = Form(""), s_region: str = Form(""), s_tel: str = Form(""),
                  s_buy: str = Form(""), s_address: str = Form(""), photo_desc: str = Form(""),
                  s_map: str = Form(""), s_market: str = Form(""), s_brand: str = Form(""),
-                 s_search: str = Form("")):
+                 s_search: str = Form(""), target_kw: str = Form(""), angle: str = Form("")):
     tenant, _ = db.get_tenant_by_token(token)
     if not tenant:
         return HTMLResponse("<p>잘못된 링크입니다.</p>", status_code=404)
@@ -4113,7 +4159,9 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
             if _ind:
                 from app.industries import ensure_profile
                 ensure_profile(_ind)
-            made = ingest_upload(tenant, files, full_note)
+            made = ingest_upload(tenant, files, full_note,
+                                 target_kw=target_kw.strip()[:40],
+                                 angle=(angle.strip() if angle.strip() in ("review", "howto", "price") else ""))
             if not made:
                 _refund_usage(owner)               # 생성 결과 없음 → 예약 원복
         except Exception:

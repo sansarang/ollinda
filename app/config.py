@@ -61,6 +61,9 @@ def plan_limit(plan: str, feature: str) -> int:
     return PLAN_LIMITS.get(plan or "free", PLAN_LIMITS["free"]).get(feature, 0)
 
 
+# ── 상위노출 실행 루프(상위노출 PHASE 1~6) ──
+TARGET_CONTENT_SUGGEST = int(os.environ.get("SHOPCAST_TARGET_SUGGEST", "3"))  # 미노출→타겟 콘텐츠 제안 수
+
 # ── 블로그 추적(블로그등록 PHASE 4) — 발행 일관성·주간 리포트 ──
 BLOG_WEEKLY_TARGET = int(os.environ.get("SHOPCAST_BLOG_WEEKLY", "3"))   # 기본 주 3회(C-Rank 지속성)
 WEEKLY_REPORT_DOW = int(os.environ.get("SHOPCAST_REPORT_DOW", "0"))     # 발송 요일(0=월요일, KST)
