@@ -90,6 +90,11 @@ def init_db() -> None:
         # 다중 가게 — 한 사용자가 여러 가게(tenant)를 등록·전환
         c.execute("CREATE TABLE IF NOT EXISTS user_stores("
                   "user_id TEXT, tenant_id TEXT, created_at TEXT, PRIMARY KEY(user_id, tenant_id))")
+        # 블로그 발행 기록(블로그등록 PHASE 2) — RSS 자동매칭(rss) / 사용자 확인(manual)
+        c.execute("CREATE TABLE IF NOT EXISTS blog_publishes("
+                  "piece_id TEXT PRIMARY KEY, tenant_id TEXT, published_url TEXT, "
+                  "published_at TEXT, matched_by TEXT, match_score REAL, post_title TEXT, created_at TEXT)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_blogpub_t ON blog_publishes(tenant_id, published_at)")
         # ── 신규기능①: 경쟁사 추적기 ──
         c.execute("CREATE TABLE IF NOT EXISTS competitors("
                   "id TEXT PRIMARY KEY, tenant_id TEXT, name TEXT, region TEXT, "
@@ -485,6 +490,40 @@ def incr_month_usage(uid: str, n: int = 1) -> None:
             "UPDATE users SET month_used = MAX(0, CASE WHEN usage_month = ? "
             "THEN COALESCE(month_used,0) + ? ELSE ? END), usage_month = ? WHERE id=?",
             (ym, n, n, ym, uid))
+
+
+# ── 블로그 발행 기록(블로그등록 PHASE 2) ──
+def record_blog_publish(tenant_id: str, piece_id: str, url: str, published_at: str = "",
+                        matched_by: str = "manual", score: float = 1.0, post_title: str = "") -> None:
+    """발행 확인 기록 upsert(1글=1기록). matched_by: rss(자동매칭) | manual(사용자 확인)."""
+    try:
+        with _conn() as c:
+            c.execute("INSERT OR REPLACE INTO blog_publishes"
+                      "(piece_id, tenant_id, published_url, published_at, matched_by, match_score, post_title, created_at) "
+                      "VALUES(?,?,?,?,?,?,?,?)",
+                      (piece_id, tenant_id, (url or "").strip(), published_at or _now(),
+                       matched_by, score, post_title, _now()))
+    except sqlite3.OperationalError:
+        pass
+
+
+def get_blog_publish(piece_id: str) -> Optional[dict]:
+    try:
+        with _conn() as c:
+            r = c.execute("SELECT * FROM blog_publishes WHERE piece_id=?", (piece_id,)).fetchone()
+        return dict(r) if r else None
+    except sqlite3.OperationalError:
+        return None
+
+
+def list_blog_publishes(tenant_id: str, limit: int = 30) -> list[dict]:
+    try:
+        with _conn() as c:
+            rows = c.execute("SELECT * FROM blog_publishes WHERE tenant_id=? "
+                             "ORDER BY published_at DESC LIMIT ?", (tenant_id, limit)).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.OperationalError:
+        return []
 
 
 # ── 신규기능 월간 사용량(경쟁사 스캔 / 인쇄물) — month_used 패턴, 원자적 ──

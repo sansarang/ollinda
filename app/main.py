@@ -1647,22 +1647,120 @@ def my_blog_connect(request: Request, blog: str = Form("")):
     return RedirectResponse("/me?tab=report&ok=" + _q(msg), status_code=303)
 
 
+def _confirm_blog_publish(t, piece, url: str, matched_by: str, score: float = 1.0,
+                          post_title: str = "", published_at: str = "") -> None:
+    """발행 확인 공통 처리 — 기록 + 상태 PUBLISHED + 발행이력 + 순위 스냅샷(성과 루프 연결)."""
+    db.record_blog_publish(t.id, piece.id, url, published_at, matched_by, score, post_title)
+    try:
+        db.create_publication(piece.id, Channel.NAVER_BLOG, url,
+                              {"manual": True, "source": matched_by, "url": url})
+        db.set_piece_status(piece.id, ContentStatus.PUBLISHED)
+    except Exception:
+        pass
+    try:                                   # 발행 시점 순위 baseline + 7일 리포트 예약(기존 성과 루프 재사용)
+        from app.services import growth
+        growth.on_publish(t, piece)
+    except Exception:
+        pass
+
+
+def _tenant_blog_pieces(tid: str, limit_sets: int = 30) -> list:
+    """이 가게의 블로그 생성글(최신순)."""
+    out = []
+    for s in db.list_sets(tenant_id=tid, limit=limit_sets):
+        for p in db.get_set_pieces(s["asset_id"]):
+            if p.kind.value == "blog":
+                out.append(p)
+    return out
+
+
+@app.post("/api/blog/check-published")
+def api_blog_check_published(request: Request):
+    """등록 블로그 RSS ↔ 올린다 생성글 매칭 → '실제 발행' 자동 확인(블로그등록 PHASE 2).
+    임계 미달 매칭은 발행으로 만들지 않음(정직성) — 수동 확인 폼 병행."""
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"error": "로그인이 필요해요."}, status_code=401)
+    t = _ensure_user_tenant(u)
+    if not getattr(t, "blog_id", ""):
+        return JSONResponse({"error": "먼저 내 네이버 블로그를 연결해 주세요.", "need_blog": True}, status_code=400)
+    from app.services import blogsync
+    feed = blogsync.fetch_feed(t.blog_id)
+    if not feed["ok"]:
+        return JSONResponse({"error": "지금 블로그 확인이 어려워요. 잠시 후 다시 시도해 주세요."}, status_code=502)
+    if not feed["exists"]:
+        return JSONResponse({"error": "블로그를 찾지 못했어요. 연결을 다시 확인해 주세요."}, status_code=400)
+    pending = [p for p in _tenant_blog_pieces(t.id) if not db.get_blog_publish(p.id)]
+    found = blogsync.find_published(pending, feed["posts"])
+    by_id = {p.id: p for p in pending}
+    for f in found:
+        piece = by_id.get(f["piece_id"])
+        if piece:
+            _confirm_blog_publish(t, piece, f["url"], "rss", f["score"], f["post_title"],
+                                  (f["published_at"].isoformat() if f.get("published_at") else ""))
+    return JSONResponse({"checked": len(pending), "rss_posts": len(feed["posts"]),
+                         "found": [{"piece_id": f["piece_id"], "url": f["url"],
+                                    "post_title": f["post_title"], "score": f["score"]} for f in found]})
+
+
+@app.post("/me/blog/published")
+def my_blog_published(request: Request, piece_id: str = Form(""), url: str = Form("")):
+    """'발행함' 수동 확인 — 사용자가 발행 URL 붙여넣기(자동 매칭이 어려울 때 병행 경로)."""
+    from urllib.parse import quote as _q
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    t = _ensure_user_tenant(u)
+    piece = db.get_piece(piece_id.strip())
+    back = f"/kit/{piece.asset_id}/naver" if piece else "/me?tab=report"
+    if not piece or piece.tenant_id != t.id or piece.kind.value != "blog":
+        return RedirectResponse("/me?tab=content&err=" + _q("내 블로그 글을 찾지 못했어요"), status_code=303)
+    url = (url or "").strip()
+    from app.services import blogsync
+    if not blogsync.normalize_blog_id(url) or "blog.naver.com" not in url:
+        return RedirectResponse(back + "?err=" + _q("네이버 블로그 글 주소를 붙여넣어 주세요 (예: https://blog.naver.com/아이디/글번호)"),
+                                status_code=303)
+    if getattr(t, "blog_id", "") and not blogsync.is_my_post_url(url, t.blog_id):
+        return RedirectResponse(back + "?err=" + _q(f"등록된 블로그(blog.naver.com/{t.blog_id})의 글 주소가 아니에요"),
+                                status_code=303)
+    _confirm_blog_publish(t, piece, url, "manual")
+    return RedirectResponse(back + "?ok=" + _q("발행 기록 완료! 이 글의 순위 추적이 시작돼요"), status_code=303)
+
+
 def _blog_connect_card(t, fw: str) -> str:
     """'내 네이버 블로그 연결' 카드 — 연결 전(입력 폼) / 연결 후(현황+해제)."""
     inp = "flex-1 border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
     if getattr(t, "blog_id", ""):
-        return (f"<div class='{fw} mt-5'>"
+        pubs = db.list_blog_publishes(t.id, limit=5)
+        pub_rows = "".join(
+            f"<div class='flex items-center justify-between border-b border-slate-100 py-2 gap-2'>"
+            f"<a href='{esc(p.get('published_url') or '')}' target=_blank rel=noopener class='text-sm text-slate-700 font-medium truncate'>"
+            f"{esc(p.get('post_title') or (p.get('published_url') or '')[:50])}</a>"
+            f"<span class='text-xs text-slate-400 whitespace-nowrap'>{esc((p.get('published_at') or '')[:10])} · "
+            f"{'RSS자동' if p.get('matched_by') == 'rss' else '직접확인'}</span></div>"
+            for p in pubs)
+        pub_box = ((f"<div class='mt-4'><div class='text-xs font-bold text-slate-500 mb-1'>최근 발행 확인 {len(pubs)}건</div>{pub_rows}</div>")
+                   if pubs else "<p class='text-xs text-slate-400 mt-3'>아직 확인된 발행이 없어요. 글 발행 후 '자동 확인'을 눌러보세요.</p>")
+        return (f"<div id='blog' class='{fw} mt-5'>"
                 "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>📝 내 네이버 블로그</h2>"
                 f"<p class='text-sm text-slate-400 mb-3'>연결됨 · 공개 RSS로 발행 여부와 순위를 추적해요.</p>"
                 "<div class='flex items-center gap-3 flex-wrap'>"
                 f"<a href='{esc(t.naver_blog_url)}' target=_blank rel=noopener "
                 "class='inline-flex items-center gap-2 bg-emerald-50 text-emerald-700 font-bold text-sm px-4 py-2.5 rounded-xl'>"
                 f"✅ blog.naver.com/{esc(t.blog_id)} ↗</a>"
-                "<form method=post action='/me/blog' onsubmit=\"return confirm('블로그 연결을 해제할까요? 발행 확인·순위 매칭이 꺼져요.')\">"
+                "<button type=button onclick='blogChk(this)' class='bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition'>🔄 발행 자동 확인</button>"
+                "<span id='blogChkMsg' class='text-xs text-slate-400'></span>"
+                "<form method=post action='/me/blog' class='ml-auto' onsubmit=\"return confirm('블로그 연결을 해제할까요? 발행 확인·순위 매칭이 꺼져요.')\">"
                 "<input type=hidden name=blog value=''>"
                 "<button class='text-xs text-slate-400 hover:text-rose-500 font-semibold'>연결 해제</button></form>"
-                "</div></div>")
-    return (f"<div class='{fw} mt-5'>"
+                "</div>" + pub_box +
+                "<script>async function blogChk(btn){var m=document.getElementById('blogChkMsg');m.textContent='확인 중…';btn.disabled=true;"
+                "try{var r=await fetch('/api/blog/check-published',{method:'POST'});var d=await r.json();"
+                "if(d.error){m.textContent=d.error;btn.disabled=false;return;}"
+                "if(d.found&&d.found.length){m.textContent='✅ 발행 '+d.found.length+'건 확인!';setTimeout(function(){location.reload();},900);}"
+                "else{m.textContent='새로 확인된 발행이 없어요 (RSS 최근글 '+d.rss_posts+'건 대조).';btn.disabled=false;}"
+                "}catch(e){m.textContent='확인 실패';btn.disabled=false;}}</script></div>")
+    return (f"<div id='blog' class='{fw} mt-5'>"
             "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>📝 내 네이버 블로그 연결</h2>"
             "<p class='text-sm text-slate-400 mb-3'>네이버는 발행 API가 없어 직접 발행하시죠? "
             "블로그 주소를 등록하면 <b>실제 발행 확인 · 내 블로그 순위 추적</b>이 정확해져요.</p>"
@@ -2145,8 +2243,47 @@ def kit(request: Request, asset_id: str):
     return HTMLResponse(_subscriber_page("발행 소재", body))
 
 
+def _naver_publish_confirm_box(tenant, blog, sec: str, cbtn: str, ok: str = "", err: str = "") -> str:
+    """발행 확인 카드 — 이미 확인됨(✅) / 자동 확인 버튼(RSS) + 수동 URL 붙여넣기 폼."""
+    banner = ""
+    if ok:
+        banner = f"<div class='bg-emerald-50 text-emerald-700 p-3 rounded-xl mb-3 text-sm'>✅ {esc(ok)}</div>"
+    if err:
+        banner = f"<div class='bg-rose-50 text-rose-600 p-3 rounded-xl mb-3 text-sm'>⚠️ {esc(err)}</div>"
+    pub = db.get_blog_publish(blog.id)
+    if pub:
+        how = "RSS 자동 확인" if pub.get("matched_by") == "rss" else "직접 확인"
+        return (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>✅ 발행 확인됨 <span class='text-emerald-600'>({how})</span></div>"
+                + banner
+                + f"<a href='{esc(pub.get('published_url') or '')}' target=_blank rel=noopener class='text-sm font-bold text-emerald-600 break-all'>"
+                f"{esc(pub.get('published_url') or '')} ↗</a>"
+                f"<p class='text-xs text-slate-400 mt-2'>발행 시각: {esc((pub.get('published_at') or '')[:16].replace('T', ' '))} · 이 글의 순위를 추적 중이에요.</p></div>")
+    inp = "flex-1 border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
+    auto = ""
+    if getattr(tenant, "blog_id", ""):
+        auto = ("<div class='flex items-center gap-2 mb-3'>"
+                f"<button type=button onclick='nvChk(this)' class='{cbtn} bg-emerald-600 hover:bg-emerald-700'>🔄 블로그에서 자동 확인 (RSS)</button>"
+                "<span id='nvChkMsg' class='text-xs text-slate-400'></span></div>"
+                "<script>async function nvChk(btn){var m=document.getElementById('nvChkMsg');m.textContent='확인 중…';btn.disabled=true;"
+                "try{var r=await fetch('/api/blog/check-published',{method:'POST'});var d=await r.json();"
+                "if(d.error){m.textContent=d.error;btn.disabled=false;return;}"
+                "if(d.found&&d.found.length){m.textContent='✅ 발행 '+d.found.length+'건 확인!';setTimeout(function(){location.reload();},900);}"
+                "else{m.textContent='아직 RSS에서 못 찾았어요 — 발행 직후엔 몇 분 걸려요. 아래에 주소를 붙여넣어도 돼요.';btn.disabled=false;}"
+                "}catch(e){m.textContent='확인 실패';btn.disabled=false;}}</script>")
+    else:
+        auto = ("<p class='text-xs text-amber-600 mb-3'>💡 <a href='/me?tab=report#blog' class='font-bold underline'>내 블로그를 연결</a>하면 "
+                "발행 여부를 자동으로 확인해 드려요.</p>")
+    return (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>발행 완료하셨나요? <span class='text-emerald-600'>(순위 추적 시작)</span></div>"
+            + banner + auto
+            + f"<form method=post action='/me/blog/published' class='flex gap-2'>"
+            f"<input type=hidden name=piece_id value='{blog.id}'>"
+            f"<input name=url placeholder='발행한 글 주소 붙여넣기 (https://blog.naver.com/...)' class='{inp}'>"
+            f"<button class='{cbtn} bg-slate-900 hover:bg-slate-800 whitespace-nowrap'>발행함 ✓</button></form>"
+            "<p class='text-xs text-slate-400 mt-2'>발행을 기록하면 이 글의 키워드 순위를 발행 전후로 비교해 드려요.</p></div>")
+
+
 @app.get("/kit/{asset_id}/naver", response_class=HTMLResponse)
-def kit_naver(request: Request, asset_id: str):
+def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
     """네이버 블로그 붙여넣기 전용 화면 — 제목/본문(사진 위치 표시)/사진 순서대로 다운."""
     import re as _re
     u = auth.current_user(request)
@@ -2205,6 +2342,8 @@ def kit_naver(request: Request, asset_id: str):
            + "<li>🎬 직접 찍은 동영상까지 넣으면 D.I.A.+ 가점.</li>"
            + "<li>⚡ 발행 직후 <b>서치어드바이저에 URL 색인 요청</b>하면 검색 반영이 수일→수시간으로 빨라져요.</li></ul>"
            f"<a href='https://searchadvisor.naver.com/console/board/registration' target='_blank' rel='noopener' class='{cbtn} bg-slate-900 hover:bg-slate-800 inline-block'>🔗 서치어드바이저 색인 요청 →</a></div>")
+        # 6. 발행 확인(블로그등록 PHASE 2) — 자동(RSS 매칭) + 수동(URL 붙여넣기) 병행
+        + _naver_publish_confirm_box(tenant, blog, sec, cbtn, ok, err)
         # 토스트
         + "<div id='nvToast' class='fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-sm font-bold px-5 py-3 rounded-xl shadow-xl opacity-0 pointer-events-none transition-opacity'>✅ 복사됨</div>"
         + "<script>function nvcp(id,btn){var t=document.getElementById(id);omCopy(t.value);"

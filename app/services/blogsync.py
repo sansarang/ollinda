@@ -120,3 +120,58 @@ def verify_blog(raw_input: str) -> dict:
             "post_count": len(feed["posts"]), "error": ""}
 
 
+# ── PHASE 2: 발행 확인(생성글 ↔ RSS 최근글 매칭) ─────────────────────
+def _norm_text(s: str) -> str:
+    return re.sub(r"[^가-힣A-Za-z0-9]+", "", (s or "")).lower()
+
+
+def _tokens(s: str) -> set:
+    return {t for t in re.findall(r"[가-힣A-Za-z0-9]{2,}", (s or "").lower()) if t}
+
+
+def match_score(piece_payload: dict, post_title: str) -> float:
+    """올린다 생성글(제목·키워드) ↔ 블로그 글제목 유사도(0~1).
+    제목 포함 관계면 강한 매칭, 아니면 토큰 자카드 + 타겟키워드 겹침 가점."""
+    pt = _norm_text(post_title)
+    if not pt:
+        return 0.0
+    title = piece_payload.get("title") or ""
+    nt = _norm_text(title)
+    if nt and len(nt) >= 8 and (nt in pt or pt in nt):
+        return 1.0
+    a, b = _tokens(title), _tokens(post_title)
+    jac = (len(a & b) / len(a | b)) if (a and b) else 0.0
+    kws = (piece_payload.get("target_keywords") or [])[:3]
+    kw_hit = sum(1 for k in kws if _norm_text(k) and _norm_text(k) in pt)
+    return min(1.0, jac + kw_hit * 0.2)
+
+
+MATCH_THRESHOLD = 0.5   # 이 이상만 '발행됨' 자동 판정 — 애매하면 발행됨을 만들지 않는다(수동 확인 병행)
+
+
+def find_published(pieces: list, posts: list[dict]) -> list[dict]:
+    """생성 블로그 글(pieces) ↔ RSS 최근글(posts) 매칭. 임계 이상만 반환(1글=1포스트).
+    반환: [{piece_id, url, published_at, score, post_title}]"""
+    out = []
+    used_links: set = set()
+    for p in pieces:
+        best, best_post = 0.0, None
+        for post in posts:
+            if not post.get("link") or post["link"] in used_links:
+                continue
+            s = match_score(p.payload, post["title"])
+            if s > best:
+                best, best_post = s, post
+        if best_post and best >= MATCH_THRESHOLD:
+            used_links.add(best_post["link"])
+            out.append({"piece_id": p.id, "url": best_post["link"],
+                        "published_at": best_post["published_at"],
+                        "score": round(best, 2), "post_title": best_post["title"]})
+    return out
+
+
+def is_my_post_url(url: str, blog_id: str) -> bool:
+    """붙여넣은 URL이 '등록된 내 블로그' 글인지 — blog_id 일치 검사."""
+    return bool(blog_id) and normalize_blog_id(url) == blog_id
+
+
