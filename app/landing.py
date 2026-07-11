@@ -130,22 +130,26 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
 // 셀프 체험 위젯 + 스마트 입력(무료·유료 공용 헬퍼)
 (function(){
  const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
- // AI 선추측 확인(스마트 입력 PHASE 2) — 무료·유료 공용(대시보드에서도 사용)
- window.intakeConfirmUI=function(box,guess,analysis,cid,vid){
+ // AI 선추측 확인(스마트 입력 PHASE 2) — 무료·유료 공용(대시보드에서도 사용).
+ // onDone: 사용자가 응답(맞아요/수정 저장)한 순간 호출 — 무료 위젯의 생성버튼 활성화 트리거.
+ window.intakeConfirmUI=function(box,guess,analysis,cid,vid,onDone){
    var c=document.getElementById(cid),v=document.getElementById(vid);
    if(v)v.value=analysis||'';
    if(!guess){box.innerHTML='';if(c)c.value='';return;}
    box.innerHTML='<div class="bg-[#EEF2FF] border border-indigo-100 rounded-xl px-3 py-2.5 text-sm">'
+     +'<div class="text-[11px] font-bold text-indigo-500 mb-0.5">확인해주세요</div>'
      +'<div class="text-slate-700">이 사진, <b>'+esc(guess)+'</b>(으)로 보여요. 맞나요?</div>'
      +'<div class="flex gap-2 mt-2"><button type="button" data-g="ok" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold">맞아요</button>'
      +'<button type="button" data-g="fix" class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 text-xs font-bold">수정할게요</button></div></div>';
    box.querySelector('[data-g=ok]').onclick=function(){if(c)c.value=guess;
-     box.innerHTML='<div class="text-xs text-indigo-600 font-bold py-1">확인됨: '+esc(guess)+'</div>';};
+     box.innerHTML='<div class="text-xs text-indigo-600 font-bold py-1">확인됨: '+esc(guess)+'</div>';
+     onDone&&onDone();};
    box.querySelector('[data-g=fix]').onclick=function(){
      box.innerHTML='<div class="flex gap-2"><input id="'+cid+'_edit" value="'+esc(guess)+'" class="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400">'
        +'<button type="button" class="px-3 rounded-xl bg-indigo-600 text-white text-xs font-bold">저장</button></div>';
      box.querySelector('button').onclick=function(){var nv=document.getElementById(cid+'_edit').value.trim();
-       if(c)c.value=nv;box.innerHTML=nv?('<div class="text-xs text-indigo-600 font-bold py-1">확인됨: '+esc(nv)+'</div>'):'';};};
+       if(c)c.value=nv;box.innerHTML=nv?('<div class="text-xs text-indigo-600 font-bold py-1">확인됨: '+esc(nv)+'</div>'):'';
+       onDone&&onDone();};};
  };
  // 업종별 스마트 질문 렌더(PHASE 3) — 무료·유료 공용. 답은 window.__intakeAnswers에 수집.
  window.__intakeAnswers={};
@@ -178,14 +182,40 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
  };
  const df=document.getElementById('demoForm');if(!df)return;
  const pf=document.getElementById('d_photo');
- async function demoGuess(){var files=pf&&pf.files;if(!files||!files.length)return;
+ // 생성버튼 가드(버그2) — 사진 확인 응답 전엔 비활성 + 이유 문구. 실패·타임아웃 시 건너뛰기 폴백.
+ function setDemoReady(ok,msg){var b=document.getElementById('d_submit'),h=document.getElementById('d_submit_hint');
+   if(b)b.disabled=!ok;if(h){h.textContent=msg||'';h.classList.toggle('hidden',!msg);}}
+ function demoSkipLink(box){var s=document.createElement('button');s.type='button';
+   s.className='block mx-auto mt-1.5 text-[11px] text-slate-400 underline';s.textContent='확인 건너뛰고 진행';
+   s.onclick=function(){box.innerHTML='';setDemoReady(true,'');};box.appendChild(s);}
+ var _gseq=0;
+ async function demoGuess(){var files=pf&&pf.files;
    var box=document.getElementById('d_guessbox');if(!box)return;
-   box.innerHTML='<div class="text-xs text-slate-400 py-1">사진 확인 중…</div>';
+   if(!files||!files.length){box.innerHTML='';setDemoReady(true,'');return;}
+   var seq=++_gseq,fin=false;
+   setDemoReady(false,'사진을 확인하는 중이에요 — 잠시만요');
+   // 진행률(버그1) — 단계 라벨 + 애니메이션 바 → 완료 시 '확인해주세요' 카드로 전환
+   box.innerHTML='<div class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">'
+     +'<div id="d_gpg_l" class="text-xs font-bold text-slate-600 mb-1.5">사진 분석 중…</div>'
+     +'<div class="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden"><div id="d_gpg_b" class="h-full bg-indigo-500 rounded-full" style="width:15%;transition:width .5s"></div></div></div>';
+   var stages=['사진 분석 중…','무엇이 담겼는지 파악 중…','거의 다 됐어요…'],si=0,w=15;
+   var st=setInterval(function(){var l=document.getElementById('d_gpg_l'),b=document.getElementById('d_gpg_b');
+     if(!l||!b){clearInterval(st);return;}si=Math.min(si+1,stages.length-1);w=Math.min(w+22,90);
+     l.textContent=stages[si];b.style.width=w+'%';},2200);
+   var to=setTimeout(function(){if(fin||seq!==_gseq)return;fin=true;clearInterval(st);
+     box.innerHTML='';setDemoReady(true,'사진 확인이 오래 걸려 건너뛰었어요 — 바로 만들 수 있어요');},18000);
    var fd=new FormData();fd.append('industry',(document.getElementById('d_ind')||{}).value||'');
    Array.from(files).slice(0,6).forEach(function(f){fd.append('photos',f);});
    try{var r=await fetch('/api/intake/guess',{method:'POST',body:fd});var d=await r.json();
-     window.intakeConfirmUI(box,d.guess||'',d.analysis||'','d_confirmed','d_vision');
-   }catch(e){box.innerHTML='';}}
+     if(fin||seq!==_gseq)return;fin=true;clearTimeout(to);clearInterval(st);
+     if(d.guess){
+       window.intakeConfirmUI(box,d.guess,d.analysis||'','d_confirmed','d_vision',
+         function(){setDemoReady(true,'');});
+       demoSkipLink(box);
+       setDemoReady(false,'위 사진 확인(맞아요/수정) 후 만들 수 있어요');
+     }else{box.innerHTML='';setDemoReady(true,'');}
+   }catch(e){if(fin||seq!==_gseq)return;fin=true;clearTimeout(to);clearInterval(st);
+     box.innerHTML='';setDemoReady(true,'');}}
  if(pf)pf.addEventListener('change',()=>{var files=pf.files||[];
    document.getElementById('d_photoname').textContent=files.length?('✓ '+files.length+'장 선택'):'';
    var pv=document.getElementById('d_preview');pv.innerHTML='';
@@ -194,6 +224,7 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
    }else{pv.classList.add('hidden');}
    demoGuess();});
  df.addEventListener('submit',async e=>{e.preventDefault();
+  var sb=document.getElementById('d_submit');if(sb&&sb.disabled)return;   // 확인 전 Enter 제출 방지
   const box=document.getElementById('demoResult');
   const ind=document.getElementById('d_ind').value.trim();
   if(!ind){box.innerHTML='<div class="text-slate-500 text-sm text-center py-3">업종/상품을 입력해주세요.</div>';return;}
@@ -370,7 +401,8 @@ def _hero_demo_card() -> str:
        <label class="flex-1"><input type="radio" name="d_biz" value="local" checked class="peer hidden"><div class="text-center py-2.5 rounded-xl bg-white border border-slate-200 text-slate-500 peer-checked:border-indigo-500 peer-checked:bg-indigo-50 peer-checked:text-indigo-700 font-bold cursor-pointer transition">동네 매장</div></label>
        <label class="flex-1"><input type="radio" name="d_biz" value="seller" class="peer hidden"><div class="text-center py-2.5 rounded-xl bg-white border border-slate-200 text-slate-500 peer-checked:border-indigo-500 peer-checked:bg-indigo-50 peer-checked:text-indigo-700 font-bold cursor-pointer transition">온라인 셀러</div></label>
      </div>
-     <button class="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition">실제로 만들어보기</button></form>
+     <button id="d_submit" class="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition disabled:opacity-40 disabled:cursor-not-allowed">실제로 만들어보기</button>
+     <div id="d_submit_hint" class="hidden text-center text-xs text-slate-400"></div></form>
     <div id="demoResult" class="mt-4"></div>
     <p class="text-center text-slate-400 text-xs mt-2">가입 없이 미리보기 · 가입하면 <b class="text-slate-600">5채널 전부 + 영상</b> 무료 2회</p>
    </div>"""
