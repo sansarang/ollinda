@@ -163,7 +163,8 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
      var prev=window.__intakeAnswers||{};                       // 질문 교체 시 답변 유지(초기화 금지)
      var oldExp=(document.getElementById(expId)||{}).value||'';
      var h='<details open class="bg-slate-50 border border-slate-200 rounded-xl p-3"><summary class="text-xs font-bold text-slate-600 cursor-pointer select-none">'
-       +'더 좋은 글 만들기 <span class="text-slate-400 font-normal">('+esc(d.hint||'선택')+')</span></summary><div class="mt-2 space-y-2">';
+       +'더 좋은 글 만들기 <span class="text-slate-400 font-normal">('+esc(d.hint||'선택')+')</span></summary>'
+       +'<div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">';   // 질문 2×2(데스크탑) — 세로 4줄→2줄
      qs.forEach(function(q,i){
        h+='<div><div class="text-xs font-semibold text-slate-600 mb-1">'+esc(q.q)+'</div>';
        if(q.type==='choice'){h+='<div class="flex flex-wrap gap-1.5">'+(q.options||[]).map(function(o){
@@ -172,7 +173,7 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
        else{h+='<input data-iqt="'+esc(q.id)+'" value="'+esc(prev[q.id]||'')+'" placeholder="'+esc(q.ph||'')+'" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400">';}
        h+='</div>';});
      var ex=d.experience||{};
-     h+='<div><div class="text-xs font-semibold text-indigo-600 mb-1">'+esc(ex.q||'')+'</div>'
+     h+='<div class="sm:col-span-2"><div class="text-xs font-semibold text-indigo-600 mb-1">'+esc(ex.q||'')+'</div>'
        +'<input id="'+expId+'" value="'+esc(oldExp)+'" placeholder="'+esc(ex.ph||'')+'" class="w-full rounded-lg border border-indigo-200 px-3 py-2 text-sm outline-none focus:border-indigo-400"></div>';
      h+='</div></details>';
      box.innerHTML=h;window.__intakeAnswers=prev;
@@ -457,18 +458,21 @@ def _hero_demo_card() -> str:
      <input type=hidden id="d_confirmed"><input type=hidden id="d_vision">
      <!-- 업종칸은 항상 빈칸 시작(하드코딩 금지) — 값이 채워지는 유일한 경로는
           fillDemo(): 순위진단 위젯에 사용자가 직접 입력한 업종 복사(그것도 빈칸일 때만) -->
-     <input id="d_ind" placeholder="업종/상품 (예: 꽃집, 헬스장, 캠핑 폴딩박스...)" class="{inp}"
-       onblur="window.demoQs&&demoQs()"
-       oninput="clearTimeout(window.__dqt);window.__dqt=setTimeout(function(){{window.demoQs&&demoQs();}},800)">
+     <!-- 가로·컴팩트(폼 개선): 업종+목적 한 줄(데스크탑) → 세로 스크롤 최소화 -->
+     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      <input id="d_ind" placeholder="업종/상품 (예: 꽃집, 헬스장...)" class="{inp}"
+        onblur="window.demoQs&&demoQs()"
+        oninput="clearTimeout(window.__dqt);window.__dqt=setTimeout(function(){{window.demoQs&&demoQs();}},800)">
+      <select id="d_purpose" class="{inp} bg-white" onchange="window.demoQs&&demoQs()">
+        <option value="">목적 (선택)</option>
+        <option value="방문 유도">매장 방문·예약 유도</option>
+        <option value="판매 전환">구매·판매 전환</option>
+        <option value="신상품 홍보">신상품·신메뉴 홍보</option>
+        <option value="이벤트·할인">이벤트·할인 알림</option>
+        <option value="신뢰·후기">신뢰·후기 쌓기</option>
+      </select>
+     </div>
      <div id="d_questions"></div>
-     <select id="d_purpose" class="{inp} bg-white" onchange="window.demoQs&&demoQs()">
-       <option value="">무슨 목적으로 만들까요? (선택)</option>
-       <option value="방문 유도">매장 방문·예약 유도</option>
-       <option value="판매 전환">구매·판매 전환</option>
-       <option value="신상품 홍보">신상품·신메뉴 홍보</option>
-       <option value="이벤트·할인">이벤트·할인 알림</option>
-       <option value="신뢰·후기">신뢰·후기 쌓기</option>
-     </select>
      <div class="flex gap-2 text-sm">
        <label class="flex-1"><input type="radio" name="d_biz" value="local" checked class="peer hidden"><div class="text-center py-2.5 rounded-xl bg-white border border-slate-200 text-slate-500 peer-checked:border-indigo-500 peer-checked:bg-indigo-50 peer-checked:text-indigo-700 font-bold cursor-pointer transition">동네 매장</div></label>
        <label class="flex-1"><input type="radio" name="d_biz" value="seller" class="peer hidden"><div class="text-center py-2.5 rounded-xl bg-white border border-slate-200 text-slate-500 peer-checked:border-indigo-500 peer-checked:bg-indigo-50 peer-checked:text-indigo-700 font-bold cursor-pointer transition">온라인 셀러</div></label>
