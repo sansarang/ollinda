@@ -30,6 +30,12 @@ from app.media import tts as tts_lib
 from app.media import ai_image
 from app import seo
 
+try:                                    # HEIC(아이폰 기본 포맷) 지원 — 없으면 조용히 통과(V2)
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+except Exception:
+    pass
+
 W, H, FPS = 1080, 1920, 30
 MAX_SCENES = 6           # 씬(=문장) 최대 — TTS 호출/길이 제어
 MAX_AI_FILL = 2          # 사진 부족 시 AI 이미지 생성 최대 장수(비용 제어)
@@ -281,12 +287,14 @@ class ShortVideoGenerator(Generator):
         """영상용 사진 다운스케일 — 대용량 원본(예: 5712×4284)은 zoompan/scale이 느려
         백그라운드 스레드(CPU 적음)에서 ffmpeg 타임아웃 → 씬 실패 → 레거시(짧고 자막없음) 유발.
         긴 변 1600px로 줄여 처리 속도↑ (원본은 payload/블로그용으로 그대로 유지)."""
-        from PIL import Image as _I
+        from PIL import Image as _I, ImageOps as _IO
         out = []
         for p in imgs:
             try:
                 im = _I.open(p)
-                if max(im.size) <= 1600:
+                orient = (im.getexif() or {}).get(0x0112, 1)   # EXIF orientation 태그
+                im = _IO.exif_transpose(im)                    # 세로 사진 눕는 문제 방지(V1)
+                if max(im.size) <= 1600 and orient in (1, 0):  # 회전 불필요 + 소형 → 원본 유지
                     out.append(p)
                     continue
                 im = im.convert("RGB")
@@ -458,7 +466,8 @@ class ShortVideoGenerator(Generator):
                   f"[a]scale={tw}:{th}:force_original_aspect_ratio=decrease[fg];"
                   f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v]")
             cmd = ["ffmpeg", "-y", "-i", video, "-filter_complex", fc, "-map", "[v]", "-map", "0:a?",
-                   "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", "-pix_fmt", "yuv420p", "-c:a", "aac", dst]
+                   "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", "-pix_fmt", "yuv420p",
+                   "-c:a", "aac", "-movflags", "+faststart", dst]
             r = subprocess.run(cmd, capture_output=True, timeout=180)
             if r.returncode == 0 and os.path.exists(dst):
                 out[key] = dst
@@ -703,11 +712,12 @@ class ShortVideoGenerator(Generator):
                   "[m]loudnorm=I=-14:TP=-1.5:LRA=11[a]")
             cmd = ["ffmpeg", "-y", "-i", video, "-i", full_wav, "-stream_loop", "-1", "-i", bgm,
                    "-filter_complex", fc, "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-ar", "44100",
-                   "-shortest", out]
+                   "-movflags", "+faststart", "-shortest", out]
         else:
             cmd = ["ffmpeg", "-y", "-i", video, "-i", full_wav,
                    "-filter_complex", "[1:a]loudnorm=I=-14:TP=-1.5:LRA=11[a]",
-                   "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-ar", "44100", "-shortest", out]
+                   "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-ar", "44100",
+                   "-movflags", "+faststart", "-shortest", out]
         r = subprocess.run(cmd, capture_output=True, timeout=180)
         if r.returncode == 0 and os.path.exists(out):
             return out
@@ -769,8 +779,22 @@ class ShortVideoGenerator(Generator):
                          f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1[v{i}]")
             labels += f"[v{i}]"
         parts.append(f"{labels}concat=n={len(imgs)}:v=1:a=0[cat]")
-        cmd += ["-filter_complex", ";".join(parts), "-map", "[cat]",
-                "-r", str(FPS), "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", out]
+        # 폴백 영상에도 자막 굽기 — 이스케이프 이슈 회피 위해 textfile 사용(V3)
+        vf_out, sub_file = "[cat]", None
+        sub = (subtitle or "").strip().replace("\n", " ")
+        if sub:
+            sub_file = os.path.join(out_dir, f"sub_{uuid.uuid4().hex}.txt")
+            with open(sub_file, "w", encoding="utf-8") as _f:
+                _f.write(sub[:120])
+            font = _font_path()
+            fontclause = f":fontfile='{font}'" if font else ""
+            parts.append(
+                f"[cat]drawtext=textfile='{sub_file}'{fontclause}:fontcolor=white:fontsize=54:"
+                f"box=1:boxcolor=black@0.5:boxborderw=20:x=(w-text_w)/2:y=h-text_h-180[out]")
+            vf_out = "[out]"
+        cmd += ["-filter_complex", ";".join(parts), "-map", vf_out,
+                "-r", str(FPS), "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast",
+                "-threads", "1", "-movflags", "+faststart", out]
         try:
             r = subprocess.run(cmd, capture_output=True, timeout=180)
             if r.returncode != 0 or not os.path.exists(out):
@@ -778,6 +802,12 @@ class ShortVideoGenerator(Generator):
             return out, f"{len(imgs)}장 슬라이드쇼(폴백)"
         except Exception as e:
             return None, f"영상 조립 오류: {str(e)[:100]}"
+        finally:
+            if sub_file and os.path.exists(sub_file):
+                try:
+                    os.remove(sub_file)
+                except Exception:
+                    pass
 
 
 def _parse_scenes(block: str) -> list[dict]:

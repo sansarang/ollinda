@@ -7,6 +7,12 @@ from __future__ import annotations
 
 import os
 
+try:                                    # HEIC(아이폰 기본 포맷) 지원 — 없으면 조용히 통과(V2)
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+except Exception:
+    pass
+
 # 음식/먹거리 업종 키워드 — 채도·따뜻함 강조(먹음직)
 _FOOD = ("음식", "식당", "맛집", "카페", "베이커리", "빵", "고기", "정육", "분식", "한식",
          "일식", "중식", "양식", "치킨", "피자", "디저트", "떡", "반찬", "포차", "술집", "횟집", "국밥")
@@ -59,6 +65,7 @@ def auto_enhance(src: str, out: str | None = None, industry: str = "", meta: dic
         return src
     try:
         im = Image.open(src)
+        im = ImageOps.exif_transpose(im)      # 세로로 찍은 폰 사진이 눕는 문제 방지(V1)
         if im.mode not in ("RGB", "L"):
             im = im.convert("RGB")
         elif im.mode == "L":
