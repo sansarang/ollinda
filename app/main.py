@@ -499,6 +499,50 @@ def demo_zip(asset_id: str, request: Request):
     return FileResponse(out, media_type="application/zip", filename="올린다_무료체험.zip")
 
 
+# ══ 스마트 입력 엔진(콘텐츠생성 개선 PHASE 1~3) — 무료·유료 공용 ══
+@app.get("/api/intake/questions")
+def intake_questions(industry: str = "", biz_type: str = "local", purpose: str = ""):
+    """업종·목적 맞춤 스마트 질문 3~4개 + 경험 유도 1개(전부 선택 입력)."""
+    from app.services import smart_intake
+    if not (industry or "").strip():
+        return JSONResponse({"questions": [], "experience": smart_intake.EXPERIENCE_QUESTION,
+                             "hint": "업종을 입력하면 맞춤 질문을 보여드려요"})
+    return JSONResponse(smart_intake.questions_for(industry.strip(), biz_type, purpose))
+
+
+@app.post("/api/intake/guess")
+async def intake_guess(request: Request, industry: str = Form(""),
+                       photos: list[UploadFile] = File(None)):
+    """사진 → AI 선추측(확인용 한 줄) + 분석 전문(PHASE 2). 무료·유료 공용.
+    분석 전문은 hidden으로 되돌려받아 생성 시 vision 재호출을 생략(비용 1콜 유지)."""
+    from app import ratelimit
+    ip = (request.headers.get("cf-connecting-ip")
+          or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+          or (request.client.host if request.client else "") or "unknown")
+    if not ratelimit.allow("intake:" + ip, 6, 30):     # 비전 콜 남용 방지
+        return JSONResponse({"guess": "", "analysis": ""})
+    files = await _read_image_uploads(photos)
+    if not files:
+        return JSONResponse({"guess": "", "analysis": ""})
+    import tempfile
+    import uuid as _uuid
+    from app.services import smart_intake
+    tmp = os.path.join(tempfile.gettempdir(), f"intake_{_uuid.uuid4().hex}")
+    os.makedirs(tmp, exist_ok=True)
+    paths = []
+    try:
+        for i, (data, fname) in enumerate(files[:6]):
+            ext = (os.path.splitext(fname or "")[1] or ".jpg")[:5]
+            p = os.path.join(tmp, f"g{i}{ext}")
+            with open(p, "wb") as f:
+                f.write(data)
+            paths.append(p)
+        return JSONResponse(smart_intake.guess_from_photos(paths, industry.strip()))
+    finally:
+        import shutil as _sh
+        _sh.rmtree(tmp, ignore_errors=True)
+
+
 @app.get("/api/place/search")
 def place_search(q: str = ""):
     """가게명 검색 → 정보 자동입력 후보(네이버 지역검색). 키 없으면 빈 목록."""
