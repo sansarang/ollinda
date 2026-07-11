@@ -127,16 +127,72 @@ const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.targ
 document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
 const cu=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){const el=e.target,t=+el.dataset.count;let n=0,st=Math.max(1,t/40);const id=setInterval(()=>{n+=st;if(n>=t){n=t;clearInterval(id)}el.textContent=Math.floor(n)},25);cu.unobserve(el)}}),{threshold:.5});
 document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
-// 셀프 체험 위젯
-(function(){const df=document.getElementById('demoForm');if(!df)return;
+// 셀프 체험 위젯 + 스마트 입력(무료·유료 공용 헬퍼)
+(function(){
  const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+ // AI 선추측 확인(스마트 입력 PHASE 2) — 무료·유료 공용(대시보드에서도 사용)
+ window.intakeConfirmUI=function(box,guess,analysis,cid,vid){
+   var c=document.getElementById(cid),v=document.getElementById(vid);
+   if(v)v.value=analysis||'';
+   if(!guess){box.innerHTML='';if(c)c.value='';return;}
+   box.innerHTML='<div class="bg-[#EEF2FF] border border-indigo-100 rounded-xl px-3 py-2.5 text-sm">'
+     +'<div class="text-slate-700">이 사진, <b>'+esc(guess)+'</b>(으)로 보여요. 맞나요?</div>'
+     +'<div class="flex gap-2 mt-2"><button type="button" data-g="ok" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold">맞아요</button>'
+     +'<button type="button" data-g="fix" class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 text-xs font-bold">수정할게요</button></div></div>';
+   box.querySelector('[data-g=ok]').onclick=function(){if(c)c.value=guess;
+     box.innerHTML='<div class="text-xs text-indigo-600 font-bold py-1">확인됨: '+esc(guess)+'</div>';};
+   box.querySelector('[data-g=fix]').onclick=function(){
+     box.innerHTML='<div class="flex gap-2"><input id="'+cid+'_edit" value="'+esc(guess)+'" class="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400">'
+       +'<button type="button" class="px-3 rounded-xl bg-indigo-600 text-white text-xs font-bold">저장</button></div>';
+     box.querySelector('button').onclick=function(){var nv=document.getElementById(cid+'_edit').value.trim();
+       if(c)c.value=nv;box.innerHTML=nv?('<div class="text-xs text-indigo-600 font-bold py-1">확인됨: '+esc(nv)+'</div>'):'';};};
+ };
+ // 업종별 스마트 질문 렌더(PHASE 3) — 무료·유료 공용. 답은 window.__intakeAnswers에 수집.
+ window.__intakeAnswers={};
+ window.intakeQuestionsUI=async function(box,industry,bizType,purpose,expId){
+   if(!box)return;
+   if(!(industry||'').trim()){box.innerHTML='';return;}
+   try{
+     var r=await fetch('/api/intake/questions?industry='+encodeURIComponent(industry)+'&biz_type='+(bizType||'local')+'&purpose='+encodeURIComponent(purpose||''));
+     var d=await r.json();var qs=d.questions||[];if(!qs.length){box.innerHTML='';return;}
+     var h='<details open class="bg-slate-50 border border-slate-200 rounded-xl p-3"><summary class="text-xs font-bold text-slate-600 cursor-pointer select-none">'
+       +'더 좋은 글 만들기 <span class="text-slate-400 font-normal">('+esc(d.hint||'선택')+')</span></summary><div class="mt-2 space-y-2">';
+     qs.forEach(function(q,i){
+       h+='<div><div class="text-xs font-semibold text-slate-600 mb-1">'+esc(q.q)+'</div>';
+       if(q.type==='choice'){h+='<div class="flex flex-wrap gap-1.5">'+(q.options||[]).map(function(o){
+         return '<button type="button" data-iq="'+esc(q.id)+'" data-v="'+esc(o)+'" class="iq-opt px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 text-xs font-semibold">'+esc(o)+'</button>';}).join('')+'</div>';}
+       else{h+='<input data-iqt="'+esc(q.id)+'" placeholder="'+esc(q.ph||'')+'" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400">';}
+       h+='</div>';});
+     var ex=d.experience||{};
+     h+='<div><div class="text-xs font-semibold text-indigo-600 mb-1">'+esc(ex.q||'')+'</div>'
+       +'<input id="'+expId+'" placeholder="'+esc(ex.ph||'')+'" class="w-full rounded-lg border border-indigo-200 px-3 py-2 text-sm outline-none focus:border-indigo-400"></div>';
+     h+='</div></details>';
+     box.innerHTML=h;window.__intakeAnswers={};
+     box.querySelectorAll('.iq-opt').forEach(function(b){b.onclick=function(){
+       var k=b.dataset.iq;var on=b.classList.toggle('ring-2');b.classList.toggle('ring-indigo-400');b.classList.toggle('bg-indigo-50');
+       var cur=(window.__intakeAnswers[k]||'').split(', ').filter(Boolean);
+       if(on)cur.push(b.dataset.v);else cur=cur.filter(function(x){return x!==b.dataset.v;});
+       window.__intakeAnswers[k]=cur.join(', ');};});
+     box.querySelectorAll('[data-iqt]').forEach(function(inp){inp.oninput=function(){window.__intakeAnswers[inp.dataset.iqt]=inp.value;};});
+   }catch(e){box.innerHTML='';}
+ };
+ const df=document.getElementById('demoForm');if(!df)return;
  const pf=document.getElementById('d_photo');
+ async function demoGuess(){var files=pf&&pf.files;if(!files||!files.length)return;
+   var box=document.getElementById('d_guessbox');if(!box)return;
+   box.innerHTML='<div class="text-xs text-slate-400 py-1">사진 확인 중…</div>';
+   var fd=new FormData();fd.append('industry',(document.getElementById('d_ind')||{}).value||'');
+   Array.from(files).slice(0,6).forEach(function(f){fd.append('photos',f);});
+   try{var r=await fetch('/api/intake/guess',{method:'POST',body:fd});var d=await r.json();
+     window.intakeConfirmUI(box,d.guess||'',d.analysis||'','d_confirmed','d_vision');
+   }catch(e){box.innerHTML='';}}
  if(pf)pf.addEventListener('change',()=>{var files=pf.files||[];
    document.getElementById('d_photoname').textContent=files.length?('✓ '+files.length+'장 선택'):'';
    var pv=document.getElementById('d_preview');pv.innerHTML='';
    if(files.length){pv.classList.remove('hidden');
      Array.from(files).slice(0,8).forEach(function(f){var im=document.createElement('img');im.src=URL.createObjectURL(f);im.className='h-24 w-24 object-cover rounded-lg flex-shrink-0';pv.appendChild(im);});
-   }else{pv.classList.add('hidden');}});
+   }else{pv.classList.add('hidden');}
+   demoGuess();});
  df.addEventListener('submit',async e=>{e.preventDefault();
   const box=document.getElementById('demoResult');
   const ind=document.getElementById('d_ind').value.trim();
@@ -152,6 +208,10 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
   fd.append('purpose',(document.getElementById('d_purpose')||{}).value||'');
   fd.append('target_kw',(document.getElementById('d_target_kw')||{}).value||'');
   fd.append('target_vol',(document.getElementById('d_target_vol')||{}).value||'');
+  fd.append('confirmed',(document.getElementById('d_confirmed')||{}).value||'');
+  fd.append('vision_analysis',(document.getElementById('d_vision')||{}).value||'');
+  fd.append('answers',JSON.stringify(window.__intakeAnswers||{}));
+  fd.append('experience',(document.getElementById('d_exp')||{}).value||'');
   if(pf&&pf.files)Array.from(pf.files).slice(0,10).forEach(function(f){fd.append('photos',f);});
   try{const r=await fetch('/api/demo',{method:'POST',body:fd});const d=await r.json();
    clearInterval(_pg);var _b=document.getElementById('pgBar');if(_b)_b.style.width='100%';
@@ -290,7 +350,11 @@ def _hero_demo_card() -> str:
        <span class="block text-slate-400 text-xs mt-0.5">가게·상품 사진 (여러 장 가능 · 선택)</span>
        <input id="d_photo" type="file" accept="image/*" multiple class="hidden"><span id="d_photoname" class="block text-indigo-600 text-xs mt-1 font-semibold"></span></label>
      <div id="d_preview" class="hidden flex gap-2 overflow-x-auto pb-1"></div>
-     <input id="d_ind" placeholder="업종/상품 (예: 꽃집, 헬스장, 캠핑 폴딩박스...)" class="{inp}">
+     <div id="d_guessbox"></div>
+     <input type=hidden id="d_confirmed"><input type=hidden id="d_vision">
+     <input id="d_ind" placeholder="업종/상품 (예: 꽃집, 헬스장, 캠핑 폴딩박스...)" class="{inp}"
+       onblur="window.intakeQuestionsUI&&intakeQuestionsUI(document.getElementById('d_questions'),this.value,(document.querySelector('input[name=d_biz]:checked')||{{}}).value,(document.getElementById('d_purpose')||{{}}).value,'d_exp')">
+     <div id="d_questions"></div>
      <select id="d_purpose" class="{inp} bg-white">
        <option value="">무슨 목적으로 만들까요? (선택)</option>
        <option value="방문 유도">매장 방문·예약 유도</option>
