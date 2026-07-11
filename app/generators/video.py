@@ -41,6 +41,7 @@ import threading as _threading
 RENDER_SEM = _threading.BoundedSemaphore(int(os.environ.get("SHOPCAST_RENDER_CONCURRENCY", "2")))
 
 W, H, FPS = 1080, 1920, 30
+XFADE = 0.25             # 씬 전환 크로스페이드(초) — 검은 플래시 제거(영상강화 PHASE 4)
 MAX_SCENES = 6           # 씬(=문장) 최대 — TTS 호출/길이 제어
 MAX_AI_FILL = 2          # 사진 부족 시 AI 이미지 생성 최대 장수(비용 제어)
 MIN_SCENE, MAX_SCENE = 2.2, 9.0   # 씬 길이 클램프(초) — 음성이 잘리지 않게 상한 넉넉히
@@ -77,6 +78,24 @@ def _pil_font(size: int, weight: str = "Bold"):
         return ImageFont.truetype(fp, size) if fp else ImageFont.load_default()
     except Exception:
         return ImageFont.load_default()
+
+
+def _run_ff(cmd: list, timeout: int, tag: str = "") -> bool:
+    """ffmpeg 실행 + 실패 시 stderr 로깅(소실 방지, 영상강화 PHASE 6). 성공 True."""
+    import logging
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        logging.warning("[video] ffmpeg %s 타임아웃(%ds)", tag, timeout)
+        return False
+    except Exception as e:
+        logging.warning("[video] ffmpeg %s 예외: %s", tag, e)
+        return False
+    if r.returncode != 0:
+        logging.warning("[video] ffmpeg %s 실패 rc=%s: %s", tag, r.returncode,
+                        r.stderr.decode("utf-8", "ignore")[-300:])
+        return False
+    return True
 
 
 def _probe_dur(path: str) -> float:
@@ -386,8 +405,9 @@ class ShortVideoGenerator(Generator):
                 return None, "사용 가능한 이미지 없음", 0, None
             vclips: list[str] = []     # 영상(무음) 클립
             awavs: list[str] = []      # 씬별 오디오(PCM, 정확히 dur초)
-            ass_scenes = []            # (start, dur, text) — 본문 자막 타이밍
+            ass_scenes = []            # (start, dur, text, word_times) — 본문 자막 타이밍
             t = 0.0
+            dropped = 0                # 씬 탈락 카운트(영상강화 PHASE 6 — 품질 진단)
             # 0) 첫 3초 훅(영상강화 PHASE 1) — 실사진 배경 + 큰 문제제기 텍스트.
             #    그라데이션 카드 대신 실사진(오리지널 신호) + 첫 프레임부터 즉시 노출(페이드인 없음).
             hook_png = os.path.join(work, "hook.png")
@@ -405,10 +425,11 @@ class ShortVideoGenerator(Generator):
             ht = _probe_dur(hook_tts) if hook_tts else 0
             hdur = self._clamp((ht + 0.5) if ht > 0.3 else (len(hook or "") * 0.14 + 1.4))
             v = self._scene_card_video(hook_png, hdur, os.path.join(work, "v_hook.mp4"),
-                                       punch=True, fade_in=False)
+                                       punch=True, fade_in=False, tail=XFADE)
             aw = self._audio_segment(hook_tts, hdur, os.path.join(work, "a_hook.wav"))
+            durs: list[float] = []                     # xfade 오프셋 계산용(체감 씬 길이)
             if v and aw:
-                vclips.append(v); awavs.append(aw); t += hdur
+                vclips.append(v); awavs.append(aw); durs.append(hdur); t += hdur
             # 1) 본문 씬들 — 자막은 ASS 카라오케로 별도(여기선 영상+켄번스+색보정만)
             #    ElevenLabs with-timestamps 실측 단어 타이밍(있으면) → 카라오케 싱크 정확(영상강화 PHASE 2)
             for i, text in enumerate(sentences):
@@ -417,11 +438,13 @@ class ShortVideoGenerator(Generator):
                 td = _probe_dur(seg_tts) if seg_tts else 0
                 # 음성이 있으면 씬 길이 = 음성 길이(+여유). 9초로 자르지 않음 → 긴 문장 나레이션 끊김·자막불일치 방지
                 sdur = min(15.0, max(MIN_SCENE, td + 0.4)) if td > 0.3 else self._clamp(len(text) * 0.13 + 1.2)
-                v = self._scene_video(img, sdur, i, os.path.join(work, f"v{i}.mp4"))
+                v = self._scene_video(img, sdur, i, os.path.join(work, f"v{i}.mp4"), tail=XFADE)
                 aw = self._audio_segment(seg_tts, sdur, os.path.join(work, f"a{i}.wav"))
                 if v and aw:
                     ass_scenes.append((t, sdur, text, word_times))
-                    vclips.append(v); awavs.append(aw); t += sdur
+                    vclips.append(v); awavs.append(aw); durs.append(sdur); t += sdur
+                else:
+                    dropped += 1
             # 2) 아웃트로 CTA 카드(무음) — 셀러는 판매 QR(추적링크) 삽입 → 스캔 시 성과 집계
             qr_url = ""
             if strat.key == "seller":
@@ -435,25 +458,35 @@ class ShortVideoGenerator(Generator):
                     except Exception:
                         qr_url = dest
             outro_png = os.path.join(work, "outro.png")
-            self._card_png(outro_png, big=outro_cta, small=tenant.name,
-                           accent=strat.key, kind="outro", qr_url=qr_url)
+            # 루프 연결(영상강화 PHASE 4): 아웃트로도 훅과 같은 실사진 배경 → 끝→처음이 자연스럽게
+            # 이어져 반복재생 유도. 셀러 QR은 가독성 위해 기존 카드 유지.
+            if real_bg and not qr_url:
+                ok_outro = self._hook_photo_png(outro_png, big=outro_cta, small=tenant.name,
+                                                img_path=real_bg, accent=strat.key)
+                if not ok_outro:
+                    self._card_png(outro_png, big=outro_cta, small=tenant.name,
+                                   accent=strat.key, kind="outro", qr_url=qr_url)
+            else:
+                self._card_png(outro_png, big=outro_cta, small=tenant.name,
+                               accent=strat.key, kind="outro", qr_url=qr_url)
             odur = 2.8
-            v = self._scene_card_video(outro_png, odur, os.path.join(work, "v_outro.mp4"))
+            v = self._scene_card_video(outro_png, odur, os.path.join(work, "v_outro.mp4"),
+                                       fade_in=False, fade_out=False)   # 끝 페이드 없음(루프 연결)
             aw = self._audio_segment(None, odur, os.path.join(work, "a_outro.wav"))
             if v and aw:
-                vclips.append(v); awavs.append(aw); t += odur
+                vclips.append(v); awavs.append(aw); durs.append(odur); t += odur
             if not vclips:
                 return None, "씬 클립 생성 실패", 0, None
             total = t
-            # 3) 영상 concat(copy) + 오디오 concat(PCM copy — 드리프트 없음)
-            video_only = self._concat(vclips, os.path.join(work, "video.mp4"))
+            # 3) 영상 xfade 크로스페이드 연결(검은 플래시 제거, PHASE 4) + 오디오 concat(PCM — 드리프트 없음)
+            #    각 클립의 tail(XFADE초)이 전환에 소모돼 총 길이 = sum(durs) = 오디오 길이 → 싱크 유지
+            video_only = self._concat_xfade(vclips, durs, os.path.join(work, "video.mp4"))
             full_wav = self._concat(awavs, os.path.join(work, "audio.wav"))
             if not (video_only and full_wav):
                 return None, "concat 실패", 0, None
-            # 4) ASS 단어자막 + 로고 워터마크 + 진행바 오버레이
+            # 4) ASS 단어자막 + 진행바 오버레이 — 로고 워터마크 제거(워터마크=노출 감소, PHASE 4)
             ass = _build_ass(ass_scenes, kws, strat.key, os.path.join(work, "cap.ass"))
-            logo = _brand_logo_png(os.path.join(work, "logo.png"), strat.key)
-            fx = self._post_overlay(video_only, ass, logo, total, strat.key)
+            fx = self._post_overlay(video_only, ass, total, strat.key)
             # 5) 영상+연속오디오 mux (+BGM: 업종 분위기 선택) — 길이 동일 → 정확히 싱크
             final = self._mux(fx, full_wav, out_dir, mood=bgm_lib.mood_for(tenant.industry))
             # 안전장치: 최종본이 작업폴더 안이면 out_dir로 복사(rmtree 삭제 방지 → 재생 404 원천 차단)
@@ -474,9 +507,11 @@ class ShortVideoGenerator(Generator):
                 shutil.rmtree(work, ignore_errors=True)   # 씬 작업폴더(wav·중간mp4·ass) 정리 — 디스크 누수 차단
             except Exception:
                 pass
-            note = (f"씬 {len(sentences)}개 · 단어자막(ASS) · 켄번스+색보정 · 로고/진행바 · 브랜드테마 · "
+            note = (f"씬 {len(sentences)}개 · 실사진 훅 · 단어자막(ASS{'·실측싱크' if any(len(s) > 3 and s[3] for s in ass_scenes) else ''}) · "
+                    f"xfade 전환 · 켄번스+색보정 · 진행바(워터마크 없음) · "
                     f"{'TTS싱크' if tts_lib.configured() else '무음'}"
-                    f"{' · AI이미지' if len(visuals) > len(imgs) else ''}")
+                    f"{' · AI이미지' if len(visuals) > len(imgs) else ''}"
+                    f"{f' · 씬탈락 {dropped}' if dropped else ''}")
             return final, note, round(total), cover
         except Exception as e:
             try:
@@ -738,40 +773,84 @@ class ShortVideoGenerator(Generator):
             return ""
         return f",fade=t=in:st=0:d=0.22,fade=t=out:st={max(0.0, dur - 0.25):.2f}:d=0.22"
 
-    def _scene_video(self, img, dur, idx, out) -> str | None:
-        """이미지 → 켄번스 + 색보정(통일감) + 페이드 전환, 정확히 dur초 무음 영상. 자막은 ASS로 별도."""
-        frames = max(1, int(dur * FPS))
+    def _scene_video(self, img, dur, idx, out, tail: float = 0.0) -> str | None:
+        """이미지 → 켄번스 + 색보정(통일감), 정확히 dur(+tail)초 무음 영상. 자막은 ASS로 별도.
+        tail>0 = xfade 전환용 여유 꼬리(전환에 소모돼 체감 길이는 dur) — 페이드 없음(검은 플래시 제거)."""
+        total_t = dur + max(0.0, tail)
+        frames = max(1, int(total_t * FPS))
         zdir = "min(zoom+0.0012,1.12)" if idx % 2 == 0 else "if(eq(on,1),1.12,max(zoom-0.0012,1.0))"
         vf = (f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,"
               f"eq=contrast=1.06:saturation=1.12:brightness=0.02,"
               f"zoompan=z='{zdir}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-              f"d={frames}:s={W}x{H}:fps={FPS}" + self._fade(dur))
-        cmd = ["ffmpeg", "-y", "-loop", "1", "-t", f"{dur:.2f}", "-i", img, "-vf", vf,
-               "-map", "0:v", "-t", f"{dur:.2f}", "-r", str(FPS), "-pix_fmt", "yuv420p",
+              f"d={frames}:s={W}x{H}:fps={FPS}" + ("" if tail > 0 else self._fade(dur)))
+        cmd = ["ffmpeg", "-y", "-loop", "1", "-t", f"{total_t:.2f}", "-i", img, "-vf", vf,
+               "-map", "0:v", "-t", f"{total_t:.2f}", "-r", str(FPS), "-pix_fmt", "yuv420p",
                "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", "-an", out]
-        r = subprocess.run(cmd, capture_output=True, timeout=120)
-        return out if (r.returncode == 0 and os.path.exists(out)) else None
+        r = _run_ff(cmd, 120, f"scene{idx}")
+        return out if (r and os.path.exists(out)) else None
 
-    def _scene_card_video(self, png, dur, out, punch=False, fade_in=True) -> str | None:
-        """카드(훅/아웃트로) → 정확히 dur초 무음 영상. punch=True면 천천히 줌인.
-        fade_in=False = 첫 프레임부터 즉시 노출(첫 3초 훅 — 로딩·인트로 없이 바로 본론)."""
-        frames = max(1, int(dur * FPS))
+    def _scene_card_video(self, png, dur, out, punch=False, fade_in=True, tail: float = 0.0,
+                          fade_out=True) -> str | None:
+        """카드(훅/아웃트로) → 정확히 dur(+tail)초 무음 영상. punch=True면 천천히 줌인.
+        fade_in=False = 첫 프레임부터 즉시 노출(첫 3초 훅). tail>0 = xfade 여유 꼬리(페이드 없음).
+        fade_out=False = 끝 페이드 없음(마지막 씬 루프 연결)."""
+        total_t = dur + max(0.0, tail)
+        frames = max(1, int(total_t * FPS))
         if punch:
             vf = (f"scale={W}:{H},setsar=1,zoompan=z='min(zoom+0.0018,1.10)':"
                   f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s={W}x{H}:fps={FPS}")
         else:
             vf = f"scale={W}:{H},setsar=1,fps={FPS}"
-        if fade_in:
+        if tail > 0 or not (fade_in or fade_out):
+            pass                                       # xfade/루프 모드: 페이드 없음
+        elif fade_in and fade_out:
             vf += self._fade(dur)
-        elif dur >= 0.9:                              # 훅: 페이드아웃만(다음 씬 전환용), 인은 즉시
+        elif fade_out and dur >= 0.9:                 # 훅: 페이드아웃만(다음 씬 전환용), 인은 즉시
             vf += f",fade=t=out:st={max(0.0, dur - 0.25):.2f}:d=0.22"
-        cmd = ["ffmpeg", "-y", "-loop", "1", "-t", f"{dur:.2f}", "-i", png, "-vf", vf,
-               "-t", f"{dur:.2f}", "-r", str(FPS), "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", "-an", out]
-        r = subprocess.run(cmd, capture_output=True, timeout=120)
-        return out if (r.returncode == 0 and os.path.exists(out)) else None
+        cmd = ["ffmpeg", "-y", "-loop", "1", "-t", f"{total_t:.2f}", "-i", png, "-vf", vf,
+               "-t", f"{total_t:.2f}", "-r", str(FPS), "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", "-an", out]
+        r = _run_ff(cmd, 120, "card")
+        return out if (r and os.path.exists(out)) else None
 
-    def _post_overlay(self, video, ass, logo, total, theme_key) -> str:
-        """ASS 단어자막 + 로고 워터마크 + 상단 진행바 합성. 단계적 폴백(자막 우선 보존)."""
+    def _concat_xfade(self, clips, durs, out) -> str | None:
+        """씬 클립들을 xfade 크로스페이드로 연결(검은 플래시 제거, 영상강화 PHASE 4).
+        클립 k(마지막 제외)는 durs[k]+XFADE 길이(tail) → 전환이 tail을 소모해
+        출력 총 길이 = sum(durs) = 오디오 길이(싱크 보존). 실패 시 tail 트림 후 concat 폴백."""
+        if not clips:
+            return None
+        if len(clips) == 1:
+            return self._concat(clips, out)
+        if len(durs) == len(clips):
+            cmd = ["ffmpeg", "-y"]
+            for c in clips:
+                cmd += ["-i", c]
+            fc, prev, off = "", "[0:v]", 0.0
+            for k in range(1, len(clips)):
+                off += durs[k - 1]
+                lab = f"[x{k}]" if k < len(clips) - 1 else "[v]"
+                fc += f"{prev}[{k}:v]xfade=transition=fade:duration={XFADE}:offset={off:.2f}{lab};"
+                prev = lab
+            cmd += ["-filter_complex", fc.rstrip(";"), "-map", "[v]", "-r", str(FPS),
+                    "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast",
+                    "-threads", "1", "-an", out]
+            if _run_ff(cmd, 420, "xfade") and os.path.exists(out):
+                return out
+        # 폴백: tail을 잘라 정확 길이로 재인코딩 → copy concat(싱크 보존, 전환은 컷)
+        trimmed = []
+        for k, c in enumerate(clips):
+            if k < len(clips) - 1 and len(durs) == len(clips):
+                tp = c.replace(".mp4", "_trim.mp4")
+                if _run_ff(["ffmpeg", "-y", "-i", c, "-t", f"{durs[k]:.2f}", "-r", str(FPS),
+                            "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast",
+                            "-threads", "1", "-an", tp], 120, "trim") and os.path.exists(tp):
+                    trimmed.append(tp)
+                    continue
+            trimmed.append(c)
+        return self._concat(trimmed, out)
+
+    def _post_overlay(self, video, ass, total, theme_key) -> str:
+        """ASS 단어자막 + 상단 진행바 합성 — 최종 화질 패스(veryfast -crf 20, PHASE 4).
+        로고 워터마크는 넣지 않는다(워터마크 = 교차게시 노출 감소). 단계적 폴백(자막 우선 보존)."""
         rgb = _theme_rgb(theme_key)
         hexcol = "0x%02X%02X%02X" % rgb
         out = os.path.join(os.path.dirname(video), "video_fx.mp4")
@@ -780,16 +859,14 @@ class ShortVideoGenerator(Generator):
         subs = f"subtitles=filename='{assp}':fontsdir='{fontsdir}'"
         bar = f"drawbox=x=0:y=0:w='iw*t/{total:.2f}':h=12:color={hexcol}@0.92:t=fill"
         attempts = [
-            f"[0:v]{subs},{bar}[bv];[bv][1:v]overlay=W-w-26:28[v]",   # 자막+진행바+로고
-            f"[0:v]{subs}[bv];[bv][1:v]overlay=W-w-26:28[v]",         # 자막+로고
+            f"{subs},{bar}",     # 자막+진행바
+            f"{subs}",           # 자막만
         ]
-        for fc in attempts:
-            # 로고는 -loop 1 로 전 구간 유지. 길이는 -t {total}로 정확히 고정(-shortest 금지: 무한 로고와 충돌해 잘림)
-            cmd = ["ffmpeg", "-y", "-i", video, "-loop", "1", "-i", logo,
-                   "-filter_complex", fc, "-map", "[v]", "-t", f"{total:.2f}", "-r", str(FPS),
-                   "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", out]
-            r = subprocess.run(cmd, capture_output=True, timeout=240)
-            if r.returncode == 0 and os.path.exists(out) and _probe_dur(out) > total * 0.8:
+        for vf in attempts:
+            cmd = ["ffmpeg", "-y", "-i", video, "-vf", vf, "-t", f"{total:.2f}", "-r", str(FPS),
+                   "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                   "-threads", "1", out]
+            if _run_ff(cmd, 300, "post_overlay") and os.path.exists(out) and _probe_dur(out) > total * 0.8:
                 return out
         return video   # 전부 실패 시 원본(자막 없이) 반환
 
