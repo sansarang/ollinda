@@ -85,7 +85,8 @@ def init_db() -> None:
                   "user_id TEXT, tenant_id TEXT, created_at TEXT, PRIMARY KEY(user_id, tenant_id))")
         # 마이그레이션: users.tenant_id (구독자 ↔ 본인 가게), free_used (무료 생성 횟수)
         for col, ddl in [("tenant_id", "TEXT"), ("free_used", "INTEGER DEFAULT 0"),
-                         ("usage_month", "TEXT"), ("month_used", "INTEGER DEFAULT 0")]:
+                         ("usage_month", "TEXT"), ("month_used", "INTEGER DEFAULT 0"),
+                         ("agency_note", "TEXT")]:   # 대행 고객 담당 메모(성장 PHASE 4)
             try:
                 c.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
             except sqlite3.OperationalError:
@@ -271,6 +272,15 @@ def get_user_by_kakao(kakao_id: str) -> Optional[dict]:
 def set_user_plan(uid: str, plan: str) -> None:
     with _conn() as c:
         c.execute("UPDATE users SET plan=? WHERE id=?", (plan, uid))
+
+
+def set_agency_note(uid: str, note: str) -> None:
+    """대행 고객 담당 메모 저장(성장 PHASE 4)."""
+    with _conn() as c:
+        try:
+            c.execute("UPDATE users SET agency_note=? WHERE id=?", (note, uid))
+        except sqlite3.OperationalError:
+            pass
 
 
 def link_store(user_id: str, tenant_id: str) -> None:
