@@ -224,8 +224,9 @@ def build_intake_note(industry: str, confirmed: str = "", answers: dict | None =
     정보가 있으면 'D.I.A.+ 재료로 최우선 사용' 지시, 없으면 빈 문자열(기존 흐름 그대로 = 정직)."""
     answers = answers or {}
     qmap = {}
-    for q in (_QUESTION_BANK.get(resolve_industry(industry).key) or _GENERIC_QUESTIONS) + [EXPERIENCE_QUESTION]:
-        qmap[q["id"]] = q["q"]
+    for q in ((_QUESTION_BANK.get(resolve_industry(industry).key) or _GENERIC_QUESTIONS)
+              + _SELLER_QUESTIONS + [EXPERIENCE_QUESTION]):
+        qmap.setdefault(q["id"], q["q"])
     lines = []
     if (confirmed or "").strip():
         lines.append(f"- 사진 내용(사장님 확인·수정 완료 = 사실): {confirmed.strip()[:120]}")
@@ -238,12 +239,18 @@ def build_intake_note(industry: str, confirmed: str = "", answers: dict | None =
         lines.append(f"- 사장님 경험담(1차 경험 — 가장 중요한 재료): {exp[:200]}")
     if not lines:
         return ""
+    # 경험담이 있을 때만 '글의 중심 배치' 지시(A2) — 없으면 억지 경험 금지(정직)
+    placement = (
+        "[경험 중심 배치] 사장님 경험담을 글의 중심에 놓아라 — 도입 1~2문장에서 그 이야기로 열거나, "
+        "본문 중간에 따옴표 인용(“…”)으로 하이라이트하고 앞뒤로 이야기를 풀어라. "
+        "요약하거나 흐리지 말고 그 문장의 구체성을 살려라.\n" if exp else "")
     return (
         "\n[✅ 사장님 제공 실제 정보 — D.I.A.+ 경험서술의 재료(최우선 사용)]\n"
         + "\n".join(lines) +
         "\n[반영 규칙] 위 정보는 사장님이 직접 확인·입력한 사실이다. 본문의 구체 수치·경험 문장은 "
         "반드시 여기서 가져와 1인칭으로 생생하게 서술하라(예: '기포 없애려고 물세척만 20분 했습니다'). "
-        "위에 없는 가격·수치·스펙은 지어내지 마라 — 없으면 그 항목은 생략하고 '문의' 유도로.\n")
+        "위에 없는 가격·수치·스펙은 지어내지 마라 — 없으면 그 항목은 생략하고 '문의' 유도로.\n"
+        + placement)
 
 
 def analysis_block(analysis: str, confirmed: str = "") -> str:

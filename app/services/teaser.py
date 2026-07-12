@@ -65,7 +65,10 @@ def run_teaser(industry: str, biz_type: str, note: str,
     # 텍스트 3채널은 즉시(빠름)
     kinds = [ContentKind.CAPTION, ContentKind.BLOG, ContentKind.X_POST]
     pieces = generate_for(t, asset, kinds, images=(paths or None))   # ✍️ 카피
+    _exp = (intake.get("experience") or "").strip()[:200]            # 사장님 경험담(A2 하이라이트)
     for p in pieces:
+        if _exp:
+            p.payload["owner_story"] = _exp
         p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value, p.payload)
         p.payload["brief"] = brief_pub
         db.save_piece(p)

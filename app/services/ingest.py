@@ -96,9 +96,12 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
         pass
     brief_public = {k: v for k, v in brief.items() if not k.startswith("_")}
     pieces = generate_for(tenant, asset, kinds, images=paths)   # ✍️ 카피라이터·🎬 영상감독
+    _exp = (intake.get("experience") or "").strip()[:200]       # 사장님 경험담 — 결과 하이라이트용(A2)
     for p in pieces:
         p.payload.setdefault("image_path", paths[0])
         p.payload.setdefault("biz_type", getattr(tenant, "biz_type", "local") or "local")
+        if _exp and p.kind in (ContentKind.BLOG, ContentKind.CAPTION, ContentKind.X_POST):
+            p.payload["owner_story"] = _exp                     # '내 말이 글이 됐네' 실감 재료
         p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value, p.payload, source=asset.note)
         polish(tenant, p)                                       # 🔍 SEO 편집장(저점수만 리라이트)
         p.payload["reach"] = reach.estimate(p.channel.value, p.kind.value, p.payload)
