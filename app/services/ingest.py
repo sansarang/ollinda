@@ -108,6 +108,11 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
                 "blog", p.payload, name=tenant.name, industry=tenant.industry,
                 region=tenant.region or "", biz_type=getattr(tenant, "biz_type", "local") or "local")
         polish(tenant, p)                                       # 🔍 SEO 편집장(저점수만 리라이트)
+        try:                                                    # 콘텐츠별 추적링크 자동 포함(추적 P1)
+            from app.services import tracklinks                 # polish 뒤 — 리라이트로 링크 유실 방지
+            tracklinks.inject(tenant, p)
+        except Exception:
+            pass
         p.payload["reach"] = reach.estimate(p.channel.value, p.kind.value, p.payload)
         p.payload["brief"] = brief_public
         ex = ["🎯 전략가", "✍️ 카피라이터"]

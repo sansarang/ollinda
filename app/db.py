@@ -1109,18 +1109,104 @@ def get_link(code: str) -> Optional[dict]:
         return None
 
 
-def incr_link_click(code: str, referrer: str = "", ua: str = "", utm_source: str = "") -> None:
-    """클릭 집계(누적 카운터) + 행 단위 로깅(시각·리퍼러·UA·채널). 어트리뷰션 정확도↑(PHASE 6)."""
+def incr_link_click(code: str, referrer: str = "", ua: str = "", utm_source: str = "",
+                    content_id: str = "", channel: str = "") -> None:
+    """클릭 집계(누적 카운터) + 행 단위 로깅(시각·리퍼러·UA·채널·콘텐츠). 콘텐츠별 실측(추적 P1)."""
     with _conn() as c:
         c.execute("UPDATE links SET clicks=clicks+1 WHERE code=?", (code,))
         try:
             c.execute("CREATE TABLE IF NOT EXISTS link_clicks("
                       "id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT, ts TEXT, "
                       "referrer TEXT, ua TEXT, utm_source TEXT)")
-            c.execute("INSERT INTO link_clicks(code, ts, referrer, ua, utm_source) VALUES(?,?,?,?,?)",
-                      (code, _now(), referrer[:300], ua[:300], utm_source[:60]))
+            for col in ("content_id", "channel"):
+                try:
+                    c.execute(f"ALTER TABLE link_clicks ADD COLUMN {col} TEXT")
+                except sqlite3.OperationalError:
+                    pass
+            c.execute("INSERT INTO link_clicks(code, ts, referrer, ua, utm_source, content_id, channel) "
+                      "VALUES(?,?,?,?,?,?,?)",
+                      (code, _now(), referrer[:300], ua[:300], utm_source[:60],
+                       (content_id or "")[:16], (channel or utm_source or "")[:40]))
         except Exception:
             pass
+
+
+# ── 콘텐츠별 클릭 실측(추적 P2·P3) — 전부 link_clicks 행 기반. '조회수'가 아니라
+#    '추적링크 경유 클릭'이다 — UI 표기도 이 이상 주장하지 않는다(정직). ──
+def content_click_counts(tenant_id: str, days: int = 90) -> dict:
+    """content_id(피스 id 앞 16자) → 클릭 수. '내 콘텐츠' 뱃지용."""
+    try:
+        from datetime import timedelta
+        since = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+        with _conn() as c:
+            rows = c.execute(
+                "SELECT lc.content_id, COUNT(*) n FROM link_clicks lc JOIN links l ON lc.code=l.code "
+                "WHERE l.tenant_id=? AND lc.content_id != '' AND lc.ts >= ? GROUP BY lc.content_id",
+                (tenant_id, since)).fetchall()
+        return {r["content_id"]: r["n"] for r in rows}
+    except Exception:
+        return {}
+
+
+def content_click_ranking(tenant_id: str, days: int = 30, limit: int = 3) -> list[dict]:
+    """가장 클릭 많이 데려온 콘텐츠 TOP N — [{content_id, channel, n}]."""
+    try:
+        from datetime import timedelta
+        since = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+        with _conn() as c:
+            rows = c.execute(
+                "SELECT lc.content_id, COALESCE(lc.channel,'') channel, COUNT(*) n "
+                "FROM link_clicks lc JOIN links l ON lc.code=l.code "
+                "WHERE l.tenant_id=? AND lc.content_id != '' AND lc.ts >= ? "
+                "GROUP BY lc.content_id ORDER BY n DESC LIMIT ?",
+                (tenant_id, since, limit)).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def channel_click_split(tenant_id: str, days: int = 30) -> dict:
+    """채널별 유입 비교 — {channel: n}. 빈 채널은 'direct'(추적 파라미터 없는 클릭)."""
+    try:
+        from datetime import timedelta
+        since = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+        with _conn() as c:
+            rows = c.execute(
+                "SELECT COALESCE(NULLIF(lc.channel,''),'direct') ch, COUNT(*) n "
+                "FROM link_clicks lc JOIN links l ON lc.code=l.code "
+                "WHERE l.tenant_id=? AND lc.ts >= ? GROUP BY ch ORDER BY n DESC",
+                (tenant_id, since)).fetchall()
+        return {r["ch"]: r["n"] for r in rows}
+    except Exception:
+        return {}
+
+
+def daily_click_series(tenant_id: str, days: int = 7) -> list[dict]:
+    """최근 N일 일별 클릭 추이 — [{date:'MM-DD', n}] (빈 날 0 포함, 과거→오늘)."""
+    out = []
+    try:
+        from datetime import timedelta
+        with _conn() as c:
+            for i in range(days - 1, -1, -1):
+                d = (datetime.utcnow() - timedelta(days=i)).strftime("%Y-%m-%d")
+                n = c.execute(
+                    "SELECT COUNT(*) FROM link_clicks lc JOIN links l ON lc.code=l.code "
+                    "WHERE l.tenant_id=? AND lc.ts LIKE ?", (tenant_id, d + "%")).fetchone()[0]
+                out.append({"date": d[5:], "n": n})
+    except Exception:
+        pass
+    return out
+
+
+def clicks_on_date(tenant_id: str, date: str) -> int:
+    """특정 날짜(YYYY-MM-DD)의 클릭 수 — 아침 브리핑 '어제 N명' 동기부여용(추적 P3)."""
+    try:
+        with _conn() as c:
+            return c.execute(
+                "SELECT COUNT(*) FROM link_clicks lc JOIN links l ON lc.code=l.code "
+                "WHERE l.tenant_id=? AND lc.ts LIKE ?", (tenant_id, date + "%")).fetchone()[0]
+    except Exception:
+        return 0
 
 
 def link_click_stats(code: str) -> dict:

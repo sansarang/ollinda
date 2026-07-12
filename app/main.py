@@ -1519,16 +1519,9 @@ def _perf_report(tenant_id: str) -> str:
 
 
 def _ensure_track_link(t):
-    """가게 대표 목적지(플레이스/스토어)로 가는 추적 링크. 클릭 집계용. 목적지 없으면 상호 지도검색으로 폴백."""
-    biz = getattr(t, "biz_type", "local") or "local"
-    if biz == "seller":
-        target, label = (getattr(t, "buy_url", "") or getattr(t, "map_url", "")), "스토어"
-    else:
-        target, label = (getattr(t, "map_url", "") or getattr(t, "buy_url", "")), "네이버 플레이스"
-    if not target and getattr(t, "name", ""):        # 폴백: 상호로 네이버 지도 검색
-        from urllib.parse import quote as _q
-        target, label = "https://map.naver.com/p/search/" + _q(t.name), "네이버 지도"
-    return db.ensure_track_link(t.id, target, label)
+    """가게 대표 목적지(플레이스/스토어) 추적 링크 — tracklinks 서비스로 위임(추적 P1에서 통합)."""
+    from app.services import tracklinks
+    return tracklinks.tenant_link(t)
 
 
 @app.get("/me/qr/{code}.png")
@@ -2792,13 +2785,15 @@ def my_set_delete(request: Request, asset_id: str):
 
 
 @app.get("/r/{code}")
-def link_redirect(code: str, request: Request, utm_source: str = ""):
-    """제휴/추적 단축링크 — 클릭 집계(행 단위+채널) 후 원본으로 이동(PHASE 6)."""
+def link_redirect(code: str, request: Request, utm_source: str = "", src: str = "", content: str = ""):
+    """제휴/추적 단축링크 — 클릭 집계(행 단위: 채널·콘텐츠·시각·리퍼러·UA) 후 원본으로 이동.
+    src={channel}&content={piece_id 앞8자} — 콘텐츠별 유입 실측(추적 P1). utm_source는 하위호환."""
     link = db.get_link(code)
     if not link or not link.get("target"):
         return RedirectResponse("/", status_code=302)
     db.incr_link_click(code, referrer=request.headers.get("referer", ""),
-                       ua=request.headers.get("user-agent", ""), utm_source=utm_source)
+                       ua=request.headers.get("user-agent", ""), utm_source=utm_source,
+                       content_id=content, channel=(src or utm_source))
     target = link["target"]
     if not target.startswith(("http://", "https://")):
         target = "https://" + target
