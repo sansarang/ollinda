@@ -68,7 +68,9 @@ def init_db() -> None:
                          ("topic_axis", "TEXT"),                  # 전문 주제 축(C-Rank 주제 집중, 성장 PHASE 7)
                          ("naver_blog_url", "TEXT"),              # 사용자 네이버 블로그 URL(블로그등록 PHASE 1)
                          ("blog_id", "TEXT"),                     # 정규화된 블로그 아이디(RSS·순위매칭용)
-                         ("parking", "TEXT")]:                    # 주차 안내(블로그템플릿 PHASE 1 고정정보)
+                         ("parking", "TEXT"),                     # 주차 안내(블로그템플릿 PHASE 1 고정정보)
+                         ("briefing_hour", "INTEGER DEFAULT 8"),  # 아침 브리핑 시각(KST, 브리핑 PHASE 2)
+                         ("briefing_on", "INTEGER DEFAULT 1")]:   # 브리핑 on/off
             try:
                 c.execute(f"ALTER TABLE tenants ADD COLUMN {col} {ddl}")
             except sqlite3.OperationalError:
@@ -101,6 +103,10 @@ def init_db() -> None:
                   "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, week TEXT, "
                   "data TEXT, sent_email INTEGER DEFAULT 0, created_at TEXT)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_weekrep ON weekly_reports(tenant_id, week)")
+        # 매일 아침 브리핑(브리핑 PHASE 1) — tenant×날짜 1건(1일 1회 원칙)
+        c.execute("CREATE TABLE IF NOT EXISTS daily_briefings("
+                  "tenant_id TEXT, date TEXT, data TEXT, passed INTEGER DEFAULT 0, "
+                  "created_at TEXT, PRIMARY KEY(tenant_id, date))")
         # 앱내 알림(상위노출 PHASE 2) — 발행 리마인더 등. read=0 이면 대시보드 배너 표시
         c.execute("CREATE TABLE IF NOT EXISTS notices("
                   "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, kind TEXT, "
@@ -227,7 +233,9 @@ def _row_to_tenant(r: sqlite3.Row) -> Tenant:
                   lat=(r["lat"] if "lat" in keys else None), lon=(r["lon"] if "lon" in keys else None),
                   topic_axis=g("topic_axis"),
                   naver_blog_url=g("naver_blog_url"), blog_id=g("blog_id"),
-                  parking=g("parking"))
+                  parking=g("parking"),
+                  briefing_hour=g("briefing_hour", 8) or 8,
+                  briefing_on=(1 if g("briefing_on", 1) in (1, None, "") else 0))
 
 
 def set_tenant_coords(tid: str, lat: float, lon: float) -> None:
@@ -262,6 +270,49 @@ def set_topic_axis(tid: str, axis: str) -> None:
             c.execute("UPDATE tenants SET topic_axis=? WHERE id=?", ((axis or "").strip()[:120], tid))
         except sqlite3.OperationalError:
             pass
+
+
+# ── 매일 아침 브리핑(브리핑 PHASE 1·2) ──
+def save_briefing(tenant_id: str, date: str, data: dict) -> None:
+    try:
+        with _conn() as c:
+            c.execute("INSERT OR REPLACE INTO daily_briefings(tenant_id, date, data, passed, created_at) "
+                      "VALUES(?,?,?,COALESCE((SELECT passed FROM daily_briefings WHERE tenant_id=? AND date=?),0),?)",
+                      (tenant_id, date, json.dumps(data, ensure_ascii=False), tenant_id, date, _now()))
+    except sqlite3.OperationalError:
+        pass
+
+
+def get_briefing(tenant_id: str, date: str) -> Optional[dict]:
+    try:
+        with _conn() as c:
+            r = c.execute("SELECT data, passed FROM daily_briefings WHERE tenant_id=? AND date=?",
+                          (tenant_id, date)).fetchone()
+        if not r:
+            return None
+        d = json.loads(r["data"] or "{}")
+        d["passed"] = bool(r["passed"])
+        return d
+    except (sqlite3.OperationalError, ValueError):
+        return None
+
+
+def pass_briefing(tenant_id: str, date: str) -> None:
+    """'오늘은 패스' — 부담 없이 넘기기(브리핑 PHASE 3)."""
+    try:
+        with _conn() as c:
+            c.execute("UPDATE daily_briefings SET passed=1 WHERE tenant_id=? AND date=?", (tenant_id, date))
+    except sqlite3.OperationalError:
+        pass
+
+
+def set_briefing_pref(tid: str, hour: int, on: bool) -> None:
+    try:
+        with _conn() as c:
+            c.execute("UPDATE tenants SET briefing_hour=?, briefing_on=? WHERE id=?",
+                      (max(5, min(12, int(hour))), 1 if on else 0, tid))
+    except sqlite3.OperationalError:
+        pass
 
 
 # ── 앱내 알림(상위노출 PHASE 2) ──
