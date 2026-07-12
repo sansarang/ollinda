@@ -1453,9 +1453,9 @@ def _perf_report(tenant_id: str) -> str:
                 f"<div class='text-4xl sm:text-5xl font-extrabold text-slate-900 leading-none tracking-tight'>{num}</div>"
                 f"<div class='text-[11px] text-slate-400 mt-2 font-bold'>{label}</div></div>")
     stats = ("<div class='grid grid-cols-3 gap-3 mb-5'>"
-             + _stat("📦", len(sets), "bg-indigo-50 text-indigo-600", "만든 세트")
-             + _stat("📡", n_pieces, "bg-violet-50 text-violet-600", "채널 발행물")
-             + _stat("⭐", avg, "bg-sky-50 text-sky-600", "평균 점수") + "</div>")
+             + _stat(_ic("package", "w-4 h-4"), len(sets), "bg-[#EEF2FF] text-indigo-600", "만든 세트")
+             + _stat(_ic("grid", "w-4 h-4"), n_pieces, "bg-[#EEF2FF] text-indigo-600", "채널 발행물")
+             + _stat(_ic("target", "w-4 h-4"), avg, "bg-[#EEF2FF] text-indigo-600", "평균 점수") + "</div>")
     kw_html = ""
     if kws:
         def _chip(k):
@@ -1484,9 +1484,9 @@ def _perf_report(tenant_id: str) -> str:
     except Exception:
         pass
     return ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow p-5 sm:p-6 mb-5'>"
-            "<h2 class='font-extrabold text-slate-900 mb-4 text-base'>📈 성과 리포트</h2>"
+            "<h2 class='font-extrabold text-slate-900 mb-4 text-base'>성과 리포트</h2>"
             + ba + stats + kw_html
-            + "<div class='mt-2'><button onclick='checkRank()' class='px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl transition'>🔎 키워드 순위 조회</button>"
+            + "<div class='mt-2'><button onclick='checkRank()' class='px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl transition'>키워드 순위 조회</button>"
             + "<div id='rankbox' class='mt-2'></div></div>"
             + "<script>async function checkRank(){var b=document.getElementById('rankbox');"
               "b.innerHTML='<span class=\"text-slate-400 text-xs\">조회 중…</span>';"
@@ -1539,7 +1539,7 @@ def _daily_action(t) -> dict:
     except Exception:
         pass
     if not sets:
-        return {"emoji": "🚀", "text": "첫 콘텐츠를 만들어보세요! 사진 한 장이면 5채널이 완성돼요.",
+        return {"emoji": "wand", "text": "첫 콘텐츠를 만들어보세요! 사진 한 장이면 5채널이 완성돼요.",
                 "cta": "지금 만들기", "href": "/me"}
     # 마지막 콘텐츠 이후 경과일
     days = 0
@@ -1550,7 +1550,7 @@ def _daily_action(t) -> dict:
     except Exception:
         pass
     if days >= 3:
-        return {"emoji": "📅", "text": f"{days}일째 새 콘텐츠가 없어요. 꾸준함이 상위노출의 1순위예요 — 오늘 하나 올려요!",
+        return {"emoji": "calendar", "text": f"{days}일째 새 콘텐츠가 없어요. 꾸준함이 상위노출의 1순위예요 — 오늘 하나 올려요!",
                 "cta": "새 콘텐츠 만들기", "href": "/me"}
     # 🔄 정체 키워드 — 앵글 바꿔 재도전(상위노출 PHASE 3·6)
     try:
@@ -1558,18 +1558,18 @@ def _daily_action(t) -> dict:
         stag = ranktrack.stagnant_keywords(t.id, limit=1)
         if stag:
             s = stag[0]
-            return {"emoji": "🔄", "text": f"‘{esc(s['keyword'])}’가 정체 중이에요. {s['retry_label']} 앵글로 바꿔 다른 검색블록을 노려봐요.",
+            return {"emoji": "refresh", "text": f"‘{esc(s['keyword'])}’가 정체 중이에요. {s['retry_label']} 앵글로 바꿔 다른 검색블록을 노려봐요.",
                     "cta": "앵글 바꿔 만들기", "href": s["href"]}
     except Exception:
         pass
     if improving:
         k = improving[0]["keyword"]
-        return {"emoji": "📈", "text": f"‘{esc(k)}’ 순위가 오르고 있어요! 이 기세로 하나 더 올리면 상위 굳히기 각이에요.",
+        return {"emoji": "trend", "text": f"‘{esc(k)}’ 순위가 오르고 있어요! 이 기세로 하나 더 올리면 상위 굳히기 각이에요.",
                 "cta": "이 키워드 더 밀기", "href": "/me?target_kw=" + _q(k)}
     if clicks > 0:
-        return {"emoji": "🎯", "text": f"추적 링크 클릭 {clicks}회 — 콘텐츠가 실제 손님을 부르고 있어요. 계속 올려요!",
+        return {"emoji": "target", "text": f"추적 링크 클릭 {clicks}회 — 콘텐츠가 실제 손님을 부르고 있어요. 계속 올려요!",
                 "cta": "성과 보기", "href": "/me?tab=report"}
-    return {"emoji": "✨", "text": "오늘 콘텐츠 하나로 노출을 늘려보세요. 매주 2~3개가 상위노출의 정석이에요.",
+    return {"emoji": "wand", "text": "오늘 콘텐츠 하나로 노출을 늘려보세요. 매주 2~3개가 상위노출의 정석이에요.",
             "cta": "만들기", "href": "/me"}
 
 
@@ -1590,10 +1590,10 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         _base_n = len(db.list_sets(tenant_id=t.id))
         banner = ("<div class='bg-indigo-50 border border-indigo-100 text-indigo-700 p-4 rounded-2xl mb-4 flex items-center gap-3'>"
                   "<div class='w-6 h-6 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin flex-shrink-0'></div>"
-                  "<div><div class='font-bold text-sm'>✨ AI 전문가팀이 콘텐츠를 만들고 있어요</div>"
+                  "<div><div class='font-bold text-sm'>AI 전문가팀이 콘텐츠를 만들고 있어요</div>"
                   "<div class='text-xs text-indigo-500'>20~60초 걸려요 · 완료되면 자동으로 나타나요 (이 화면 유지)</div></div></div>"
                   f"<script>(function(){{var base={_base_n},n=0;var iv=setInterval(async function(){{n++;if(n>40){{clearInterval(iv);location.reload();return;}}"
-                  "try{var r=await fetch('/me/sets/count');var d=await r.json();if(d.n>base){clearInterval(iv);location.href='/me?ok='+encodeURIComponent('✨ 콘텐츠가 완성됐어요! 아래에서 확인하세요');}}catch(e){}"
+                  "try{var r=await fetch('/me/sets/count');var d=await r.json();if(d.n>base){clearInterval(iv);location.href='/me?ok='+encodeURIComponent('콘텐츠가 완성됐어요! 아래에서 확인하세요');}}catch(e){}"
                   "}},3000);})();</script>")
     # ① 가게/스토어 설정
     bopts = "".join(f"<option value='{k}'{' selected' if (t.biz_type or 'local') == k else ''}>{lab}</option>"
@@ -1608,15 +1608,15 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         f"<input id=sf_industry name=industry value=\"{esc(t.industry)}\" placeholder='업종/상품 * (예: 카페, 캠핑 폴딩박스)' required class='{inp}'>"
         f"<input id=sf_region name=region value=\"{esc(t.region)}\" placeholder='지역 (매장)' class='{inp}'>"
         f"<select name=biz_type class='{inp} font-semibold'>{bopts}</select>"
-        f"<input id=sf_phone name=phone value=\"{esc(t.phone)}\" placeholder='📞 전화 (매장)' class='{inp}'>"
-        f"<input id=sf_address name=address value=\"{esc(t.address)}\" placeholder='📍 주소 (매장)' class='{inp}'>"
+        f"<input id=sf_phone name=phone value=\"{esc(t.phone)}\" placeholder='전화 (매장)' class='{inp}'>"
+        f"<input id=sf_address name=address value=\"{esc(t.address)}\" placeholder='주소 (매장)' class='{inp}'>"
         f"<select name=marketplace class='{inp}'>{mkopts}</select>"
-        f"<input name=brand_name value=\"{esc(t.brand_name)}\" placeholder='🏷 브랜드명 (셀러)' class='{inp}'>"
-        f"<input name=search_kw value=\"{esc(t.search_kw)}\" placeholder='🔎 검색어 유도 (쿠팡 등)' class='{inp}'>"
-        f"<input name=buy_url value=\"{esc(t.buy_url)}\" placeholder='🔗 상세페이지/스토어/제휴 링크' class='{inp}'>"
-        f"<input name=map_url value=\"{esc(t.map_url)}\" placeholder='📍 네이버 플레이스 URL (매장)' class='{inp}'>"
+        f"<input name=brand_name value=\"{esc(t.brand_name)}\" placeholder='브랜드명 (셀러)' class='{inp}'>"
+        f"<input name=search_kw value=\"{esc(t.search_kw)}\" placeholder='검색어 유도 (쿠팡 등)' class='{inp}'>"
+        f"<input name=buy_url value=\"{esc(t.buy_url)}\" placeholder='상세페이지/스토어/제휴 링크' class='{inp}'>"
+        f"<input name=map_url value=\"{esc(t.map_url)}\" placeholder='네이버 플레이스 URL (매장)' class='{inp}'>"
         "<button class='bg-indigo-600 text-white font-bold py-2.5 rounded-xl sm:col-span-2'>저장</button></form>"
-        "<p class='text-xs text-slate-400 mt-1 sm:col-span-2'>💡 링크를 넣으면 글 끝에 <b>클릭 링크</b>로 자동 삽입돼요 (블로그·유튜브·X는 바로 클릭, 인스타는 프로필 안내).</p>"
+        "<p class='text-xs text-slate-400 mt-1 sm:col-span-2'>링크를 넣으면 글 끝에 <b>클릭 링크</b>로 자동 삽입돼요 (블로그·유튜브·X는 바로 클릭, 인스타는 프로필 안내).</p>"
         "<p class='text-xs text-slate-400 mt-2'>매장이면 글 끝에 지도·연락처, 셀러면 구매 링크/검색어로 자동 전환됩니다.</p>")
     # 온보딩용 최소 폼(필수 3개만 — 나머지는 나중에 설정에서). 셀러/동네매장 = 큰 토글로 명확히.
     _bt = (t.biz_type or "local")
@@ -1695,7 +1695,9 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 "네이버는 공식 API가 없어 글을 완성해 드리면 직접 발행(반자동).</p>" + rows + "</div>")
     # ③ 콘텐츠 이력(세트 단위) → 각 항목 = 발행 소재(/kit)
     sets = db.list_sets(tenant_id=t.id, limit=50)
-    _chan_icon = {"instagram": "📷", "naver_blog": "📝", "x": "𝕏", "youtube": "▶️", "facebook": "👍", "marketplace": "🛒"}
+    _chan_icon = {k: _ic(v, "w-3.5 h-3.5 inline-block text-slate-500") for k, v in
+                  {"instagram": "camera", "naver_blog": "pen", "x": "message", "youtube": "play",
+                   "facebook": "check", "marketplace": "package"}.items()}
     if sets:
         _cards = []
         for s in sets:
@@ -1721,7 +1723,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 + f"<div class='text-xs text-slate-400 font-medium'>{esc(s['created'])} · {s['n']}채널</div></div>"
                 + f"<a href='/me?view={s['asset_id']}' class='px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-[.98] text-white text-xs font-bold rounded-xl transition'>보기</a>"
                 + f"<form method=post action='/me/set/{s['asset_id']}/delete' onsubmit=\"return confirm('이 콘텐츠를 삭제할까요?')\">"
-                + "<button class='px-1.5 py-2 text-slate-300 hover:text-rose-500 text-base transition' title='삭제'>🗑</button></form></div>")
+                + "<button class='px-1.5 py-2 text-slate-300 hover:text-rose-500 text-base transition' title='삭제'>" + _ic("xcircle", "w-4 h-4") + "</button></form></div>")
         hist = "<div class='grid sm:grid-cols-2 gap-3'>" + "".join(_cards) + "</div>"
     else:
         hist = "<p class='text-slate-400 text-sm py-6 text-center'>아직 만든 콘텐츠가 없어요. 위에서 사진 올려 만들어보세요.</p>"
@@ -1786,11 +1788,11 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
     _angle = (request.query_params.get("angle") or "").strip()
     _angle = _angle if _angle in ("review", "howto", "price") else ""
     upload_section = ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6 sm:p-7'>"
-                      "<div class='mb-5'><div class='text-lg font-extrabold text-slate-900'>✨ 콘텐츠 만들기</div>"
+                      "<div class='mb-5'><div class='text-lg font-extrabold text-slate-900'>콘텐츠 만들기</div>"
                       "<div class='text-sm text-slate-400'>가게 이름·사진만 있으면 끝</div></div>"
                       + _upload_form_html(t, tok, target_kw=_tkw, angle=_angle) + "</div>")
     content = ("<div id='myContent' class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5'>"
-               "<h2 class='font-bold text-slate-900 mb-1'>📋 내 콘텐츠</h2>"
+               "<h2 class='font-bold text-slate-900 mb-1'>내 콘텐츠</h2>"
                "<p class='text-xs text-slate-400 mb-3'>‘보기’를 누르면 결과가 나와요.</p>" + hist + "</div>")
     # 성과 데이터(통계 카드 + 최근 키워드)
     _sets2, _scores, _kws2, _np = db.list_sets(tenant_id=t.id, limit=200), [], [], 0
@@ -1811,14 +1813,14 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 f"<div class='min-w-0'><div class='text-4xl sm:text-5xl font-extrabold text-slate-900 leading-none tracking-tight'>{num}</div>"
                 f"<div class='text-sm text-slate-400 font-semibold mt-1.5'>{label}</div></div></div>")
     stats_row = (("<div class='grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6'>"
-                  + _statc("📦", "bg-emerald-100 text-emerald-600", len(_sets2), "만든 세트")
-                  + _statc("🔍", "bg-amber-100 text-amber-600", _np, "채널 발행물")
-                  + _statc("⭐", "bg-violet-100 text-violet-600", _avg, "평균 노출점수") + "</div>") if _sets2 else "")
+                  + _statc(_ic("package", "w-7 h-7"), "bg-[#EEF2FF] text-indigo-600", len(_sets2), "만든 세트")
+                  + _statc(_ic("grid", "w-7 h-7"), "bg-[#EEF2FF] text-indigo-600", _np, "채널 발행물")
+                  + _statc(_ic("target", "w-7 h-7"), "bg-[#EEF2FF] text-indigo-600", _avg, "평균 노출점수") + "</div>") if _sets2 else "")
     kw_card = ""
     if _kws2:
         _chips = "".join(f"<span class='inline-block bg-slate-100 text-slate-600 text-xs px-3 py-1.5 rounded-full mr-1.5 mb-1.5'>{esc(_clean_kw(k))}</span>" for k in _kws2[:9])
         kw_card = ("<div id='perfCard' class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5'>"
-                   "<h2 class='font-bold text-slate-900 mb-1'>📊 성과 리포트 · 최근 키워드</h2>"
+                   "<h2 class='font-bold text-slate-900 mb-1'>성과 리포트 · 최근 키워드</h2>"
                    f"<p class='text-xs text-slate-400 mb-3'>노리는 키워드 {len(_kws2)}개</p>{_chips}</div>")
     view = (request.query_params.get("view") or "").strip()
     tab = (request.query_params.get("tab") or "").strip()
@@ -1829,18 +1831,18 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
     if result_html:                                        # 콘텐츠 결과 (전체 폭)
         active = "content"
         main_inner = _sbadge + f"<div class='{_fw}'>{result_html}</div>"
-    elif tab == "content":                                # 📋 내 콘텐츠 (전체 폭)
+    elif tab == "content":                                # 내 콘텐츠 (전체 폭)
         active = "content"
         main_inner = (_sbadge + f"<div class='{_fw}'>"
-                      "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>📋 내 콘텐츠</h2>"
+                      "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>내 콘텐츠</h2>"
                       "<p class='text-sm text-slate-400 mb-5'>‘보기’를 누르면 결과가 크게 나와요.</p>" + hist + "</div>")
-    elif tab == "report":                                 # 📊 성과 리포트 · 최근 키워드 + 순위(자동) (전체 폭)
+    elif tab == "report":                                 # 성과 리포트 · 최근 키워드 + 순위(자동) (전체 폭)
         active = "report"
-        _kwbox = ((f"<div class='{_fw}'><h2 class='text-2xl font-extrabold text-slate-900 mb-1'>📊 성과 리포트 · 최근 키워드</h2>"
+        _kwbox = ((f"<div class='{_fw}'><h2 class='text-2xl font-extrabold text-slate-900 mb-1'>성과 리포트 · 최근 키워드</h2>"
                    f"<p class='text-sm text-slate-400 mb-5'>노리는 키워드 {len(_kws2)}개</p>{_chips}</div>") if _kws2 else "")
-        # 🔎 키워드 순위 — 페이지 열면 자동 조회(네이버 지역검색)
+        # 키워드 순위 — 페이지 열면 자동 조회(네이버 지역검색)
         _rankbox = (f"<div class='{_fw} mt-5'>"
-                    "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>🔎 키워드 순위</h2>"
+                    "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>키워드 순위</h2>"
                     "<p class='text-sm text-slate-400 mb-4'>네이버 지역검색 기준 · 참고용(위치·기기별 차이)</p>"
                     "<div id='rankbox' class='text-sm'><div class='flex items-center gap-2 text-slate-400'>"
                     "<div class='w-4 h-4 border-2 border-slate-200 border-t-indigo-500 rounded-full animate-spin'></div>조회 중…</div></div>"
@@ -1877,7 +1879,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                         f"<div class='text-sm font-extrabold text-slate-800'>{emoji} {label}</div>"
                         f"<div class='text-[11px] text-slate-500 mt-0.5'>{sub}</div></div>")
             _loopbox = (f"<div class='{_fw} mb-5'>"
-                        "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>🔁 상위노출 실행 루프</h2>"
+                        "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>상위노출 실행 루프</h2>"
                         "<p class='text-sm text-slate-400 mb-4'>진단 → 타겟 글 → 꾸준한 발행 → 순위 추적·학습. 올린다가 이 루프를 돌려요.</p>"
                         "<div class='flex gap-2.5 flex-wrap'>"
                         + _step(1, "🔍", "진단", _has_diag, "놓치는 키워드 찾기" if _has_diag else "가게 정보를 설정하세요")
@@ -1897,7 +1899,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             _diag_payload = _json.dumps({"industry": t.industry or "", "region": t.region or "",
                                          "name": t.name or ""}, ensure_ascii=False)
             _missbox = (f"<div class='{_fw} mt-5'>"
-                        "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>🎯 놓치는 키워드</h2>"
+                        "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>놓치는 키워드</h2>"
                         "<p class='text-sm text-slate-400 mb-4'>미노출 키워드를 찾아 바로 그 키워드를 겨냥한 글로 연결해요. 진단은 무료예요.</p>"
                         "<div id='missbox' class='text-sm'><div class='flex items-center gap-2 text-slate-400'>"
                         "<div class='w-4 h-4 border-2 border-slate-200 border-t-amber-500 rounded-full animate-spin'></div>진단 중…</div></div>"
@@ -1921,7 +1923,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             _short = f"{_base}/r/{_tl['code']}"
             _trackbox = (
                 f"<div class='{_fw} mt-5'>"
-                "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>🎯 성과 실측 · 내 손님 추적</h2>"
+                "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>성과 실측 · 내 손님 추적</h2>"
                 "<p class='text-sm text-slate-400 mb-4'>이 링크·QR을 <b>인스타 프로필·명함·매장</b>에 넣으면, 여기로 온 손님 수가 집계돼요.</p>"
                 "<div class='flex items-center gap-5 flex-wrap'>"
                 f"<img src='/me/qr/{_tl['code']}.png' class='w-28 h-28 rounded-xl border border-slate-100 p-1 bg-white' alt='추적 QR'>"
@@ -1948,7 +1950,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         _blog_nudge = ""
         if not getattr(t, "blog_id", ""):
             _blog_nudge = ("<div class='flex items-center gap-3 bg-emerald-50 border border-emerald-100 rounded-2xl p-4 mb-5'>"
-                           "<span class='text-2xl'>📝</span>"
+                           "<span class='text-indigo-600'>" + _ic("pen", "w-5 h-5") + "</span>"
                            "<div class='flex-1 min-w-0 text-sm text-slate-700'><b>내 네이버 블로그를 연결</b>하면 "
                            "발행 여부 자동 확인 + 내 블로그 순위 추적이 정확해져요. (공개 RSS만 사용)</div>"
                            "<a href='/me?tab=report#blog' class='flex-shrink-0 bg-emerald-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-emerald-700 transition'>연결하기</a></div>")
@@ -1958,7 +1960,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         if _notices:
             _notice_html = "".join(
                 "<div class='flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-3'>"
-                f"<span class='text-xl'>🔔</span><div class='flex-1 text-sm text-amber-800'>{esc(n.get('text') or '')}</div>"
+                f"<span class='text-amber-500'>" + _ic("message", "w-5 h-5") + "</span><div class='flex-1 text-sm text-amber-800'>{esc(n.get('text') or '')}</div>"
                 "<a href='/me' class='flex-shrink-0 bg-amber-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>오늘 만들기</a></div>"
                 for n in _notices[:2])
             db.mark_notices_read(t.id)
@@ -1967,7 +1969,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         else:
             _act = _daily_action(t)
             _coach = ("<div class='flex items-center gap-3 bg-gradient-to-r from-indigo-50 to-violet-50 border border-indigo-100 rounded-2xl p-4 mb-5'>"
-                      f"<div class='text-2xl'>{_act['emoji']}</div>"
+                      f"<div class='w-10 h-10 rounded-full bg-[#EEF2FF] text-indigo-600 flex items-center justify-center flex-shrink-0'>{_ic(_act['emoji'], 'w-5 h-5')}</div>"
                       "<div class='flex-1 min-w-0'><div class='text-xs font-bold text-indigo-500 mb-0.5'>오늘의 액션</div>"
                       f"<div class='text-sm text-slate-700 font-medium'>{_act['text']}</div></div>"
                       f"<a href='{_act['href']}' class='flex-shrink-0 bg-indigo-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-indigo-700 transition'>{_act['cta']}</a></div>")
@@ -1977,21 +1979,21 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
     # 🆕 새로 추가한 '빈 새 가게'면 실수 대비 '뒤로가기(취소)' 배너
     if t.name == "새 가게" and len(db.list_user_stores(u["id"])) > 1 and not db.list_sets(tenant_id=t.id):
         _backban = ("<div class='flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-5'>"
-                    "<span class='text-xl'>🆕</span>"
+                    "<span class='text-amber-500'>" + _ic("store", "w-5 h-5") + "</span>"
                     "<div class='flex-1 text-sm text-amber-800'><b>새 가게</b>를 추가했어요. 가게 이름을 넣고 자동 인식하세요. 잘못 누르셨나요?</div>"
                     "<form method=post action='/me/store/cancel'><button class='bg-white border border-amber-300 text-amber-700 text-sm font-bold px-4 py-2 rounded-xl hover:bg-amber-100 transition whitespace-nowrap'>← 뒤로가기</button></form></div>")
         main_inner = _backban + main_inner
     from app import landing
-    _navitems = [("🏠", "홈", "/me", "create"), ("📄", "내 콘텐츠", "/me?tab=content", "content"),
-                 ("📊", "리포트", "/me?tab=report", "report"),
-                 ("🥊", "경쟁사", "/me/competitors", "competitors"),
-                 ("🖨️", "인쇄물", "/me/print", "print")]
+    _navitems = [("wand", "홈", "/me", "create"), ("book", "내 콘텐츠", "/me?tab=content", "content"),
+                 ("chart", "리포트", "/me?tab=report", "report"),
+                 ("trophy", "경쟁사", "/me/competitors", "competitors"),
+                 ("printer", "인쇄물", "/me/print", "print")]
 
     def _navlink(i, l, h, key):
-        cls = ("bg-indigo-50 text-indigo-700" if key == active
+        cls = ("bg-[#EEF2FF] text-indigo-700" if key == active
                else "text-slate-500 hover:bg-slate-50 hover:text-slate-900")
         return (f"<a href='{h}' class='flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold {cls} transition'>"
-                f"<span class='text-base'>{i}</span>{l}</a>")
+                f"{_ic(i, 'w-4 h-4 flex-shrink-0')}{l}</a>")
 
     # 🏪 다중 가게 전환기 + 가게 추가
     _stores = db.list_user_stores(u["id"])
@@ -2003,7 +2005,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         chk = "<span class='ml-auto text-xs'>✓</span>" if on else ""
         return (f"<form method=post action='/me/store/switch'><input type=hidden name=tenant_id value='{st.id}'>"
                 f"<button class='w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold {cls} transition text-left'>"
-                f"<span>🏪</span><span class='truncate'>{nm}</span>{chk}</button></form>")
+                f"{_ic('store', 'w-4 h-4 flex-shrink-0')}<span class='truncate'>{nm}</span>{chk}</button></form>")
     _storebox = ("<div class='mb-5'><div class='text-[11px] font-bold text-slate-400 px-2 mb-1.5'>내 가게</div>"
                  "<div class='space-y-1'>" + "".join(_storeitem(s) for s in _stores) + "</div>"
                  "<form method=post action='/me/store/add'>"
@@ -2013,12 +2015,12 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                + _storebox
                + "<nav class='space-y-1'>" + "".join(_navlink(*n) for n in _navitems)
                + f"</nav><div class='mt-auto px-3 pt-4 border-t border-slate-100'><div class='text-xs text-slate-400 mb-1'>{_pn}</div>"
-               "<a href='/logout' class='text-sm font-semibold text-slate-400 hover:text-slate-700'>↩ 로그아웃</a></div></aside>")
+               "<a href='/logout' class='text-sm font-semibold text-slate-400 hover:text-slate-700'>로그아웃</a></div></aside>")
     _mobnav = ("<div class='flex lg:hidden items-center gap-2 mb-4 overflow-x-auto'>"
                + "".join(_navlink(*n) for n in _navitems)
                + "<a href='/logout' class='ml-auto text-sm text-slate-400 whitespace-nowrap'>로그아웃</a></div>")
     page = (landing._HEAD
-            + "<div class='flex min-h-screen bg-slate-100'>" + sidebar
+            + "<div class='flex min-h-screen bg-[#F9FAFB]'>" + sidebar
             + "<main class='flex-1 min-w-0 px-5 sm:px-8 py-8'>"
             + "<div class='lg:hidden mb-3'>" + _storebox + "</div>" + _mobnav
             + "<div class='max-w-[1400px]'>" + banner + main_inner + "</div></main></div>"
@@ -2212,7 +2214,7 @@ def _blog_connect_card(t, fw: str) -> str:
                            f"<span class='text-slate-600'>{esc(str(c.get('keyword', '')))} <span class='text-[10px] text-slate-400'>{_src}</span></span>"
                            f"<span class='font-bold {_cls}'>{_b} → {_a}{' ⬆️' if _up else ''}</span></div>")
             cons_html += ("<div class='mt-3 bg-indigo-50/50 rounded-2xl p-4'>"
-                          f"<div class='text-sm font-bold text-slate-700 mb-1'>🗞 주간 리포트 <span class='text-xs text-slate-400 font-normal'>({esc(_wr.get('week') or '')})</span></div>"
+                          f"<div class='text-sm font-bold text-slate-700 mb-1'>주간 리포트 <span class='text-xs text-slate-400 font-normal'>({esc(_wr.get('week') or '')})</span></div>"
                           + _rows2
                           + f"<p class='text-xs text-slate-500 mt-2'>{esc(_d.get('coaching') or '')}</p></div>")
         pubs = db.list_blog_publishes(t.id, limit=5)
@@ -2226,13 +2228,13 @@ def _blog_connect_card(t, fw: str) -> str:
         pub_box = ((f"<div class='mt-4'><div class='text-xs font-bold text-slate-500 mb-1'>최근 발행 확인 {len(pubs)}건</div>{pub_rows}</div>")
                    if pubs else "<p class='text-xs text-slate-400 mt-3'>아직 확인된 발행이 없어요. 글 발행 후 '자동 확인'을 눌러보세요.</p>")
         return (f"<div id='blog' class='{fw} mt-5'>"
-                "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>📝 내 네이버 블로그</h2>"
+                "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>내 네이버 블로그</h2>"
                 f"<p class='text-sm text-slate-400 mb-3'>연결됨 · 공개 RSS로 발행 여부와 순위를 추적해요.</p>"
                 "<div class='flex items-center gap-3 flex-wrap'>"
                 f"<a href='{esc(t.naver_blog_url)}' target=_blank rel=noopener "
                 "class='inline-flex items-center gap-2 bg-emerald-50 text-emerald-700 font-bold text-sm px-4 py-2.5 rounded-xl'>"
                 f"✅ blog.naver.com/{esc(t.blog_id)} ↗</a>"
-                "<button type=button onclick='blogChk(this)' class='bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition'>🔄 발행 자동 확인</button>"
+                "<button type=button onclick='blogChk(this)' class='bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition'>발행 자동 확인</button>"
                 "<span id='blogChkMsg' class='text-xs text-slate-400'></span>"
                 "<form method=post action='/me/blog' class='ml-auto' onsubmit=\"return confirm('블로그 연결을 해제할까요? 발행 확인·순위 매칭이 꺼져요.')\">"
                 "<input type=hidden name=blog value=''>"
@@ -2245,7 +2247,7 @@ def _blog_connect_card(t, fw: str) -> str:
                 "else{m.textContent='새로 확인된 발행이 없어요 (RSS 최근글 '+d.rss_posts+'건 대조).';btn.disabled=false;}"
                 "}catch(e){m.textContent='확인 실패';btn.disabled=false;}}</script></div>")
     return (f"<div id='blog' class='{fw} mt-5'>"
-            "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>📝 내 네이버 블로그 연결</h2>"
+            "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>내 네이버 블로그 연결</h2>"
             "<p class='text-sm text-slate-400 mb-3'>네이버는 발행 API가 없어 직접 발행하시죠? "
             "블로그 주소를 등록하면 <b>실제 발행 확인 · 내 블로그 순위 추적</b>이 정확해져요.</p>"
             "<form method=post action='/me/blog' class='flex gap-2'>"
@@ -2325,7 +2327,7 @@ def my_store_info(request: Request, phone: str = Form(""), address: str = Form("
 
 
 def _store_info_card(t) -> str:
-    """🏪 매장 정보 카드 — 한 번 입력하면 모든 글 마무리 고정정보 블록에 재사용."""
+    """매장 정보 카드 — 한 번 입력하면 모든 글 마무리 고정정보 블록에 재사용."""
     inp = "w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
     seller = (getattr(t, "biz_type", "local") or "local") in ("seller", "hybrid")
     filled = sum(1 for v in (t.phone, t.address, t.hours, getattr(t, "parking", ""), t.map_url)
@@ -2333,19 +2335,19 @@ def _store_info_card(t) -> str:
     seller_rows = ""
     if seller:
         seller_rows = (
-            f"<input name=buy_url value=\"{esc(t.buy_url or '')}\" placeholder='🔗 구매 링크(스토어/상세페이지)' class='{inp}'>"
-            f"<input name=search_kw value=\"{esc(t.search_kw or '')}\" placeholder='🔎 검색어 유도 (예: 쿠팡에서 폴딩박스)' class='{inp}'>")
+            f"<input name=buy_url value=\"{esc(t.buy_url or '')}\" placeholder='구매 링크(스토어/상세페이지)' class='{inp}'>"
+            f"<input name=search_kw value=\"{esc(t.search_kw or '')}\" placeholder='검색어 유도 (예: 쿠팡에서 폴딩박스)' class='{inp}'>")
     return (f"<details {'open' if filled < 2 else ''} class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5 mb-5'>"
-            f"<summary class='cursor-pointer select-none font-extrabold text-slate-900'>🏪 매장 정보 "
+            f"<summary class='cursor-pointer select-none font-extrabold text-slate-900'>매장 정보 "
             f"<span class='text-xs text-slate-400 font-normal'>({filled}/5 입력됨 · 한 번 입력하면 모든 글에 자동 삽입)</span></summary>"
             "<p class='text-xs text-slate-400 mt-1 mb-3'>블로그 글 마무리 '찾아오는 길' 블록에 재사용돼요. "
             "지도는 텍스트가 아니라 네이버 <b>장소 컴포넌트</b>로 넣도록 발행 화면에서 안내해 드려요.</p>"
             "<form method=post action='/me/store-info' class='grid sm:grid-cols-2 gap-2'>"
-            f"<input name=address value=\"{esc(t.address or '')}\" placeholder='📍 주소' class='{inp} sm:col-span-2'>"
-            f"<input name=phone value=\"{esc(t.phone or '')}\" placeholder='📞 전화번호' class='{inp}'>"
-            f"<input name=hours value=\"{esc(t.hours or '')}\" placeholder='🕒 영업시간 (예: 매일 10-21시, 월 휴무)' class='{inp}'>"
-            f"<input name=parking value=\"{esc(getattr(t, 'parking', '') or '')}\" placeholder='🅿️ 주차 (예: 가게 앞 2대, 공영주차장 3분)' class='{inp}'>"
-            f"<input name=map_url value=\"{esc(t.map_url or '')}\" placeholder='🗺 네이버 플레이스 URL' class='{inp}'>"
+            f"<input name=address value=\"{esc(t.address or '')}\" placeholder='주소' class='{inp} sm:col-span-2'>"
+            f"<input name=phone value=\"{esc(t.phone or '')}\" placeholder='전화번호' class='{inp}'>"
+            f"<input name=hours value=\"{esc(t.hours or '')}\" placeholder='영업시간 (예: 매일 10-21시, 월 휴무)' class='{inp}'>"
+            f"<input name=parking value=\"{esc(getattr(t, 'parking', '') or '')}\" placeholder='주차 (예: 가게 앞 2대, 공영주차장 3분)' class='{inp}'>"
+            f"<input name=map_url value=\"{esc(t.map_url or '')}\" placeholder='네이버 플레이스 URL' class='{inp}'>"
             + seller_rows +
             "<button class='bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 rounded-xl sm:col-span-2 transition'>저장</button>"
             "</form></details>")
@@ -2363,7 +2365,7 @@ def my_topic_axis(request: Request, topic_axis: str = Form("")):
 
 
 def _growth_card(t, fw: str) -> str:
-    """📈 순위 성장 그래프 + 코칭(상위노출 PHASE 3) — 잘 되는 키워드는 더 밀고, 정체는 앵글 재도전."""
+    """순위 성장 그래프 + 코칭(상위노출 PHASE 3) — 잘 되는 키워드는 더 밀고, 정체는 앵글 재도전."""
     from app.services import ranktrack
     from urllib.parse import quote as _q
     deltas = ranktrack.rank_deltas(t.id)
@@ -2407,7 +2409,7 @@ def _growth_card(t, fw: str) -> str:
                   f"{s['prev_label']} 대신 <b>{s['retry_label']}</b> 앵글로 재도전</span>"
                   "<span class='text-xs font-bold text-amber-600 whitespace-nowrap'>앵글 바꿔 만들기 →</span></a>")
     return (f"<div class='{fw} mt-5'>"
-            "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>📈 순위 성장</h2>"
+            "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>순위 성장</h2>"
             "<p class='text-sm text-slate-400 mb-3'>자동 추적 스냅샷 기준 · 실측만 표시(참고용, 위치·기기별 차이)</p>"
             + rows + coach + "</div>")
 
@@ -2461,7 +2463,7 @@ def _place_card(t, fw: str) -> str:
           f"<a href='/me/review-card.png' download class='text-indigo-600 font-bold'>⬇ 리뷰 요청 카드(인쇄용)</a> · "
           f"<a href='/me/qr/{_tl['code']}.png' download class='text-indigo-600 font-bold'>⬇ QR 저장</a></div></div>") if _tl else ""
     return (f"<div class='{fw} mt-5'>"
-            "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>📍 플레이스 최적화 (매장)</h2>"
+            "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>플레이스 최적화 (매장)</h2>"
             f"<p class='text-sm text-slate-400 mb-4'>동네매장은 지도 상위노출이 방문에 직결돼요 · 정보 완성 {s['done']}/{s['known']}"
             " · 리뷰는 <b>실제 방문 손님</b>에게만 정당하게 요청해요(가짜 리뷰 금지).</p>"
             + rank_box
@@ -2472,7 +2474,7 @@ def _place_card(t, fw: str) -> str:
 
 
 def _calendar_card(t, plan: str) -> str:
-    """📅 발행 캘린더 카드(상위노출 PHASE 2) — 이번 주 진행률 + 남은 슬롯 제안 + 주제 축."""
+    """발행 캘린더 카드(상위노출 PHASE 2) — 이번 주 진행률 + 남은 슬롯 제안 + 주제 축."""
     from app.services import pubcal
     wp = pubcal.week_plan(t, plan)
     # 진행률 도트(●=완료 ○=남음)
@@ -2492,13 +2494,13 @@ def _calendar_card(t, plan: str) -> str:
     axis = esc(getattr(t, "topic_axis", "") or "")
     inp = "flex-1 border border-slate-200 rounded-xl px-3 py-2 text-sm"
     axis_form = ("<details class='mt-2'><summary class='text-xs text-slate-400 cursor-pointer select-none'>"
-                 f"🧭 전문 주제 축 {('· <b class=\"text-slate-600\">' + axis + '</b>') if axis else '설정(권장)'} — 같은 주제 꾸준함이 C-Rank 신호</summary>"
+                 f"전문 주제 축 {('· <b class=\"text-slate-600\">' + axis + '</b>') if axis else '설정(권장)'} — 같은 주제 꾸준함이 C-Rank 신호</summary>"
                  "<form method=post action='/me/topic-axis' class='flex gap-2 mt-2'>"
                  f"<input name=topic_axis value=\"{axis}\" placeholder='예: 부산 썬팅, 열차단 필름 (쉼표로 여러 개)' class='{inp}'>"
                  "<button class='px-4 bg-slate-900 text-white rounded-xl text-xs font-bold'>저장</button></form></details>")
     return ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5 mb-5'>"
             "<div class='flex items-center justify-between mb-2'>"
-            f"<h2 class='font-extrabold text-slate-900'>📅 발행 캘린더 · 이번 주 {wp['done']}/{wp['target']}{basis_note}</h2>"
+            f"<h2 class='font-extrabold text-slate-900'>발행 캘린더 · 이번 주 {wp['done']}/{wp['target']}{basis_note}</h2>"
             f"<div class='flex items-center gap-1'>{dots}</div></div>"
             f"<p class='text-xs text-slate-500 mb-3'>{esc(wp['coach'])}</p>"
             + sug_html + axis_form + "</div>")
@@ -3156,7 +3158,7 @@ def _naver_publish_confirm_box(tenant, blog, sec: str, cbtn: str, ok: str = "", 
     auto = ""
     if getattr(tenant, "blog_id", ""):
         auto = ("<div class='flex items-center gap-2 mb-3'>"
-                f"<button type=button onclick='nvChk(this)' class='{cbtn} bg-emerald-600 hover:bg-emerald-700'>🔄 블로그에서 자동 확인 (RSS)</button>"
+                f"<button type=button onclick='nvChk(this)' class='{cbtn} bg-emerald-600 hover:bg-emerald-700'>블로그에서 자동 확인 (RSS)</button>"
                 "<span id='nvChkMsg' class='text-xs text-slate-400'></span></div>"
                 "<script>async function nvChk(btn){var m=document.getElementById('nvChkMsg');m.textContent='확인 중…';btn.disabled=true;"
                 "try{var r=await fetch('/api/blog/check-published',{method:'POST'});var d=await r.json();"
@@ -3165,7 +3167,7 @@ def _naver_publish_confirm_box(tenant, blog, sec: str, cbtn: str, ok: str = "", 
                 "else{m.textContent='아직 RSS에서 못 찾았어요 — 발행 직후엔 몇 분 걸려요. 아래에 주소를 붙여넣어도 돼요.';btn.disabled=false;}"
                 "}catch(e){m.textContent='확인 실패';btn.disabled=false;}}</script>")
     else:
-        auto = ("<p class='text-xs text-amber-600 mb-3'>💡 <a href='/me?tab=report#blog' class='font-bold underline'>내 블로그를 연결</a>하면 "
+        auto = ("<p class='text-xs text-amber-600 mb-3'><a href='/me?tab=report#blog' class='font-bold underline'>내 블로그를 연결</a>하면 "
                 "발행 여부를 자동으로 확인해 드려요.</p>")
     return (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>발행 완료하셨나요? <span class='text-emerald-600'>(순위 추적 시작)</span></div>"
             + banner + auto
@@ -3661,9 +3663,9 @@ def shops(ok: str = "", err: str = ""):
         "<option value=local>🏪 동네 매장(소상공인) — 방문·예약 유도</option>"
         "<option value=seller>📦 온라인 셀러(쿠팡·11번가·스토어) — 구매 유도</option>"
         "<option value=hybrid>🔁 매장+온라인 동시</option></select>"
-        f"<input name=phone placeholder='📞 전화 (매장)' class='{inp}'>"
+        f"<input name=phone placeholder='전화 (매장)' class='{inp}'>"
         f"<input name=hours placeholder='🕐 영업시간 (매장)' class='{inp}'>"
-        f"<input name=address placeholder='📍 주소 (매장)' class='{inp}'>"
+        f"<input name=address placeholder='주소 (매장)' class='{inp}'>"
         f"<input name=map_url placeholder='🗺 네이버 지도 링크 (매장)' class='{inp}'>"
         # ── 셀러 부가정보 ──
         f"<select name=marketplace class='{inp}'>"
@@ -3727,9 +3729,9 @@ def shops(ok: str = "", err: str = ""):
             "<span class='text-[11px] text-slate-400'>수동→점수게이트→완전자동 (검수 부담↓)</span></form>"
             # 연락처/장소(블로그 자동 삽입)
             f"<form method=post action='/admin/shops/{t.id}/profile' class='grid sm:grid-cols-2 gap-2'>"
-            f"<input name=phone value=\"{esc(t.phone)}\" placeholder='📞 전화번호' class='{inp}'>"
+            f"<input name=phone value=\"{esc(t.phone)}\" placeholder='전화번호' class='{inp}'>"
             f"<input name=hours value=\"{esc(t.hours)}\" placeholder='🕐 영업시간' class='{inp}'>"
-            f"<input name=address value=\"{esc(t.address)}\" placeholder='📍 주소' class='{inp}'>"
+            f"<input name=address value=\"{esc(t.address)}\" placeholder='주소' class='{inp}'>"
             f"<input name=map_url value=\"{esc(t.map_url)}\" placeholder='🗺 네이버 지도 링크' class='{inp}'>"
             "<button class='px-3 py-1.5 bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg sm:col-span-2'>연락처·장소 저장 (블로그에 자동 삽입)</button></form>"
             + bizform +
@@ -3819,7 +3821,7 @@ def ops(ok: str = "", err: str = ""):
             f"<div class='text-xs text-slate-500 mb-3'>이번주 발행 {st['pub_week']} · 검수대기 {st['draft']} · 누적 {st['total']}</div>"
             "<div class='flex flex-wrap gap-2 items-center'>"
             + review_btn
-            + f"<a href='/u/{tok}' class='px-3 py-1.5 bg-emerald-500 text-white text-xs font-semibold rounded-lg'>📷 사진 올리기</a>"
+            + f"<a href='/u/{tok}' class='px-3 py-1.5 bg-emerald-500 text-white text-xs font-semibold rounded-lg'>사진 올리기</a>"
             + f"<a href='/admin/adpack/{t.id}' class='px-3 py-1.5 bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-lg'>🎯 광고 소재팩</a>"
             + f"<form method=post action='/admin/shops/{t.id}/remix' class='inline'><button class='px-3 py-1.5 bg-fuchsia-100 text-fuchsia-700 text-xs font-semibold rounded-lg'>🔥 리믹스</button></form>"
             + f"<form method=post action='/admin/shops/{t.id}/schedule' class='inline flex items-center gap-1 ml-auto'>"
@@ -4803,12 +4805,12 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "") 
           <input name=s_address id=s_address value="{_addr}" placeholder='주소' class='{inp} col-span-2'>
           <input name=s_map id=s_map value="{_map0}" placeholder='네이버 플레이스 URL (선택)' class='{inp} col-span-2'></div>
         <div id=sf_seller class='grid grid-cols-2 gap-2 hidden'>
-          <input name=s_buy id=s_buy value="{esc(getattr(tenant,'buy_url','') or '')}" placeholder='🔗 내 스토어/상품 링크 (손님이 갈 곳) *필수' class='{inp} col-span-2'>
+          <input name=s_buy id=s_buy value="{esc(getattr(tenant,'buy_url','') or '')}" placeholder='내 스토어/상품 링크 (손님이 갈 곳) *필수' class='{inp} col-span-2'>
           <input name=s_market id=s_market value="{esc(getattr(tenant,'marketplace','') or '')}" placeholder='마켓 (쿠팡·스마트스토어·11번가)' class='{inp}'>
           <input name=s_brand id=s_brand value="{esc(getattr(tenant,'brand_name','') or '')}" placeholder='브랜드명' class='{inp}'>
           <input name=s_search id=s_search value="{esc(getattr(tenant,'search_kw','') or '')}" placeholder='검색어 유도 (예: 폴딩박스)' class='{inp} col-span-2'></div></details>
       <div><label class='{lb}'>3. 사진 <span class='text-slate-400 font-normal text-xs'>(끌어서 순서 변경 · × 삭제)</span>
-        <span class='inline-block ml-1 bg-indigo-50 text-indigo-600 text-[11px] font-bold px-2 py-0.5 rounded-full'>✨ 자동 전문가 보정</span></label>
+        <span class='inline-block ml-1 bg-indigo-50 text-indigo-600 text-[11px] font-bold px-2 py-0.5 rounded-full'>자동 전문가 보정</span></label>
         <div id=up_preview class='grid grid-cols-3 sm:grid-cols-4 gap-2'></div>
         <input type=file name=photos id=up_photos accept='image/*' multiple required class='hidden'>
         <p class='text-xs text-slate-400 mt-1.5'>💡 <b class='text-slate-500'>끌어서</b> 순서 변경 · <b class='text-slate-500'>＋</b> 로 여러 장 추가 · 올린 순서대로 영상·블로그에 배치돼요</p></div>
@@ -4889,7 +4891,7 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "") 
           "}catch(e){b.innerHTML='<span class=\"text-rose-400\">인식 실패</span>';}}"
           "async function showGen(e){if(e&&e.preventDefault)e.preventDefault();var f=(e&&e.target)?e.target:document.querySelector('form[action*=\"/upload\"]');"
           "var o=document.getElementById('genOverlay');o.classList.remove('hidden');o.classList.add('flex');"
-          "var st=[[0,'🎯 마케팅 전략가가 분석 중…'],[20,'✍️ 카피라이터가 글 쓰는 중…'],[42,'🔍 SEO 편집장이 다듬는 중…'],[62,'🎬 영상 감독이 영상 만드는 중…'],[85,'🎬 영상 마무리 중…']];"
+          "var st=[[0,'마케팅 전략가가 분석 중…'],[20,'카피라이터가 글 쓰는 중…'],[42,'SEO 편집장이 다듬는 중…'],[62,'🎬 영상 감독이 영상 만드는 중…'],[85,'🎬 영상 마무리 중…']];"
           "function setBar(v){var b=document.getElementById('gBar');if(b)b.style.width=v+'%';var g=document.getElementById('gPct');if(g)g.textContent=Math.round(v)+'%';var l=st[0][1];st.forEach(function(s){if(v>=s[0])l=s[1];});var gl=document.getElementById('gLabel');if(gl)gl.textContent=l;}"
           "var aid='';var p=0;var tick=setInterval(function(){var cap=aid?97:60;p=Math.min(p+(p<58?1.0:0.35),cap);setBar(p);},600);"
           "var base=0;try{base=(await (await fetch('/me/sets/count')).json()).n;}catch(_){}"
