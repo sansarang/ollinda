@@ -206,6 +206,16 @@ def build_briefing(t, plan: str = "free") -> dict:
     best["action_label"] = "사진 보내고 시작하기"
     best["pass_href"] = "/api/briefing/pass"
     best["partner_note"] = "사진만 보내주시면 글·영상·발행 준비는 제가 할게요."
+    # 어제 클릭 실측 동기부여(추적 P3) — 있을 때만, 링크 클릭 기준임을 명시(정직)
+    try:
+        import datetime as _dt
+        y = (_dt.datetime.utcnow() - _dt.timedelta(days=1)).strftime("%Y-%m-%d")
+        yc = db.clicks_on_date(t.id, y)
+        if yc:
+            best["partner_note"] = (f"어제 콘텐츠가 손님 {yc}명을 데려왔어요(추적링크 클릭 기준) — "
+                                    "오늘도 하나 어때요? " + best["partner_note"])
+    except Exception:
+        pass
     best["date"] = __import__("datetime").datetime.utcnow().strftime("%Y-%m-%d")
     return best
 

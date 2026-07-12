@@ -1982,7 +1982,20 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                               f"<div class='flex-1 min-w-0'><div class='text-sm font-bold text-slate-700 truncate'>{_tt}</div>"
                               f"<div class='text-[11px] text-slate-400'>{_cl}</div></div>"
                               f"<span class='text-xl font-extrabold text-violet-600'>{rk['n']}<span class='text-xs text-slate-400 font-bold ml-0.5'>명</span></span></div>")
-                _top3 = ((f"<div class='mb-4'><div class='text-sm font-bold text-slate-600 mb-1'>가장 손님 많이 데려온 콘텐츠 TOP {len(_rank3)}</div>{_rows}</div>")
+                # 성과→학습 코칭(추적 P3): 1위 콘텐츠의 키워드·앵글 → 다음 글 방향 제안
+                _coach = ""
+                if _rank3 and _rank3[0]["n"] >= 3:
+                    _b1 = db.find_piece_brief(t.id, _rank3[0]["content_id"]) or {}
+                    _kw1 = (_b1.get("keywords") or [""])[0]
+                    _ang1 = _b1.get("angle") or "review"
+                    _ang_lab = {"review": "후기형", "howto": "방법형", "price": "가격형"}.get(_ang1, "")
+                    if _kw1:
+                        from urllib.parse import quote as _q3
+                        _coach = ("<div class='flex items-center gap-3 bg-violet-50 border border-violet-100 rounded-xl px-3.5 py-2.5 mt-2'>"
+                                  f"<div class='flex-1 text-sm text-violet-800'>{('<b>' + esc(_ang_lab) + '</b>·' if _ang_lab else '')}"
+                                  f"<b>'{esc(_kw1)}'</b> 글이 잘 됐어요 — 다음 글도 이 방향 어때요?</div>"
+                                  f"<a href='/me?target_kw={_q3(_kw1)}&angle={_ang1}' class='flex-shrink-0 bg-violet-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>이 방향으로 만들기</a></div>")
+                _top3 = ((f"<div class='mb-4'><div class='text-sm font-bold text-slate-600 mb-1'>가장 손님 많이 데려온 콘텐츠 TOP {len(_rank3)}</div>{_rows}{_coach}</div>")
                          if _rank3 else "")
                 _sp_rows = "".join(
                     f"<div class='flex items-center justify-between py-1.5'><span class='text-sm text-slate-600'>{_ch_lab.get(k, esc(k))}</span>"

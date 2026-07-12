@@ -94,6 +94,19 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
                            f"제목·첫문장·본문에 자연스럽게 더 강하게 반영하라: {kwlist}")
     except Exception:
         pass
+    # 📊 클릭 실측 학습(추적 P3) — 손님을 실제로 데려온 콘텐츠의 키워드·앵글을 다음 생성에 강화
+    try:
+        top = db.content_click_ranking(tenant.id, days=30, limit=1)
+        if top and top[0]["n"] >= 3:                    # 우연 클릭(1~2회)으로 방향 왜곡 방지
+            b = db.find_piece_brief(tenant.id, top[0]["content_id"]) or {}
+            kw = (b.get("keywords") or [""])[0]
+            ang = {"review": "후기형", "howto": "방법형", "price": "가격형"}.get(b.get("angle") or "", "")
+            if kw:
+                asset.note += (f"\n[성과 학습 — 클릭 실측] '{kw}'{(' · ' + ang) if ang else ''} 콘텐츠가 "
+                               f"추적링크 클릭 {top[0]['n']}회로 가장 반응이 좋았다. "
+                               "이 키워드·앵글 방향을 참고해 더 강화하라(그대로 복제 금지).")
+    except Exception:
+        pass
     brief_public = {k: v for k, v in brief.items() if not k.startswith("_")}
     pieces = generate_for(tenant, asset, kinds, images=paths)   # ✍️ 카피라이터·🎬 영상감독
     _exp = (intake.get("experience") or "").strip()[:200]       # 사장님 경험담 — 결과 하이라이트용(A2)
