@@ -11,9 +11,13 @@ from urllib.parse import quote
 from app import config, db
 
 # 앵글 로테이션(스마트블록 다중진입과 연결) — 같은 주제라도 검색의도별로 다른 블록을 노린다
+# 사업형태별 분기(C2 버그수정): 매장형=지역·방문 의도 / 셀러형=상품·구매 의도
 _ANGLES = [("review", "후기형", "실제 경험담 — '후기' 스마트블록"),
            ("howto", "방법·과정형", "단계별 과정 — '방법' 블록·지식스니펫"),
            ("price", "가격·비용형", "가격·구성 정리 — '가격/비용' 블록")]
+_ANGLES_SELLER = [("review", "내돈내산 후기형", "실사용 후기 — '후기' 스마트블록·구매 전환"),
+                  ("howto", "사용법·비교형", "사용법·타제품 비교 — '방법/비교' 블록"),
+                  ("price", "가성비·구성형", "가격·구성·혜택 정리 — '가격' 블록")]
 
 
 def weekly_target(tenant, plan: str = "free") -> int:
@@ -25,12 +29,19 @@ def weekly_target(tenant, plan: str = "free") -> int:
 
 
 def _topics(tenant, limit: int = 3) -> list[str]:
-    """이번 주 제안 주제 — 전문 주제 축(topic_axis) 우선, 없으면 지역+업종."""
+    """이번 주 제안 주제 — 전문 주제 축(topic_axis) 우선. 없으면 사업형태 자동분기(C2):
+    매장형 = 지역+업종(방문 검색), 셀러형 = 상품·브랜드 키워드(구매 검색)."""
     axis = (getattr(tenant, "topic_axis", "") or "").strip()
     if axis:
         toks = [t.strip() for t in axis.replace("\n", ",").split(",") if t.strip()]
         if toks:
             return (toks * ((limit // len(toks)) + 1))[:limit]
+    if (getattr(tenant, "biz_type", "local") or "local") == "seller":
+        # 셀러: 검색어 유도(search_kw) > 브랜드+상품 > 상품명 — 지역 키워드 금지(구매 의도와 무관)
+        prod = ((getattr(tenant, "search_kw", "") or "").strip()
+                or f"{(getattr(tenant, 'brand_name', '') or '').strip()} {getattr(tenant, 'industry', '')}".strip()
+                or (getattr(tenant, "industry", "") or "").strip())
+        return [prod or "내 상품 핵심 키워드"] * limit
     base = (f"{getattr(tenant, 'region', '')} {getattr(tenant, 'industry', '')}").strip()
     return [base or "내 가게 핵심 주제"] * limit
 
@@ -43,9 +54,11 @@ def week_plan(tenant, plan: str = "free") -> dict:
     done = act["this_week"]
     remaining = max(0, target - done)
     topics = _topics(tenant, max(remaining, 1))
+    angles = (_ANGLES_SELLER if (getattr(tenant, "biz_type", "local") or "local") == "seller"
+              else _ANGLES)
     sugg = []
     for i in range(remaining):
-        angle, label, why = _ANGLES[i % len(_ANGLES)]
+        angle, label, why = angles[i % len(angles)]
         topic = topics[i % len(topics)]
         sugg.append({"topic": topic, "angle": angle, "angle_label": label, "why": why,
                      "href": f"/me?target_kw={quote(topic)}&angle={angle}"})
