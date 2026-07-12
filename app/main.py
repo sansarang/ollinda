@@ -239,6 +239,22 @@ app.include_router(google_router())
 _DEMO_HITS: dict = {}   # ip -> [timestamps] (무료 체험 rate limit)
 
 
+# ── 대시보드 공통 스타일(대시보드 톤 A1) — 랜딩의 아이콘·톤 재사용(중복 정의 금지) ──
+# 규칙: 보라 1색(#6366F1)·상승만 초록·흰 배경+#F9FAFB 구분·카드 흰+#E5E7EB+16px·아이콘 연보라 원형
+def _ic(name: str, cls: str = "w-4 h-4") -> str:
+    from app import landing as _l
+    return _l._icon(name, cls)
+
+
+def _icchip(name: str, tone: str = "indigo") -> str:
+    from app import landing as _l
+    return _l._icon_chip(name, tone)
+
+
+_BTN = "bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition"
+_CARD = "bg-white border border-slate-200 rounded-2xl"
+
+
 def _client_ip(request: Request) -> str:
     return (request.headers.get("cf-connecting-ip")
             or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
@@ -1731,16 +1747,15 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         _pn, _usage, _upbtn = "👑 사장님", "무제한 · 영구 라이선스", ""
     elif _plan == "free":
         _usage = f"무료 {u.get('free_used') or 0}/{FREE_LIMIT}회"
-        _upbtn = ("<a href='/billing?plan=pro' class='ml-auto bg-white text-indigo-700 text-sm font-bold "
-                  "px-4 py-2 rounded-xl'>업그레이드</a>")
+        _upbtn = (f"<a href='/billing?plan=pro' class='ml-auto {_BTN} text-sm px-4 py-2'>업그레이드</a>")
     else:
         _cap = _pay.PLANS.get(_plan, {}).get("monthly", 0)
         _usage = f"이번달 {db.month_usage(u['id'])}" + (f"/{_cap}건" if _cap else "건(무제한)")
         _upbtn = ""
-    plan_card = ("<div class='rounded-2xl p-4 mb-4 flex items-center gap-3 text-white' "
-                 "style='background:linear-gradient(120deg,#334155,#4338ca)'>"
-                 f"<div><div class='text-xs text-white/70'>내 플랜</div>"
-                 f"<div class='font-bold'>{_pn} · {_usage}</div></div>{_upbtn}</div>")
+    plan_card = (f"<div class='{_CARD} p-4 mb-4 flex items-center gap-3'>"
+                 f"{_icchip('shield')}"
+                 f"<div><div class='text-xs text-slate-400'>내 플랜</div>"
+                 f"<div class='font-bold text-slate-900'>{_pn} · {_usage}</div></div>{_upbtn}</div>")
     # 무료 소진 → 결제 유도(전환 PHASE 3) — 방금 만든 품질 근거 + 유료 기능 맛보기(사실만, 과장 없음)
     _upsell = ""
     if (not _is_owner(u)) and _plan == "free" and (u.get("free_used") or 0) >= FREE_LIMIT:
@@ -1763,9 +1778,9 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                    "<p class='text-xs text-slate-400 mt-2'>연 결제 시 약 30% 할인 · 언제든 해지 가능</p></div>")
     _sname = t.name if (t.name and t.name not in ("카카오회원", "구글회원", "회원", "내 가게")) else ""
     greeting = ("<div class='mb-6'>"
-                + (f"<div class='inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-700 text-sm font-bold px-3 py-1.5 rounded-full mb-3'>🏪 {esc(_sname)}</div>" if _sname else "")
-                + "<div class='text-2xl sm:text-3xl font-extrabold text-slate-900 leading-tight'>사진만 올리면 "
-                "<span style='background:linear-gradient(120deg,#6366f1,#ec4899);-webkit-background-clip:text;background-clip:text;color:transparent'>5채널 콘텐츠</span>가 완성돼요</div></div>")
+                + (f"<div class='inline-flex items-center gap-1.5 bg-[#EEF2FF] text-indigo-700 text-sm font-bold px-3 py-1.5 rounded-full mb-3'>{_ic('store', 'w-3.5 h-3.5')} {esc(_sname)}</div>" if _sname else "")
+                + "<div class='text-2xl sm:text-3xl font-bold text-slate-900 leading-tight'>사진만 올리면 "
+                "<span class='text-indigo-600'>5채널 콘텐츠</span>가 완성돼요</div></div>")
     # 🎯 진단→생성 연결(상위노출 PHASE 1): ?target_kw=미노출키워드&angle=review|howto|price
     _tkw = (request.query_params.get("target_kw") or "").strip()[:40]
     _angle = (request.query_params.get("angle") or "").strip()
@@ -2712,8 +2727,8 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
     wrap = "bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg transition-shadow"
 
     def _av():
-        return ("<div class='w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0' "
-                f"style='background:linear-gradient(120deg,#6366f1,#ec4899)'>{esc(sname[:1])}</div>")
+        return ("<div class='w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center text-white text-sm font-bold flex-shrink-0'>"
+                f"{esc(sname[:1])}</div>")
 
     def _cp(cid, text, label):
         return (f"<textarea id='{cid}' class='hidden'>{esc(text)}</textarea>"
@@ -2891,9 +2906,8 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                 "<div class='text-xs text-indigo-500'>🎯 마케팅 전략가 → ✍️ 카피라이터 → 🔍 SEO 편집장 → 🎬 영상 감독</div>"
                 + (f"<div class='text-xs text-slate-500 mt-2'>핵심 전략 키워드: <b>{esc(brief.get('core_keyword',''))}</b> · 앵글: {esc(brief.get('angle',''))}</div>" if brief else "")
                 + "</div>")
-    all_btn = (f"<a href='/kit/{asset_id}/pack-all' class='block text-center text-white font-extrabold py-4 rounded-2xl mb-5 "
-               "shadow-xl shadow-indigo-500/30 hover:shadow-indigo-500/50 transition' "
-               "style='background:linear-gradient(120deg,#6366f1,#8b5cf6,#ec4899)'>⬇ 5채널 전체 한 번에 받기 "
+    all_btn = (f"<a href='/kit/{asset_id}/pack-all' class='block text-center {_BTN} py-4 rounded-2xl mb-5 font-extrabold'>"
+               "5채널 전체 한 번에 받기 "
                "<span class='opacity-80 font-medium text-sm'>· 글+사진+영상 (채널별 폴더)</span></a>")
     thumbs = "".join(f"<img src='/dl/{asset_id}/{os.path.basename(im)}' class='h-24 w-24 object-cover rounded-lg border border-slate-100'>"
                      for im in imgs if im)
@@ -4807,7 +4821,8 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "") 
         <div id=pg_questions class='mb-2'></div>
         <input name=note maxlength=50 oninput="var c=document.getElementById('reqc');if(c)c.textContent=this.value.length+'/50';" placeholder='꼭 반영할 요청 (예: 급매 강조 / 차분한 톤)' class='{inp}'>
         <div class='text-right text-xs text-slate-400 mt-1'><span id=reqc>0/50</span></div></div>
-      <button class='w-full py-4 rounded-2xl text-white font-extrabold text-lg shadow-xl shadow-indigo-500/30 hover:shadow-indigo-500/50 transition' style='background:linear-gradient(120deg,#6366f1,#8b5cf6,#ec4899)'>✨ 5채널 콘텐츠 생성하기</button>
+      <button id=pd_submit class='w-full py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-lg transition disabled:opacity-40 disabled:cursor-not-allowed'>5채널 콘텐츠 생성하기</button>
+      <div id=pd_submit_hint class='hidden text-center text-xs text-slate-400'></div>
       <p class='text-center text-xs text-slate-400'>인스타·네이버·유튜브·X + 영상을 AI가 자동 생성 (20~40초)</p></form>"""
     js = ("<script>"
           "function bizFields(v){var l=document.getElementById('sf_local'),s=document.getElementById('sf_seller');if(l&&s){if(v==='seller'){l.classList.add('hidden');s.classList.remove('hidden');}else{s.classList.add('hidden');l.classList.remove('hidden');}}"
@@ -4893,8 +4908,8 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "") 
           "</script>")
     gen_overlay = ("<div id='genOverlay' class='fixed inset-0 z-50 hidden items-center justify-center' style='background:rgba(15,23,42,.45);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)'>"
                    "<div class='bg-white rounded-2xl p-6 w-72 max-w-[85vw] text-center shadow-2xl'>"
-                   "<div id='gLabel' class='font-bold text-sm mb-3'>🎯 마케팅 전략가가 분석 중…</div>"
-                   "<div class='w-full h-2 bg-slate-100 rounded-full overflow-hidden'><div id='gBar' class='h-full' style='width:0%;transition:width .4s;background:linear-gradient(90deg,#6366f1,#ec4899)'></div></div>"
+                   "<div id='gLabel' class='font-bold text-sm mb-3'>마케팅 전략가가 분석 중…</div>"
+                   "<div class='w-full h-2 bg-slate-100 rounded-full overflow-hidden'><div id='gBar' class='h-full bg-indigo-500' style='width:0%;transition:width .4s'></div></div>"
                    "<div id='gPct' class='text-slate-400 text-xs mt-1.5'>0%</div>"
                    "<p class='text-xs text-slate-400 mt-3'>AI 전문가팀이 만드는 중… (20~60초)</p></div></div>")
     return form + js + gen_overlay
