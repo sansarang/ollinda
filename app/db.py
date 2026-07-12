@@ -1198,6 +1198,25 @@ def daily_click_series(tenant_id: str, days: int = 7) -> list[dict]:
     return out
 
 
+def find_piece_brief(tenant_id: str, id_prefix: str) -> Optional[dict]:
+    """content_id(피스 id 앞부분) → {title, channel, kind, keywords, angle}. 성과 랭킹 표시용(추적 P2)."""
+    if not (id_prefix or "").strip():
+        return None
+    try:
+        with _conn() as c:
+            r = c.execute("SELECT payload, channel, kind FROM content_pieces WHERE tenant_id=? AND id LIKE ?",
+                          (tenant_id, id_prefix + "%")).fetchone()
+        if not r:
+            return None
+        pl = json.loads(r["payload"] or "{}")
+        title = (pl.get("title") or (pl.get("text") or "")[:40] or
+                 (pl.get("product_names") or [""])[0] or "").strip()
+        return {"title": title, "channel": r["channel"], "kind": r["kind"],
+                "keywords": pl.get("target_keywords") or [], "angle": pl.get("angle") or ""}
+    except Exception:
+        return None
+
+
 def clicks_on_date(tenant_id: str, date: str) -> int:
     """특정 날짜(YYYY-MM-DD)의 클릭 수 — 아침 브리핑 '어제 N명' 동기부여용(추적 P3)."""
     try:

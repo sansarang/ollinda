@@ -1712,8 +1712,10 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                    "facebook": "check", "marketplace": "package"}.items()}
     if sets:
         _cards = []
+        _ccounts = db.content_click_counts(t.id)         # 콘텐츠별 클릭 뱃지(추적 P2)
         for s in sets:
             ps = db.get_set_pieces(s["asset_id"])
+            _nclk = sum(_ccounts.get(p.id[:8], 0) for p in ps)
             thumb = ""
             for p in ps:
                 ips = p.payload.get("image_paths") or ([p.payload.get("image_path")] if p.payload.get("image_path") else [])
@@ -1731,7 +1733,10 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             _cards.append(
                 "<div class='group flex items-center gap-3 p-2.5 rounded-2xl border border-slate-100 bg-white hover:shadow-md hover:border-indigo-200 hover:-translate-y-0.5 transition-all'>"
                 + thumb_html
-                + f"<div class='flex-1 min-w-0'><div class='flex items-center gap-1 text-base leading-none mb-1.5'>{badges}</div>"
+                + f"<div class='flex-1 min-w-0'><div class='flex items-center gap-1 text-base leading-none mb-1.5'>{badges}"
+                + (f"<span class='ml-1 text-[11px] font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full' "
+                   f"title='올린다 추적링크 클릭 기준(조회수 아님)'>이 콘텐츠로 온 손님 {_nclk}명</span>" if _nclk else "")
+                + "</div>"
                 + f"<div class='text-xs text-slate-400 font-medium'>{esc(s['created'])} · {s['n']}채널</div></div>"
                 + f"<a href='/me?view={s['asset_id']}' class='px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-[.98] text-white text-xs font-bold rounded-xl transition'>보기</a>"
                 + f"<form method=post action='/me/set/{s['asset_id']}/delete' onsubmit=\"return confirm('이 콘텐츠를 삭제할까요?')\">"
@@ -1958,9 +1963,51 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 f"<div class='text-xs text-slate-400 mt-1.5'>→ {esc(_tl.get('label',''))}(으)로 연결돼요</div>"
                 f"<a href='/me/qr/{_tl['code']}.png' download='ollinda-qr.png' class='inline-block mt-2 text-xs font-bold text-indigo-500'>⬇ QR 이미지 저장</a>"
                 "</div></div></div>")
+        # 🏆 콘텐츠 성과(추적 P2) — 전부 추적링크 클릭 실측. '조회수' 아님을 명시(정직).
+        _perfbox = ""
+        try:
+            _rank3 = db.content_click_ranking(t.id, days=30, limit=3)
+            _split = db.channel_click_split(t.id, days=30)
+            _series = db.daily_click_series(t.id, 7)
+            _ch_lab = {"naver_blog": "네이버 블로그", "instagram": "인스타그램", "marketplace": "판매 콘텐츠",
+                       "x": "X", "qr": "매장 QR(오프라인)", "direct": "직접·기타"}
+            if _split or _rank3:
+                _rows = ""
+                for i, rk in enumerate(_rank3, 1):
+                    _b = db.find_piece_brief(t.id, rk["content_id"]) or {}
+                    _tt = esc((_b.get("title") or "(삭제된 콘텐츠)")[:34])
+                    _cl = _ch_lab.get(rk.get("channel") or _b.get("channel") or "", rk.get("channel") or "")
+                    _rows += (f"<div class='flex items-center gap-3 py-2 border-b border-slate-100'>"
+                              f"<span class='text-lg font-extrabold text-violet-500 w-6'>{i}</span>"
+                              f"<div class='flex-1 min-w-0'><div class='text-sm font-bold text-slate-700 truncate'>{_tt}</div>"
+                              f"<div class='text-[11px] text-slate-400'>{_cl}</div></div>"
+                              f"<span class='text-xl font-extrabold text-violet-600'>{rk['n']}<span class='text-xs text-slate-400 font-bold ml-0.5'>명</span></span></div>")
+                _top3 = ((f"<div class='mb-4'><div class='text-sm font-bold text-slate-600 mb-1'>가장 손님 많이 데려온 콘텐츠 TOP {len(_rank3)}</div>{_rows}</div>")
+                         if _rank3 else "")
+                _sp_rows = "".join(
+                    f"<div class='flex items-center justify-between py-1.5'><span class='text-sm text-slate-600'>{_ch_lab.get(k, esc(k))}</span>"
+                    f"<span class='text-base font-extrabold text-violet-600'>{v}<span class='text-xs text-slate-400 font-bold ml-0.5'>클릭</span></span></div>"
+                    for k, v in _split.items())
+                _mx = max((d["n"] for d in _series), default=0) or 1
+                _bars = "".join(
+                    f"<div class='flex-1 flex flex-col items-center gap-1'>"
+                    f"<div class='w-full max-w-[26px] rounded-t bg-violet-400' style='height:{max(3, int(44 * d['n'] / _mx))}px'></div>"
+                    f"<span class='text-[10px] text-slate-400'>{d['date']}</span></div>" for d in _series)
+                _perfbox = (
+                    f"<div class='{_fw} mt-5'>"
+                    "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>콘텐츠 성과 · 링크 클릭 실측</h2>"
+                    "<p class='text-sm text-slate-400 mb-4'>올린다 추적링크를 눌러 들어온 방문만 셉니다 — "
+                    "<b class='text-slate-600'>글 조회수가 아니에요.</b> 실제 조회수는 네이버 블로그·인스타 앱 통계에서 확인하세요.</p>"
+                    + _top3
+                    + "<div class='grid sm:grid-cols-2 gap-6'>"
+                    + f"<div><div class='text-sm font-bold text-slate-600 mb-1'>채널별 유입 (30일)</div>{_sp_rows or '<span class=\"text-sm text-slate-400\">아직 클릭이 없어요</span>'}</div>"
+                    + f"<div><div class='text-sm font-bold text-slate-600 mb-1'>최근 7일 추이</div><div class='flex items-end gap-1.5 h-16'>{_bars}</div></div>"
+                    + "</div></div>")
+        except Exception:
+            _perfbox = ""
         main_inner = (_sbadge + stats_row + _loopbox + _missbox + _growth_card(t, _fw)
                       + _blog_connect_card(t, _fw) + _place_card(t, _fw)
-                      + _trackbox + _rankbox + _kwbox)
+                      + _trackbox + _perfbox + _rankbox + _kwbox)
     else:                                                 # ✨ 만들기 (기본) — 완성되면 여기(만들기 대시보드)에 결과 표시
         active = "create"
         _made = (request.query_params.get("made") or "").strip()
