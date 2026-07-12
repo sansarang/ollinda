@@ -1970,7 +1970,8 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         if _notices:
             _notice_html = "".join(
                 "<div class='flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-3'>"
-                f"<span class='text-amber-500'>" + _ic("message", "w-5 h-5") + "</span><div class='flex-1 text-sm text-amber-800'>{esc(n.get('text') or '')}</div>"
+                "<span class='text-amber-500'>" + _ic("message", "w-5 h-5") + "</span>"
+                f"<div class='flex-1 text-sm text-amber-800'>{esc(n.get('text') or '')}</div>"
                 "<a href='/me' class='flex-shrink-0 bg-amber-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>오늘 만들기</a></div>"
                 for n in _notices[:2])
             db.mark_notices_read(t.id)
