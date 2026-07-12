@@ -441,12 +441,14 @@ def _teaser_html(pieces, brief, asset_id, remaining: int = 0,
                + "".join(f"<img src='{u}' class='h-24 w-24 object-cover rounded-lg flex-shrink-0'>" for u in thumbs)
                + "</div>") if thumbs else "")
 
-    def card(label, badge, inner, hi=False):
+    def card(label, badge, inner, hi=False, wide=False):
         """채널 카드 — 모바일: 가로 스와이프(80% 폭·스냅), 데스크탑: auto-fit 그리드(3~4열).
-        flex-col + 마지막 요소 mt-auto로 같은 행 카드 높이·하단 CTA 정렬 통일."""
+        flex-col + 마지막 요소 mt-auto로 같은 행 카드 높이·하단 CTA 정렬 통일.
+        wide=True: 데스크탑에서 행 전체 폭 배너(잔여 칸 빈 공간 방지, 무료그리드 D1)."""
         ring = "border-2 border-indigo-300" if hi else "border border-slate-200"
+        span = " md:col-span-full" if wide else ""
         return (f"<div class='bg-white {ring} rounded-2xl p-4 min-w-[80%] snap-center flex-shrink-0 "
-                f"md:min-w-0 md:flex-shrink flex flex-col'>"
+                f"md:min-w-0 md:flex-shrink flex flex-col{span}'>"
                 f"<div class='flex items-center justify-between mb-2'>"
                 f"<span class='font-bold text-sm text-slate-700'>{label}</span>"
                 f"<span class='text-[10px] font-bold text-indigo-500'>{badge}</span></div>{inner}</div>")
@@ -506,8 +508,11 @@ def _teaser_html(pieces, brief, asset_id, remaining: int = 0,
                   "인스타 캐러셀 카드 — 가입 후 생성",
                   "영상 완성본 + 피드 규격(1:1·4:5) — 가입 후",
                   "전체 다운로드(ZIP) · 네이버 발행 도우미 — 가입 후"])
+    # 배너형(D1): 4카드가 3+1로 배치될 때 둘째 줄 빈 칸 방지 — 행 전체 폭 + 항목 2열
     cards.append(card("+ 나머지 채널", "가입하면 전부",
-        locked_items + "<div class='text-xs text-slate-400 mt-auto pt-2'>가입하면 5채널 전부 + 완성본 다운로드 (무료 2회)</div>"))
+        f"<div class='md:grid md:grid-cols-2 md:gap-x-6'>{locked_items}</div>"
+        "<div class='text-xs text-slate-400 mt-auto pt-2'>가입하면 5채널 전부 + 완성본 다운로드 (무료 2회)</div>",
+        wide=True))
 
     # 모바일: 가로 스와이프 캐러셀(스냅) / 데스크탑: .tz-grid = auto-fit(minmax 280px) 3~4열 자동
     grid = ("<div class='tz-grid flex gap-3 overflow-x-auto snap-x snap-mandatory pb-2 -mx-1 px-1 mb-2'>"
