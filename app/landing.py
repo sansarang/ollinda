@@ -135,7 +135,8 @@ const cu=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){const 
 document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
 // 셀프 체험 위젯 + 스마트 입력(무료·유료 공용 헬퍼)
 (function(){
- const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+ // 큰따옴표 포함(버그2-a): 추측 텍스트에 "가 있으면 value="…" 속성이 깨져 수정 입력란이 안 뜨던 원인
+ const esc=s=>(s||'').replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
  // AI 선추측 확인(스마트 입력 PHASE 2) — 무료·유료 공용(대시보드에서도 사용).
  // onDone: 사용자가 응답(맞아요/수정 저장)한 순간 호출 — 무료 위젯의 생성버튼 활성화 트리거.
  window.intakeConfirmUI=function(box,guess,analysis,cid,vid,onDone){
@@ -153,11 +154,27 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
      box.innerHTML=confirmedLine(guess);   // 1줄 요약(넘치면 … · 탭하면 전체)
      onDone&&onDone();};
    box.querySelector('[data-g=fix]').onclick=function(){
-     box.innerHTML='<div class="flex gap-2"><input id="'+cid+'_edit" value="'+esc(guess)+'" class="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400">'
-       +'<button type="button" class="px-3 rounded-xl bg-indigo-600 text-white text-xs font-bold">저장</button></div>';
-     box.querySelector('button').onclick=function(){var nv=document.getElementById(cid+'_edit').value.trim();
-       if(c)c.value=nv;box.innerHTML=nv?confirmedLine(nv):'';
-       onDone&&onDone();};};
+     // DOM으로 직접 조립(버그2-a 재발 방지) — 추측 텍스트에 어떤 특수문자가 있어도 입력란이 항상 뜬다
+     box.innerHTML='';
+     var row=document.createElement('div');row.className='flex gap-2';
+     var inp=document.createElement('input');inp.id=cid+'_edit';
+     inp.className='flex-1 min-w-0 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400';
+     inp.placeholder='사진 속 내용을 직접 알려주세요 (예: 네잎클로버 키링, 자개 소재)';
+     inp.value=guess;
+     var sv=document.createElement('button');sv.type='button';sv.textContent='저장';
+     sv.className='px-3 rounded-xl bg-indigo-600 text-white text-xs font-bold';
+     function save(){var nv=inp.value.trim();
+       if(c)c.value=nv;box.innerHTML=nv?confirmedLine(nv):'';onDone&&onDone();}
+     sv.onclick=save;
+     inp.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();save();}});
+     row.appendChild(inp);row.appendChild(sv);box.appendChild(row);
+     // 미저장 경로 명시: 저장 안 하면 원래 AI 추측을 그대로 쓰고 진행
+     var skip=document.createElement('button');skip.type='button';
+     skip.className='block mt-1.5 text-[11px] text-slate-400 underline';
+     skip.textContent='수정 없이 AI 추측 그대로 진행';
+     skip.onclick=function(){if(c)c.value=guess;box.innerHTML=confirmedLine(guess);onDone&&onDone();};
+     box.appendChild(skip);
+     inp.focus();};
  };
  // 업종별 스마트 질문 렌더(PHASE 3) — 무료·유료 공용. 답은 window.__intakeAnswers에 수집.
  // hint: 사진 추측 텍스트(버그2 — 상호명 입력 시 서버가 업종 추론). 재렌더 시 기존 답변 보존.
@@ -271,19 +288,21 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
  function dpReset(){var gb=document.getElementById('d_guessbox');if(gb)gb.innerHTML='';
    var c=document.getElementById('d_confirmed'),v=document.getElementById('d_vision');
    if(c)c.value='';if(v)v.value='';_gseq++;setDemoReady(true,'');}
+ // 버그1: 0장=점선 박스(d_photobox) ↔ 1장+=박스 자체가 썸네일 그리드(d_preview)로 전환 — 분리 영역 없음
  function dpRender(){var pv=document.getElementById('d_preview');if(!pv)return;
+   var pb=document.getElementById('d_photobox');
    var nm=document.getElementById('d_photoname');if(nm)nm.textContent=DP.length?('✓ '+DP.length+'장 선택'):'';
    pv.innerHTML='';
-   if(!DP.length){pv.classList.add('hidden');dpReset();return;}
-   pv.classList.remove('hidden');
-   DP.slice(0,10).forEach(function(f,i){var w=document.createElement('div');w.className='relative flex-shrink-0 pt-1.5 pr-1.5';
-     var im=document.createElement('img');im.src=URL.createObjectURL(f);im.className='h-24 w-24 object-cover rounded-lg';w.appendChild(im);
+   if(!DP.length){pv.classList.add('hidden');if(pb)pb.classList.remove('hidden');dpReset();return;}
+   pv.classList.remove('hidden');if(pb)pb.classList.add('hidden');
+   DP.slice(0,10).forEach(function(f,i){var w=document.createElement('div');w.className='relative';
+     var im=document.createElement('img');im.src=URL.createObjectURL(f);im.className='w-full aspect-square object-cover rounded-lg';w.appendChild(im);
      var x=document.createElement('button');x.type='button';x.setAttribute('aria-label','사진 삭제');x.textContent='×';
-     x.className='absolute top-0 right-0 w-5 h-5 rounded-full bg-slate-700 text-white text-xs leading-none flex items-center justify-center';
+     x.className='absolute top-1 right-1 w-5 h-5 rounded-full bg-slate-700/80 text-white text-xs leading-none flex items-center justify-center';
      x.onclick=function(){DP.splice(i,1);dpSync();dpRender();if(DP.length)dpChanged();};
      w.appendChild(x);pv.appendChild(w);});
    var add=document.createElement('button');add.type='button';add.onclick=function(){pf.click();};
-   add.className='h-24 w-24 flex-shrink-0 rounded-lg border-2 border-dashed border-slate-300 text-slate-400 text-2xl mt-1.5';
+   add.className='w-full aspect-square rounded-lg border-2 border-dashed border-slate-300 text-slate-400 text-2xl flex items-center justify-center';
    add.textContent='＋';add.setAttribute('aria-label','사진 추가');pv.appendChild(add);}
  if(pf)pf.addEventListener('change',function(){Array.from(pf.files||[]).forEach(function(f){DP.push(f);});
    dpSync();dpRender();if(DP.length)dpChanged();});
@@ -479,11 +498,12 @@ def _hero_demo_card() -> str:
     <div id="d_target_hint" class="hidden bg-[#EEF2FF] text-indigo-700 text-xs font-bold rounded-xl px-3 py-2 mb-2"></div>
     <form id="demoForm" class="space-y-2">
      <input type=hidden id="d_target_kw"><input type=hidden id="d_target_vol">
-     <label class="block bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl px-4 py-3 text-center cursor-pointer hover:border-indigo-300 transition">
+     <!-- 사진 0장: 점선 박스 / 1장+: 박스가 썸네일 그리드로 전환(d_preview) — 분리 영역 제거(모바일 UX) -->
+     <label id="d_photobox" class="block bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl px-4 py-3 text-center cursor-pointer hover:border-indigo-300 transition">
        <span class="text-slate-800 font-bold text-sm inline-flex items-center gap-2">{_icon('camera', 'w-4 h-4 text-indigo-600')} 사진 올리기</span>
        <span class="block text-slate-400 text-xs mt-0.5">가게·상품 사진 (여러 장 가능 · 선택)</span>
        <input id="d_photo" type="file" accept="image/*" multiple class="hidden"><span id="d_photoname" class="block text-indigo-600 text-xs mt-1 font-semibold"></span></label>
-     <div id="d_preview" class="hidden flex gap-2 overflow-x-auto pb-1"></div>
+     <div id="d_preview" class="hidden grid grid-cols-3 gap-2 bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl p-3"></div>
      <div id="d_guessbox"></div>
      <input type=hidden id="d_confirmed"><input type=hidden id="d_vision">
      <!-- 업종칸은 항상 빈칸 시작(하드코딩 금지) — 값이 채워지는 유일한 경로는

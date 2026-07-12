@@ -261,7 +261,10 @@ def analysis_block(analysis: str, confirmed: str = "") -> str:
     if not analysis:
         return ""
     if (confirmed or "").strip():
-        return ("\n\n[사진 분석 — 사장님이 사진 내용을 확인·수정함(사실로 사용 가능)]\n" + analysis)
+        # 사용자 수정값 = 확정 사실(신뢰 최상위) — 분석과 어긋나면 분석이 아니라 확정을 따른다(버그2-b)
+        return ("\n\n[사진 분석 — 사장님이 사진 내용을 확인·수정함]\n" + analysis
+                + f"\n[우선순위] 사장님 확정 내용은 '{confirmed.strip()[:120]}'이다. "
+                "위 분석이 이와 어긋나는 부분(대상·소재·종류 오인)은 사장님 확정을 따르고 분석 쪽 표현은 버려라.")
     return ("\n\n[사진 분석 — AI 추측(사장님 미확인)]\n" + analysis +
             "\n[⚠️ 추측 주의] 위 분석은 확인되지 않은 추측이다. 차종·모델명·메뉴명 등 구체 대상을 "
             "단정하지 마라 — 확실치 않으면 일반 표현(예: 'SUV 차량', '시그니처 메뉴')으로 쓰고, "
