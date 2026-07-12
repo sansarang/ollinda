@@ -240,8 +240,9 @@ def _row_to_tenant(r: sqlite3.Row) -> Tenant:
                   topic_axis=g("topic_axis"),
                   naver_blog_url=g("naver_blog_url"), blog_id=g("blog_id"),
                   parking=g("parking"),
-                  briefing_hour=g("briefing_hour", 8) or 8,
-                  briefing_on=(1 if g("briefing_on", 1) in (1, None, "") else 0))
+                  # g()는 falsy를 기본값으로 바꿔버리므로(0→1) on/off는 raw로 읽는다
+                  briefing_hour=(r["briefing_hour"] if "briefing_hour" in keys and r["briefing_hour"] else 8),
+                  briefing_on=(0 if ("briefing_on" in keys and r["briefing_on"] == 0) else 1))
 
 
 def set_tenant_coords(tid: str, lat: float, lon: float) -> None:
