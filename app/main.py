@@ -2362,6 +2362,42 @@ def _store_info_card(t) -> str:
             "</form></details>")
 
 
+@app.post("/me/briefing-pref")
+def my_briefing_pref(request: Request, hour: str = Form("8"), on: str = Form("1")):
+    """아침 브리핑 설정 — 시각(05~12시)·on/off (브리핑 PHASE 2)."""
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    t = _ensure_user_tenant(u)
+    try:
+        db.set_briefing_pref(t.id, int(hour or 8), (on or "1") == "1")
+    except Exception:
+        pass
+    return RedirectResponse("/me?ok=아침 브리핑 설정을 저장했어요", status_code=303)
+
+
+@app.post("/api/briefing/pass")
+def api_briefing_pass(request: Request):
+    """'오늘은 패스' — 부담 없이 넘기기(브리핑 PHASE 3)."""
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"ok": False}, status_code=401)
+    t = _ensure_user_tenant(u)
+    import datetime
+    db.pass_briefing(t.id, datetime.datetime.utcnow().strftime("%Y-%m-%d"))
+    return JSONResponse({"ok": True, "message": "오늘은 쉬어가요. 내일 아침에 다시 브리핑드릴게요!"})
+
+
+@app.post("/admin/briefing/send-now")
+def admin_briefing_now(hour: int = 0):
+    """수동 트리거(테스트) — hour 미지정 시 현재 KST 시각."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from app.services import briefing
+    h = hour or datetime.now(ZoneInfo("Asia/Seoul")).hour
+    return JSONResponse(briefing.send_morning(h))
+
+
 @app.post("/me/topic-axis")
 def my_topic_axis(request: Request, topic_axis: str = Form("")):
     """'전문 주제 축' 저장 — 이 블로그가 밀 핵심 주제/키워드군(C-Rank 주제 집중)."""

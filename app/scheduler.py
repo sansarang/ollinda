@@ -39,6 +39,12 @@ def start() -> None:
         # 순위 자동추적(상위노출 PHASE 3) — tenant×타겟키워드 일일 스냅샷(아침, 스캔과 시차)
         sch.add_job(_rank_track, "cron", hour=7, minute=30,
                     id="rank_track_daily", replace_existing=True)
+        # 아침 브리핑(브리핑 PHASE 2) — 매시 정각(05~12시), tenant별 설정 시각에 발송(1일 1회 락)
+        sch.add_job(_morning_briefing, "cron", hour="5-12", minute=0,
+                    id="morning_briefing", replace_existing=True)
+        # 저녁 성과 피드백(브리핑 PHASE 4) — 20시
+        sch.add_job(_evening_feedback, "cron", hour=20, minute=0,
+                    id="evening_feedback", replace_existing=True)
         sch.start()
         _scheduler = sch
         logging.info("[scheduler] 경쟁사 일일 자동 스캔 등록(매일 %02d:00 KST)", hour)
@@ -46,6 +52,26 @@ def start() -> None:
                      _cfg.WEEKLY_REPORT_DOW, _cfg.WEEKLY_REPORT_HOUR)
     except Exception:
         logging.exception("[scheduler] 기동 실패 — 자동 스캔 없이 계속")
+
+
+def _morning_briefing() -> None:
+    """매일 아침 브리핑 — 현재 KST 시각에 예약된 가게만(브리핑 PHASE 2)."""
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from app.services import briefing
+        briefing.send_morning(datetime.now(ZoneInfo("Asia/Seoul")).hour)
+    except Exception:
+        logging.exception("[scheduler] 아침 브리핑 실패")
+
+
+def _evening_feedback() -> None:
+    """저녁 성과 피드백(브리핑 PHASE 4)."""
+    try:
+        from app.services import briefing
+        briefing.send_evening()
+    except Exception:
+        logging.exception("[scheduler] 저녁 피드백 실패")
 
 
 def _rank_track() -> None:

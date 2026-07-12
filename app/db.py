@@ -107,6 +107,12 @@ def init_db() -> None:
         c.execute("CREATE TABLE IF NOT EXISTS daily_briefings("
                   "tenant_id TEXT, date TEXT, data TEXT, passed INTEGER DEFAULT 0, "
                   "created_at TEXT, PRIMARY KEY(tenant_id, date))")
+        for col, ddl in [("sent", "INTEGER DEFAULT 0"),        # 아침 발송 1일 1회 락(브리핑 PHASE 2)
+                         ("evening_sent", "INTEGER DEFAULT 0")]:  # 저녁 피드백 1일 1회(PHASE 4)
+            try:
+                c.execute(f"ALTER TABLE daily_briefings ADD COLUMN {col} {ddl}")
+            except sqlite3.OperationalError:
+                pass
         # 앱내 알림(상위노출 PHASE 2) — 발행 리마인더 등. read=0 이면 대시보드 배너 표시
         c.execute("CREATE TABLE IF NOT EXISTS notices("
                   "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, kind TEXT, "
@@ -295,6 +301,26 @@ def get_briefing(tenant_id: str, date: str) -> Optional[dict]:
         return d
     except (sqlite3.OperationalError, ValueError):
         return None
+
+
+def briefing_sent(tenant_id: str, date: str, col: str = "sent") -> bool:
+    col = col if col in ("sent", "evening_sent") else "sent"
+    try:
+        with _conn() as c:
+            r = c.execute(f"SELECT {col} FROM daily_briefings WHERE tenant_id=? AND date=?",
+                          (tenant_id, date)).fetchone()
+        return bool(r and r[0])
+    except sqlite3.OperationalError:
+        return False
+
+
+def mark_briefing_sent(tenant_id: str, date: str, col: str = "sent") -> None:
+    col = col if col in ("sent", "evening_sent") else "sent"
+    try:
+        with _conn() as c:
+            c.execute(f"UPDATE daily_briefings SET {col}=1 WHERE tenant_id=? AND date=?", (tenant_id, date))
+    except sqlite3.OperationalError:
+        pass
 
 
 def pass_briefing(tenant_id: str, date: str) -> None:

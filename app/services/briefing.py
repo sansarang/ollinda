@@ -41,9 +41,10 @@ def _sig_competitor(t) -> dict | None:
             if their and (not my or their < my):
                 kw = s.get("keyword") or (comp.get("keywords") or [""])[0] or \
                      f"{t.region} {t.industry}".strip()
+                my_txt = f"{my}위" if my else "미노출"
                 return {"score": _W_COMPETITOR, "kind": "competitor",
                         "headline": f"'{esc_kw(kw)}'에서 {comp['name']}이(가) 사장님보다 위에 있어요"
-                                    f"({their}위 vs {my or '미노출'}).",
+                                    f" ({their}위 vs 내 가게 {my_txt}).",
                         "task": f"'{kw}' 겨냥 글 1편 — 사진 3장만 보내주세요",
                         "reason": "경쟁사가 먼저 자리를 잡으면 되찾는 데 몇 배 오래 걸려요. 오늘 한 편이면 추격이 시작돼요.",
                         "kw": kw, "angle": "review"}
@@ -156,6 +157,62 @@ def build_briefing(t, plan: str = "free") -> dict:
     best["partner_note"] = "사진만 보내주시면 글·영상·발행 준비는 제가 할게요."
     best["date"] = __import__("datetime").datetime.utcnow().strftime("%Y-%m-%d")
     return best
+
+
+# ── PHASE 2: 매일 아침 능동 발송 ─────────────────────────
+def _briefing_text(t, b: dict) -> str:
+    """발송용 텍스트 — 파트너 톤('나머지는 제가 준비할게요')."""
+    return (f"사장님, 오늘 아침 브리핑이에요 ☕\n\n"
+            f"■ 오늘 상황\n{b['headline']}\n\n"
+            f"■ 오늘 할 일 딱 하나\n{b['task']}\n"
+            f"→ {b['reason']}\n\n"
+            f"{b['partner_note']}\n"
+            f"시작하기: https://ollinda.kr{b['action_href']}\n"
+            f"(오늘은 쉬어가도 괜찮아요 — 앱에서 '오늘은 패스'를 눌러주세요)")
+
+
+def _send_kakao_stub(t, b: dict) -> None:
+    # TODO(kakao): 알림톡 템플릿 승인 후 비즈메시지 발송 연결. 현재는 스텁(로그만).
+    _log.info("[briefing] 카톡 알림톡(스텁) tenant=%s kind=%s", t.id, b.get("kind"))
+
+
+def send_morning(now_kst_hour: int) -> dict:
+    """현재 KST 시각과 tenant.briefing_hour가 일치하는 가게에 아침 브리핑 생성·발송.
+    스케줄러가 매시 정각 호출(인스턴스 1개 전제 + daily_briefings sent 플래그로 1일 1회 보장)."""
+    import datetime
+    import os
+    today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+    sent = 0
+    for u in db.list_users():
+        tid = u.get("tenant_id")
+        if not tid:
+            continue
+        t = db.get_tenant(tid)
+        if not t or not (t.industry or "").strip():
+            continue
+        if not getattr(t, "briefing_on", 1) or int(getattr(t, "briefing_hour", 8) or 8) != now_kst_hour:
+            continue
+        if db.briefing_sent(tid, today):               # 1일 1회(중복 발송 방지 락)
+            continue
+        try:
+            b = get_or_create_today(t, u.get("plan") or "free")
+            text = _briefing_text(t, b)
+            db.add_notice(tid, "briefing", f"오늘 아침 브리핑 — {b['headline']} 오늘 할 일: {b['task']}")
+            email = (u.get("email") or "")
+            if email and not email.endswith((".guest", ".local")) and os.environ.get("SMTP_HOST"):
+                try:
+                    from app.services.weekly_report import _send_email
+                    _send_email(email, "[올린다] 오늘 아침 브리핑", text)
+                except Exception:
+                    _log.exception("[briefing] 이메일 실패 uid=%s", u.get("id"))
+            _send_kakao_stub(t, b)
+            db.mark_briefing_sent(tid, today)
+            sent += 1
+        except Exception:
+            _log.exception("[briefing] 발송 실패 tenant=%s", tid)
+    if sent:
+        _log.info("[briefing] %02d시 브리핑 %d건 발송", now_kst_hour, sent)
+    return {"sent": sent, "hour": now_kst_hour}
 
 
 def get_or_create_today(t, plan: str = "free") -> dict:
