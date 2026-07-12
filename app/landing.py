@@ -389,12 +389,15 @@ def _hero() -> str:
   <!-- 두 미끼를 한눈에: 순위진단(왼쪽) + 무료 만들기(오른쪽) — 모바일은 세로 스택 -->
   <div class="reveal mt-12 max-w-4xl mx-auto grid lg:grid-cols-2 gap-5 items-start text-left">
    <div class="bg-white border-2 border-indigo-200 rounded-2xl shadow-sm p-5">
-    <div class="flex items-center gap-2 text-slate-800 font-bold text-sm mb-1">{_icon('search', 'w-4 h-4 text-indigo-600')} 내 가게 순위 즉시 진단</div>
-    <p class="text-xs text-slate-400 mb-3">지역·업종·상호만 — 네이버 현재 순위를 바로 확인</p>
+    <div class="flex items-center gap-2 text-slate-800 font-bold text-sm mb-1">{_icon('search', 'w-4 h-4 text-indigo-600')} 내 가게·상품 순위 즉시 진단</div>
+    <div class="flex gap-1.5 mb-2 text-xs font-bold">
+      <button type="button" id="rc_mlocal" onclick="rcSetMode('local')" class="px-3 py-1.5 rounded-lg border border-indigo-500 bg-indigo-50 text-indigo-700 transition">동네 매장</button>
+      <button type="button" id="rc_mseller" onclick="rcSetMode('seller')" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 transition">온라인 셀러</button></div>
+    <p id="rc_sub" class="text-xs text-slate-400 mb-3">지역·업종·상호만 — 네이버 현재 순위를 바로 확인</p>
     <div class="flex gap-2">
-      <input id="rc_region" placeholder="지역(부산 동구)" class="w-1/3 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400">
-      <input id="rc_ind" placeholder="업종" class="w-1/3 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400">
-      <input id="rc_name" placeholder="상호" class="w-1/3 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400"></div>
+      <input id="rc_region" placeholder="지역(부산 동구)" class="flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400">
+      <input id="rc_ind" placeholder="업종" class="flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400">
+      <input id="rc_name" placeholder="상호" class="flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400"></div>
     <button onclick="rankCheck()" class="w-full mt-2.5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition">현재 순위 확인</button>
     <div id="rc_out" class="text-slate-600 text-sm mt-3"></div>
    </div>
@@ -409,14 +412,25 @@ def _hero() -> str:
    if(hint){{if(top.kw){{hint.textContent="목표: 미노출 키워드 '"+top.kw+"'"+(top.vol?(' (월 '+top.vol.toLocaleString()+'회 검색)'):'')+" 잡는 글";hint.classList.remove('hidden');}}else{{hint.classList.add('hidden');}}}}
    var t=document.getElementById('herodemo');if(t)t.scrollIntoView({{behavior:'smooth',block:'center'}});
    if(d)d.focus();}}
+  function rcSetMode(m){{window.__rcMode=m;var seller=(m==='seller');
+   var r=document.getElementById('rc_region'),i=document.getElementById('rc_ind'),n=document.getElementById('rc_name');
+   var bl=document.getElementById('rc_mlocal'),bs=document.getElementById('rc_mseller'),sub=document.getElementById('rc_sub');
+   var on=['border-indigo-500','bg-indigo-50','text-indigo-700'],off=['border-slate-200','bg-white','text-slate-500'];
+   [bl,bs].forEach(function(b,idx){{var act=(idx===1)===seller;
+     on.forEach(function(c){{b.classList.toggle(c,act);}});off.forEach(function(c){{b.classList.toggle(c,!act);}});}});
+   r.classList.toggle('hidden',seller);
+   i.placeholder=seller?'상품 키워드(블루투스 이어폰)':'업종';
+   n.placeholder=seller?'스토어/브랜드명':'상호';
+   sub.textContent=seller?'상품 키워드·스토어명만 — 네이버 쇼핑 현재 순위를 바로 확인':'지역·업종·상호만 — 네이버 현재 순위를 바로 확인';}}
   async function rankCheck(){{var o=document.getElementById('rc_out');o.textContent='조회 중…';
    var fd=new FormData();fd.append('region',document.getElementById('rc_region').value);
    fd.append('industry',document.getElementById('rc_ind').value);fd.append('name',document.getElementById('rc_name').value);
+   if(window.__rcMode==='seller')fd.append('mode','seller');
    try{{var r=await fetch('/api/rank-check',{{method:'POST',body:fd}});var d=await r.json();
    if(d.error){{o.textContent=d.error;return;}}
    var rows='';
    (d.caught||[]).forEach(function(s){{rows+='<div class="flex justify-between bg-slate-50 rounded-lg px-3 py-1.5 mt-1.5"><span class="text-slate-700">'+s.keyword+'</span><span class="text-emerald-600 font-bold">'+s.rank+'위</span></div>';}});
-   (d.missing||[]).forEach(function(s){{var v=s.volume?(' <span class="text-slate-400">월 '+s.volume.toLocaleString()+'회</span>'):'';rows+='<div class="flex justify-between bg-slate-50 rounded-lg px-3 py-1.5 mt-1.5"><span class="text-slate-500">'+s.keyword+v+'</span><span class="text-slate-400 font-bold">미노출</span></div>';}});
+   (d.missing||[]).forEach(function(s){{var v=s.volume?(' <span class="text-slate-400">월 '+s.volume.toLocaleString()+'회</span>'):'';rows+='<div class="flex justify-between bg-slate-50 rounded-lg px-3 py-1.5 mt-1.5"><span class="text-slate-500">'+s.keyword+v+'</span><span class="text-slate-400 font-bold">'+(d.miss_label||'미노출')+'</span></div>';}});
    var mk='';
    window.__rcTop=(d.targets&&d.targets.length)?{{kw:d.targets[0].keyword,vol:d.targets[0].volume||0}}:null;
    (d.targets||[]).forEach(function(tg){{var v=tg.volume?(' (월 '+tg.volume.toLocaleString()+'회)'):'';

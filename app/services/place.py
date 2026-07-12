@@ -99,6 +99,39 @@ def shop_search(query: str, limit: int = 5) -> list[dict]:
         return []
 
 
+SHOP_SCAN_DEPTH = 40   # 쇼핑검색 스캔 깊이(공식 API display 상한 100 내, 호출 1회)
+
+
+def shop_rank(keyword: str, store_name: str, brand: str = "") -> "int | None":
+    """네이버 쇼핑검색 상위 SHOP_SCAN_DEPTH 안에서 내 스토어/브랜드 상품 순위.
+    상위 밖이면 0, 조회 불가(무키/실패)면 None. 크롤링 아님 — 공식 shop.json 1회."""
+    keyword = (keyword or "").strip()
+    if not (configured() and keyword and (store_name or brand)):
+        return None
+    try:
+        r = requests.get(
+            "https://openapi.naver.com/v1/search/shop.json",
+            params={"query": keyword, "display": SHOP_SCAN_DEPTH},
+            headers={"X-Naver-Client-Id": os.environ["NAVER_CLIENT_ID"],
+                     "X-Naver-Client-Secret": os.environ["NAVER_CLIENT_SECRET"]},
+            timeout=8)
+        if r.status_code != 200:
+            _log.warning("[place.shop_rank] non-200: status=%s kw=%r body=%.200s",
+                         r.status_code, keyword, r.text)
+            return None
+        for i, it in enumerate(r.json().get("items", []), 1):
+            mall = (it.get("mallName") or "").strip()
+            ibrand = (it.get("brand") or it.get("maker") or "").strip()
+            title = re.sub(r"<[^>]+>", "", it.get("title", "")).strip()
+            if (store_name and (_name_match(store_name, mall) or _name_match(store_name, ibrand))) \
+               or (brand and (_name_match(brand, mall) or _name_match(brand, ibrand) or _name_match(brand, title))):
+                _log.info("[place.shop_rank] kw=%r store=%r → %d위", keyword, store_name, i)
+                return i
+        return 0
+    except Exception:
+        return None
+
+
 def rank(keyword: str, store_name: str, limit: int = 5) -> int | None:
     """참고용 순위 — 네이버 지역검색 상위 limit 안에서 내 가게 위치(1~limit).
     상위 밖이면 0, 조회 불가(무키/실패)면 None."""

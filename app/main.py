@@ -768,16 +768,21 @@ async def api_rank_check(request: Request):
     from app.config import RANK_RATE_PER_MIN, RANK_RATE_PER_HOUR, RANK_CACHE_TTL
     try:
         form = await request.form()
-        industry = (form.get("industry") or "").strip()
+        industry = (form.get("industry") or "").strip()   # 셀러 모드에선 '상품 키워드'
         region = (form.get("region") or "").strip()
-        name = (form.get("name") or "").strip()
+        name = (form.get("name") or "").strip()           # 셀러 모드에선 '스토어명'
+        mode = (form.get("mode") or "").strip()           # ''(매장) | 'seller'
+        brand = (form.get("brand") or "").strip()
     except Exception:
-        industry = region = name = ""
-    if not (industry or name):
+        industry = region = name = mode = brand = ""
+    if mode == "seller":
+        if not industry:
+            return JSONResponse({"error": "상품 키워드를 입력해주세요."}, status_code=400)
+    elif not (industry or name):
         return JSONResponse({"error": "업종 또는 상호를 입력해주세요."}, status_code=400)
 
     # ── 앞단 게이트 ① 동일 상호+지역 TTL 캐시 → 네이버 콜 자체를 절감(레이트리밋과 별개) ──
-    ckey = f"{industry}|{region}|{name}".lower()
+    ckey = f"{mode}|{industry}|{region}|{name}|{brand}".lower()
     cached = ratelimit.cache_get(ckey, RANK_CACHE_TTL)
     if cached is not None:
         return JSONResponse(cached)                      # 캐시 히트 = 네이버 콜 0 → 한도 미차감
@@ -791,7 +796,10 @@ async def api_rank_check(request: Request):
             {"error": "순위 진단이 잠깐 몰렸어요 🙏 1~2분 뒤 다시 눌러주시면 바로 열려요!"},
             status_code=429)
 
-    result = diagnose.diagnose_rank(industry, region, name)
+    if mode == "seller":
+        result = diagnose.diagnose_product_rank(industry, name, brand)   # 쇼핑검색 40위 스캔
+    else:
+        result = diagnose.diagnose_rank(industry, region, name)
     # 진단→생성 연결(상위노출 PHASE 1): 미노출 키워드(검색량 큰 순) 상위 3개 = 타겟 콘텐츠 제안
     from app import config as _cfg
     from urllib.parse import quote as _q
@@ -1906,8 +1914,13 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         _missbox = ""
         if (t.industry or "").strip():
             import json as _json
-            _diag_payload = _json.dumps({"industry": t.industry or "", "region": t.region or "",
-                                         "name": t.name or ""}, ensure_ascii=False)
+            _is_seller = (getattr(t, "biz_type", "local") or "local") == "seller"
+            _diag_payload = _json.dumps({
+                "industry": t.industry or "",
+                "region": "" if _is_seller else (t.region or ""),
+                "name": ((getattr(t, "brand_name", "") or t.name or "") if _is_seller else (t.name or "")),
+                "brand": (getattr(t, "brand_name", "") or "") if _is_seller else "",
+                "mode": "seller" if _is_seller else ""}, ensure_ascii=False)
             _missbox = (f"<div class='{_fw} mt-5'>"
                         "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>놓치는 키워드</h2>"
                         "<p class='text-sm text-slate-400 mb-4'>미노출 키워드를 찾아 바로 그 키워드를 겨냥한 글로 연결해요. 진단은 무료예요.</p>"
@@ -1915,12 +1928,13 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                         "<div class='w-4 h-4 border-2 border-slate-200 border-t-amber-500 rounded-full animate-spin'></div>진단 중…</div></div>"
                         f"<script>(async function(){{var b=document.getElementById('missbox');if(!b)return;var td={_diag_payload};"
                         "try{var fd=new FormData();fd.append('industry',td.industry);fd.append('region',td.region);fd.append('name',td.name);"
+                        "if(td.mode)fd.append('mode',td.mode);if(td.brand)fd.append('brand',td.brand);"
                         "var d=await (await fetch('/api/rank-check',{method:'POST',body:fd})).json();"
                         "if(d.error){b.innerHTML='<span class=\"text-slate-400\">'+d.error+'</span>';return;}"
                         "if(!d.targets||!d.targets.length){b.innerHTML='<span class=\"text-emerald-600 font-bold\">지금 잡을 미노출 키워드가 없어요 — 잡은 키워드를 유지·강화해요</span>';return;}"
                         "b.innerHTML=d.targets.map(function(tg){var v=tg.volume?('<span class=\"text-xs text-slate-400 ml-1\">월 '+tg.volume.toLocaleString()+'회 검색</span>'):'';"
                         "return '<div class=\"flex items-center justify-between bg-amber-50 rounded-xl px-3.5 py-2.5 mb-2\">"
-                        "<div><span class=\"font-bold text-slate-700\">'+tg.keyword+'</span>'+v+' <span class=\"text-xs text-amber-600 font-bold\">미노출</span></div>"
+                        "<div><span class=\"font-bold text-slate-700\">'+tg.keyword+'</span>'+v+' <span class=\"text-xs text-amber-600 font-bold\">'+(d.miss_label||'미노출')+'</span></div>"
                         "<a href=\"'+tg.make_href+'\" class=\"bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition whitespace-nowrap\">✍️ 이 키워드 잡는 글 만들기</a></div>';}).join('')"
                         "+(d.missed_volume?'<div class=\"text-xs text-slate-400 mt-1\">미노출 키워드 합계 월 '+d.missed_volume.toLocaleString()+'회 검색을 놓치는 중이에요.</div>':'');"
                         "}catch(e){b.innerHTML='<span class=\"text-rose-400\">진단 실패</span>';}})();</script></div>")
