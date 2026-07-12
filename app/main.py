@@ -1009,7 +1009,8 @@ async def print_generate(request: Request):
             except Exception:
                 pass
 
-    res = await asyncio.to_thread(printable.generate, ptype, t, items, note, photo_path, "png")
+    _with_qr = (form.get("qr") or "1") != "0"          # 매장 QR 삽입 옵션(추적 P4, 기본 켬)
+    res = await asyncio.to_thread(printable.generate, ptype, t, items, note, photo_path, "png", _with_qr)
     if not res.get("ok"):
         return JSONResponse({"error": res.get("error", "생성 실패")}, status_code=200)
     jid = db.save_print_job(t.id, ptype, res.get("path", ""), res.get("url") or "",
@@ -1085,7 +1086,9 @@ def print_page(request: Request):
         "<div id='p_items'></div>"
         "<button onclick='addRow()' class='text-xs text-indigo-600 font-bold mb-2'>+ 항목 추가</button>"
         "<label class='block text-xs text-slate-500 mb-1'>대표 사진(선택)</label>"
-        "<input id='p_photo' type='file' accept='image/*' class='w-full text-xs mb-3'>"
+        "<input id='p_photo' type='file' accept='image/*' class='w-full text-xs mb-2'>"
+        "<label class='flex items-center gap-2 text-xs text-slate-600 mb-3'>"
+        "<input id='p_qr' type='checkbox' checked class='accent-indigo-600'> 매장 QR 넣기 — 손님이 찍으면 리포트에 '매장 QR' 유입으로 집계돼요</label>"
         "<button onclick='genPrint()' class='w-full grad-btn text-white font-bold py-3 rounded-xl'>인쇄물 생성</button>"
         "<div id='p_msg' class='text-sm mt-2'></div></div>"
         "<div class='font-bold text-slate-700 mb-2'>내가 만든 인쇄물</div>" + made + upgrade +
@@ -1096,6 +1099,7 @@ def print_page(request: Request):
         "async function genPrint(){var msg=document.getElementById('p_msg');msg.textContent='생성 중… (10~20초)';"
         "var items=[];document.querySelectorAll('#p_items > div').forEach(function(row){var n=row.querySelector('.pn').value,p=row.querySelector('.pp').value;if(n)items.push({name:n,price:p});});"
         "var fd=new FormData();fd.append('type',document.getElementById('p_type').value);fd.append('note',document.getElementById('p_note').value);fd.append('items',JSON.stringify(items));"
+        "var q=document.getElementById('p_qr');fd.append('qr',(q&&q.checked)?'1':'0');"
         "var ph=document.getElementById('p_photo').files[0];if(ph)fd.append('photo',ph);"
         "try{var r=await fetch('/api/print/generate',{method:'POST',body:fd});var d=await r.json();"
         "if(d.ok){msg.innerHTML='✅ 완성! <a href=\"'+d.download+'\" target=\"_blank\" class=\"text-indigo-600 underline font-bold\">다운로드</a>';setTimeout(function(){location.reload();},1200);}"
@@ -2010,7 +2014,8 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                     f"<div class='{_fw} mt-5'>"
                     "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>콘텐츠 성과 · 링크 클릭 실측</h2>"
                     "<p class='text-sm text-slate-400 mb-4'>올린다 추적링크를 눌러 들어온 방문만 셉니다 — "
-                    "<b class='text-slate-600'>글 조회수가 아니에요.</b> 실제 조회수는 네이버 블로그·인스타 앱 통계에서 확인하세요.</p>"
+                    "<b class='text-slate-600'>글 조회수가 아니에요.</b> 실제 조회수는 네이버 블로그·인스타 앱 통계에서 확인하세요. "
+                    "온라인 글(블로그·인스타) 유입과 매장 QR(오프라인) 유입은 구분 집계돼요.</p>"
                     + _top3
                     + "<div class='grid sm:grid-cols-2 gap-6'>"
                     + f"<div><div class='text-sm font-bold text-slate-600 mb-1'>채널별 유입 (30일)</div>{_sp_rows or '<span class=\"text-sm text-slate-400\">아직 클릭이 없어요</span>'}</div>"

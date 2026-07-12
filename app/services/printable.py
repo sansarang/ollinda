@@ -83,7 +83,29 @@ def _esc(s: str) -> str:
     return html.escape(str(s or ""))
 
 
-def build_html(data: dict, photo_uri: str = "") -> str:
+def _qr_data_uri(tenant, ptype: str) -> str:
+    """매장 QR(추적 P4) — 스캔하면 /r/{code}?src=qr&content=print_{ptype} 경유로 이동.
+    오프라인 유입이 리포트에 '매장 QR'로 구분 집계된다. 실패/목적지 없음 → ''(억지 삽입 금지)."""
+    try:
+        import base64
+        import io
+
+        import qrcode
+
+        from app.services import tracklinks
+        link = tracklinks.tenant_link(tenant)
+        if not link:
+            return ""
+        url = f"{tracklinks._base()}/r/{link['code']}?src=qr&content=print_{ptype}"
+        img = qrcode.make(url)
+        buf = io.BytesIO()
+        img.save(buf, "PNG")
+        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        return ""
+
+
+def build_html(data: dict, photo_uri: str = "", qr_uri: str = "") -> str:
     """타입별 HTML/CSS 템플릿 렌더. Jinja2 있으면 사용, 없으면 순수 문자열 폴백."""
     ptype = data.get("type", "menu")
     head = _esc(data.get("headline") or data.get("name") or "")
@@ -110,39 +132,53 @@ def build_html(data: dict, photo_uri: str = "") -> str:
     .iprice{font-size:22px;font-weight:900;color:#4f46e5}
     .muted{color:#94a3b8;border:none;justify-content:center}
     .foot{margin-top:auto;font-size:15px;color:#94a3b8;text-align:center;padding-top:16px}
+    .qrfoot{display:flex;align-items:center;justify-content:space-between;text-align:left;gap:14px}
+    .qrfoot img{width:92px;height:92px;border-radius:8px}
+    .qrcap{font-size:12px;color:#64748b;font-weight:700;text-align:center;margin-top:2px}
     .center{text-align:center;align-items:center;justify-content:center}
     .pop .headline{font-size:60px}.pop .tag{font-size:24px}
     .banner .wrap{flex-direction:row;align-items:center;gap:30px}
     .grad{background:linear-gradient(135deg,#6366f1,#ec4899)}
     """
+    # 매장 QR(추적 P4) — 스캔 유입이 '매장 QR(오프라인)'로 집계. 있으면 foot이 좌우 배치로 전환
+    qr = (f"<div><img src='{qr_uri}' alt='QR'><div class='qrcap'>QR 찍고 바로 보기</div></div>" if qr_uri else "")
+
+    def _foot(text):
+        if not qr:
+            return f"<div class='foot'>{text}</div>"
+        return f"<div class='foot qrfoot'><div style='flex:1'>{text}</div>{qr}</div>"
     # 타입별 본문
     if ptype == "pop":
         inner = (f"<div class='wrap center pop'><div class='brand'>{name}</div>"
                  f"<div class='headline grad' style='-webkit-background-clip:text;background-clip:text;color:transparent'>{head}</div>"
                  f"<div class='tag'>{tag}</div>{photo}"
-                 f"<div class='list' style='width:100%'>{rows}</div></div>")
+                 f"<div class='list' style='width:100%'>{rows}</div>"
+                 + (_foot(f"{name}") if qr else "") + "</div>")
     elif ptype == "banner":
         inner = (f"<div class='wrap banner'>{photo or ''}<div style='flex:1'>"
                  f"<div class='brand'>{name}</div><div class='headline'>{head}</div>"
-                 f"<div class='tag'>{tag}</div></div></div>")
+                 f"<div class='tag'>{tag}</div></div>{qr}</div>")
     elif ptype == "store":
         inner = (f"<div class='wrap'><div class='brand'>{name}</div><div class='headline'>{head}</div>"
                  f"<div class='tag'>{tag}</div>{photo}<div class='list'>{rows}</div>"
-                 f"<div class='foot'>{name} · 올린다로 제작</div></div>")
+                 + _foot(f"{name} · 올린다로 제작") + "</div>")
     else:  # menu / price / event
         inner = (f"<div class='wrap'><div class='brand'>{name}</div><div class='headline'>{head}</div>"
                  f"<div class='tag'>{tag}</div>{photo}<div class='list'>{rows}</div>"
-                 f"<div class='foot'>가격·구성은 매장 사정에 따라 변경될 수 있어요</div></div>")
+                 + _foot("가격·구성은 매장 사정에 따라 변경될 수 있어요") + "</div>")
     return f"<!doctype html><html><head><meta charset='utf-8'><style>{base_css}</style></head><body>{inner}</body></html>"
 
 
-def generate(ptype: str, tenant, items: list, note: str = "", photo_path: str = "", fmt: str = "png") -> dict:
-    """타입·데이터 → 문구 생성 → 템플릿 바인딩 → 렌더 → 저장. 반환 render()와 동일 + copy."""
+def generate(ptype: str, tenant, items: list, note: str = "", photo_path: str = "",
+             fmt: str = "png", with_qr: bool = True) -> dict:
+    """타입·데이터 → 문구 생성 → 템플릿 바인딩 → 렌더 → 저장. 반환 render()와 동일 + copy.
+    with_qr: 매장 추적 QR 삽입(추적 P4) — 스캔 유입이 리포트에 '매장 QR'로 집계."""
     industry = getattr(tenant, "industry", "") or ""
     name = getattr(tenant, "name", "") or ""
     data = generate_copy(ptype, industry, name, items, note)
     photo_uri = _photo_data_uri(photo_path) if photo_path else ""
-    html = build_html(data, photo_uri)
+    qr_uri = _qr_data_uri(tenant, ptype) if with_qr else ""
+    html = build_html(data, photo_uri, qr_uri)
     preset_name = PRINT_TYPES.get(ptype, {}).get("preset", DEFAULT_PRESET)
     res = render(html, preset_name, getattr(tenant, "id", "print"), fmt=fmt)
     res["copy"] = {"headline": data["headline"], "tagline": data["tagline"], "type": ptype, "label": data["label"]}
