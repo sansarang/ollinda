@@ -49,15 +49,22 @@ def _apply_volume(kws: list[str], limit: int, hints: list[str] | None = None) ->
     return list(dict.fromkeys(keep + extra))[:limit]
 
 
-def product_keywords(note: str = "", brand: str = "", limit: int = 10) -> list[str]:
-    """상품/후기축 키워드 — 온라인 셀러용(지역 대신 상품명+구매의도)."""
+def product_keywords(note: str = "", brand: str = "", limit: int = 10, industry: str = "") -> list[str]:
+    """상품/후기축 키워드 — 온라인 셀러용(지역 대신 상품명+구매의도).
+    note의 지시/라벨 라인('['·'-'로 시작: intake 블록·브리프)은 제외 — '사장님 제공 실제' 같은
+    라벨이 타겟 키워드로 새어 제목에 박히던 버그 수정. 자유 텍스트 명사가 없으면 업종/브랜드 폴백."""
     kws: list[str] = []
-    nouns = [w for w in re.findall(r"[가-힣A-Za-z0-9]{2,}", note or "")
+    free_text = "\n".join(
+        ln for ln in (note or "").splitlines()
+        if ln.strip() and not ln.strip().startswith(("[", "-", "→", "Q.", "A.", "#", "|")))
+    nouns = [w for w in re.findall(r"[가-힣A-Za-z0-9]{2,}", free_text)
              if w not in ("추천", "이벤트", "할인", "후기") and len(w) <= 12]
     # 단어를 쪼개지 말고 '제품 구'로 — 전체 구 + 뒤 2단어(종류어)
-    phrase = " ".join(nouns[:3]) if nouns else brand.strip()          # 예: "무선 블루투스 이어폰"
+    phrase = " ".join(nouns[:3]) if nouns else (industry.strip() or brand.strip())  # 예: "무선 블루투스 이어폰"
     short = " ".join(nouns[-2:]) if len(nouns) >= 2 else phrase       # 예: "이어폰 노이즈캔슬링"
     heads = [h for h in dict.fromkeys([phrase, short]) if h] or ([brand.strip()] if brand.strip() else [])
+    if industry.strip() and industry.strip() not in heads:
+        heads.append(industry.strip())                                # 업종(상품명)은 항상 후보에
     for n in heads:
         for it in _PRODUCT_INTENTS:
             kws.append(f"{n} {it}")
@@ -113,9 +120,10 @@ def target_keywords(industry_name: str, region: str, note: str = "", limit: int 
                     axis: str = "local", brand: str = "") -> list[str]:
     """키워드 세트. axis='product'면 상품/후기축(셀러), 'both'면 지역+상품 병합, 기본은 지역축."""
     if axis == "product":
-        return product_keywords(note, brand, limit)
+        return product_keywords(note, brand, limit, industry=industry_name)
     if axis == "both":
-        merged = product_keywords(note, brand, limit) + target_keywords(industry_name, region, note, limit)
+        merged = (product_keywords(note, brand, limit, industry=industry_name)
+                  + target_keywords(industry_name, region, note, limit))
         return list(dict.fromkeys(merged))[:limit]
     kws: list[str] = []
     reg = (region or "").strip()
