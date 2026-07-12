@@ -2390,6 +2390,36 @@ def api_briefing_pass(request: Request):
     return JSONResponse({"ok": True, "message": "오늘은 쉬어가요. 내일 아침에 다시 브리핑드릴게요!"})
 
 
+@app.post("/api/briefing/send-test")
+def api_briefing_send_test(request: Request):
+    """본인 계정 한정 테스트 발송 — 실발송 경로(알림+이메일+카톡 스텁) 그대로, 시각·1일1회 락 무시.
+    남용 방지: 로그인 필수(본인 tenant만) + IP 레이트리밋(시간 3회)."""
+    from app import ratelimit
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"ok": False, "error": "로그인이 필요해요."}, status_code=401)
+    if not ratelimit.allow("brieftest:" + _client_ip(request), 3, 3):
+        return JSONResponse({"ok": False, "error": "테스트 발송은 시간당 3회까지예요."}, status_code=429)
+    t = _ensure_user_tenant(u)
+    if not (t.industry or "").strip():
+        return JSONResponse({"ok": False, "error": "가게 설정(업종) 먼저 완료해 주세요."}, status_code=400)
+    from app.services import briefing as _bf
+    b = _bf.get_or_create_today(t, u.get("plan") or "free")
+    text = _bf._briefing_text(t, b)
+    db.add_notice(t.id, "briefing", f"오늘 아침 브리핑 — {b['headline']} 오늘 할 일: {b['task']}")
+    mailed = False
+    email = (u.get("email") or "")
+    if email and not email.endswith((".guest", ".local")) and os.environ.get("SMTP_HOST"):
+        try:
+            from app.services.weekly_report import _send_email
+            mailed = _send_email(email, "[올린다] 오늘 아침 브리핑 (테스트)", text)
+        except Exception:
+            pass
+    _bf._send_kakao_stub(t, b)
+    return JSONResponse({"ok": True, "kind": b.get("kind"), "headline": b.get("headline"),
+                         "task": b.get("task"), "notice": True, "mailed": mailed})
+
+
 @app.post("/admin/briefing/send-now")
 def admin_briefing_now(hour: int = 0):
     """수동 트리거(테스트) — hour 미지정 시 현재 KST 시각."""
