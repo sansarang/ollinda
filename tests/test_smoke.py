@@ -118,3 +118,18 @@ def test_admin_requires_auth(monkeypatch):
     monkeypatch.delenv("SHOPCAST_ADMIN_PASS", raising=False)
     assert client.get("/admin").status_code == 503
     assert client.get("/admin/cleanup").status_code == 503
+
+
+def test_target_banner_only_with_param():
+    """타겟 배너는 ?target_kw 진입 시에만 — plain /me·made 복귀엔 없음(C1 회귀 가드)."""
+    import app.main as main
+    from app import auth
+    client = TestClient(main.app)
+    u = db.create_user(email="banner@t.t")
+    t = db.create_tenant("이어폰샵", "이어폰", "", biz_type="seller")
+    db.update_tenant_classification(t.id, "seller", "coupang", "", "블루투스 이어폰", "")
+    db.set_user_tenant(u["id"], t.id)
+    client.cookies.set(auth.COOKIE, auth.make_session(u["id"]))
+    assert "키워드를 겨냥해요" not in client.get("/me").text
+    assert "키워드를 겨냥해요" not in client.get("/me?made=x").text
+    assert "키워드를 겨냥해요" in client.get("/me?target_kw=블루투스 이어폰").text
