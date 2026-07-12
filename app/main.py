@@ -3085,7 +3085,7 @@ def _naver_component_guide(tenant, blog, sec: str) -> str:
             + steps
             + f"<textarea id='cgq' class='hidden'>{esc(place_q)}</textarea>"
             f"<button onclick=\"omCopy(document.getElementById('cgq').value);this.querySelector('span').textContent='✅ 복사됨 — 이제 네이버 장소 버튼에 붙여넣기'\" "
-            f"class='{big} bg-emerald-600 hover:bg-emerald-700 text-white mb-3'><span>📋 '{esc(place_q)}' 복사</span><span>→</span></button>"
+            f"class='{big} bg-emerald-600 hover:bg-emerald-700 text-white mb-3'><span>'{esc(place_q)}' 복사</span><span>→</span></button>"
             + place_link
             + "<details class='mt-1'><summary class='text-xs font-bold text-slate-500 cursor-pointer select-none'>연락처·영업시간·주차 개별 복사 ▾</summary>"
             f"<div class='mt-2'>{rows}</div></details></div>")
@@ -3113,7 +3113,7 @@ def _internal_link_box(blog, sec: str) -> str:
             "<p class='text-xs text-slate-500 mb-2'>발행할 때 본문 끝에 아래 글 링크를 넣어보세요. 같은 주제 글끼리 연결되면 "
             "블로그의 주제 전문성이 쌓여요.</p>" + rows +
             f"<textarea id='nvRel' class='hidden'>{esc(links_text)}</textarea>"
-            "<button onclick=\"nvcp('nvRel',this)\" class='mt-1 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl transition'>📋 링크 문구 복사</button></div>")
+            "<button onclick=\"nvcp('nvRel',this)\" class='mt-1 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl transition'>링크 문구 복사</button></div>")
 
 
 def _angle_variant_box(blog, sec: str, cbtn: str) -> str:
@@ -3221,12 +3221,12 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
         + f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>1. 제목</div>"
         f"<div class='text-lg font-extrabold text-slate-900 mb-3'>{esc(title)}</div>"
         f"<textarea id='nvT' class='hidden'>{esc(title)}</textarea>"
-        f"<button onclick=\"nvcp('nvT',this)\" class='{cbtn} bg-slate-900 hover:bg-slate-800'>📋 제목 복사</button></div>"
+        f"<button onclick=\"nvcp('nvT',this)\" class='{cbtn} bg-slate-900 hover:bg-slate-800'>제목 복사</button></div>"
         # 본문
         f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>2. 본문 <span class='text-emerald-600'>(사진 위치 표시 포함)</span></div>"
         f"<div class='bg-slate-50 rounded-xl p-4 text-sm text-slate-700 whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto mb-3'>{esc(body_marked)}</div>"
         f"<textarea id='nvB' class='hidden'>{esc(body_marked)}</textarea>"
-        f"<button onclick=\"nvcp('nvB',this)\" class='{cbtn} bg-emerald-500 hover:bg-emerald-600 w-full'>📋 전체 본문 복사</button></div>"
+        f"<button onclick=\"nvcp('nvB',this)\" class='{cbtn} bg-emerald-500 hover:bg-emerald-600 w-full'>전체 본문 복사</button></div>"
         # 사진
         + (f"<div class='{sec}'><div class='flex items-center justify-between mb-3'>"
            "<div class='text-xs font-bold text-slate-400'>3. 사진 <span class='text-slate-500'>(순서대로)</span></div>"
