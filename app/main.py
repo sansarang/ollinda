@@ -2918,6 +2918,12 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
             cls = ("bg-emerald-100 text-emerald-700" if sc >= 85 else
                    "bg-amber-100 text-amber-700" if sc >= 70 else "bg-slate-100 text-slate-600")
             badge = f"<span class='ml-2 text-[11px] font-bold px-2 py-0.5 rounded-full {cls}'>상위노출 {sc}점</span>"
+        ga = (pl or {}).get("geo_audit") or {}
+        gs = ga.get("score")
+        if gs is not None and gs > 0:                       # AI검색 준비 점수(GEO B2) — 병기
+            gcls = ("bg-violet-100 text-violet-700" if gs >= 75 else "bg-slate-100 text-slate-600")
+            badge += (f"<span class='ml-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full {gcls}' "
+                      f"title='AI 검색(ChatGPT 등)이 인용하기 유리한 구조 점수 — 인용을 보장하진 않아요'>AI검색 준비 {gs}점</span>")
         return f"<div class='text-xs font-bold text-slate-400 mb-2 flex items-center flex-wrap'>{label}{badge}</div>"
     naver_btn = (f"<a href='/kit/{asset_id}/naver' target='_blank' class='block text-center py-3 rounded-xl text-white text-sm font-extrabold "
                  "shadow-md hover:brightness-110 active:scale-[.99] transition' style='background:#03c75a'>네이버 블로그에 올리기 →</a>")

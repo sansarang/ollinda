@@ -199,6 +199,85 @@ BLOG_DIRECTIVES = (
     "- 같은 키워드 7회+ 남발 금지, 복사·짜깁기 금지, 실시간 이슈 억지 삽입 금지, 느낌표 남발 금지."
 )
 
+# ── GEO(Generative Engine Optimization, B블록) — AI 검색(ChatGPT·Perplexity·클로바X)이
+#    인용하기 쉬운 구조: 정의문·검색질문형 Q&A·한눈 요약·표기 일관(NAP/SPU). 인용 '보장'은 없다(정직).
+def geo_questions(industry: str, region: str = "", pain_points: str = "") -> list[str]:
+    """업종별 'AI가 받을 질문' 3개 — 프로필 pain_points 1개 + 검색질문 템플릿 2개."""
+    industry = (industry or "").strip() or "이 업종"
+    loc = (region or "").strip()
+    qs = []
+    pains = [s.strip() for s in re.split(r"[,·/]", pain_points or "") if s.strip()]
+    if pains:
+        qs.append(f"{pains[0]} — 어떻게 해결하나요?")
+    qs.append(f"{(loc + ' ') if loc else ''}{industry} 고를 때 뭘 봐야 하나요?")
+    qs.append(f"{industry} 가격(비용)은 어느 정도인가요?")
+    return qs[:3]
+
+
+def geo_directive(biz_type: str, name: str, industry: str, region: str = "",
+                  brand: str = "", questions: list[str] | None = None) -> str:
+    """블로그 프롬프트 주입용 GEO 구조 지시 — 매장(NAP)/셀러(SPU) 분기."""
+    qline = " / ".join(questions or [])
+    if (biz_type or "local") == "seller":
+        pname = f"{brand} {name}".strip() if brand and brand not in (name or "") else (name or "")
+        return (
+            "[GEO — AI 검색(ChatGPT·Perplexity 등)이 인용하기 쉬운 구조로]\n"
+            f"- 첫 문단에 상품 정의문 한 문장: \"{pname}은(는) ~한 {industry}다\" 꼴로 자연스럽게(무엇인지 한 문장으로 규정).\n"
+            "- '## 한눈 요약' 소제목 1개: 핵심 3줄(- 목록) — 검색자가 답만 뽑아가게.\n"
+            "- '## 솔직 장단점' 소제목 1개: 입력에 근거한 장점 2~3개 + 아쉬운 점 1개(솔직함이 AI 인용 신뢰를 높인다. 없는 단점 지어내기 금지).\n"
+            f"- 비교 질문 Q&A 1개: \"{name} 비슷한 제품과 차이는?\" — 입력 정보로만 답하고 타사 비방·비교 우위 날조 금지.\n"
+            + (f"- FAQ 질문은 실제 검색 질문형으로: {qline}\n" if qline else "")
+            + "- 상품명·스토어명·구매링크(SPU) 표기는 본문 전체에서 한 글자도 다르지 않게 일관되게.\n")
+    place = f"{region}의 {industry}".strip()
+    return (
+        "[GEO — AI 검색(ChatGPT·Perplexity 등)이 인용하기 쉬운 구조로]\n"
+        f"- 첫 문단에 정의문 한 문장: \"{name}은(는) {place} 전문점이다\" 꼴로 자연스럽게(무엇을 하는 곳인지 한 문장으로 규정).\n"
+        "- '## 한눈 요약' 소제목 1개: 핵심 3줄(- 목록) — 검색자·AI가 답만 뽑아가게.\n"
+        + (f"- FAQ 질문은 실제 검색 질문형으로: {qline}\n" if qline else "")
+        + f"- 상호는 항상 '{name}', 지역은 '{region}'으로 본문 전체 일관 표기(NAP 일관 = 인용 신뢰 신호).\n")
+
+
+def geo_audit(kind: str, payload: dict, name: str = "", industry: str = "",
+              region: str = "", biz_type: str = "local") -> dict:
+    """GEO(AI검색 준비) 점수 — 구조 요소 기계 채점(LLM 0콜). blog만 의미 있음.
+    항목: 정의문(첫 문단 상호+업종/지역) · 한눈 요약 · 검색질문형 Q&A · 표기 일관(NAP/SPU)
+    + 셀러는 솔직 장단점. '인용 보장'이 아니라 '인용되기 유리한 구조' 점수다."""
+    if kind != "blog":
+        return {}
+    text = payload.get("body") or ""
+    if not text:
+        return {}
+    hits, misses = [], []
+    head = text[:260]
+    if name and name in head and (industry in head or (region and region.split()[0] in head)):
+        hits.append("정의문(첫 문단에 상호+업종/지역)")
+    else:
+        misses.append("첫 문단 정의문 없음")
+    if "한눈 요약" in text or "한 눈 요약" in text:
+        hits.append("한눈 요약")
+    else:
+        misses.append("'## 한눈 요약' 없음")
+    if any(s in text for s in ("자주 묻는", "Q&A", "Q.")):
+        hits.append("Q&A")
+    else:
+        misses.append("Q&A 없음")
+    if biz_type == "seller":
+        if any(s in text for s in ("솔직 장단점", "아쉬운 점", "단점")):
+            hits.append("솔직 장단점")
+        else:
+            misses.append("솔직 장단점 없음")
+        consistent = bool(name) and text.count(name) >= 2
+    else:
+        consistent = bool(name) and text.count(name) >= 2 and (not region or region.split()[0] in text)
+    if consistent:
+        hits.append("표기 일관(NAP/SPU)")
+    else:
+        misses.append("상호/상품 표기 일관성 약함")
+    total = len(hits) + len(misses)
+    score = int(round(100 * len(hits) / total)) if total else 0
+    return {"score": score, "hits": hits, "misses": misses}
+
+
 SHORT_DIRECTIVES = (
     "[릴스/쇼츠 알고리즘 분석 → 반영 필수]\n"
     "배포 1위 신호는 '시청 유지(watch time)'. 3초 홀드율 60%+면 도달이 5~10배. "

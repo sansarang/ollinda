@@ -383,6 +383,7 @@ def _hero() -> str:
   <p class="reveal mt-7 text-lg text-slate-500 max-w-2xl mx-auto">사진만 올리면 AI가 <b class="text-slate-800">네이버 블로그·플레이스 상위노출에 유리한 글</b>을 씁니다.
    <b class="text-slate-800">인스타·유튜브·릴스·X</b>까지 덤으로 만들어 <b class="text-slate-800">매장 방문·구매</b>로 연결해요.</p>
   <p class="reveal mt-4 text-sm text-slate-400 max-w-xl mx-auto">C-Rank·D.I.A.+ 신호 반영 · 없는 가격·스펙 안 지어내는 정직한 글 · 실검색량 키워드</p>
+  <p class="reveal mt-1.5 text-sm text-slate-400 max-w-xl mx-auto">네이버만? <b class="text-slate-600">ChatGPT·AI 검색에도 내 가게가</b> — 인용되기 유리한 구조로 씁니다</p>
   <div class="reveal mt-10 flex justify-center">
    <a href="/login/kakao" class="flex items-center justify-center px-10 py-4 rounded-2xl font-extrabold text-lg" style="background:#FEE500;color:#191600">카카오로 무료 시작</a></div>
   <p class="reveal mt-4 text-xs text-slate-400">구글 <a href="/login/google" class="text-slate-500 underline">간편가입</a> · 이메일 <a href="/signup" class="text-slate-500 underline">회원가입</a> · 이미 회원이면 <a href="/login" class="text-slate-500 underline">로그인</a></p>

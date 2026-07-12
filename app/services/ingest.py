@@ -103,6 +103,10 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
         if _exp and p.kind in (ContentKind.BLOG, ContentKind.CAPTION, ContentKind.X_POST):
             p.payload["owner_story"] = _exp                     # '내 말이 글이 됐네' 실감 재료
         p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value, p.payload, source=asset.note)
+        if p.kind == ContentKind.BLOG:                          # GEO(AI검색 준비) 점수 — 블로그만(B2)
+            p.payload["geo_audit"] = seo.geo_audit(
+                "blog", p.payload, name=tenant.name, industry=tenant.industry,
+                region=tenant.region or "", biz_type=getattr(tenant, "biz_type", "local") or "local")
         polish(tenant, p)                                       # 🔍 SEO 편집장(저점수만 리라이트)
         p.payload["reach"] = reach.estimate(p.channel.value, p.kind.value, p.payload)
         p.payload["brief"] = brief_public
