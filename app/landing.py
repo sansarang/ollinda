@@ -897,6 +897,25 @@ def _rank_loop() -> str:
  </div></section>"""
 
 
+def _briefing_sell() -> str:
+    """매일 아침 브리핑 셀링(브리핑 PHASE 5) — '혼자 고민 안 해도 돼요' 파트너 포지셔닝."""
+    steps = [("message", "아침 8시, 브리핑 도착", "\"'부산 국밥'에서 옆집이 사장님보다 위예요. 오늘 이 키워드 글 한 편이면 추격이 시작돼요.\""),
+             ("camera", "사장님은 사진 3장만", "오늘 할 일은 딱 하나로 줄여드려요. 글·영상·발행 준비는 올린다가 해요."),
+             ("trend", "저녁엔 성과 피드백", "\"오늘 올린 글로 3명이 들어왔어요. 순위는 4위→2위로 움직이는 중.\"")]
+    cards = "".join(
+        f"<div class='reveal card p-5'>{_icon_chip(ic)}<div class='font-bold mb-1 text-slate-900'>{t}</div>"
+        f"<p class='text-sm text-slate-500 leading-relaxed'>{d}</p></div>" for ic, t, d in steps)
+    return f"""
+<section class="bg-[#F5F3FF] py-24">
+ <div class="max-w-6xl mx-auto px-5">
+  <div class="text-center mb-4"><span class="reveal inline-block px-3 py-1 rounded-full bg-white border border-indigo-100 text-xs font-bold text-indigo-600">AI 사장님 파트너</span></div>
+  <h2 class="reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900">매일 아침, 올린다가 <span class="text-indigo-600">먼저 알려드려요</span></h2>
+  <p class="reveal text-center text-slate-500 mb-12 max-w-2xl mx-auto">오늘 뭘 올릴지 혼자 고민하지 마세요. 순위·경쟁·검색 데이터를 보고 <b class="text-slate-800">오늘 할 일 딱 하나</b>를 브리핑해드려요.</p>
+  <div class="grid sm:grid-cols-3 gap-4">{cards}</div>
+  <p class="reveal text-center text-xs text-slate-400 mt-6">※ 브리핑은 실측 데이터만 사용해요 — 특별한 변화가 없는 날엔 정직하게 "변화 없음"이라고 알려드려요.</p>
+ </div></section>"""
+
+
 def _copy_compare() -> str:
     """'그냥 글' vs '팔리는 글' before/after(#4)."""
     before = ("안녕하세요~ 저희 루마썬팅입니다 😊<br>오늘도 열심히 시공했어요!<br>"
@@ -947,7 +966,7 @@ def render() -> str:
     return (_HEAD + _ga() + _seo_jsonld() + _nav()
             + _hero() + _problem()
             + _video() + _copy_compare()
-            + _why_rank() + _rank_loop()
+            + _why_rank() + _rank_loop() + _briefing_sell()
             + _results() + _honesty()
             + _stats() + _features() + _modes()
             + _new_features() + _pricing() + _faq() + _contact() + _cta() + _footer()

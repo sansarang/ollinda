@@ -1983,7 +1983,8 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                       "<div class='flex-1 min-w-0'><div class='text-xs font-bold text-indigo-500 mb-0.5'>오늘의 액션</div>"
                       f"<div class='text-sm text-slate-700 font-medium'>{_act['text']}</div></div>"
                       f"<a href='{_act['href']}' class='flex-shrink-0 bg-indigo-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-indigo-700 transition'>{_act['cta']}</a></div>")
-            main_inner = (greeting + _upsell + _notice_html + _coach + _calendar_card(t, _plan)
+            main_inner = (greeting + _upsell + _briefing_card(t, _plan) + _notice_html
+                          + _coach + _calendar_card(t, _plan)
                           + _blog_nudge + upload_section
                           + "<div class='mt-5'></div>" + _store_info_card(t))
     # 🆕 새로 추가한 '빈 새 가게'면 실수 대비 '뒤로가기(취소)' 배너
@@ -2517,6 +2518,45 @@ def _place_card(t, fw: str) -> str:
             f"<div><div class='text-xs font-bold text-slate-500 mb-1'>정보 완성도 체크리스트</div>{chk}</div>"
             f"<div><div class='text-xs font-bold text-slate-500 mb-1'>리뷰 요청 키트</div>{rv}{qr}</div>"
             "</div></div>")
+
+
+def _briefing_card(t, plan: str) -> str:
+    """오늘의 브리핑 카드(브리핑 PHASE 5) — 능동 발송과 별개로 앱에서도 확인. 밝은 톤.
+    게이팅: 전 플랜 제공(리텐션 목적 — 매일 들어올 이유가 곧 구독 유지)."""
+    from app.services import briefing as _bf
+    try:
+        b = _bf.get_or_create_today(t, plan)
+    except Exception:
+        return ""
+    if b.get("passed"):
+        return (f"<div class='{_CARD} p-4 mb-5 flex items-center gap-3'>"
+                f"{_icchip('checkcircle')}"
+                "<div class='text-sm text-slate-500'>오늘 브리핑은 패스하셨어요 — 푹 쉬세요. "
+                "내일 아침에 새 브리핑으로 찾아뵐게요.</div></div>")
+    hour = int(getattr(t, "briefing_hour", 8) or 8)
+    on = bool(getattr(t, "briefing_on", 1))
+    hours_opts = "".join(f"<option value='{h}'{' selected' if h == hour else ''}>{h:02d}:00</option>"
+                         for h in range(5, 13))
+    pref = ("<details class='mt-3'><summary class='text-xs text-slate-400 cursor-pointer select-none'>"
+            f"브리핑 설정 — 매일 {hour:02d}:00 · {'켜짐' if on else '꺼짐'}</summary>"
+            "<form method=post action='/me/briefing-pref' class='flex items-center gap-2 mt-2'>"
+            f"<select name=hour class='border border-slate-200 rounded-xl px-2.5 py-2 text-sm'>{hours_opts}</select>"
+            f"<label class='text-sm text-slate-600 flex items-center gap-1.5'>"
+            f"<input type=checkbox name=on value=1 {'checked' if on else ''}> 아침 브리핑 받기</label>"
+            f"<button class='{_BTN} text-xs px-3 py-2'>저장</button></form></details>")
+    return (f"<div class='bg-[#F5F3FF] border border-indigo-200 rounded-2xl p-5 mb-5'>"
+            "<div class='flex items-center gap-2 mb-2'>"
+            f"{_ic('message', 'w-4 h-4 text-indigo-600')}"
+            "<span class='text-xs font-bold text-indigo-600'>오늘 아침 브리핑</span></div>"
+            f"<div class='font-bold text-slate-900 mb-1'>{b.get('headline', '')}</div>"
+            f"<div class='text-sm text-slate-700'><b>오늘 할 일 딱 하나</b> — {esc(b.get('task', ''))}</div>"
+            f"<div class='text-xs text-slate-500 mt-1'>{esc(b.get('reason', ''))}</div>"
+            f"<div class='text-xs text-indigo-500 mt-1.5'>{esc(b.get('partner_note', ''))}</div>"
+            "<div class='flex items-center gap-2 mt-3'>"
+            f"<a href='{b.get('action_href', '/me')}' class='{_BTN} text-sm px-4 py-2.5'>{esc(b.get('action_label', '시작하기'))}</a>"
+            "<button type=button onclick=\"fetch('/api/briefing/pass',{method:'POST'}).then(r=>r.json())"
+            ".then(d=>{location.reload();})\" class='text-xs text-slate-400 hover:text-slate-600 px-2'>오늘은 패스</button>"
+            "</div>" + pref + "</div>")
 
 
 def _calendar_card(t, plan: str) -> str:
