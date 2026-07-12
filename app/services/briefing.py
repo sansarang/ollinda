@@ -215,6 +215,67 @@ def send_morning(now_kst_hour: int) -> dict:
     return {"sent": sent, "hour": now_kst_hour}
 
 
+# ── PHASE 4: 저녁 성과 피드백(하루 루프: 아침 브리핑 → 실행 → 저녁 피드백) ──
+def _evening_text(t, st: dict) -> str:
+    """저녁 피드백 — 전부 실측. 데이터 없으면 '내일부터 추적' 정직 안내."""
+    lines = []
+    if st["clicks_today"]:
+        lines.append(f"오늘 콘텐츠 링크로 벌써 {st['clicks_today']}명이 들어왔어요.")
+    ups = [m for m in st["rank_moves"] if (m["after"] or 31) < (m["before"] or 31)]
+    downs = [m for m in st["rank_moves"] if (m["after"] or 31) > (m["before"] or 31)]
+    for m in ups[:2]:
+        b = f"{m['before']}위" if m["before"] else "미노출"
+        lines.append(f"'{m['keyword']}' 순위가 {b} → {m['after']}위로 움직이는 중이에요.")
+    if downs and not ups:
+        m = downs[0]
+        lines.append(f"'{m['keyword']}'가 {m['before']}위 → {m['after'] or '미노출'}로 밀렸어요 — 내일 브리핑에서 대응책 드릴게요.")
+    if not lines:
+        lines.append("오늘 만든 콘텐츠의 순위 변화는 내일부터 추적해서 알려드릴게요 — 네이버 반영엔 하루 이틀 걸려요.")
+    return ("사장님, 오늘 하루 마무리 피드백이에요 🌙\n\n"
+            + "\n".join("· " + x for x in lines)
+            + f"\n\n오늘 {st['made_today']}건 만드셨어요. 내일 아침 브리핑에서 다음 한 수를 준비해둘게요.")
+
+
+def send_evening() -> dict:
+    """저녁 20시 — '오늘 콘텐츠를 만든' 가게에만 성과 피드백(안 만든 날은 조용히 — 스팸 방지)."""
+    import datetime
+    import os
+    today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+    sent = 0
+    for u in db.list_users():
+        tid = u.get("tenant_id")
+        if not tid:
+            continue
+        t = db.get_tenant(tid)
+        if not t or not (t.industry or "").strip() or not getattr(t, "briefing_on", 1):
+            continue
+        if db.briefing_sent(tid, today, col="evening_sent"):
+            continue
+        st = db.today_feedback_stats(tid)
+        if not st["made_today"]:                        # 오늘 실행 없음 → 피드백 없음(정직·비스팸)
+            continue
+        try:
+            text = _evening_text(t, st)
+            db.add_notice(tid, "evening", text.split("\n\n")[1][:180])
+            email = (u.get("email") or "")
+            if email and not email.endswith((".guest", ".local")) and os.environ.get("SMTP_HOST"):
+                try:
+                    from app.services.weekly_report import _send_email
+                    _send_email(email, "[올린다] 오늘 하루 피드백", text)
+                except Exception:
+                    _log.exception("[briefing] 저녁 이메일 실패 uid=%s", u.get("id"))
+            _send_kakao_stub(t, {"kind": "evening"})
+            # 저녁 락 — 브리핑 행이 없으면 만들어 두고 표시
+            if not db.get_briefing(tid, today):
+                db.save_briefing(tid, today, {"kind": "evening_only", "date": today})
+            db.mark_briefing_sent(tid, today, col="evening_sent")
+            sent += 1
+        except Exception:
+            _log.exception("[briefing] 저녁 피드백 실패 tenant=%s", tid)
+    _log.info("[briefing] 저녁 피드백 %d건", sent)
+    return {"sent": sent}
+
+
 def get_or_create_today(t, plan: str = "free") -> dict:
     """오늘 브리핑 조회(있으면 재사용 — 1일 1회) 없으면 생성·저장."""
     today = __import__("datetime").datetime.utcnow().strftime("%Y-%m-%d")

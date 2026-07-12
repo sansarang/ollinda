@@ -279,6 +279,34 @@ def set_topic_axis(tid: str, axis: str) -> None:
             pass
 
 
+def today_feedback_stats(tenant_id: str) -> dict:
+    """저녁 피드백 원자료(브리핑 PHASE 4, 전부 실측) — 오늘 만든 콘텐츠 수·
+    오늘 추적링크 클릭 수·오늘 스냅샷의 순위 변화(어제 대비)."""
+    today = _now()[:10]
+    out = {"made_today": 0, "clicks_today": 0, "rank_moves": []}
+    try:
+        with _conn() as c:
+            out["made_today"] = c.execute(
+                "SELECT COUNT(DISTINCT asset_id) FROM content_pieces WHERE tenant_id=? AND created_at LIKE ?",
+                (tenant_id, today + "%")).fetchone()[0]
+            try:
+                out["clicks_today"] = c.execute(
+                    "SELECT COUNT(*) FROM link_clicks lc JOIN links l ON lc.code=l.code "
+                    "WHERE l.tenant_id=? AND lc.ts LIKE ?", (tenant_id, today + "%")).fetchone()[0]
+            except sqlite3.OperationalError:
+                pass
+            rows = c.execute(
+                "SELECT keyword, rank FROM rank_snapshots WHERE tenant_id=? AND checked_at LIKE ? "
+                "AND rank IS NOT NULL GROUP BY keyword", (tenant_id, today + "%")).fetchall()
+        for r in rows:
+            prev = get_prev_rank(tenant_id, r["keyword"])
+            if prev is not None and prev != r["rank"]:
+                out["rank_moves"].append({"keyword": r["keyword"], "before": prev, "after": r["rank"]})
+    except Exception:
+        pass
+    return out
+
+
 # ── 매일 아침 브리핑(브리핑 PHASE 1·2) ──
 def save_briefing(tenant_id: str, date: str, data: dict) -> None:
     try:
