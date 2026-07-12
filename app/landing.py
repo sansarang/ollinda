@@ -388,17 +388,20 @@ def _hero() -> str:
    <a href="/login/kakao" class="flex items-center justify-center px-10 py-4 rounded-2xl font-extrabold text-lg" style="background:#FEE500;color:#191600">카카오로 무료 시작</a></div>
   <p class="reveal mt-4 text-xs text-slate-400">구글 <a href="/login/google" class="text-slate-500 underline">간편가입</a> · 이메일 <a href="/signup" class="text-slate-500 underline">회원가입</a> · 이미 회원이면 <a href="/login" class="text-slate-500 underline">로그인</a></p>
   <!-- 두 미끼를 한눈에: 순위진단(왼쪽) + 무료 만들기(오른쪽) — 모바일은 세로 스택 -->
-  <div class="reveal mt-12 max-w-4xl mx-auto grid lg:grid-cols-2 gap-5 items-start text-left">
+  <!-- grid-cols-1 명시(모바일 반응형): lg 미만에서 암시적 auto 트랙이 max-content(576px)로 커져
+       카드가 뷰포트를 넘고 overflow-hidden에 잘리던 버그 — minmax(0,1fr) 트랙으로 강제 -->
+  <div class="reveal mt-12 max-w-4xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-5 items-start text-left">
    <div class="bg-white border-2 border-indigo-200 rounded-2xl shadow-sm p-5">
     <div class="flex items-center gap-2 text-slate-800 font-bold text-sm mb-1">{_icon('search', 'w-4 h-4 text-indigo-600')} 내 가게·상품 순위 즉시 진단</div>
     <div class="flex gap-1.5 mb-2 text-xs font-bold">
       <button type="button" id="rc_mlocal" onclick="rcSetMode('local')" class="px-3 py-1.5 rounded-lg border border-indigo-500 bg-indigo-50 text-indigo-700 transition">동네 매장</button>
       <button type="button" id="rc_mseller" onclick="rcSetMode('seller')" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 transition">온라인 셀러</button></div>
     <p id="rc_sub" class="text-xs text-slate-400 mb-3">지역·업종·상호만 — 네이버 현재 순위를 바로 확인</p>
-    <div class="flex gap-2">
-      <input id="rc_region" placeholder="지역(부산 동구)" class="flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400">
-      <input id="rc_ind" placeholder="업종" class="flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400">
-      <input id="rc_name" placeholder="상호" class="flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400"></div>
+    <!-- 모바일: 3칸 세로 스택(각 100%) / sm+: 가로 1행 -->
+    <div class="flex flex-col sm:flex-row gap-2">
+      <input id="rc_region" placeholder="지역(부산 동구)" class="w-full sm:flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400">
+      <input id="rc_ind" placeholder="업종" class="w-full sm:flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400">
+      <input id="rc_name" placeholder="상호" class="w-full sm:flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400"></div>
     <button onclick="rankCheck()" class="w-full mt-2.5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition">현재 순위 확인</button>
     <div id="rc_out" class="text-slate-600 text-sm mt-3"></div>
    </div>
