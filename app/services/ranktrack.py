@@ -40,13 +40,21 @@ def track_tenant(t) -> int:
         return 0
     n = 0
     bid = getattr(t, "blog_id", "") or ""
+    _biz = getattr(t, "biz_type", "local") or "local"
     for kw in kws:
-        cur = place.rank(kw, t.name)
-        db.save_rank_snapshot(t.id, kw, cur, kind="blog")          # None이면 내부에서 스킵
-        if cur is not None:
-            n += 1
-        if (getattr(t, "biz_type", "local") or "local") in ("local", "hybrid"):
-            db.save_place_rank(t.id, kw, cur)                       # 플레이스 노출(분리 추적)
+        if _biz == "seller":
+            # 셀러: 지역검색 대신 쇼핑검색 순위(kind='shop') — 상품 키워드 승부(셀러 C1)
+            cur = place.shop_rank(kw, t.name, getattr(t, "brand_name", "") or "")
+            db.save_rank_snapshot(t.id, kw, cur, kind="shop")
+            if cur is not None:
+                n += 1
+        else:
+            cur = place.rank(kw, t.name)
+            db.save_rank_snapshot(t.id, kw, cur, kind="blog")      # None이면 내부에서 스킵
+            if cur is not None:
+                n += 1
+            if _biz in ("local", "hybrid"):
+                db.save_place_rank(t.id, kw, cur)                   # 플레이스 노출(분리 추적)
         if bid:
             from app.services import blogrank
             br = blogrank.blog_rank(kw, bid)
@@ -122,7 +130,7 @@ def rank_deltas(tenant_id: str, limit: int = 6) -> list[dict]:
     out = []
     for kw in db.tracked_keywords(tenant_id, limit=limit):
         best = None
-        for kind in ("blog_search", "place", "blog"):
+        for kind in ("blog_search", "place", "blog", "shop"):
             hist = [h for h in db.rank_history(tenant_id, kw, kind=kind) if h.get("rank") is not None]
             if len(hist) >= 1 and (best is None or len(hist) > len(best[1])):
                 best = (kind, hist)

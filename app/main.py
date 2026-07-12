@@ -2239,7 +2239,7 @@ def _blog_connect_card(t, fw: str) -> str:
             for c in (_d.get("rank_changes") or [])[:4]:
                 _b = c.get("before") or "미노출"
                 _a = c.get("after") or "미노출"
-                _src = {"blog_search": "블로그탭", "place": "플레이스", "blog": "지역검색"}.get(c.get("kind"), "")
+                _src = {"blog_search": "블로그탭", "place": "플레이스", "blog": "지역검색", "shop": "쇼핑검색"}.get(c.get("kind"), "")
                 _up = (c.get("after") or 99) < (c.get("before") or 99) and c.get("after")
                 _cls = "text-emerald-600" if _up else "text-slate-500"
                 _rows2 += (f"<div class='flex justify-between text-sm py-1 border-b border-slate-100'>"
@@ -2469,7 +2469,7 @@ def _growth_card(t, fw: str) -> str:
     deltas = ranktrack.rank_deltas(t.id)
     if not deltas:
         return ""
-    _src_lab = {"blog_search": "블로그탭", "place": "플레이스", "blog": "지역검색"}
+    _src_lab = {"blog_search": "블로그탭", "place": "플레이스", "blog": "지역검색", "shop": "쇼핑검색"}
 
     def _spark(history: list) -> str:
         """순위 미니 그래프 — 낮은 순위(1위)가 높은 막대. 0(미노출)은 최하 취급."""

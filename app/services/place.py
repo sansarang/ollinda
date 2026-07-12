@@ -132,6 +132,18 @@ def shop_rank(keyword: str, store_name: str, brand: str = "") -> "int | None":
         return None
 
 
+def shop_top(keyword: str, limit: int = 3) -> list[dict]:
+    """쇼핑검색 상위 상품 [{name, mall, price}] — 브리핑 '지금 1위는 ○○(N원)' 실측용. 무키/실패 []."""
+    out = []
+    for it in shop_search(keyword, limit):
+        try:
+            price = int(it.get("price") or 0)
+        except Exception:
+            price = 0
+        out.append({"name": it.get("name", ""), "mall": it.get("mall", ""), "price": price})
+    return out
+
+
 def rank(keyword: str, store_name: str, limit: int = 5) -> int | None:
     """참고용 순위 — 네이버 지역검색 상위 limit 안에서 내 가게 위치(1~limit).
     상위 밖이면 0, 조회 불가(무키/실패)면 None."""

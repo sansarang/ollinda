@@ -124,6 +124,51 @@ def _sig_missing_kw(t) -> dict | None:
     return None
 
 
+# ── 셀러 신호(셀러 C1) — 지역·플레이스 대신 상품 키워드 쇼핑검색 축 ──
+def _sig_shop_market(t) -> list[dict]:
+    """셀러: 쇼핑검색 실측 — ① 상위권인데 1위 아님(추격+상위 상품 가격 실측)
+    ② 미노출 고검색량 키워드(선점 기회). 공식 shop.json 범위만(리뷰수는 API 미제공 → 안 씀)."""
+    out = []
+    try:
+        from app.services import diagnose, place
+        r = diagnose.diagnose_product_rank(
+            t.industry, getattr(t, "brand_name", "") or t.name, getattr(t, "brand_name", "") or "")
+        if r.get("estimated"):
+            return []
+
+        def _top_line(kw):
+            tops = place.shop_top(kw, 1)
+            if tops and tops[0].get("mall"):
+                p = tops[0]
+                return f" 지금 1위는 {p['mall']}" + (f"({p['price']:,}원)" if p.get("price") else "") + "이에요."
+            return ""
+
+        caught = sorted(r.get("caught") or [], key=lambda s: s["rank"])
+        if caught and caught[0]["rank"] > 1:
+            s = caught[0]
+            kw = s["keyword"]
+            out.append({"score": _W_COMPETITOR - 5, "kind": "shop_chase",
+                        "headline": f"'{esc_kw(kw)}' 쇼핑 {s['rank']}위 — 위에 {s['rank'] - 1}개 상품이 있어요."
+                                    + _top_line(kw),
+                        "task": f"'{kw}' 내돈내산 후기 글 1편 — 사진 3장만 보내주세요",
+                        "reason": "구매 전 검색은 후기 글에서 갈려요. 후기 콘텐츠가 쌓이면 상품 클릭·전환이 같이 올라요.",
+                        "kw": kw, "angle": "review"})
+        miss = sorted(r.get("missing") or [], key=lambda s: -(s.get("volume") or 0))
+        if miss:
+            s = miss[0]
+            kw, vol = s["keyword"], s.get("volume") or 0
+            vol_txt = f"월 {vol:,}회 검색되는데 " if vol else ""
+            out.append({"score": _W_MISSING_KW + (5 if vol >= 1000 else 0), "kind": "shop_missing",
+                        "headline": f"'{esc_kw(kw)}' — {vol_txt}상위 {r.get('scan_depth', 40)}위 안에 "
+                                    "내 상품이 안 보여요." + _top_line(kw),
+                        "task": f"'{kw}' 선점 후기 글 1편 — 사진 3장만 보내주세요",
+                        "reason": "그 검색이 지금은 전부 다른 스토어로 가고 있어요. 후기 글이 검색 유입의 지렛대예요.",
+                        "kw": kw, "vol": vol, "angle": "review"})
+    except Exception:
+        pass
+    return out
+
+
 def esc_kw(s: str) -> str:
     return (s or "").replace("<", "").replace(">", "")
 
@@ -132,8 +177,14 @@ def build_briefing(t, plan: str = "free") -> dict:
     """tenant의 '오늘의 브리핑 1건' — 신호 점수화 → 최고 1개만(딱 하나 원칙).
     반환: {kind, headline, task, reason, action_href, action_label, pass_href, score, date}."""
     signals: list[dict] = []
-    for s in ([_sig_competitor(t)] + _sig_rank_moves(t)
-              + [_sig_publish_gap(t, plan), _sig_missing_kw(t)]):
+    if (getattr(t, "biz_type", "local") or "local") == "seller":
+        # 셀러: 상품 키워드 쇼핑검색 축(추격/선점) + 순위 변화(kind=shop 포함) + 발행 공백.
+        # 지역·플레이스 기반 신호(경쟁사·지역 미노출)는 셀러에겐 안 씀(매장 냄새 제거).
+        cand = _sig_shop_market(t) + _sig_rank_moves(t) + [_sig_publish_gap(t, plan)]
+    else:
+        cand = ([_sig_competitor(t)] + _sig_rank_moves(t)
+                + [_sig_publish_gap(t, plan), _sig_missing_kw(t)])
+    for s in cand:
         if s:
             signals.append(s)
     if signals:
