@@ -3001,11 +3001,30 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                 f"<div class='flex-1 text-sm text-slate-800'>{esc(n)}</div>{_cp('c_mn' + str(i) + p.id[:4], n, '복사')}</div>"
                 for i, n in enumerate(names[:3]))
             tags_html = "".join(f"<span class='inline-block bg-slate-100 text-slate-600 text-xs px-2 py-1 rounded-full mr-1 mb-1'>{esc(tg)}</span>" for tg in tags)
+            summary = pl.get("detail_summary") or []
+            spec = pl.get("spec_table", "")
+            rkit = pl.get("review_kit") or []
+            summary_html = ""
+            if summary:
+                summary_html = ("<div class='text-xs font-bold text-slate-400 mt-3 mb-1'>요약본 (핵심 소구점 5줄)</div>"
+                                + "".join(f"<div class='text-sm text-slate-700 mb-1'>· {esc(s)}</div>" for s in summary)
+                                + _cp("c_ms" + p.id[:5], "\n".join(summary), "요약 복사"))
+            spec_html = (("<div class='text-xs font-bold text-slate-400 mt-3 mb-1'>스펙표 (입력값만)</div>"
+                          f"<div class='text-xs text-slate-600 whitespace-pre-wrap border border-slate-100 rounded-lg p-2'>{esc(spec)}</div>")
+                         if spec else "")
+            rkit_html = ""
+            if rkit:
+                rkit_html = ("<div class='text-xs font-bold text-slate-400 mt-3 mb-1'>리뷰 요청 문구 키트</div>"
+                             + "".join(f"<div class='flex items-start gap-2 mb-1.5'><div class='flex-1 text-xs text-slate-600'>{esc(s)}</div>"
+                                       f"{_cp('c_mr' + str(i) + p.id[:4], s, '복사')}</div>" for i, s in enumerate(rkit))
+                             + "<div class='text-[11px] text-slate-400'>※ 리뷰 대가(포인트·사은품 조건) 제시는 플랫폼 규정 위반이에요 — 정당한 요청 문구만 담았어요.</div>")
             block = (_hd(f"🛒 {esc(mk)} 판매 콘텐츠", pl) + f"<div class='{wrap} p-4'>"
                      "<div class='text-xs font-bold text-slate-400 mb-1.5'>상품명 (검색 최적화 · 3안)</div>" + names_html
                      + "<div class='text-xs font-bold text-slate-400 mt-3 mb-1'>상세페이지</div>"
                      + f"<div class='text-xs text-slate-600 whitespace-pre-wrap max-h-40 overflow-y-auto border border-slate-100 rounded-lg p-2'>{esc(detail)}</div>"
+                     + summary_html + spec_html
                      + (f"<div class='text-xs font-bold text-slate-400 mt-3 mb-1'>검색 태그</div><div>{tags_html}</div>" if tags_html else "")
+                     + rkit_html
                      + f"<div class='mt-3 flex gap-2'>{_cp('c_md' + p.id[:5], detail, '상세 복사')}{pack_btn(p.id, False)}</div></div>")
         if block:
             grp = ("video" if k == "short" else "sell" if k == "marketplace" else "text")

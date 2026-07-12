@@ -64,6 +64,20 @@ _QUESTION_BANK: dict[str, list[dict]] = {
     ],
 }
 
+# 셀러(온라인 판매) 전용 — 상품 중심 질문만(차별점·사용감·추천대상·배송).
+# 프리셋 업종 뱅크는 매장 지향(방문·시공·주차·좌석)이라 셀러에겐 쓰지 않는다(셀러 S2).
+_SELLER_QUESTIONS = [
+    {"id": "diff", "q": "비슷한 상품과 다른 점 하나는요?", "type": "text",
+     "ph": "예: 두께 2배, 국내 생산이에요"},
+    {"id": "usage", "q": "직접 써보니 어땠어요?", "type": "text",
+     "ph": "예: 세척이 진짜 편해요"},
+    {"id": "fit_for", "q": "어떤 분께 추천하나요?", "type": "text",
+     "ph": "예: 캠핑 자주 가시는 분"},
+    {"id": "shipping", "q": "배송·구성에서 알릴 점은요?", "type": "text",
+     "ph": "예: 오후 2시 전 주문 당일 출고 (없으면 비워두세요)"},
+]
+_EXPERIENCE_PH_SELLER = "예: 배송 파손 줄이려고 포장을 이중으로 바꿨어요"
+
 # 범용(미정의 업종) 폴백 — 업종 중립 질문만(타업종 냄새 금지: '시공·당일 1시간' 같은 예시 금지)
 _GENERIC_QUESTIONS = [
     {"id": "strength", "q": "우리 가게만의 강점 하나는요?", "type": "text",
@@ -131,6 +145,14 @@ def questions_for(industry: str, biz_type: str = "local", purpose: str = "",
     prefill로 되돌려 반복 입력을 없앤다."""
     known = {k: v for k, v in (known or {}).items() if (v or "").strip()}
     prof = resolve_industry(industry)
+    if (biz_type or "").strip() == "seller":
+        # 셀러 분기: 상품 질문만 — 매장 프리셋(방문·시공·주차)이 섞이지 않게 별도 뱅크 사용
+        qs = [q for q in _SELLER_QUESTIONS if q["id"] not in known][:4]
+        exp = dict(EXPERIENCE_QUESTION)
+        exp["ph"] = _EXPERIENCE_PH_SELLER
+        return {"industry": prof.name, "questions": qs,
+                "experience": exp, "prefill": known,
+                "hint": "안 넣어도 되지만, 넣으면 글이 훨씬 구체적으로 좋아져요"}
     qs = [q for q in _QUESTION_BANK.get(prof.key, []) if q["id"] not in known]
     if not qs:
         # 프리셋 뱅크가 없는 업종(AI 생성/GENERIC 프로필) — trust_signals·pain_points를

@@ -5,6 +5,7 @@ Claude 기반 텍스트 생성기 — 인스타 캡션, 네이버 블로그 SEO 
 """
 from __future__ import annotations
 
+import re
 import uuid
 
 from app.domain.models import Asset, Channel, ContentKind, ContentPiece, ContentStatus, Tenant
@@ -317,18 +318,35 @@ class MarketplaceGenerator(Generator):
             "검색 키워드를 앞쪽에, 40~50자, 특수문자·중복 남발 금지)\n"
             "[상세페이지]\n(구매를 부르는 상세설명. ## 핵심 셀링포인트 3가지 · ## 이런 분께 추천 · "
             "## 상세 스펙(가능하면 표) · ## 자주 묻는 질문(Q&A 2~3) · 마지막 구매 유도 한 줄. 900~1400자)\n"
+            "[요약본]\n(상세페이지 요약 — 핵심 소구점 딱 5줄. 각 줄 한 문장, 구매 결정 포인트만. "
+            "썸네일·목록·SNS 소개에 바로 쓰는 용도)\n"
+            "[스펙표]\n(입력에 있는 스펙만 '항목: 값' 형식 한 줄씩. 입력에 스펙이 없으면 "
+            "'입력된 스펙 없음' 한 줄만 — 지어내기 금지)\n"
             "[태그]\n(쉼표로 10개, 마켓 검색 노출용 키워드 — 상품종류·용도·타겟·시즌 등)"
         )
-        raw = _call_llm(prompt, self.model, 2600)
-        d = _parse_sections(raw, ["상품명", "상세페이지", "태그"])
+        raw = _call_llm(prompt, self.model, 3000)
+        d = _parse_sections(raw, ["상품명", "상세페이지", "요약본", "스펙표", "태그"])
         names = [n.strip().lstrip("-*·0123456789.) ").strip()
                  for n in (d.get("상품명", "")).split("\n") if n.strip()][:3]
         tags = [t.strip().lstrip("#") for t in (d.get("태그", "")).replace("\n", ",").split(",") if t.strip()][:10]
+        # 목록 마커('- ', '1. ')만 제거 — lstrip 문자셋은 '60L'의 숫자까지 벗겨 오파싱
+        summary = [re.sub(r"^[\s\-\*·]*(?:\d+[.)]\s*)?", "", s).strip()
+                   for s in (d.get("요약본", "")).split("\n") if s.strip()][:5]
+        spec = (d.get("스펙표", "") or "").strip()
+        if "입력된 스펙 없음" in spec:
+            spec = ""                                    # 스펙 미입력 = 표 자체를 안 보여줌(날조 방지)
+        # 리뷰 유도 키트 — 결정적 템플릿(LLM 미사용: 대가성 제안·날조 위험 원천 차단). 정당한 요청만.
+        review_kit = [
+            f"{brand}입니다. 받아보신 상품, 써보시고 솔직한 후기를 남겨주시면 다음 상품을 만드는 데 큰 힘이 됩니다.",
+            "혹시 불편한 점이 있었다면 후기보다 먼저 문의로 알려주세요 — 바로 도와드릴게요.",
+            "사진과 함께 남겨주시는 솔직한 사용 후기는 다른 구매자분들께 큰 도움이 됩니다. 내용과 무관하게 감사드려요.",
+        ]
         return ContentPiece(
             id=str(uuid.uuid4()), tenant_id=tenant.id, asset_id=asset.id,
             channel=Channel.MARKETPLACE, kind=self.kind,
             payload={"product_names": names or [tenant.name],
                      "detail_body": d.get("상세페이지", "") or raw,
+                     "detail_summary": summary, "spec_table": spec, "review_kit": review_kit,
                      "tags": tags, "market": mk, "brand": brand,
                      "buy_url": getattr(tenant, "buy_url", "") or "",
                      "search_kw": getattr(tenant, "search_kw", "") or "",
