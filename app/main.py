@@ -1796,10 +1796,11 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
     _tkw = (request.query_params.get("target_kw") or "").strip()[:40]
     _angle = (request.query_params.get("angle") or "").strip()
     _angle = _angle if _angle in ("review", "howto", "price") else ""
+    _src = (request.query_params.get("from") or "").strip()      # briefing 원클릭 진입(PHASE 3)
     upload_section = ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6 sm:p-7'>"
                       "<div class='mb-5'><div class='text-lg font-extrabold text-slate-900'>콘텐츠 만들기</div>"
                       "<div class='text-sm text-slate-400'>가게 이름·사진만 있으면 끝</div></div>"
-                      + _upload_form_html(t, tok, target_kw=_tkw, angle=_angle) + "</div>")
+                      + _upload_form_html(t, tok, target_kw=_tkw, angle=_angle, src=_src) + "</div>")
     content = ("<div id='myContent' class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5'>"
                "<h2 class='font-bold text-slate-900 mb-1'>내 콘텐츠</h2>"
                "<p class='text-xs text-slate-400 mb-3'>‘보기’를 누르면 결과가 나와요.</p>" + hist + "</div>")
@@ -4789,15 +4790,27 @@ def oauth_callback(code: str = "", state: str = "", error: str = ""):
 
 
 # ── 사장님 업로드 ────────────────────────────────────────
-def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "") -> str:
+def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
+                      src: str = "") -> str:
     """모던·간결 생성 카드 — 가게이름/링크 자동인식 + 사진 + 형태 + 목적 → 5채널 생성.
-    target_kw/angle: 진단→생성 연결(상위노출 PHASE 1) — 이 키워드/앵글을 겨냥한 글 생성."""
+    target_kw/angle: 진단→생성 연결(상위노출 PHASE 1) — 이 키워드/앵글을 겨냥한 글 생성.
+    src='briefing': 아침 브리핑 원클릭 진입(브리핑 PHASE 3) — 파트너 톤 배너."""
     bt = (tenant.biz_type or "local")
     _angle_lab = {"review": "후기형", "howto": "방법·과정형", "price": "가격·비용형"}.get(angle, "")
     target_banner = ""
-    if target_kw:
+    if target_kw and src == "briefing":
+        # 브리핑 원클릭: "사진만 보내면 나머지는 제가" — 짐을 나눠 지는 경험
+        target_banner = ("<div class='flex items-center gap-2.5 bg-[#EEF2FF] border border-indigo-200 rounded-2xl p-3.5'>"
+                         f"{_ic('wand', 'w-5 h-5 text-indigo-600 flex-shrink-0')}<div class='text-sm text-slate-700'>"
+                         f"오늘 브리핑에서 제안드린 <b>'{esc(target_kw)}'</b>"
+                         + (f" · <b>{_angle_lab}</b>" if _angle_lab else "")
+                         + " — <b>사진 3장만</b> 올려주세요. 글·영상·발행 준비는 제가 할게요.</div>"
+                         "<button type=button onclick=\"fetch('/api/briefing/pass',{method:'POST'}).then(r=>r.json())"
+                         ".then(d=>{alert(d.message||'내일 다시 브리핑드릴게요');location.href='/me';})\" "
+                         "class='ml-auto text-xs text-slate-400 hover:text-slate-600 whitespace-nowrap'>오늘은 패스</button></div>")
+    elif target_kw:
         target_banner = ("<div class='flex items-center gap-2.5 bg-amber-50 border border-amber-200 rounded-2xl p-3.5'>"
-                         "<span class='text-xl'>🎯</span><div class='text-sm text-slate-700'>"
+                         f"{_ic('target', 'w-5 h-5 text-amber-600 flex-shrink-0')}<div class='text-sm text-slate-700'>"
                          f"이번 글은 <b>'{esc(target_kw)}'</b> 키워드를 겨냥해요"
                          + (f" · <b>{_angle_lab}</b> 앵글" if _angle_lab else "")
                          + " — 제목·본문에 자연스럽게 반영돼요.</div>"
