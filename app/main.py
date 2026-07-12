@@ -4829,7 +4829,7 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "") 
     js = ("<script>"
           "function bizFields(v){var l=document.getElementById('sf_local'),s=document.getElementById('sf_seller');if(l&&s){if(v==='seller'){l.classList.add('hidden');s.classList.remove('hidden');}else{s.classList.add('hidden');l.classList.remove('hidden');}}"
           "var q=document.getElementById('lk_q'),h=document.getElementById('lk_hint2');"
-          "if(v==='seller'){if(q)q.placeholder='🔗 내 상품/스토어 링크 붙여넣기 (또는 상품명)';if(h)h.innerHTML='내 상품 링크를 붙이면 그게 손님이 갈 <b>판매 링크</b>가 돼요. 링크 없으면 상품명으로 검색(정보만) 후 <b>내 링크는 직접 입력</b>.';}"
+          "if(v==='seller'){if(q)q.placeholder='내 상품/스토어 링크 붙여넣기 (또는 상품명)';if(h)h.innerHTML='내 상품 링크를 붙이면 그게 손님이 갈 <b>판매 링크</b>가 돼요. 링크 없으면 상품명으로 검색(정보만) 후 <b>내 링크는 직접 입력</b>.';}"
           "else{if(q)q.placeholder='가게 이름 (자동 인식)';if(h)h.innerHTML='';}}"
           "var PM={f:[],drag:-1};"
           "function pmSync(){var dt=new DataTransfer();PM.f.forEach(function(x){dt.items.add(x);});document.getElementById('up_photos').files=dt.files;}"
