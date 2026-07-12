@@ -343,6 +343,27 @@ RISKY_EXPRESSIONS = [
     "초대박", "역대급", "클릭", "꼭 사세요",
 ]
 
+# ── AI 클리셰(휴먼터치 A1) — 'AI가 쓴 티' 나는 정형 표현. 2026 AI 콘텐츠 피로 → 감점 대상 ──
+AI_CLICHES = [
+    "알아보겠습니다", "알아보도록 하겠습니다", "소개해드리겠습니다", "소개해 드리겠습니다",
+    "추천드립니다", "추천드려요", "추천해 드립니다",
+    "도움이 되셨길", "도움이 되었으면", "마무리하겠습니다", "마치겠습니다",
+    "어떠셨나요", "포스팅을 마",
+]
+
+# 휴먼터치 지시 — blog/insta/X 공통 주입(A1). '사람이 쓴 것 같은' 리듬·구어가 차별화.
+HUMAN_TOUCH = (
+    "[휴먼터치 — AI 티 빼기(어기면 저품질·독자 이탈)]\n"
+    "- 금지 클리셰: '안녕하세요~ 오늘은 ~알아보겠습니다' 류 도입, '~추천드립니다'·'~소개해드리겠습니다' 반복, "
+    "'지금까지 ~였습니다'·'도움이 되셨길 바랍니다' 류 마무리, '어떠셨나요?' 상투 질문.\n"
+    "- 문장 길이를 일부러 섞어라 — 아주 짧은 문장 뒤에 긴 문장. 문단 길이도 균일하게 맞추지 마라.\n"
+    "- 자연스러운 구어 추임새를 가끔만: '근데', '사실', '솔직히' 같은 말(남발 금지).\n"
+    "- 사장님(판매자) 1인칭 목소리 유지 — 설명문이 아니라 '내 가게(내 상품) 이야기'로.\n"
+    "- 이모지: 네이버 블로그 0~1개, 인스타 1~2개까지만(남발=AI티).\n"
+)
+
+_EMOJI_RE = re.compile("[\U0001F300-\U0001FAFF❤⭐✨]")
+
 # 감점이 아니라 '발행 차단' 대상 — 의료광고법·자동차관리법 위반 소지가 큰 단정 표현(PHASE 7)
 HARD_BLOCK_EXPRESSIONS = [
     "완치", "부작용 없", "부작용없", "무통", "100% 효과", "영구적", "재발 없",
@@ -394,6 +415,24 @@ def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> d
     if text.count("!") >= 5 or "!!!" in text:
         warnings.append("느낌표 남발 → 스팸 신호")
         score -= 5
+    # 휴먼터치(A1): AI 클리셰·균일 문단·이모지 남발 = 'AI가 쓴 티' 감점
+    cliches = [w for w in AI_CLICHES if w in text]
+    if cliches:
+        warnings.append(f"AI 클리셰 {cliches[:3]} → AI티(사람 냄새 없는 글)")
+        score -= min(15, 5 * len(cliches))
+    paras = [p for p in text.split("\n\n") if len(p.strip()) >= 40 and not p.strip().startswith(("#", "|", "["))]
+    if len(paras) >= 4:
+        lens = [len(p) for p in paras]
+        mean = sum(lens) / len(lens)
+        cv = (sum((l - mean) ** 2 for l in lens) / len(lens)) ** 0.5 / mean if mean else 1
+        if cv < 0.18:
+            warnings.append("문단 길이가 너무 균일 → AI티(길이 변주 권장)")
+            score -= 5
+    emoji_n = len(_EMOJI_RE.findall(text))
+    emoji_cap = {"blog": 1, "caption": 2, "x_post": 2}.get(kind)
+    if emoji_cap is not None and emoji_n > emoji_cap:
+        warnings.append(f"이모지 {emoji_n}개 > {emoji_cap} → AI티·과장 인상")
+        score -= 4
     # 키워드 남발(스터핑)
     for kw in (payload.get("target_keywords") or [])[:3]:
         if kw and text.count(kw) > 6:
