@@ -352,6 +352,15 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
    clearInterval(_pg);var _b=document.getElementById('pgBar');if(_b)_b.style.width='100%';
    if(d.teaser){renderTeaser(d.teaser_html);return;}
    if(d.go_dashboard){window.location.href='/me';return;}
+   // 한도 소진(reason=ip_limit): '말없이 가입으로 점프' 금지 — 왜 생성이 안 되는지 먼저 명확히 안내
+   if(d.require_signup&&d.reason==='ip_limit'){
+     box.innerHTML='<div class="card p-5 text-center">'
+      +'<div class="inline-block bg-amber-50 text-amber-700 text-[11px] font-bold px-2.5 py-1 rounded-full mb-2">안내</div>'
+      +'<p class="text-slate-900 font-extrabold text-base mb-1">무료 미리보기 2회를 모두 사용하셨어요</p>'
+      +'<p class="text-slate-500 text-xs mb-4">이 기기(네트워크)에서 이미 2번 만들어보셨어요. 가입하면 <b class="text-slate-700">무료 2회가 새로</b> 생기고 5채널 전부 + 영상까지 열려요.</p>'
+      +'<a href="/login/kakao" class="block py-3 rounded-xl font-extrabold mb-2" style="background:#FEE500;color:#191600">카카오로 3초 가입</a>'
+      +'<a href="/login/google" class="block py-3 rounded-xl font-bold bg-white border border-slate-200 text-slate-700">구글로 가입</a></div>';
+     box.scrollIntoView({behavior:'smooth',block:'nearest'});return;}
    let cta;
    if(d.limit){cta='<a href="#pricing" class="block py-3 rounded-xl font-bold bg-indigo-600 text-white">요금제 보기 →</a>';}
    else{cta='<a href="/login/kakao" class="block py-3 rounded-xl font-extrabold mb-2" style="background:#FEE500;color:#191600">카카오로 3초 가입</a>'

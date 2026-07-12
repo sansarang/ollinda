@@ -1050,6 +1050,12 @@ def incr_demo_ip(ip: str) -> None:
                   "ON CONFLICT(ip) DO UPDATE SET count=count+1, last=excluded.last", (ip, _now()))
 
 
+def decr_demo_ip(ip: str) -> None:
+    """데모 카운터 환불 — 선예약(연타 한도우회 방지) 후 생성 실패 시 원복."""
+    with _conn() as c:
+        c.execute("UPDATE demo_usage SET count=MAX(0, count-1) WHERE ip=?", (ip,))
+
+
 def reset_demo_usage(ip: str = "") -> None:
     """무료 체험 사용량 초기화(ip 지정 시 해당 IP만, 없으면 전체)."""
     with _conn() as c:

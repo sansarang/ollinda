@@ -303,8 +303,10 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
         return JSONResponse({"require_signup": True, "message": "업종/상품을 입력하면 실제로 만들어 보여드려요!"})
     ip = _client_ip(request)
     if not _dev and db.demo_ip_count(ip) >= 2:       # 무료 미리보기 2회 → 그다음 가입 유도(개발자 IP 예외)
-        return JSONResponse({"require_signup": True,
+        return JSONResponse({"require_signup": True, "reason": "ip_limit",   # 프론트 명시 안내용
                              "message": "무료 미리보기 2회를 다 보셨어요! 가입하면 5채널 전부 + 영상까지 무료로 만들어드려요 🎁"})
+    if not _dev:
+        db.incr_demo_ip(ip)                          # 선예약(연타로 한도 우회 방지) — 실패 시 백그라운드에서 환불
     imgs = await _read_image_uploads(photos)
     full_note = (note or "").strip()
     if purpose.strip():                              # 목적 → 생성 프롬프트에 반영(글·영상 톤↑)
@@ -343,14 +345,14 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
                 from app import llm as _llm
                 _llm.call("ping", max_tokens=16)
                 raise RuntimeError("no pieces")
-            if not _dev:
-                db.incr_demo_ip(ip)                  # 개발자 IP는 카운터 미소모
             remaining = 2 if _dev else max(0, 2 - db.demo_ip_count(ip))
             html = _teaser_html(pieces, brief, _a, remaining,
                                 target_kw=target_kw, target_vol=target_vol_n, enrichment=_level)
             with _demo_jobs_lock:
                 _demo_jobs[job] = {"status": "done", "html": html, "ts": _time.time()}
         except Exception as e:
+            if not _dev:
+                db.decr_demo_ip(ip)                  # 선예약 환불 — 실패는 한도 미소모(공정)
             import logging
             logging.exception("[teaser] 실패 job=%s", job)
             # 에러 분류(진단용) — 원인 유실 방지: 폴링 응답에 coarse 카테고리로 노출(상세는 로그)
