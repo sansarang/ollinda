@@ -4773,8 +4773,8 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "") 
                 "<div class='rounded-2xl border-2 border-slate-200 p-3.5 text-center transition "
                 f"peer-checked:border-indigo-600 peer-checked:bg-indigo-50 peer-checked:text-indigo-700'>"
                 f"<div class='text-2xl'>{emoji}</div><div class='font-bold text-sm mt-0.5'>{label}</div></div></label>")
-    biz_toggle = ("<div class='grid grid-cols-2 gap-2.5'>" + _bz("local", "🏪", "동네 매장")
-                  + _bz("seller", "📦", "온라인 셀러") + "</div>")
+    biz_toggle = ("<div class='grid grid-cols-2 gap-2.5'>" + _bz("local", _ic("store", "w-6 h-6 mx-auto text-indigo-600"), "동네 매장")
+                  + _bz("seller", _ic("package", "w-6 h-6 mx-auto text-indigo-600"), "온라인 셀러") + "</div>")
     lb = "block text-sm font-bold text-slate-800 mb-2"
     # 저장된 가게정보로 미리 채움(한번 인식되면 계속) — 기본명은 비움
     _nm = esc(tenant.name) if getattr(tenant, "name", "") and tenant.name not in ("내 가게", "새 가게", "카카오회원", "구글회원") else ""
