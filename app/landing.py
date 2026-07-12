@@ -853,11 +853,18 @@ def _ga() -> str:
 
 
 def _sticky_cta() -> str:
-    """모바일 하단 고정 CTA — 스크롤 어디서든 전환 유도(모바일 전환율 핵심)."""
-    return ('<div class="fixed bottom-0 left-0 right-0 z-40 sm:hidden bg-white/95 backdrop-blur border-t border-slate-200 px-3 pt-3" '
-            'style="padding-bottom:max(12px,env(safe-area-inset-bottom))">'
-            '<a href="/login/kakao" onclick="trackEv(\'sticky_cta\',{})" '
-            'class="block text-center py-3.5 rounded-xl font-extrabold text-white bg-indigo-600">무료로 시작하기</a></div>')
+    """모바일 하단 고정 CTA — 스크롤 어디서든 전환 유도(모바일 전환율 핵심).
+    iOS Safari 플로팅 주소창이 bottom:0 요소를 덮어 탭을 가로채는 실기기 버그 대응:
+    env(safe-area-inset-bottom)은 브라우저 UI를 포함하지 않으므로 +12px 여유를 더해
+    터치 타겟 전체를 주소창 위로 띄운다. onclick의 location.href는 폴백(기본 내비 실패 대비),
+    href는 그대로 유지(JS 꺼져도 동작)."""
+    return ('<div class="fixed bottom-0 left-0 right-0 z-50 sm:hidden bg-white/95 backdrop-blur border-t border-slate-200 px-3 pt-3" '
+            'style="padding-bottom:max(28px,calc(env(safe-area-inset-bottom) + 12px))">'
+            '<a href="/login/kakao" '
+            'onclick="trackEv(\'sticky_cta\',{});window.location.href=\'/login/kakao\';return false;" '
+            'class="block text-center py-3.5 rounded-xl font-extrabold text-white bg-indigo-600 '
+            'active:scale-[.98] active:bg-indigo-700 transition" '
+            'style="-webkit-tap-highlight-color:rgba(79,70,229,.25)">무료로 시작하기</a></div>')
 
 
 def _naver_preview() -> str:
