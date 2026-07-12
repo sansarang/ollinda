@@ -63,7 +63,7 @@ def week_plan(tenant, plan: str = "free") -> dict:
         sugg.append({"topic": topic, "angle": angle, "angle_label": label, "why": why,
                      "href": f"/me?target_kw={quote(topic)}&angle={angle}"})
     if done >= target:
-        coach = f"이번 주 {done}/{target}회 완료 🎉 이 페이스가 C-Rank '활동 지속성' 신호를 쌓아요."
+        coach = f"이번 주 {done}/{target}회 완료! 이 페이스가 C-Rank '활동 지속성' 신호를 쌓아요."
     elif act["gap_days"] is not None and act["gap_days"] >= config.REMIND_GAP_DAYS:
         coach = (f"{act['gap_days']}일째 발행이 없어요. 발행 간격이 벌어지면 꾸준함 신호가 식어요 — "
                  f"오늘 1편으로 다시 페이스를 잡아요. (이번 주 {done}/{target})")

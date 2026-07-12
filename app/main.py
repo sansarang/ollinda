@@ -2830,7 +2830,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                      + f"<div class='max-h-72 overflow-y-auto'>{_blog_body(pl.get('body',''))}</div>"
                      + f"<textarea id='cb{sid}' data-body=\"{esc(body_part)}\" class='hidden'>{esc(blog_copy)}</textarea>"
                      + f"<div class='mt-4 space-y-2'>{naver_btn}"
-                     + f"<div class='flex gap-2'>{pack_btn(p.id, False)}<button type=button onclick=\"cp('cb{sid}',this)\" class='px-3.5 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold rounded-xl transition'>📋 글 복사</button></div></div></div>")
+                     + f"<div class='flex gap-2'>{pack_btn(p.id, False)}<button type=button onclick=\"cp('cb{sid}',this)\" class='px-3.5 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold rounded-xl transition'>글 복사</button></div></div></div>")
         elif k == "x_post":
             xt = pl.get("text", "")
             xvid = (f"<div class='relative mt-2'><video src='{vurl}' controls autoplay muted loop playsinline preload='metadata' poster='{first_img}' class='w-full rounded-xl bg-black' style='max-height:360px'></video>"
@@ -3183,7 +3183,7 @@ def _naver_publish_confirm_box(tenant, blog, sec: str, cbtn: str, ok: str = "", 
             + f"<form method=post action='/me/blog/published' class='flex gap-2'>"
             f"<input type=hidden name=piece_id value='{blog.id}'>"
             f"<input name=url placeholder='발행한 글 주소 붙여넣기 (https://blog.naver.com/...)' class='{inp}'>"
-            f"<button class='{cbtn} bg-slate-900 hover:bg-slate-800 whitespace-nowrap'>발행함 ✓</button></form>"
+            f"<button class='{cbtn} bg-indigo-600 hover:bg-indigo-700 whitespace-nowrap'>발행함 ✓</button></form>"
             "<p class='text-xs text-slate-400 mt-2'>발행을 기록하면 이 글의 키워드 순위를 발행 전후로 비교해 드려요.</p></div>")
 
 
@@ -3226,7 +3226,7 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
         + f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>1. 제목</div>"
         f"<div class='text-lg font-extrabold text-slate-900 mb-3'>{esc(title)}</div>"
         f"<textarea id='nvT' class='hidden'>{esc(title)}</textarea>"
-        f"<button onclick=\"nvcp('nvT',this)\" class='{cbtn} bg-slate-900 hover:bg-slate-800'>제목 복사</button></div>"
+        f"<button onclick=\"nvcp('nvT',this)\" class='{cbtn} bg-indigo-600 hover:bg-indigo-700'>제목 복사</button></div>"
         # 본문
         f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>2. 본문 <span class='text-emerald-600'>(사진 위치 표시 포함)</span></div>"
         f"<div class='bg-slate-50 rounded-xl p-4 text-sm text-slate-700 whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto mb-3'>{esc(body_marked)}</div>"
@@ -3248,7 +3248,7 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
               if len(photos) < 6 else "<li>사진 6장+ ✓ 좋아요.</li>")
            + "<li>직접 찍은 동영상까지 넣으면 D.I.A.+ 가점.</li>"
            + "<li>발행 직후 <b>서치어드바이저에 URL 색인 요청</b>하면 검색 반영이 수일→수시간으로 빨라져요.</li></ul>"
-           f"<a href='https://searchadvisor.naver.com/console/board/registration' target='_blank' rel='noopener' class='{cbtn} bg-slate-900 hover:bg-slate-800 inline-block'>서치어드바이저 색인 요청 →</a></div>")
+           f"<a href='https://searchadvisor.naver.com/console/board/registration' target='_blank' rel='noopener' class='{cbtn} bg-indigo-600 hover:bg-indigo-700 inline-block'>서치어드바이저 색인 요청 →</a></div>")
         # 🗺 네이버 장소 컴포넌트 가이드(블로그템플릿 PHASE 3) — 고정정보 블록 위치
         + _naver_component_guide(tenant, blog, sec)
         # 내부링크 제안(상위노출 PHASE 4) — 같은 주제 발행글 서로 링크(주제 응집도 = C-Rank 신호)
@@ -4806,7 +4806,7 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "") 
         <div id=lk_hint2 class='text-xs text-indigo-500 font-semibold mt-3 mb-1.5'></div>
         <div class='flex gap-2'>
           <input id=lk_q value="{_nm}" placeholder='가게 이름 (자동 인식)' class='{inp} flex-1'>
-          <button type=button onclick='lookupStore()' class='px-5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-sm whitespace-nowrap transition'>자동 인식</button></div>
+          <button type=button onclick='lookupStore()' class='px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm whitespace-nowrap transition'>자동 인식</button></div>
         <div id=lk_result class='text-xs mt-2 mb-2 text-slate-400'>{_hint}</div>
         <div id=sf_local class='grid grid-cols-2 gap-2'>
           <input name=s_region id=s_region value="{_rg}" placeholder='지역 (예: 부산 동구)' class='{inp}'>
