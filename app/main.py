@@ -1977,52 +1977,54 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             _series = db.daily_click_series(t.id, 7)
             _ch_lab = {"naver_blog": "네이버 블로그", "instagram": "인스타그램", "marketplace": "판매 콘텐츠",
                        "x": "X", "qr": "매장 QR(오프라인)", "direct": "직접·기타"}
-            if _split or _rank3:
-                _rows = ""
-                for i, rk in enumerate(_rank3, 1):
-                    _b = db.find_piece_brief(t.id, rk["content_id"]) or {}
-                    _tt = esc((_b.get("title") or "(삭제된 콘텐츠)")[:34])
-                    _cl = _ch_lab.get(rk.get("channel") or _b.get("channel") or "", rk.get("channel") or "")
-                    _rows += (f"<div class='flex items-center gap-3 py-2 border-b border-slate-100'>"
-                              f"<span class='text-lg font-extrabold text-violet-500 w-6'>{i}</span>"
-                              f"<div class='flex-1 min-w-0'><div class='text-sm font-bold text-slate-700 truncate'>{_tt}</div>"
-                              f"<div class='text-[11px] text-slate-400'>{_cl}</div></div>"
-                              f"<span class='text-xl font-extrabold text-violet-600'>{rk['n']}<span class='text-xs text-slate-400 font-bold ml-0.5'>명</span></span></div>")
-                # 성과→학습 코칭(추적 P3): 1위 콘텐츠의 키워드·앵글 → 다음 글 방향 제안
-                _coach = ""
-                if _rank3 and _rank3[0]["n"] >= 3:
-                    _b1 = db.find_piece_brief(t.id, _rank3[0]["content_id"]) or {}
-                    _kw1 = (_b1.get("keywords") or [""])[0]
-                    _ang1 = _b1.get("angle") or "review"
-                    _ang_lab = {"review": "후기형", "howto": "방법형", "price": "가격형"}.get(_ang1, "")
-                    if _kw1:
-                        from urllib.parse import quote as _q3
-                        _coach = ("<div class='flex items-center gap-3 bg-violet-50 border border-violet-100 rounded-xl px-3.5 py-2.5 mt-2'>"
-                                  f"<div class='flex-1 text-sm text-violet-800'>{('<b>' + esc(_ang_lab) + '</b>·' if _ang_lab else '')}"
-                                  f"<b>'{esc(_kw1)}'</b> 글이 잘 됐어요 — 다음 글도 이 방향 어때요?</div>"
-                                  f"<a href='/me?target_kw={_q3(_kw1)}&angle={_ang1}' class='flex-shrink-0 bg-violet-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>이 방향으로 만들기</a></div>")
-                _top3 = ((f"<div class='mb-4'><div class='text-sm font-bold text-slate-600 mb-1'>가장 손님 많이 데려온 콘텐츠 TOP {len(_rank3)}</div>{_rows}{_coach}</div>")
-                         if _rank3 else "")
-                _sp_rows = "".join(
-                    f"<div class='flex items-center justify-between py-1.5'><span class='text-sm text-slate-600'>{_ch_lab.get(k, esc(k))}</span>"
-                    f"<span class='text-base font-extrabold text-violet-600'>{v}<span class='text-xs text-slate-400 font-bold ml-0.5'>클릭</span></span></div>"
-                    for k, v in _split.items())
-                _mx = max((d["n"] for d in _series), default=0) or 1
-                _bars = "".join(
-                    f"<div class='flex-1 flex flex-col items-center gap-1'>"
-                    f"<div class='w-full max-w-[26px] rounded-t bg-violet-400' style='height:{max(3, int(44 * d['n'] / _mx))}px'></div>"
-                    f"<span class='text-[10px] text-slate-400'>{d['date']}</span></div>" for d in _series)
-                _perfbox = (
-                    f"<div class='{_fw} mt-5'>"
-                    "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>콘텐츠 성과 · 링크 클릭 실측</h2>"
-                    "<p class='text-sm text-slate-400 mb-4'>올린다 추적링크를 눌러 들어온 방문만 셉니다 — "
-                    "<b class='text-slate-600'>글 조회수가 아니에요.</b> 실제 조회수는 네이버 블로그·인스타 앱 통계에서 확인하세요. "
-                    "온라인 글(블로그·인스타) 유입과 매장 QR(오프라인) 유입은 구분 집계돼요.</p>"
-                    + _top3
-                    + "<div class='grid sm:grid-cols-2 gap-6'>"
-                    + f"<div><div class='text-sm font-bold text-slate-600 mb-1'>채널별 유입 (30일)</div>{_sp_rows or '<span class=\"text-sm text-slate-400\">아직 클릭이 없어요</span>'}</div>"
-                    + f"<div><div class='text-sm font-bold text-slate-600 mb-1'>최근 7일 추이</div><div class='flex items-end gap-1.5 h-16'>{_bars}</div></div>"
-                    + "</div></div>")
+            _rows = ""
+            for i, rk in enumerate(_rank3, 1):
+                _b = db.find_piece_brief(t.id, rk["content_id"]) or {}
+                _tt = esc((_b.get("title") or "(삭제된 콘텐츠)")[:34])
+                _cl = _ch_lab.get(rk.get("channel") or _b.get("channel") or "", rk.get("channel") or "")
+                _rows += (f"<div class='flex items-center gap-3 py-2 border-b border-slate-100'>"
+                          f"<span class='text-lg font-extrabold text-violet-500 w-6'>{i}</span>"
+                          f"<div class='flex-1 min-w-0'><div class='text-sm font-bold text-slate-700 truncate'>{_tt}</div>"
+                          f"<div class='text-[11px] text-slate-400'>{_cl}</div></div>"
+                          f"<span class='text-xl font-extrabold text-violet-600'>{rk['n']}<span class='text-xs text-slate-400 font-bold ml-0.5'>명</span></span></div>")
+            # 성과→학습 코칭(추적 P3): 1위 콘텐츠의 키워드·앵글 → 다음 글 방향 제안
+            _coach = ""
+            if _rank3 and _rank3[0]["n"] >= 3:
+                _b1 = db.find_piece_brief(t.id, _rank3[0]["content_id"]) or {}
+                _kw1 = (_b1.get("keywords") or [""])[0]
+                _ang1 = _b1.get("angle") or "review"
+                _ang_lab = {"review": "후기형", "howto": "방법형", "price": "가격형"}.get(_ang1, "")
+                if _kw1:
+                    from urllib.parse import quote as _q3
+                    _coach = ("<div class='flex items-center gap-3 bg-violet-50 border border-violet-100 rounded-xl px-3.5 py-2.5 mt-2'>"
+                              f"<div class='flex-1 text-sm text-violet-800'>{('<b>' + esc(_ang_lab) + '</b>·' if _ang_lab else '')}"
+                              f"<b>'{esc(_kw1)}'</b> 글이 잘 됐어요 — 다음 글도 이 방향 어때요?</div>"
+                              f"<a href='/me?target_kw={_q3(_kw1)}&angle={_ang1}' class='flex-shrink-0 bg-violet-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>이 방향으로 만들기</a></div>")
+            _top3 = ((f"<div class='mb-4'><div class='text-sm font-bold text-slate-600 mb-1'>가장 손님 많이 데려온 콘텐츠 TOP {len(_rank3)}</div>{_rows}{_coach}</div>")
+                     if _rank3 else
+                     ("<div class='mb-4 bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm text-slate-500'>"
+                      "아직 유입이 없어요 — 발행물 속 추적링크·매장 QR로 온 손님이 여기 콘텐츠별로 집계돼요. "
+                      "글을 발행하고 링크가 눌리면 TOP 3가 채워집니다.</div>"))
+            _sp_rows = "".join(
+                f"<div class='flex items-center justify-between py-1.5'><span class='text-sm text-slate-600'>{_ch_lab.get(k, esc(k))}</span>"
+                f"<span class='text-base font-extrabold text-violet-600'>{v}<span class='text-xs text-slate-400 font-bold ml-0.5'>클릭</span></span></div>"
+                for k, v in _split.items())
+            _mx = max((d["n"] for d in _series), default=0) or 1
+            _bars = "".join(
+                f"<div class='flex-1 flex flex-col items-center gap-1'>"
+                f"<div class='w-full max-w-[26px] rounded-t bg-violet-400' style='height:{max(3, int(44 * d['n'] / _mx))}px'></div>"
+                f"<span class='text-[10px] text-slate-400'>{d['date']}</span></div>" for d in _series)
+            _perfbox = (
+                f"<div class='{_fw} mt-5'>"
+                "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>콘텐츠 성과 · 링크 클릭 실측</h2>"
+                "<p class='text-sm text-slate-400 mb-4'>올린다 추적링크를 눌러 들어온 방문만 셉니다 — "
+                "<b class='text-slate-600'>글 조회수가 아니에요.</b> 실제 조회수는 네이버 블로그·인스타 앱 통계에서 확인하세요. "
+                "온라인 글(블로그·인스타) 유입과 매장 QR(오프라인) 유입은 구분 집계돼요.</p>"
+                + _top3
+                + "<div class='grid sm:grid-cols-2 gap-6'>"
+                + f"<div><div class='text-sm font-bold text-slate-600 mb-1'>채널별 유입 (30일)</div>{_sp_rows or '<span class=\"text-sm text-slate-400\">아직 유입이 없어요 — 블로그·인스타·매장 QR별로 나눠 보여드려요</span>'}</div>"
+                + f"<div><div class='text-sm font-bold text-slate-600 mb-1'>최근 7일 추이</div><div class='flex items-end gap-1.5 h-16'>{_bars}</div></div>"
+                + "</div></div>")
         except Exception:
             _perfbox = ""
         main_inner = (_sbadge + stats_row + _loopbox + _missbox + _growth_card(t, _fw)
