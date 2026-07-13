@@ -74,6 +74,7 @@ class Tenant:
     topic_axis: str = ""      # 전문 주제 축 — 이 블로그가 밀 핵심 주제/키워드군(C-Rank)
     briefing_hour: int = 8    # 아침 브리핑 시각(KST) — 사장님 설정 가능
     briefing_on: int = 1      # 브리핑 on/off
+    guide_dismissed: int = 0  # 시작 가이드 '다음에 하기'(온보딩 P1)
     naver_blog_url: str = ""  # 사용자 네이버 블로그 URL(수동 발행 추적의 기준점)
     blog_id: str = ""         # 정규화된 네이버 블로그 아이디(RSS·검색결과 정확 식별)
     created_at: Optional[datetime] = None

@@ -1871,7 +1871,8 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         # 키워드 순위 — 페이지 열면 자동 조회(네이버 지역검색)
         _rankbox = (f"<div class='{_fw} mt-5'>"
                     "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>키워드 순위</h2>"
-                    "<p class='text-sm text-slate-400 mb-4'>네이버 지역검색 기준 · 참고용(위치·기기별 차이)</p>"
+                    "<p class='text-sm text-slate-400 mb-4'>네이버에서 이 검색어로 <b class='text-slate-600'>내 가게가 몇 위인지</b> — "
+                    "매일 자동으로 확인해요. (네이버 지역검색 기준 · 위치·기기별 차이 있음)</p>"
                     "<div id='rankbox' class='text-sm'><div class='flex items-center gap-2 text-slate-400'>"
                     "<div class='w-4 h-4 border-2 border-slate-200 border-t-indigo-500 rounded-full animate-spin'></div>조회 중…</div></div>"
                     "<script>(async function(){var b=document.getElementById('rankbox');if(!b)return;"
@@ -1933,7 +1934,8 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 "mode": "seller" if _is_seller else ""}, ensure_ascii=False)
             _missbox = (f"<div class='{_fw} mt-5'>"
                         "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>놓치는 키워드</h2>"
-                        "<p class='text-sm text-slate-400 mb-4'>미노출 키워드를 찾아 바로 그 키워드를 겨냥한 글로 연결해요. 진단은 무료예요.</p>"
+                        "<p class='text-sm text-slate-400 mb-4'>이 검색어로 사람들이 찾는데 <b class='text-slate-600'>내 가게가 안 나와요</b> — "
+                        "버튼 누르면 그 검색어를 겨냥한 글을 만들어드려요.</p>"
                         "<div id='missbox' class='text-sm'><div class='flex items-center gap-2 text-slate-400'>"
                         "<div class='w-4 h-4 border-2 border-slate-200 border-t-amber-500 rounded-full animate-spin'></div>진단 중…</div></div>"
                         f"<script>(async function(){{var b=document.getElementById('missbox');if(!b)return;var td={_diag_payload};"
@@ -1956,9 +1958,10 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             _base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
             _short = f"{_base}/r/{_tl['code']}"
             _trackbox = (
-                f"<div class='{_fw} mt-5'>"
+                f"<div class='{_fw} mt-5' id='qr'>"
                 "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>성과 실측 · 내 손님 추적</h2>"
-                "<p class='text-sm text-slate-400 mb-4'>이 링크·QR을 <b>인스타 프로필·명함·매장</b>에 넣으면, 여기로 온 손님 수가 집계돼요.</p>"
+                "<p class='text-sm text-slate-400 mb-4'>이 QR을 <b>명함·매장 앞</b>에 붙이면, 찍고 온 손님이 여기 집계돼요. "
+                "사용법: <b class='text-slate-600'>① QR 이미지 저장 ② 인쇄해서 붙이기</b> — 링크는 인스타 프로필에 넣어도 돼요.</p>"
                 "<div class='flex items-center gap-5 flex-wrap'>"
                 f"<img src='/me/qr/{_tl['code']}.png' class='w-28 h-28 rounded-xl border border-slate-100 p-1 bg-white' alt='추적 QR'>"
                 "<div class='flex-1 min-w-[220px]'>"
@@ -2017,8 +2020,10 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             _perfbox = (
                 f"<div class='{_fw} mt-5'>"
                 "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>콘텐츠 성과 · 링크 클릭 실측</h2>"
-                "<p class='text-sm text-slate-400 mb-4'>올린다 추적링크를 눌러 들어온 방문만 셉니다 — "
-                "<b class='text-slate-600'>글 조회수가 아니에요.</b> 실제 조회수는 네이버 블로그·인스타 앱 통계에서 확인하세요. "
+                "<p class='text-sm text-slate-500 mb-1'>내가 만든 글에 넣은 링크를 손님이 몇 번 눌렀는지 — "
+                "<b class='text-slate-700'>어느 글이 손님을 데려오는지</b> 보여요.</p>"
+                "<p class='text-sm text-slate-400 mb-4'>집계는 올린다 추적링크 클릭 기준이에요 — "
+                "<b class='text-slate-600'>조회수·체류는 네이버/인스타 앱에서 확인하세요.</b> "
                 "온라인 글(블로그·인스타) 유입과 매장 QR(오프라인) 유입은 구분 집계돼요.</p>"
                 + _top3
                 + "<div class='grid sm:grid-cols-2 gap-6'>"
@@ -2060,14 +2065,10 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         if _made_html:
             main_inner = _made_html + upload_section
         else:
-            _act = _daily_action(t)
-            _coach = ("<div class='flex items-center gap-3 bg-gradient-to-r from-indigo-50 to-violet-50 border border-indigo-100 rounded-2xl p-4 mb-5'>"
-                      f"<div class='w-10 h-10 rounded-full bg-[#EEF2FF] text-indigo-600 flex items-center justify-center flex-shrink-0'>{_ic(_act['emoji'], 'w-5 h-5')}</div>"
-                      "<div class='flex-1 min-w-0'><div class='text-xs font-bold text-indigo-500 mb-0.5'>오늘의 액션</div>"
-                      f"<div class='text-sm text-slate-700 font-medium'>{_act['text']}</div></div>"
-                      f"<a href='{_act['href']}' class='flex-shrink-0 bg-indigo-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-indigo-700 transition'>{_act['cta']}</a></div>")
-            main_inner = (greeting + _upsell + _briefing_card(t, _plan) + _notice_html
-                          + _coach + _calendar_card(t, _plan)
+            # '오늘 할 일'은 브리핑 카드 하나로 통합(온보딩 P3) — 기존 '오늘의 액션'(_daily_action)
+            # 카드는 브리핑과 중복이라 제거. 신규 사장님은 시작 가이드가 다음 할 일을 안내.
+            main_inner = (greeting + _upsell + _guide_card(t) + _briefing_card(t, _plan) + _notice_html
+                          + _calendar_card(t, _plan)
                           + _blog_nudge + upload_section
                           + "<div class='mt-5'></div>" + _store_info_card(t))
     # 🆕 새로 추가한 '빈 새 가게'면 실수 대비 '뒤로가기(취소)' 배너
@@ -2631,6 +2632,57 @@ def _place_card(t, fw: str) -> str:
             f"<div><div class='text-xs font-bold text-slate-500 mb-1'>정보 완성도 체크리스트</div>{chk}</div>"
             f"<div><div class='text-xs font-bold text-slate-500 mb-1'>리뷰 요청 키트</div>{rv}{qr}</div>"
             "</div></div>")
+
+
+def _guide_card(t) -> str:
+    """첫 사용자 3스텝 온보딩(온보딩 P1) — ①첫 콘텐츠 ②네이버 발행 ③QR·링크 붙이기.
+    완료 상태는 실데이터로 판정(체크 저장 불필요·정직). 다 하면 브리핑 안내, '다음에 하기'로 숨김."""
+    if getattr(t, "guide_dismissed", 0):
+        return ""
+    try:
+        s1 = bool(db.list_sets(tenant_id=t.id, limit=1))                      # 첫 콘텐츠
+        s2 = bool(db.list_blog_publishes(t.id, limit=1))                      # 네이버 발행 확인
+        s3 = sum(int(l.get("clicks") or 0) for l in db.list_links(t.id)) > 0  # 링크·QR 첫 유입
+    except Exception:
+        return ""
+    dismiss = ("<form method=post action='/me/guide/dismiss' class='inline'>"
+               "<button class='text-xs text-slate-400 underline'>다음에 하기</button></form>")
+    if s1 and s2 and s3:
+        # 전부 완료 — 축하 + 브리핑 안내 1회(닫으면 다시 안 뜸)
+        return ("<div class='flex items-center gap-3 bg-emerald-50 border border-emerald-100 rounded-2xl p-4 mb-5'>"
+                f"<span class='text-emerald-500'>{_ic('check', 'w-6 h-6')}</span>"
+                "<div class='flex-1 text-sm text-emerald-800'><b>시작 3단계를 모두 마쳤어요!</b> "
+                "이제 매일 아침 브리핑이 '오늘 뭘 할지' 챙겨드려요.</div>"
+                "<form method=post action='/me/guide/dismiss'>"
+                "<button class='flex-shrink-0 bg-emerald-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>확인</button></form></div>")
+
+    def _step(done, num, label, href, cta):
+        mark = (f"<span class='w-6 h-6 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center flex-shrink-0'>{_ic('check', 'w-3.5 h-3.5')}</span>"
+                if done else
+                f"<span class='w-6 h-6 rounded-full bg-white border border-violet-200 text-violet-600 text-xs font-extrabold flex items-center justify-center flex-shrink-0'>{num}</span>")
+        body = (f"<span class='text-sm {'text-slate-400 line-through' if done else 'text-slate-700 font-semibold'}'>{label}</span>")
+        act = ("" if done else
+               f"<a href='{href}' class='ml-auto flex-shrink-0 bg-violet-600 text-white text-xs font-bold px-3 py-1.5 rounded-xl'>{cta}</a>")
+        return f"<div class='flex items-center gap-2.5 py-1.5'>{mark}{body}{act}</div>"
+    done_n = sum([s1, s2, s3])
+    return ("<div class='bg-violet-50 border border-violet-100 rounded-2xl p-4 mb-5'>"
+            "<div class='flex items-center justify-between mb-1.5'>"
+            f"<div class='text-sm font-extrabold text-violet-700'>올린다 시작 가이드 <span class='font-bold text-violet-400'>({done_n}/3)</span></div>"
+            + dismiss + "</div>"
+            + _step(s1, 1, "사진 올려 첫 콘텐츠 만들기", "/me#made", "만들기")
+            + _step(s2, 2, "네이버 블로그에 발행하기", "/me?tab=content", "발행 소재 보기")
+            + _step(s3, 3, "매장 QR·추적링크 붙이기 (손님 유입이 집계돼요)", "/me?tab=report#qr", "QR 받기")
+            + "</div>")
+
+
+@app.post("/me/guide/dismiss")
+def guide_dismiss(request: Request):
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    t = _ensure_user_tenant(u)
+    db.dismiss_guide(t.id)
+    return RedirectResponse("/me", status_code=303)
 
 
 def _briefing_card(t, plan: str) -> str:

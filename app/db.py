@@ -70,7 +70,8 @@ def init_db() -> None:
                          ("blog_id", "TEXT"),                     # 정규화된 블로그 아이디(RSS·순위매칭용)
                          ("parking", "TEXT"),                     # 주차 안내(블로그템플릿 PHASE 1 고정정보)
                          ("briefing_hour", "INTEGER DEFAULT 8"),  # 아침 브리핑 시각(KST, 브리핑 PHASE 2)
-                         ("briefing_on", "INTEGER DEFAULT 1")]:   # 브리핑 on/off
+                         ("briefing_on", "INTEGER DEFAULT 1"),    # 브리핑 on/off
+                         ("guide_dismissed", "INTEGER DEFAULT 0")]:  # 시작 가이드 '다음에 하기'(온보딩 P1)
             try:
                 c.execute(f"ALTER TABLE tenants ADD COLUMN {col} {ddl}")
             except sqlite3.OperationalError:
@@ -242,7 +243,14 @@ def _row_to_tenant(r: sqlite3.Row) -> Tenant:
                   parking=g("parking"),
                   # g()는 falsy를 기본값으로 바꿔버리므로(0→1) on/off는 raw로 읽는다
                   briefing_hour=(r["briefing_hour"] if "briefing_hour" in keys and r["briefing_hour"] else 8),
-                  briefing_on=(0 if ("briefing_on" in keys and r["briefing_on"] == 0) else 1))
+                  briefing_on=(0 if ("briefing_on" in keys and r["briefing_on"] == 0) else 1),
+                  guide_dismissed=(1 if ("guide_dismissed" in keys and r["guide_dismissed"]) else 0))
+
+
+def dismiss_guide(tid: str) -> None:
+    """시작 가이드 '다음에 하기'(온보딩 P1) — 다시 띄우지 않음."""
+    with _conn() as c:
+        c.execute("UPDATE tenants SET guide_dismissed=1 WHERE id=?", (tid,))
 
 
 def set_tenant_coords(tid: str, lat: float, lon: float) -> None:
