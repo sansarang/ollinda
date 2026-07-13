@@ -2316,13 +2316,26 @@ def _blog_connect_card(t, fw: str) -> str:
                           + _rows2
                           + f"<p class='text-xs text-slate-500 mt-2'>{esc(_d.get('coaching') or '')}</p></div>")
         pubs = db.list_blog_publishes(t.id, limit=5)
-        pub_rows = "".join(
-            f"<div class='flex items-center justify-between border-b border-slate-100 py-2 gap-2'>"
-            f"<a href='{esc(p.get('published_url') or '')}' target=_blank rel=noopener class='text-sm text-slate-700 font-medium truncate'>"
-            f"{esc(p.get('post_title') or (p.get('published_url') or '')[:50])}</a>"
-            f"<span class='text-xs text-slate-400 whitespace-nowrap'>{esc((p.get('published_at') or '')[:10])} · "
-            f"{'RSS자동' if p.get('matched_by') == 'rss' else '직접확인'}</span></div>"
-            for p in pubs)
+
+        def _pub_row(p):
+            # 발행 후 며칠(진단 P3) — 색인 대기(3일 미만)면 그 사실을 먼저 보여줌(불안 방지)
+            from app.services.whynot import _days_since
+            _d = _days_since(p.get("published_at") or "")
+            _chip = (f"<span class='text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full whitespace-nowrap'>"
+                     f"{_d}일차</span>" if _d >= 0 else "")
+            _pid = esc(p.get("piece_id") or "")
+            btn = (f"<button type=button onclick=\"whyNot('{_pid}',this)\" "
+                   "class='text-[11px] font-bold text-indigo-600 border border-indigo-200 hover:bg-indigo-50 "
+                   "px-2.5 py-1 rounded-lg transition whitespace-nowrap'>왜 안 뜨나요? 진단</button>" if _pid else "")
+            return (f"<div class='border-b border-slate-100 py-2'>"
+                    f"<div class='flex items-center justify-between gap-2'>"
+                    f"<a href='{esc(p.get('published_url') or '')}' target=_blank rel=noopener class='text-sm text-slate-700 font-medium truncate'>"
+                    f"{esc(p.get('post_title') or (p.get('published_url') or '')[:50])}</a>"
+                    f"<span class='flex items-center gap-1.5'>{_chip}{btn}</span></div>"
+                    f"<div class='text-xs text-slate-400'>{esc((p.get('published_at') or '')[:10])} · "
+                    f"{'RSS자동' if p.get('matched_by') == 'rss' else '직접확인'}</div>"
+                    f"<div id='why_{_pid}'></div></div>")
+        pub_rows = "".join(_pub_row(p) for p in pubs)
         pub_box = ((f"<div class='mt-4'><div class='text-xs font-bold text-slate-500 mb-1'>최근 발행 확인 {len(pubs)}건</div>{pub_rows}</div>")
                    if pubs else "<p class='text-xs text-slate-400 mt-3'>아직 확인된 발행이 없어요. 글 발행 후 '자동 확인'을 눌러보세요.</p>")
         return (f"<div id='blog' class='{fw} mt-5'>"
@@ -2343,7 +2356,17 @@ def _blog_connect_card(t, fw: str) -> str:
                 "if(d.error){m.textContent=d.error;btn.disabled=false;return;}"
                 "if(d.found&&d.found.length){m.textContent='✅ 발행 '+d.found.length+'건 확인!';setTimeout(function(){location.reload();},900);}"
                 "else{m.textContent='새로 확인된 발행이 없어요 (RSS 최근글 '+d.rss_posts+'건 대조).';btn.disabled=false;}"
-                "}catch(e){m.textContent='확인 실패';btn.disabled=false;}}</script></div>")
+                "}catch(e){m.textContent='확인 실패';btn.disabled=false;}}"
+                # '왜 안 뜨나요?' 원클릭 진단(whynot P1~P3) — 결과는 해당 발행 항목 아래 삽입
+                "async function whyNot(pid,btn){var box=document.getElementById('why_'+pid);if(!box)return;"
+                "if(box.innerHTML){box.innerHTML='';btn.textContent='왜 안 뜨나요? 진단';return;}"
+                "btn.disabled=true;btn.textContent='진단 중… (10초쯤)';"
+                "try{var r=await fetch('/api/whynot/'+pid);var d=await r.json();"
+                "if(d.error){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">'+d.error+'</div>';}"
+                "else{box.innerHTML=d.html;btn.textContent='진단 닫기';}"
+                "}catch(e){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">진단 실패 — 잠시 후 다시</div>';}"
+                "btn.disabled=false;if(btn.textContent.indexOf('진단 중')>=0)btn.textContent='왜 안 뜨나요? 진단';}"
+                "</script></div>")
     return (f"<div id='blog' class='{fw} mt-5'>"
             "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>내 네이버 블로그 연결</h2>"
             "<p class='text-sm text-slate-400 mb-3'>네이버는 발행 API가 없어 직접 발행하시죠? "
@@ -2676,6 +2699,46 @@ def _guide_card(t) -> str:
             + _step(s2, 2, "네이버 블로그에 발행하기", "/me?tab=content", "발행 소재 보기")
             + _step(s3, 3, "매장 QR·추적링크 붙이기 (손님 유입이 집계돼요)", "/me?tab=report#qr", "QR 받기")
             + "</div>")
+
+
+@app.get("/api/whynot/{piece_id}")
+def api_whynot(piece_id: str, request: Request):
+    """'왜 아직 안 뜨나요?' 원클릭 노출 진단 + 처방전(HTML 조각 반환).
+    실측만: 순위 API·RSS·quality_audit·searchad. 보장 표현 금지(whynot.HONEST_NOTE)."""
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"error": "로그인이 필요해요."}, status_code=401)
+    t = _ensure_user_tenant(u)
+    piece = db.get_piece(piece_id)
+    if not piece or piece.tenant_id != t.id:
+        return JSONResponse({"error": "글을 찾을 수 없어요."}, status_code=404)
+    from app import ratelimit
+    if not ratelimit.allow("whynot:" + t.id, 4, 12):   # 진단 1회 = 네이버·searchad 실콜 3~4회
+        return JSONResponse({"error": "진단이 잠깐 몰렸어요 — 1~2분 뒤 다시 눌러주세요."}, status_code=429)
+    from app.services import whynot
+    d = whynot.diagnose(t, piece, db.get_blog_publish(piece_id))
+    _icon = {"ok": ("check", "text-emerald-500"), "warn": ("help", "text-amber-500"),
+             "fail": ("xcircle", "text-rose-500"), "info": ("clock", "text-slate-400")}
+    rows = ""
+    for ck in d["checks"]:
+        ic, cls = _icon.get(ck["status"], ("info", "text-slate-400"))
+        rows += (f"<div class='flex items-start gap-2 py-1.5 border-b border-slate-100'>"
+                 f"<span class='{cls} mt-0.5 flex-shrink-0'>{_ic(ic, 'w-4 h-4')}</span>"
+                 f"<div><div class='text-sm font-bold text-slate-700'>{esc(ck['title'])}</div>"
+                 f"<div class='text-xs text-slate-500'>{esc(ck['detail'])}</div></div></div>")
+    rx = "".join(
+        f"<div class='flex items-center gap-3 bg-indigo-50 border border-indigo-100 rounded-xl px-3.5 py-2.5 mt-2'>"
+        f"<div class='flex-1 text-sm text-slate-700'>{esc(p['text'])}</div>"
+        f"<a href='{esc(p['href'])}' class='flex-shrink-0 bg-indigo-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>{esc(p['label'])}</a></div>"
+        for p in d["prescriptions"])
+    head = ("이미 노출되고 있어요 — 굳히기가 다음 수예요" if d["exposed"]
+            else f"'{esc(d['kw'])}'가 아직 안 뜨는 이유")
+    html = (f"<div class='bg-white border border-slate-200 rounded-2xl p-4 mt-2'>"
+            f"<div class='text-sm font-extrabold text-slate-800 mb-2'>{head}</div>"
+            + rows
+            + "<div class='text-xs font-bold text-slate-500 mt-3 mb-1'>처방전 — 뜨게 하는 법</div>" + rx
+            + f"<p class='text-[11px] text-slate-400 mt-2.5'>{esc(d['note'])}</p></div>")
+    return JSONResponse({"ok": True, "html": html, "exposed": d["exposed"]})
 
 
 @app.post("/me/guide/dismiss")
