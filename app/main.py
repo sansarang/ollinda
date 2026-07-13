@@ -1815,10 +1815,13 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
     _angle = (request.query_params.get("angle") or "").strip()
     _angle = _angle if _angle in ("review", "howto", "price") else ""
     _src = (request.query_params.get("from") or "").strip()      # briefing 원클릭 진입(PHASE 3)
-    upload_section = ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6 sm:p-7'>"
+    # 타겟 키워드 진입(놓치는 키워드/브리핑) 시 만들기 섹션으로 자동 스크롤 — 어디로 왔는지 헷갈림 방지
+    _scrolljs = ("<script>window.addEventListener('load',function(){var b=document.getElementById('makebox');"
+                 "if(b)b.scrollIntoView({behavior:'smooth',block:'start'});});</script>" if _tkw else "")
+    upload_section = ("<div id='makebox' class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6 sm:p-7'>"
                       "<div class='mb-5'><div class='text-lg font-extrabold text-slate-900'>콘텐츠 만들기</div>"
                       "<div class='text-sm text-slate-400'>가게 이름·사진만 있으면 끝</div></div>"
-                      + _upload_form_html(t, tok, target_kw=_tkw, angle=_angle, src=_src) + "</div>")
+                      + _upload_form_html(t, tok, target_kw=_tkw, angle=_angle, src=_src) + "</div>" + _scrolljs)
     content = ("<div id='myContent' class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5'>"
                "<h2 class='font-bold text-slate-900 mb-1'>내 콘텐츠</h2>"
                "<p class='text-xs text-slate-400 mb-3'>‘보기’를 누르면 결과가 나와요.</p>" + hist + "</div>")
