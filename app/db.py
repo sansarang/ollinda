@@ -1138,23 +1138,26 @@ def get_link(code: str) -> Optional[dict]:
 
 
 def incr_link_click(code: str, referrer: str = "", ua: str = "", utm_source: str = "",
-                    content_id: str = "", channel: str = "") -> None:
-    """클릭 집계(누적 카운터) + 행 단위 로깅(시각·리퍼러·UA·채널·콘텐츠). 콘텐츠별 실측(추적 P1)."""
+                    content_id: str = "", channel: str = "",
+                    visitor_id: str = "", device: str = "", region: str = "") -> None:
+    """클릭 집계(누적 카운터) + 행 단위 로깅(시각·리퍼러·UA·채널·콘텐츠·익명방문자·기기·국가).
+    개인 신원 정보는 저장하지 않는다 — visitor_id는 익명 쿠키(방문 구분용)뿐(방문자 B1)."""
     with _conn() as c:
         c.execute("UPDATE links SET clicks=clicks+1 WHERE code=?", (code,))
         try:
             c.execute("CREATE TABLE IF NOT EXISTS link_clicks("
                       "id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT, ts TEXT, "
                       "referrer TEXT, ua TEXT, utm_source TEXT)")
-            for col in ("content_id", "channel"):
+            for col in ("content_id", "channel", "visitor_id", "device", "region"):
                 try:
                     c.execute(f"ALTER TABLE link_clicks ADD COLUMN {col} TEXT")
                 except sqlite3.OperationalError:
                     pass
-            c.execute("INSERT INTO link_clicks(code, ts, referrer, ua, utm_source, content_id, channel) "
-                      "VALUES(?,?,?,?,?,?,?)",
+            c.execute("INSERT INTO link_clicks(code, ts, referrer, ua, utm_source, content_id, channel, "
+                      "visitor_id, device, region) VALUES(?,?,?,?,?,?,?,?,?,?)",
                       (code, _now(), referrer[:300], ua[:300], utm_source[:60],
-                       (content_id or "")[:16], (channel or utm_source or "")[:40]))
+                       (content_id or "")[:16], (channel or utm_source or "")[:40],
+                       (visitor_id or "")[:32], (device or "")[:10], (region or "")[:8]))
         except Exception:
             pass
 
@@ -1221,6 +1224,63 @@ def daily_click_series(tenant_id: str, days: int = 7) -> list[dict]:
                     "SELECT COUNT(*) FROM link_clicks lc JOIN links l ON lc.code=l.code "
                     "WHERE l.tenant_id=? AND lc.ts LIKE ?", (tenant_id, d + "%")).fetchone()[0]
                 out.append({"date": d[5:], "n": n})
+    except Exception:
+        pass
+    return out
+
+
+def visitor_stats(tenant_id: str, days: int = 30) -> dict:
+    """익명 방문자 특성 요약(방문자 B1·B2) — 전부 link_clicks 행 기반, 신원 정보 없음.
+    반환: {total, device:{mobile,pc}, top_hour_band, top_channel, top_region,
+           new_visitors, returning_visitors, journeys, hot_visitors}."""
+    out = {"total": 0, "device": {}, "top_hour_band": "", "top_channel": "", "top_region": "",
+           "new_visitors": 0, "returning_visitors": 0, "journeys": 0, "hot_visitors": 0}
+    try:
+        from datetime import timedelta
+        since = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+        with _conn() as c:
+            rows = c.execute(
+                "SELECT lc.ts, COALESCE(lc.channel,'') ch, COALESCE(lc.device,'') dv, "
+                "COALESCE(lc.region,'') rg, COALESCE(lc.visitor_id,'') vid "
+                "FROM link_clicks lc JOIN links l ON lc.code=l.code "
+                "WHERE l.tenant_id=? AND lc.ts >= ?", (tenant_id, since)).fetchall()
+        out["total"] = len(rows)
+        if not rows:
+            return out
+        from collections import Counter
+        dv = Counter(r["dv"] for r in rows if r["dv"])
+        out["device"] = dict(dv)
+        # 시간대(KST) — 3시간 밴드로 최빈
+        bands = Counter()
+        for r in rows:
+            try:
+                h = (int(r["ts"][11:13]) + 9) % 24          # UTC→KST
+                lo = (h // 3) * 3
+                bands[f"{lo}~{lo + 3}시"] += 1
+            except Exception:
+                pass
+        if bands:
+            out["top_hour_band"] = bands.most_common(1)[0][0]
+        ch = Counter(r["ch"] for r in rows if r["ch"])
+        if ch:
+            out["top_channel"] = ch.most_common(1)[0][0]
+        rg = Counter(r["rg"] for r in rows if r["rg"])
+        if rg:
+            out["top_region"] = rg.most_common(1)[0][0]
+        # 익명 재방문(B2) — visitor_id 쿠키 기준(신원 아님)
+        vis = Counter(r["vid"] for r in rows if r["vid"])
+        out["new_visitors"] = sum(1 for n in vis.values() if n == 1)
+        out["returning_visitors"] = sum(1 for n in vis.values() if n >= 2)
+        # 여정: 같은 익명 방문자가 서로 다른 채널 2개+(예: 블로그→매장 QR) = 관심 신호
+        by_vid: dict = {}
+        for r in rows:
+            if r["vid"] and r["ch"]:
+                by_vid.setdefault(r["vid"], set()).add(r["ch"])
+        out["journeys"] = sum(1 for s in by_vid.values() if len(s) >= 2)
+        # 관심 손님: 최근 7일 3회+ 방문한 익명 방문자
+        wk = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d")
+        hot = Counter(r["vid"] for r in rows if r["vid"] and r["ts"] >= wk)
+        out["hot_visitors"] = sum(1 for n in hot.values() if n >= 3)
     except Exception:
         pass
     return out
