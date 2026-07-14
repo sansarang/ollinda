@@ -2449,6 +2449,15 @@ def _blog_connect_card(t, fw: str) -> str:
                 "m.innerHTML=d.msg+' <a href=\"'+d.kit+'\" class=\"underline\">발행 소재 열기</a>';}"
                 "}catch(e){m.className='text-xs mt-1.5 text-rose-500';m.textContent='보강 실패 — 잠시 후 다시';}"
                 "btn.disabled=false;btn.textContent='보강 실행';}"
+                # AI 순위 분석(분석가 P3) — 타임라인 안 버튼에서 호출
+                "async function analystView(pid,btn){var box=document.getElementById('anl_'+pid);if(!box)return;"
+                "if(box.innerHTML){box.innerHTML='';btn.textContent='왜 이 순위? AI 분석';return;}"
+                "btn.disabled=true;btn.textContent='분석 중… (첫 분석은 30초쯤)';"
+                "try{var r=await fetch('/api/analyst/'+pid);var d=await r.json();"
+                "if(d.error){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">'+d.error+'</div>';btn.textContent='왜 이 순위? AI 분석';}"
+                "else{box.innerHTML=d.html;btn.textContent='분석 닫기';}"
+                "}catch(e){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">분석 실패 — 잠시 후 다시</div>';btn.textContent='왜 이 순위? AI 분석';}"
+                "btn.disabled=false;}"
                 # 생존 신고(생존신고 P3) — 발행→색인→진입→현재→다음 관문 타임라인
                 "async function raceView(pid,btn){var box=document.getElementById('race_'+pid);if(!box)return;"
                 "if(box.innerHTML){box.innerHTML='';btn.textContent='생존 신고';return;}"
@@ -2926,6 +2935,45 @@ def api_race(piece_id: str, request: Request):
     html = (f"<div class='bg-white border border-slate-200 rounded-2xl p-4 mt-2'>"
             f"<div class='text-sm font-extrabold text-slate-800 mb-2.5'>'{esc(d['kw'])}' 생존 신고 — {d['days']}일차</div>"
             + rows + scout + bars
+            + f"<button type=button onclick=\"analystView('{esc(piece_id)}',this)\" "
+            "class='mt-2.5 text-[11px] font-bold text-violet-600 border border-violet-200 hover:bg-violet-50 "
+            "px-2.5 py-1.5 rounded-lg transition'>왜 이 순위? AI 분석</button>"
+            f"<div id='anl_{esc(piece_id)}'></div>"
+            + f"<p class='text-[11px] text-slate-400 mt-2.5'>{esc(d['note'])}</p></div>")
+    return JSONResponse({"ok": True, "html": html})
+
+
+@app.get("/api/analyst/{piece_id}")
+def api_analyst(piece_id: str, request: Request):
+    """AI 순위 분석가(분석가 P2) — 왜 이 순위·왜 1위가 아닌가·어떻게 이기나(HTML 조각).
+    크롤링 없음: 검색API 제목·요약·발행일 + 공개 RSS 체급 + 업종 패턴 집계. 순위 변동 시에만 LLM 재분석."""
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"error": "로그인이 필요해요."}, status_code=401)
+    t = _ensure_user_tenant(u)
+    piece = db.get_piece(piece_id)
+    pub = db.get_blog_publish(piece_id)
+    if not pub or pub.get("tenant_id") != t.id or (piece and piece.tenant_id != t.id):
+        return JSONResponse({"error": "발행 기록을 찾을 수 없어요."}, status_code=404)
+    from app import ratelimit
+    if not ratelimit.allow("analyst:" + t.id, 3, 10):   # 분석 1회 = 네이버 5~7콜 + LLM(캐시 시 0콜)
+        return JSONResponse({"error": "분석이 잠깐 몰렸어요 — 잠시 후 다시 눌러주세요."}, status_code=429)
+    from app.services import analyst
+    d = analyst.analyze(t, piece, pub)
+    rank_txt = f"{d['rank']}위" if d.get("rank") else "10위 밖"
+    gap_rows = ""
+    for g in d["gaps"]:
+        gap_rows += (f"<div class='bg-indigo-50 border border-indigo-100 rounded-xl px-3.5 py-2.5 mt-2'>"
+                     f"<div class='text-[11px] font-bold text-indigo-500 mb-0.5'>실측: {esc(g['why'])}</div>"
+                     f"<div class='flex items-center gap-3'><div class='flex-1 text-sm text-slate-700'>{esc(g['text'])}</div>"
+                     f"<a href='{esc(g['href'])}' class='flex-shrink-0 bg-indigo-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>{esc(g['label'])}</a></div></div>")
+    _sec = lambda title, body: ((f"<div class='mt-2.5'><div class='text-xs font-bold text-slate-500 mb-0.5'>{title}</div>"
+                                 f"<div class='text-sm text-slate-700'>{esc(body)}</div></div>") if body else "")
+    html = (f"<div class='bg-white border border-violet-200 rounded-2xl p-4 mt-2'>"
+            f"<div class='text-sm font-extrabold text-slate-800'>AI 순위 분석 — '{esc(d['kw'])}' 현재 {rank_txt}</div>"
+            + _sec("왜 이 순위까지 왔나", d.get("why_here"))
+            + _sec("왜 1위가 아닌가", d.get("why_not_first"))
+            + "<div class='text-xs font-bold text-slate-500 mt-3 mb-0.5'>어떻게 이기나 — 격차별 처방</div>" + gap_rows
             + f"<p class='text-[11px] text-slate-400 mt-2.5'>{esc(d['note'])}</p></div>")
     return JSONResponse({"ok": True, "html": html})
 
