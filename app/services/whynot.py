@@ -121,8 +121,9 @@ def diagnose(t, piece, publish: dict | None = None) -> dict:
         if score < 70:
             checks.append({"status": "fail", "title": f"글 품질 {score}점 — 보강 필요",
                            "detail": "부족한 신호: " + ("; ".join(warns) if warns else "경험 서술·분량·이미지 확인")})
-            rx.append({"text": "이 키워드로 경험 문장·사진을 더 담아 보강 글을 새로 올리는 게 빨라요.",
-                       "label": "보강 글 만들기", "href": make(kw)})
+            # 원클릭 보강(진단→실행): 빠진 실제 정보 한 줄 받아 이 글 자체를 재작성(revise 재사용)
+            rx.append({"text": "경험 문장·구체 수치가 부족해요 — 빠진 실제 정보 한 줄만 주시면 이 글을 바로 보강해드려요.",
+                       "label": "이 글 보강하기", "href": make(kw), "enrich": piece.id})
         elif score < 85:
             checks.append({"status": "warn", "title": f"글 품질 {score}점 — 나쁘지 않지만 아쉬워요",
                            "detail": ("; ".join(warns) if warns else "세부 경고 없음")})
@@ -163,6 +164,13 @@ def diagnose(t, piece, publish: dict | None = None) -> dict:
         me = next((r for r in rows if (r.get("keyword") or "").replace(" ", "") == kw.replace(" ", "")), None)
         if me:
             comp, vol = (me.get("comp") or ""), (me.get("total") or 0)
+            # 경쟁 정찰(생존신고 P4 재사용) — 상위 글 발행일 '사실'로 난이도 뉘앙스 보강
+            scout = ""
+            try:
+                from app.services import race
+                scout = race._scout_line(kw, days)
+            except Exception:
+                pass
             if comp == "높음" or vol >= 10000:
                 alt = ""
                 try:
@@ -172,14 +180,15 @@ def diagnose(t, piece, publish: dict | None = None) -> dict:
                     pass
                 checks.append({"status": "warn",
                                "title": f"'{kw}' 경쟁 치열 (월 {vol:,}회 · 경쟁도 {comp or '높음'})",
-                               "detail": "대형 키워드는 신생 블로그가 바로 잡기 어려워요 — 롱테일부터 잡고 올라가는 게 정석이에요."})
+                               "detail": ("대형 키워드는 신생 블로그가 바로 잡기 어려워요 — 롱테일부터 잡고 올라가는 게 정석이에요."
+                                          + (f" {scout}" if scout else ""))})
                 if alt:
                     rx.append({"text": f"'{alt}'(롱테일)부터 잡으세요 — 경쟁이 덜해 먼저 노출되고, 그 신뢰가 '{kw}'에도 쌓여요.",
                                "label": f"'{alt}' 글 만들기", "href": make(alt)})
             else:
                 checks.append({"status": "ok",
                                "title": f"'{kw}' 경쟁 무난 (월 {vol:,}회 · 경쟁도 {comp or '보통'})",
-                               "detail": "키워드 난이도 문제는 아니에요."})
+                               "detail": "키워드 난이도 문제는 아니에요." + (f" {scout}" if scout else "")})
     except Exception:
         pass
 
