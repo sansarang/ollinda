@@ -777,7 +777,9 @@ def record_blog_publish(tenant_id: str, piece_id: str, url: str, published_at: s
                        (ex["indexed_at"] if ex else None),          # 재기록 시 색인 확인 보존
                        (target_kw or (ex["target_kw"] if ex else "") or "")[:40]))
     except sqlite3.OperationalError:
-        pass
+        # 조용한 삼킴 금지 — 발행 기록 유실 원인 추적(파이프라인 신뢰성)
+        import logging
+        logging.exception("[db] record_blog_publish 실패 tenant=%s piece=%s", tenant_id, piece_id)
 
 
 def get_blog_publish(piece_id: str) -> Optional[dict]:
