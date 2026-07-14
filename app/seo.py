@@ -333,6 +333,8 @@ FACTS_RULE = (
     "[⚠️ 정직 원칙 — 반드시 지켜라(위반하면 콘텐츠 폐기)]\n"
     "- 입력(메모·사진분석·상품정보)에 '없는' 가격·할인율·수치·스펙·모델명·성분·효능·용량·수상/인증·후기수를 절대 지어내지 마라.\n"
     "- 가격·할인은 입력에 명시됐을 때만 그 값 그대로 써라. 없으면 금액을 아예 언급하지 마라(임의 숫자 금지).\n"
+    "- 소요 시간·기간(예: '2~3시간 걸린다', '30분이면 끝')도 입력에 없으면 숫자로 단정하지 마라 — "
+    "'차종·상태에 따라 달라진다'로 쓰고 정확한 안내는 상담으로 돌려라.\n"
     "- 상품 등급/성능(예: 노이즈캔슬링·방수)과 가격이 안 맞게 쓰지 마라 — 확실치 않은 사실은 쓰지 말고 비워둬라.\n"
     "- 모르는 정보는 '지어내기'보다 '생략'. 추측을 사실처럼 단정하지 마라.\n"
     "- 과장·낚시 금지: 최고/최저가/100%/무조건/보장/완벽/1위/유일/대박.\n"
@@ -466,7 +468,7 @@ def hard_block_hits(text: str) -> list[str]:
 
 def _money_nums(s: str) -> set:
     """텍스트에서 '금액·%·수치+단위'를 정규화 추출(콤마·공백 제거). 날조 탐지용(PHASE 7)."""
-    raw = re.findall(r"(\d[\d,]*)\s*(원|만원|%|퍼센트|만|천원)", s or "")
+    raw = re.findall(r"(\d[\d,]*)\s*(원|만원|%|퍼센트|만|천원|시간|분)", s or "")
     return {num.replace(",", "") + unit for num, unit in raw}
 
 
@@ -504,6 +506,8 @@ def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> d
     score = 100
 
     # 사실 검증: 출력의 금액·%·수치가 입력에 존재하는지 대조(LLM 0콜 날조 탐지)
+    # source 미전달 호출(게이트 경로 등)은 생성 시 저장한 payload.gen_source로 폴백
+    source = source or (payload.get("gen_source") or "")
     if source:
         fabricated = [n for n in _money_nums(text) if n not in _money_nums(source)]
         if fabricated:
