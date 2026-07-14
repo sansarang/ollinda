@@ -124,6 +124,47 @@ def _sig_missing_kw(t) -> dict | None:
     return None
 
 
+def _sig_stuck(t) -> list[dict]:
+    """추적 글 정체 진단(rx P4) — 5일+ 같은 자리(11위 밖)면 품질 경고 기반 처방을 브리핑으로.
+    '보장' 금지 — '올라갈 가능성' 표현까지만. 실측(post 스냅샷·저장된 audit)만 사용."""
+    out = []
+    try:
+        for pub in db.list_blog_publishes(t.id, limit=5):
+            piece = db.get_piece(pub.get("piece_id") or "")
+            if not piece:
+                continue
+            kw = ((piece.payload or {}).get("target_keywords") or [""])[0].strip()
+            if not kw:
+                continue
+            hist = [h for h in db.rank_history(t.id, kw, kind="post", limit=15)
+                    if h.get("rank") is not None]
+            if len(hist) < 3:
+                continue
+            first_at, last_at = (hist[0].get("checked_at") or "")[:10], (hist[-1].get("checked_at") or "")[:10]
+            ranks = [h["rank"] for h in hist[-5:]]
+            cur = ranks[-1]
+            span = 0
+            try:
+                import datetime as _d
+                span = (_d.date.fromisoformat(last_at) - _d.date.fromisoformat(first_at)).days
+            except Exception:
+                pass
+            if not (cur and cur > 10 and span >= 5 and max(ranks) - min(ranks) <= 1):
+                continue
+            au = (piece.payload or {}).get("ranking_audit") or {}
+            weak = next((w for w in (au.get("warnings") or []) if "경험" in w or "수치" in w), "")
+            fix = "경험 문장을 보강하면" if weak else "같은 주제 글을 하나 더하면"
+            out.append({"score": 74, "kind": "stuck",
+                        "headline": f"'{esc_kw(kw)}' 글이 {span}일째 {cur}위 부근에서 정체 중이에요.",
+                        "task": f"{fix} 올라갈 가능성이 있어요 — 리포트의 '왜 안 뜨나요? 진단'에서 원클릭 보강",
+                        "reason": "정체는 신호 부족이라는 뜻이에요. 진단이 부족한 항목을 짚고 바로 보강해드려요. (순위 보장은 아니에요)",
+                        "kw": kw, "angle": "review"})
+            break
+    except Exception:
+        pass
+    return out
+
+
 def _sig_race(t) -> list[dict]:
     """추적 중인 발행 글의 순위 이동(생존신고 P5) — rank_snapshots(kind='post') 실측 비교.
     첫 페이지(10위) 진입은 축하(성취=리텐션), 상승은 '가능성' 표현까지만(보장 금지)."""
@@ -215,10 +256,10 @@ def build_briefing(t, plan: str = "free") -> dict:
     if (getattr(t, "biz_type", "local") or "local") == "seller":
         # 셀러: 상품 키워드 쇼핑검색 축(추격/선점) + 순위 변화(kind=shop 포함) + 발행 공백.
         # 지역·플레이스 기반 신호(경쟁사·지역 미노출)는 셀러에겐 안 씀(매장 냄새 제거).
-        cand = _sig_shop_market(t) + _sig_rank_moves(t) + [_sig_publish_gap(t, plan)] + _sig_race(t)
+        cand = _sig_shop_market(t) + _sig_rank_moves(t) + [_sig_publish_gap(t, plan)] + _sig_race(t) + _sig_stuck(t)
     else:
         cand = ([_sig_competitor(t)] + _sig_rank_moves(t)
-                + [_sig_publish_gap(t, plan), _sig_missing_kw(t)] + _sig_race(t))
+                + [_sig_publish_gap(t, plan), _sig_missing_kw(t)] + _sig_race(t) + _sig_stuck(t))
     for s in cand:
         if s:
             signals.append(s)
