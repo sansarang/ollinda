@@ -1719,9 +1719,63 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
     if sets:
         _cards = []
         _ccounts = db.content_click_counts(t.id)         # 콘텐츠별 클릭 뱃지(추적 P2)
+        _vol_budget = [3]                                 # 렌더당 searchad 미캐시 조회 상한(비용 가드)
+
+        def _kw_volume_cached(kw: str):
+            """월 검색량 — 일 1회 캐시(rx P3). 캐시 미스는 렌더당 3회까지만 실조회."""
+            from app import ratelimit as _rl
+            key = "kwvol:" + kw.replace(" ", "")
+            v = _rl.cache_get(key, 86400)
+            if v is not None:
+                return v or None
+            if _vol_budget[0] <= 0:
+                return None
+            _vol_budget[0] -= 1
+            try:
+                from app.services import searchad
+                rows = searchad.keyword_volumes([kw])
+                me = next((r for r in rows if (r.get("keyword") or "").replace(" ", "") == kw.replace(" ", "")), None)
+                val = (me or {}).get("total") or 0
+            except Exception:
+                val = 0
+            _rl.cache_set(key, val)
+            return val or None
+
+        def _expose_badge(ps):
+            """글별 노출 배지(rx P3) — 저장된 실측 스냅샷·색인 상태만(렌더 시 네이버 콜 없음)."""
+            blog_p = next((p for p in ps if p.kind.value == "blog"), None)
+            if not blog_p:
+                return ""
+            kw = ((blog_p.payload.get("target_keywords") or [""])[0] or "").strip()
+            if not kw:
+                return ""
+            hist = [h for h in db.rank_history(t.id, kw, kind="post") if h.get("rank") is not None] \
+                or [h for h in db.rank_history(t.id, kw, kind="blog_search") if h.get("rank") is not None]
+            pub = db.get_blog_publish(blog_p.id)
+            vol = _kw_volume_cached(kw)
+            vtxt = f" (월 {vol:,}회)" if vol else ""
+            if hist:
+                cur = hist[-1]["rank"]
+                prev = hist[-2]["rank"] if len(hist) >= 2 else None
+                if cur:
+                    d = ("↑상승중" if prev and cur < prev else "↓하락" if prev and cur > prev else "")
+                    body, cls = f"지금 {cur}위" + (f" {d}" if d else ""), ("text-emerald-700 bg-emerald-50" if cur <= 10 else "text-indigo-700 bg-indigo-50")
+                else:
+                    body, cls = "31위 밖", "text-slate-500 bg-slate-100"
+            elif pub and not pub.get("indexed_at"):
+                from app.services.whynot import _days_since as _ds
+                body, cls = f"색인대기 {max(0, _ds(pub.get('published_at') or ''))}일차", "text-amber-700 bg-amber-50"
+            elif pub:
+                body, cls = "추적 시작 전", "text-slate-500 bg-slate-100"
+            else:
+                return ""
+            return (f"<a href='/me?tab=report#blog' title='실측 기준 · 위치·기기별 차이' "
+                    f"class='inline-block text-[11px] font-bold px-2 py-0.5 rounded-full {cls}'>"
+                    f"{esc(kw)}{vtxt} · {body}</a>")
         for s in sets:
             ps = db.get_set_pieces(s["asset_id"])
             _nclk = sum(_ccounts.get(p.id[:8], 0) for p in ps)
+            _ebadge = _expose_badge(ps)
             thumb = ""
             for p in ps:
                 ips = p.payload.get("image_paths") or ([p.payload.get("image_path")] if p.payload.get("image_path") else [])
@@ -1743,7 +1797,8 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 + (f"<span class='ml-1 text-[11px] font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full' "
                    f"title='올린다 추적링크 클릭 기준(조회수 아님)'>이 콘텐츠로 온 손님 {_nclk}명</span>" if _nclk else "")
                 + "</div>"
-                + f"<div class='text-xs text-slate-400 font-medium'>{esc(s['created'])} · {s['n']}채널</div></div>"
+                + f"<div class='text-xs text-slate-400 font-medium'>{esc(s['created'])} · {s['n']}채널</div>"
+                + (f"<div class='mt-1'>{_ebadge}</div>" if _ebadge else "") + "</div>"
                 + f"<a href='/me?view={s['asset_id']}' class='px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-[.98] text-white text-xs font-bold rounded-xl transition'>보기</a>"
                 + f"<form method=post action='/me/set/{s['asset_id']}/delete' onsubmit=\"return confirm('이 콘텐츠를 삭제할까요?')\">"
                 + "<button class='px-1.5 py-2 text-slate-300 hover:text-rose-500 text-base transition' title='삭제'>" + _ic("xcircle", "w-4 h-4") + "</button></form></div>")
@@ -2369,6 +2424,16 @@ def _blog_connect_card(t, fw: str) -> str:
                 "else{box.innerHTML=d.html;btn.textContent='진단 닫기';}"
                 "}catch(e){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">진단 실패 — 잠시 후 다시</div>';}"
                 "btn.disabled=false;if(btn.textContent.indexOf('진단 중')>=0)btn.textContent='왜 안 뜨나요? 진단';}"
+                # 처방 실행(rx P2) — 진단 카드의 '이 글 보강하기' 인라인 폼에서 호출
+                "async function enrichPiece(pid,btn){var inp=document.getElementById('enr_'+pid),m=document.getElementById('enrmsg_'+pid);"
+                "btn.disabled=true;btn.textContent='보강 중… (30초쯤)';m.className='text-xs mt-1.5 text-slate-500';m.textContent='';"
+                "try{var fd=new FormData();fd.append('note',(inp&&inp.value)||'');"
+                "var r=await fetch('/api/piece/'+pid+'/enrich',{method:'POST',body:fd});var d=await r.json();"
+                "if(d.error){m.className='text-xs mt-1.5 text-rose-500';m.textContent=d.error;}"
+                "else{m.className='text-xs mt-1.5 text-emerald-600 font-bold';"
+                "m.innerHTML=d.msg+' <a href=\"'+d.kit+'\" class=\"underline\">발행 소재 열기</a>';}"
+                "}catch(e){m.className='text-xs mt-1.5 text-rose-500';m.textContent='보강 실패 — 잠시 후 다시';}"
+                "btn.disabled=false;btn.textContent='보강 실행';}"
                 # 생존 신고(생존신고 P3) — 발행→색인→진입→현재→다음 관문 타임라인
                 "async function raceView(pid,btn){var box=document.getElementById('race_'+pid);if(!box)return;"
                 "if(box.innerHTML){box.innerHTML='';btn.textContent='생존 신고';return;}"
@@ -2738,11 +2803,23 @@ def api_whynot(piece_id: str, request: Request):
                  f"<span class='{cls} mt-0.5 flex-shrink-0'>{_ic(ic, 'w-4 h-4')}</span>"
                  f"<div><div class='text-sm font-bold text-slate-700'>{esc(ck['title'])}</div>"
                  f"<div class='text-xs text-slate-500'>{esc(ck['detail'])}</div></div></div>")
-    rx = "".join(
-        f"<div class='flex items-center gap-3 bg-indigo-50 border border-indigo-100 rounded-xl px-3.5 py-2.5 mt-2'>"
-        f"<div class='flex-1 text-sm text-slate-700'>{esc(p['text'])}</div>"
-        f"<a href='{esc(p['href'])}' class='flex-shrink-0 bg-indigo-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>{esc(p['label'])}</a></div>"
-        for p in d["prescriptions"])
+    rx = ""
+    for p in d["prescriptions"]:
+        if p.get("enrich"):
+            # 처방 실행형(rx P2): 빠진 정보 한 줄 → 그 글 자체를 재작성(보강) — 분석에서 멈추지 않는다
+            _eid = esc(p["enrich"])
+            rx += (f"<div class='bg-indigo-50 border border-indigo-100 rounded-xl px-3.5 py-2.5 mt-2'>"
+                   f"<div class='text-sm text-slate-700'>{esc(p['text'])}</div>"
+                   f"<div class='flex gap-2 mt-2'>"
+                   f"<input id='enr_{_eid}' placeholder='빠진 실제 정보 (예: 시공 1시간 30분, 보증 5년)' "
+                   "class='flex-1 min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400'>"
+                   f"<button type=button onclick=\"enrichPiece('{_eid}',this)\" "
+                   "class='flex-shrink-0 bg-indigo-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>보강 실행</button></div>"
+                   f"<div id='enrmsg_{_eid}' class='text-xs mt-1.5'></div></div>")
+        else:
+            rx += (f"<div class='flex items-center gap-3 bg-indigo-50 border border-indigo-100 rounded-xl px-3.5 py-2.5 mt-2'>"
+                   f"<div class='flex-1 text-sm text-slate-700'>{esc(p['text'])}</div>"
+                   f"<a href='{esc(p['href'])}' class='flex-shrink-0 bg-indigo-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>{esc(p['label'])}</a></div>")
     head = ("이미 노출되고 있어요 — 굳히기가 다음 수예요" if d["exposed"]
             else f"'{esc(d['kw'])}'가 아직 안 뜨는 이유")
     html = (f"<div class='bg-white border border-slate-200 rounded-2xl p-4 mt-2'>"
@@ -2799,6 +2876,41 @@ def api_race(piece_id: str, request: Request):
             + rows + scout + bars
             + f"<p class='text-[11px] text-slate-400 mt-2.5'>{esc(d['note'])}</p></div>")
     return JSONResponse({"ok": True, "html": html})
+
+
+@app.post("/api/piece/{pid}/enrich")
+async def api_piece_enrich(pid: str, request: Request, note: str = Form("")):
+    """진단→처방 실행(rx P2): 품질 낮은 글을 audit 경고 기반 지시문 + 사장님 제공 실제 정보로
+    재작성(보강). 효과 '보장' 없음 — 점수 전/후만 정직하게 보여준다."""
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"error": "로그인이 필요해요."}, status_code=401)
+    t = _ensure_user_tenant(u)
+    piece = db.get_piece(pid)
+    if not piece or piece.tenant_id != t.id:
+        return JSONResponse({"error": "글을 찾을 수 없어요."}, status_code=404)
+    if piece.kind.value != "blog":
+        return JSONResponse({"error": "블로그 글만 보강할 수 있어요."}, status_code=400)
+    from app import ratelimit
+    if not ratelimit.allow("enrich:" + t.id, 2, 6):     # 보강 1회 = LLM 1콜
+        return JSONResponse({"error": "보강이 잠깐 몰렸어요 — 잠시 후 다시 시도해주세요."}, status_code=429)
+    audit = (piece.payload or {}).get("ranking_audit") or {}
+    before = audit.get("score")
+    instr = autofix_instruction(audit, piece.kind.value) or "1인칭 실제 경험 문장과 구체 수치를 보강"
+    note = (note or "").strip()[:200]
+    if note:
+        instr += (f"\n[사장님 제공 실제 정보 — 사실로 반영(최우선), 지어내기 금지] {note}")
+    instr += "\n입력에 없는 가격·수치·스펙은 추가하지 마라."
+    try:
+        import asyncio
+        await asyncio.to_thread(revise_piece, piece, instr)
+    except Exception:
+        return JSONResponse({"error": "보강 생성에 문제가 있었어요 — 잠시 후 다시."}, status_code=200)
+    after = ((piece.payload or {}).get("ranking_audit") or {}).get("score")
+    return JSONResponse({"ok": True, "before": before, "after": after,
+                         "kit": f"/kit/{piece.asset_id}/naver",
+                         "msg": (f"보강 완료 — 품질 {before}→{after}점. " if before is not None and after is not None
+                                 else "보강 완료. ") + "발행 소재에서 확인하고 다시 발행해보세요."})
 
 
 @app.post("/me/guide/dismiss")
