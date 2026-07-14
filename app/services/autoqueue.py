@@ -27,6 +27,12 @@ def _bad_kw(kw: str) -> bool:
     return ("," in (kw or "")) or ("/" in (kw or ""))
 
 
+def _reason(text: str, **meta) -> str:
+    """reason 필드(내부 로그) 구조화 — 근거 카드가 파싱할 JSON. text에 기존 사람용 로그 유지."""
+    import json
+    return json.dumps({"text": text, **{k: v for k, v in meta.items() if v is not None}}, ensure_ascii=False)
+
+
 # ── 적재(refill) — 순위추적 스냅샷 갱신 직후 / 큐 비었을 때 ─────────
 def refill(t, plan: str = "free") -> dict:
     """기존 분석 산출물 → 큐 적재. 반환 {P1,P2,P3,P4} 적재 수."""
@@ -38,7 +44,9 @@ def refill(t, plan: str = "free") -> dict:
             if _bad_kw(s["keyword"]):
                 continue
             if db.enqueue_writing(t.id, "P1", s["keyword"], s["retry_angle"],
-                                  f"정체(스냅샷 {s['first']}→{s['last']}) — {s['prev_label']} 대신 {s['retry_label']} 재도전"):
+                                  _reason(f"정체(스냅샷 {s['first']}→{s['last']}) — {s['prev_label']} 대신 {s['retry_label']} 재도전",
+                                          first=s["first"], last=s["last"], days=s.get("days"),
+                                          prev=s["prev_label"], retry=s["retry_label"])):
                 added["P1"] += 1
                 _log.info("[autoqueue] 적재 P1 t=%s kw=%r angle=%s", t.id, s["keyword"], s["retry_angle"])
     except Exception:
@@ -56,7 +64,8 @@ def refill(t, plan: str = "free") -> dict:
                           key=lambda s: -(s.get("volume") or 0))
             for s in miss[:REFILL_P2_MAX]:
                 if db.enqueue_writing(t.id, "P2", s["keyword"], "review",
-                                      f"미노출(월 {s.get('volume') or 0}회 실측) 선점"):
+                                      _reason(f"미노출(월 {s.get('volume') or 0}회 실측) 선점",
+                                              vol=s.get("volume"))):
                     added["P2"] += 1
                     _log.info("[autoqueue] 적재 P2 t=%s kw=%r vol=%s", t.id, s["keyword"], s.get("volume"))
     except Exception:
@@ -67,15 +76,18 @@ def refill(t, plan: str = "free") -> dict:
             if d.get("dir") not in ("up", "enter") or not d.get("last") or _bad_kw(d["keyword"]):
                 continue
             reason = f"상승 굳히기({d.get('first') or '미노출'}→{d['last']}위, {d.get('kind')})"
+            _gap = False
             if d.get("kind") in ("blog", "place") and 2 <= d["last"] <= 5:
                 try:
                     from app.services import place
                     det = place.rank_detail(d["keyword"], t.name)
                     if det.get("rival"):
                         reason += f" | 근소격차: '{det['rival']}'만 넘으면 {d['last'] - 1}위"
+                        _gap = True
                 except Exception:
                     pass
-            if db.enqueue_writing(t.id, "P3", d["keyword"], "howto", reason):
+            if db.enqueue_writing(t.id, "P3", d["keyword"], "howto",
+                                  _reason(reason, first=d.get("first"), last=d.get("last"), gap=_gap or None)):
                 added["P3"] += 1
                 _log.info("[autoqueue] 적재 P3 t=%s kw=%r reason=%s", t.id, d["keyword"], reason)
             break                                     # 굳히기는 1건이면 충분
@@ -96,7 +108,8 @@ def refill(t, plan: str = "free") -> dict:
                 for it in b["items"]:
                     if it.get("top10") and (it.get("status") or "candidate") == "candidate":
                         if db.enqueue_writing(t.id, "P4", it["keyword"], "review",
-                                              f"키워드 풀 최고 승률 {it.get('win')}%(예상·내부용) 미사용분"):
+                                              _reason(f"키워드 풀 최고 승률 {it.get('win')}%(예상·내부용) 미사용분",
+                                                      win=it.get("win"), vol=it.get("volume"))):
                             added["P4"] += 1
                             _log.info("[autoqueue] 적재 P4 t=%s kw=%r win=%s", t.id, it["keyword"], it.get("win"))
                         break

@@ -116,7 +116,16 @@ def stagnant_keywords(tenant_id: str, limit: int = 3) -> list[dict]:
             continue
         prev = _last_angle(tenant_id, kw)
         ang = next_angle(prev)
+        days = None                              # 정체 일수(실측 스냅샷 날짜 차) — 근거 카드용
+        try:
+            from datetime import date
+            d0, d1 = (hist[0].get("checked_at") or "")[:10], (hist[-1].get("checked_at") or "")[:10]
+            if d0 and d1:
+                days = max(1, (date.fromisoformat(d1) - date.fromisoformat(d0)).days)
+        except Exception:
+            pass
         out.append({"keyword": kw, "first": hist[0]["rank"], "last": hist[-1]["rank"],
+                    "days": days,
                     "retry_angle": ang, "retry_label": _ANGLE_LABEL[ang],
                     "prev_label": _ANGLE_LABEL.get(prev, "기본"),
                     "href": f"/me?target_kw={quote(kw)}&angle={ang}"})

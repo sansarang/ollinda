@@ -1316,6 +1316,18 @@ def writing_queue_rows(tenant_id: str, status: str = "", limit: int = 30) -> lis
         return []
 
 
+def find_writing_by_piece(piece_id: str) -> Optional[dict]:
+    """생성된 글(piece) ← 큐 항목 역조회 — 근거 카드(trust) 렌더용."""
+    if not piece_id:
+        return None
+    try:
+        with _conn() as c:
+            r = c.execute("SELECT * FROM writing_queue WHERE piece_id=? LIMIT 1", (piece_id,)).fetchone()
+        return dict(r) if r else None
+    except Exception:
+        return None
+
+
 # ── 승률 키워드 배치(대량 P1·P3·P4) ──────────────────────────
 def save_keyword_batch(bid: str, tenant_id: str, industry: str, items: list) -> None:
     with _conn() as c:
