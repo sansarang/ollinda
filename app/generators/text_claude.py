@@ -209,6 +209,17 @@ class BlogDraftGenerator(Generator):
                 "A. 네, 방문 전 연락 주시면 상황에 맞게 안내해 드립니다.")
         # ④ 키워드 밀도 검증
         kdens = _kw_density(body, kw0)
+        # ⑤ '꼭 반영할 요청' 셀프체크 1회(폼사실 게이트 1-3d) — 미반영이면 게이트가 감점
+        request_check = ""
+        _rq = re.search(r"\[반드시 반영할 요청\]\s*([^\n]+)", asset.note or "")
+        if _rq and __import__("os").environ.get("ANTHROPIC_API_KEY"):
+            try:
+                _v = _call_llm("사용자 요청이 아래 글에 반영됐는지만 판단해 YES 또는 NO 한 단어로 답하라.\n"
+                               f"요청: {_rq.group(1).strip()}\n글 제목: {title}\n글 앞부분:\n{body[:900]}",
+                               self.model, 400)
+                request_check = "ok" if "YES" in (_v or "").upper() else "miss"
+            except Exception:
+                request_check = ""
         markers = [{"marker": f"[사진{i+1}]", "image_index": i, "image_path": p}
                    for i, p in enumerate(imgs)]
         return ContentPiece(
@@ -228,6 +239,7 @@ class BlogDraftGenerator(Generator):
                      "brand_name": getattr(tenant, "brand_name", "") or "",
                      "gen_finish": _last_finish(),      # stop_reason 기록(절단 검증 V1)
                      "gen_source": (asset.note or "")[:4000],   # 날조 대조용 입력 스냅샷(게이트 경로 폴백)
+                     "request_check": request_check,            # '꼭 반영할 요청' 셀프체크(1-3d)
                      "fixed_info_block": fixed_block,      # 발행 화면 컴포넌트 가이드용(템플릿 PHASE 2·3)
                      "raw": raw, "image_path": imgs[0], "image_paths": imgs},
             status=ContentStatus.DRAFT)
