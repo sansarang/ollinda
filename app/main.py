@@ -3126,6 +3126,15 @@ def my_rank(request: Request):
             for k in (p.payload.get("target_keywords") or []):
                 if k and k not in kws:
                     kws.append(k)
+    # 발행 추적 키워드 자동 편입(완전자동 파이프) — 외부 글 target_kw + 순위 스냅샷 키워드.
+    # 콘텐츠를 안 만들었어도 블로그만 연결하면 '키워드 순위'가 채워진다.
+    for pub in db.list_blog_publishes(t.id, limit=10):
+        k = (pub.get("target_kw") or "").strip()
+        if k and k not in kws:
+            kws.append(k)
+    for k in db.tracked_keywords(t.id):
+        if k and k not in kws:
+            kws.append(k)
     # blog_id 연결 시: 블로그검색 결과에서 내 블로그 '정확 식별'(상호매칭 오탐 없음, 블로그등록 PHASE 3)
     bid = getattr(t, "blog_id", "") or ""
     items = []
