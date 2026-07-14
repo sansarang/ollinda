@@ -163,9 +163,8 @@ class BlogDraftGenerator(Generator):
             "1인칭 경험담('직접 해보니','만져보니','시공하고 나니')으로 녹여라. 추상적 미사여구·일반론 금지, 손에 잡히듯 구체적으로.\n"
             "[필수 섹션] ① '## 자주 묻는 질문'(Q&A 정확히 3쌍) ② 가격대/영업시간/찾아오는길을 마크다운 표(| 항목 | 내용 |) 1개 "
             "③ '## 한눈 요약'(핵심 3줄 목록 — GEO).\n"
-            f"[키워드 밀도] 핵심키워드 '{kw0}'는 본문에 정확히 3~5회만(남발=저품질 추락). 첫 문장에 반드시 1회. "
-            "반복 대신 유의어·연관어로 확장. 기계적 반복(문단마다 풀네임 삽입) 금지.\n"
-            "[입력 원문 노출 금지] 업종/키워드 입력이 '썬팅,광택'처럼 쉼표 나열형이면 제목·본문에 원문 그대로 "
+            + _kw_natural_directive(kw0, tenant.region)
+            + "[입력 원문 노출 금지] 업종/키워드 입력이 '썬팅,광택'처럼 쉼표 나열형이면 제목·본문에 원문 그대로 "
             "박지 말고 자연어로 풀어 써라(예: '썬팅과 광택', '썬팅·광택 시공').\n"
             + (f"[연관 표현] '{', '.join(kplan['longtail'])}' 는 본문 문장 속에 자연스럽게 1회씩만 스치게 써라 — "
                "소제목(##)으로 만들지 마라(1글 1키워드 원칙).\n" if kplan.get("longtail") else "")
@@ -175,7 +174,7 @@ class BlogDraftGenerator(Generator):
             "아래 형식 그대로(대괄호 머리표 유지) 출력:\n"
             f"[제목후보]\n(3줄. 각 줄 '{kw0}'를 맨 앞에 + 서로 다른 각도(후기형/정보형/혜택형), 22~35자 롱테일, 숫자·혜택으로 클릭 유도)\n"
             "[메타설명]\n(150자 내외, 클릭 유도)\n"
-            f"[본문]\n(첫 문장에 '{kw0}' 포함, ## 소제목 3~5개 + 마크다운 표 1개 + '## 자주 묻는 질문'(Q&A 3쌍), "
+            f"[본문]\n(첫 문장에 '{seo._kw_shorten(kw0)}' 같은 자연 변형 포함(원형 금지), ## 소제목 3~5개 + 마크다운 표 1개 + '## 자주 묻는 질문'(Q&A 3쌍), "
             "1500~2200자, [사진N] 마커 배치)\n"
             "[이미지배치]\n(- 각 사진을 어디에 왜)\n"
             "[키워드]\n(쉼표로 5~8개, 타겟 키워드 우선)"
@@ -225,9 +224,27 @@ class BlogDraftGenerator(Generator):
                      "biz_type": strat.key, "closing": strat.closing, "buy_block": buy,
                      "angle": getattr(asset, "angle", "") or "",
                      "target_kw": tkw,
+                     "business_name": tenant.name,      # 게이트 업체명 정합 검사용(재검증 STEP 1-2a)
+                     "brand_name": getattr(tenant, "brand_name", "") or "",
                      "fixed_info_block": fixed_block,      # 발행 화면 컴포넌트 가이드용(템플릿 PHASE 2·3)
                      "raw": raw, "image_path": imgs[0], "image_paths": imgs},
             status=ContentStatus.DRAFT)
+
+
+def _kw_natural_directive(kw0: str, region: str) -> str:
+    """키워드 자연 변형 지시(재검증 STEP 1-2b) — 원형은 제목 1회, 본문은 구어형 변형."""
+    short = seo._kw_shorten(kw0)
+    toks = short.split()
+    ex = [f"'{short}'"]
+    if len(toks) >= 2:
+        ex.append(f"'{toks[0]}에서 {' '.join(toks[1:])}'")
+        ex.append(f"'{toks[-1]} 맡기실 때' 같은 문장형")
+    rshort = seo._kw_shorten(region or "")
+    full_warn = (f" 행정구역 풀네임 대신 '{rshort}'처럼 구어형으로 쓰고, 풀네임은 본문 2회 이하."
+                 if rshort and rshort != (region or "") else "")
+    return (f"[키워드 자연 변형] 타깃 키워드 '{kw0}' 원형은 제목에서만 정확히 1회. "
+            f"본문·소제목에서는 원형을 그대로 반복하지 말고 자연 변형으로 풀어 써라(예: {', '.join(ex)}). "
+            f"변형 포함 노출은 3~5회(남발=저품질 추락), 반복 대신 유의어·연관어로 확장.{full_warn}\n")
 
 
 def _tpl_sequence(tenant) -> str:

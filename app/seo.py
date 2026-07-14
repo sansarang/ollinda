@@ -477,6 +477,22 @@ def keywords_line(kws: list[str]) -> str:
 # 경험/후기 신호(D.I.A 가점)
 _EXPERIENCE_WORDS = ["후기", "직접", "경험", "먹어보", "써보", "방문", "가봤", "시공해", "느꼈"]
 
+# 행정구역 풀네임(본문 반복 시 기계 삽입 티) — 키워드 자연 변형 게이트(재검증 STEP 1-2b)
+_ADMIN_FULL_RE = re.compile(r"[가-힣]{2,}(?:광역시|특별시|특별자치시|특별자치도)")
+
+
+def _kw_shorten(kw: str) -> str:
+    """'부산광역시 썬팅 비용' → '부산 썬팅 비용' — 행정구역 풀네임을 구어형으로."""
+    return re.sub(r"([가-힣]{2,})(광역시|특별시|특별자치시|특별자치도)", r"\1", kw or "").strip()
+
+
+def _kw_variant_hits(text: str, kw: str) -> int:
+    """타깃 키워드의 자연 변형 노출 수 — 핵심 토큰(축약형)이 한 문장에 모두 있으면 1회."""
+    toks = [t for t in _kw_shorten(kw).split() if len(t) >= 2]
+    if not toks:
+        return 0
+    return sum(1 for s in re.split(r"[\n.!?]", text) if all(t in s for t in toks))
+
 
 def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> dict:
     """네이버 랭킹 신호(C-Rank·D.I.A.+·플레이스) 기준 채점(0~100) + 개선 경고.
@@ -540,14 +556,35 @@ def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> d
                 warnings.append(f"타깃 외 키워드('{_ok}')가 소제목에 — 1글 1키워드 위반")
                 score -= 8
                 break
+        # 업체명 정합(재검증 STEP 1-2a): 본문 업체명 ≠ 프로필 업체명 → 게이트 실패(-30)
+        _bname = (payload.get("business_name") or "").strip()
+        if _bname:
+            if _bname not in (title + " " + text):
+                warnings.append(f"프로필 업체명 '{_bname}' 미표기 — 상호 일관 신호 없음")
+                score -= 12
+            for _nm in re.findall(r"네이버(?:에서)?\s*['\"‘“]([^'\"’”]{2,25})['\"’”]\s*검색", text):
+                _nm = _nm.strip()
+                if _nm and _nm != _bname and _nm != (payload.get("brand_name") or "").strip():
+                    warnings.append(f"본문 업체명 '{_nm}' ≠ 프로필 '{_bname}' — 업체명 불일치(게이트 실패)")
+                    score -= 30
+                    break
         if main_kw and main_kw not in title:
             warnings.append(f"제목에 핵심키워드 '{main_kw}' 없음 → 상위노출 크게 불리")
             score -= 12
-        if main_kw and main_kw not in text[:120]:
-            warnings.append("첫 문단에 핵심키워드 없음 → 검색의도 매칭 약함")
-            score -= 6
-        if main_kw and text.count(main_kw) < 2:
-            warnings.append(f"핵심키워드 '{main_kw}' 본문 노출 부족(2회↓)")
+        # 키워드 자연 변형(재검증 STEP 1-2b): 원형은 제목 1회만 — 본문은 자연 변형으로
+        if main_kw:
+            if main_kw != _kw_shorten(main_kw) and main_kw in text:
+                warnings.append(f"본문에 키워드 원형 '{main_kw}' 그대로 — 자연 변형('{_kw_shorten(main_kw)}' 등)으로")
+                score -= 8
+            if _kw_variant_hits(text[:200], main_kw) == 0:
+                warnings.append("첫 문단에 핵심키워드(자연 변형 포함) 없음 → 검색의도 매칭 약함")
+                score -= 6
+            if _kw_variant_hits(text, main_kw) < 2:
+                warnings.append(f"핵심키워드 '{main_kw}'(자연 변형 포함) 본문 노출 부족(2회↓)")
+                score -= 6
+        _fulls = _ADMIN_FULL_RE.findall(text)
+        if len(_fulls) >= 3:
+            warnings.append(f"행정구역 풀네임 {len(_fulls)}회('{_fulls[0]}' 등) — 기계 삽입 티, 구어형으로")
             score -= 6
         if not any(s in text for s in ("자주 묻는", "Q&A", "Q.", "Q1")):
             warnings.append("FAQ(자주 묻는 질문) 없음 → Q&A·체류 가점 놓침")
