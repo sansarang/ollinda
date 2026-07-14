@@ -1974,8 +1974,9 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                                 "미노출 키워드 겨냥 글")
                         + _step(3, _ic("calendar", "w-4 h-4 mx-auto"), "발행 일관성", _wp2["done"] >= 1,
                                 f"이번 주 {_wp2['done']}/{_wp2['target']}회" + (" · 발행확인 " + str(_n_pub) + "건" if _n_pub else ""))
-                        + _step(4, _ic("refresh", "w-4 h-4 mx-auto"), "추적·학습", _n_imp > 0,
-                                f"오른 키워드 {_n_imp}개 → 다음 글에 강화" if _n_imp else "순위 자동추적 중")
+                        + _step(4, _ic("refresh", "w-4 h-4 mx-auto"), "추적·학습", _n_imp > 0 or _n_pub > 0,
+                                (f"추적 글 {min(_n_pub, 10)}개 · " if _n_pub else "")
+                                + (f"오른 키워드 {_n_imp}개 → 다음 글에 강화" if _n_imp else "순위 자동추적 중"))
                         + "</div></div>")
         except Exception:
             _loopbox = ""
@@ -2243,19 +2244,9 @@ def my_blog_connect(request: Request, blog: str = Form("")):
 
 def _confirm_blog_publish(t, piece, url: str, matched_by: str, score: float = 1.0,
                           post_title: str = "", published_at: str = "") -> None:
-    """발행 확인 공통 처리 — 기록 + 상태 PUBLISHED + 발행이력 + 순위 스냅샷(성과 루프 연결)."""
-    db.record_blog_publish(t.id, piece.id, url, published_at, matched_by, score, post_title)
-    try:
-        db.create_publication(piece.id, Channel.NAVER_BLOG, url,
-                              {"manual": True, "source": matched_by, "url": url})
-        db.set_piece_status(piece.id, ContentStatus.PUBLISHED)
-    except Exception:
-        pass
-    try:                                   # 발행 시점 순위 baseline + 7일 리포트 예약(기존 성과 루프 재사용)
-        from app.services import growth
-        growth.on_publish(t, piece)
-    except Exception:
-        pass
+    """발행 확인 + 자동 연쇄 — pipesync로 위임(파이프 A1·A2: pubDate 보정→생존신고 즉시→링크 안내)."""
+    from app.services import pipesync
+    pipesync.confirm_publish(t, piece, url, matched_by, score, post_title, published_at)
 
 
 def _tenant_blog_pieces(tid: str, limit_sets: int = 30) -> list:
@@ -2378,6 +2369,23 @@ def _blog_connect_card(t, fw: str) -> str:
             _d = _days_since(p.get("published_at") or "")
             _chip = (f"<span class='text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full whitespace-nowrap'>"
                      f"{_d}일차</span>" if _d >= 0 else "")
+            # 생존신고 요약(파이프 A4) — 저장된 실측 스냅샷만(렌더 시 네이버 콜 없음)
+            try:
+                _pc = db.get_piece(p.get("piece_id") or "")
+                _pkw = (((_pc.payload or {}).get("target_keywords") or [""])[0] or "").strip() if _pc else ""
+                _ph = [h for h in db.rank_history(t.id, _pkw, kind="post") if h.get("rank") is not None] if _pkw else []
+                if _ph:
+                    _pr, _pp = _ph[-1]["rank"], (_ph[-2]["rank"] if len(_ph) >= 2 else None)
+                    if _pr:
+                        _ar = ("↑" if _pp and _pr < _pp else "↓" if _pp and _pr > _pp else "→")
+                        _chip += (f"<span class='ml-1 text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full whitespace-nowrap'>"
+                                  f"{_pr}위 {_ar}</span>")
+                    else:
+                        _chip += "<span class='ml-1 text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full whitespace-nowrap'>31위 밖</span>"
+                elif p.get("indexed_at"):
+                    _chip += "<span class='ml-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full whitespace-nowrap'>색인됨</span>"
+            except Exception:
+                pass
             _pid = esc(p.get("piece_id") or "")
             btn = (f"<button type=button onclick=\"whyNot('{_pid}',this)\" "
                    "class='text-[11px] font-bold text-indigo-600 border border-indigo-200 hover:bg-indigo-50 "
