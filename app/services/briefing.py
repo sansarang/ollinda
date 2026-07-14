@@ -292,6 +292,14 @@ def build_briefing(t, plan: str = "free") -> dict:
                                     "오늘도 하나 어때요? " + best["partner_note"])
     except Exception:
         pass
+    # 관심 손님(방문자 B2) — 익명 재방문 3회+ 실측이 있을 때만 타이밍 제안
+    try:
+        hv = db.visitor_stats(t.id, days=7).get("hot_visitors") or 0
+        if hv:
+            best["partner_note"] = (f"이번 주 3번 이상 다시 온 관심 손님이 {hv}명 있어요(익명 집계) — "
+                                    "이벤트·새 소식을 알릴 타이밍이에요. " + best["partner_note"])
+    except Exception:
+        pass
     best["date"] = __import__("datetime").datetime.utcnow().strftime("%Y-%m-%d")
     return best
 
