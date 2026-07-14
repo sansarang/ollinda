@@ -38,10 +38,22 @@ def track_publish(t, piece, publish: dict) -> dict:
     from app.services import blogrank
     kw = _kw_of(piece)
     url = (publish or {}).get("published_url") or ""
-    title = (publish or {}).get("post_title") or (piece.payload or {}).get("title") or ""
+    title = (publish or {}).get("post_title") or ""
     out = {"indexed": None, "rank": None}
     if not (kw and url):
         return out
+    if not title:
+        # 수동 발행확인은 제목이 비어 있음 — RSS에서 실제 글 제목을 찾아야 색인 검사가 정확(오검출 방지)
+        try:
+            from app.services import blogsync
+            bid = getattr(t, "blog_id", "") or blogsync.normalize_blog_id(url)
+            for post in (blogsync.fetch_feed(bid).get("posts") or []) if bid else []:
+                if blogrank._norm_post_url(post.get("link", "")) == blogrank._norm_post_url(url):
+                    title = post.get("title") or ""
+                    break
+        except Exception:
+            pass
+        title = title or (piece.payload or {}).get("title") or ""
     # 색인: 이미 확인됐으면 재조회 안 함(API 절약)
     if (publish or {}).get("indexed_at"):
         out["indexed"] = True
