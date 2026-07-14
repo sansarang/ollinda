@@ -240,14 +240,24 @@ def _tpl_sequence(tenant) -> str:
 
 
 def _ensure_photo_markers(body: str, n: int) -> str:
-    """본문에 [사진1]..[사진n] 마커가 다 있는지 보장. 없으면 문단 사이에 고르게 삽입."""
+    """본문에 [사진1]..[사진n] 마커가 정확히 있도록 보장. 부족=재배치, 초과=빈 슬롯이라 제거."""
+    import re
     if n <= 0:
-        return body
+        return re.sub(r"[ \t]*\[사진\d+\][ \t]*", "", body)
+    _seen: set = set()
+
+    def _keep(m):
+        i = int(m.group(1))
+        if i > n or i in _seen:              # 사진 수 초과·중복 마커 = 빈 슬롯 → 제거
+            return ""
+        _seen.add(i)
+        return m.group(0)
+
+    body = re.sub(r"[ \t]*\[사진(\d+)\][ \t]*", _keep, body)
     present = [i for i in range(1, n + 1) if f"[사진{i}]" in body]
     if len(present) >= n:
         return body
     # 마커가 부족하면 기존 마커 제거 후 재배치(순서·중복 보장)
-    import re
     clean = re.sub(r"\[사진\d+\]", "", body)
     paras = [p.strip() for p in clean.split("\n\n") if p.strip()]
     if not paras:

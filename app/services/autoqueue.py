@@ -22,6 +22,11 @@ REFILL_P2_MAX = 2
 SIM_THRESHOLD = 0.45
 
 
+def _bad_kw(kw: str) -> bool:
+    """쉼표·슬래시 든 키워드 = 업종 원문이 그대로 굳은 오염 데이터 — 검색어로 성립 안 하므로 큐에 안 넣는다."""
+    return ("," in (kw or "")) or ("/" in (kw or ""))
+
+
 # ── 적재(refill) — 순위추적 스냅샷 갱신 직후 / 큐 비었을 때 ─────────
 def refill(t, plan: str = "free") -> dict:
     """기존 분석 산출물 → 큐 적재. 반환 {P1,P2,P3,P4} 적재 수."""
@@ -30,6 +35,8 @@ def refill(t, plan: str = "free") -> dict:
     # P1 — 정체 키워드 앵글 재도전(기존 처방 로직 출력 그대로)
     try:
         for s in ranktrack.stagnant_keywords(t.id, limit=2):
+            if _bad_kw(s["keyword"]):
+                continue
             if db.enqueue_writing(t.id, "P1", s["keyword"], s["retry_angle"],
                                   f"정체(스냅샷 {s['first']}→{s['last']}) — {s['prev_label']} 대신 {s['retry_label']} 재도전"):
                 added["P1"] += 1
@@ -45,7 +52,8 @@ def refill(t, plan: str = "free") -> dict:
         else:
             r = diagnose.diagnose_rank(t.industry, t.region, t.name)
         if not r.get("estimated"):
-            miss = sorted(r.get("missing") or [], key=lambda s: -(s.get("volume") or 0))
+            miss = sorted((s for s in (r.get("missing") or []) if not _bad_kw(s["keyword"])),
+                          key=lambda s: -(s.get("volume") or 0))
             for s in miss[:REFILL_P2_MAX]:
                 if db.enqueue_writing(t.id, "P2", s["keyword"], "review",
                                       f"미노출(월 {s.get('volume') or 0}회 실측) 선점"):
@@ -56,7 +64,7 @@ def refill(t, plan: str = "free") -> dict:
     # P3 — 잘 되는 키워드 굳히기(+근소 격차 가점: '○○만 넘으면 N-1위' → 프롬프트 반영 재료)
     try:
         for d in ranktrack.rank_deltas(t.id, limit=4):
-            if d.get("dir") not in ("up", "enter") or not d.get("last"):
+            if d.get("dir") not in ("up", "enter") or not d.get("last") or _bad_kw(d["keyword"]):
                 continue
             reason = f"상승 굳히기({d.get('first') or '미노출'}→{d['last']}위, {d.get('kind')})"
             if d.get("kind") in ("blog", "place") and 2 <= d["last"] <= 5:

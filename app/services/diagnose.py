@@ -16,9 +16,11 @@ MAX_SCAN = 4   # 스캔 키워드 상한(네이버 Local API 호출 수 제한)
 
 def _rank_keywords(region: str, industry: str) -> list[str]:
     """넓은→좁은 [지역+업종] 키워드 생성(중복 제거, 최대 MAX_SCAN)."""
-    region, industry = (region or "").strip(), (industry or "").strip()
-    if not industry:
+    region = (region or "").strip()
+    inds = [x.strip() for x in (industry or "").replace("/", ",").split(",") if x.strip()]
+    if not inds:
         return []
+    industry = inds[0]      # 검색어는 자연어 1개 축('썬팅,광택' → '썬팅')
     toks = [t for t in region.split() if t]
     cands: list[str] = []
     if not toks:
@@ -30,6 +32,8 @@ def _rank_keywords(region: str, industry: str) -> list[str]:
         if len(toks) >= 3 or (len(toks) >= 1 and toks[-1] != toks[0]):
             cands.append(f"{toks[-1]} {industry}")              # 동/역(롱테일): '초량동 중고차'
         cands.append(f"{region} {industry}")                    # 풀
+        if len(inds) >= 2:
+            cands.append(f"{toks[0]} {inds[1]}")                # 두 번째 축: '부산 광택'
     # 중복 제거(순서 유지) + 상한
     out, seen = [], set()
     for k in cands:
@@ -57,7 +61,8 @@ def diagnose_rank(industry: str, region: str, name: str) -> dict:
     status: 'top'(1~5위) | 'missing'(5위 밖) | 'unknown'(조회불가). 하위호환 위해 top-level 필드 유지."""
     industry, region, name = (industry or "").strip(), (region or "").strip(), (name or "").strip()
     keywords = _rank_keywords(region, industry)
-    primary = keywords[-1] if keywords else (f"{region} {industry}".strip() or industry or "내 지역 업종")
+    ind0 = (industry.replace("/", ",").split(",")[0] or "").strip()
+    primary = (f"{region} {ind0}".strip() if ind0 else "") or (keywords[-1] if keywords else "") or "내 지역 업종"
 
     # 상호 없으면 순위 조회 불가 → 정직한 추정 폴백(검색량은 붙여 기회 제시)
     if not name or not keywords:
