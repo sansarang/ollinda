@@ -45,6 +45,9 @@ def start() -> None:
         # 저녁 성과 피드백(브리핑 PHASE 4) — 20시
         sch.add_job(_evening_feedback, "cron", hour=20, minute=0,
                     id="evening_feedback", replace_existing=True)
+        # RSS 자동 매칭(파이프 A1 보조 경로) — 3시간마다 새 글 감지→자동 연결/확인 요청
+        sch.add_job(_rss_autosync, "cron", hour="*/3", minute=20,
+                    id="rss_autosync", replace_existing=True)
         sch.start()
         _scheduler = sch
         logging.info("[scheduler] 경쟁사 일일 자동 스캔 등록(매일 %02d:00 KST)", hour)
@@ -72,6 +75,15 @@ def _evening_feedback() -> None:
         briefing.send_evening()
     except Exception:
         logging.exception("[scheduler] 저녁 피드백 실패")
+
+
+def _rss_autosync() -> None:
+    """RSS 폴링 자동 매칭(파이프 A1) — 발행 URL 붙여넣기를 잊어도 파이프라인이 이어지게."""
+    try:
+        from app.services import pipesync
+        pipesync.auto_sync_all()
+    except Exception:
+        logging.exception("[scheduler] RSS 자동매칭 실패")
 
 
 def _rank_track() -> None:

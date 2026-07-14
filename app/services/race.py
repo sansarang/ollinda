@@ -85,8 +85,11 @@ def track_all_publishes(days: int = 45) -> dict:
         if not t:
             continue
         for pub in db.list_blog_publishes(tid, limit=10):
-            if _days_since(pub.get("published_at") or "") > days:
+            d = _days_since(pub.get("published_at") or "")
+            if d > days:
                 continue
+            if d > 14 and datetime.utcnow().weekday() != 0:
+                continue      # 비용 가드: 2주 지난 글은 주 1회(월요일)만 실측
             piece = db.get_piece(pub.get("piece_id") or "")
             if not piece:
                 continue
