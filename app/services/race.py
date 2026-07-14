@@ -77,8 +77,9 @@ def track_publish(t, piece, publish: dict) -> dict:
         db.save_rank_snapshot(t.id, kw, pr["rank"], kind="post")
         # 첫 페이지(10위) 첫 진입 → 축하 알림(성취감, P5) — 1회만
         if pr["rank"] and pr["rank"] <= 10 and (prev is None or prev == 0 or prev > 10):
+            _tt = (title[:20] + "…") if len(title) > 20 else (title or "발행하신 글")
             db.add_notice(t.id, "race",
-                          f"'{kw}' 글이 블로그검색 {pr['rank']}위 — 첫 페이지에 진입했어요! 지금 굳히면 더 올라가요.")
+                          f"발행하신 글('{_tt}')이 블로그검색 {pr['rank']}위 — 첫 페이지에 진입했어요! 지금 굳히면 더 올라가요.")
     return out
 
 

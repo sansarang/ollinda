@@ -43,9 +43,9 @@ def _sig_competitor(t) -> dict | None:
                      f"{t.region} {t.industry}".strip()
                 my_txt = f"{my}위" if my else "미노출"
                 return {"score": _W_COMPETITOR, "kind": "competitor",
-                        "headline": f"'{esc_kw(kw)}'에서 {comp['name']}이(가) 사장님보다 위에 있어요"
+                        "headline": f"동네 검색에서 {comp['name']}이(가) 사장님보다 위에 있어요"
                                     f" ({their}위 vs 내 가게 {my_txt}).",
-                        "task": f"'{kw}' 겨냥 글 1편 — 사진 3장만 보내주세요",
+                        "task": "추격 글 1편 — 글감은 제가 잡아뒀어요, 사진 3장만 보내주세요",
                         "reason": "경쟁사가 먼저 자리를 잡으면 되찾는 데 몇 배 오래 걸려요. 오늘 한 편이면 추격이 시작돼요.",
                         "kw": kw, "angle": "review"}
     except Exception:
@@ -66,14 +66,14 @@ def _sig_rank_moves(t) -> list[dict]:
             kw = d["keyword"]
             if lv > fv:                                # 하락
                 out.append({"score": _W_RANK_DOWN + min(9, lv - fv), "kind": "rank_down",
-                            "headline": f"'{kw}' 순위가 {f or '미노출'}위 → {l or '미노출'}위로 밀렸어요.",
-                            "task": f"'{kw}' 새 글 1편 — 최근 작업 사진 3장만 보내주세요",
+                            "headline": f"추적 중인 검색 순위 하나가 {f or '미노출'}위 → {l or '미노출'}위로 밀렸어요.",
+                            "task": "회복 글 1편 — 글감은 제가 정해뒀어요, 최근 작업 사진 3장만 보내주세요",
                             "reason": "새 글이 끊기면 네이버가 '활동이 식었다'고 봐요. 오늘 한 편이면 흐름을 되돌릴 수 있어요.",
                             "kw": kw, "angle": "review"})
             elif lv < fv and (l or 0) > 0:             # 상승
                 out.append({"score": _W_RANK_UP + min(9, fv - lv), "kind": "rank_up",
-                            "headline": f"'{kw}' 순위가 {f or '미노출'}위 → {l}위로 오르는 중이에요!",
-                            "task": f"기세 굳히기 — '{kw}' 글 1편 더 (사진 3장이면 충분해요)",
+                            "headline": f"추적 중인 검색 순위 하나가 {f or '미노출'}위 → {l}위로 오르는 중이에요!",
+                            "task": "기세 굳히기 글 1편 — 글감은 제가 이어뒀어요 (사진 3장이면 충분해요)",
                             "reason": "오르는 키워드에 글을 더하면 상위 안착이 훨씬 빨라져요. 지금이 제일 효율 좋은 타이밍이에요.",
                             "kw": kw, "angle": "howto"})
     except Exception:
@@ -94,7 +94,7 @@ def _sig_publish_gap(t, plan: str) -> dict | None:
             angle = (wp["suggestions"][0]["angle"] if wp["suggestions"] else "review")
             return {"score": _W_GAP + min(9, gap), "kind": "gap",
                     "headline": f"{gap}일째 새 발행이 없어요 (이번 주 {wp['done']}/{wp['target']}회).",
-                    "task": f"오늘 '{topic}' 1편 — 사진 3장만 보내주세요",
+                    "task": "오늘 1편 — 글감은 준비돼 있어요, 사진 3장만 보내주세요",
                     "reason": "발행 간격이 벌어지면 쌓아둔 C-Rank 꾸준함 신호가 식어요. 한 편이면 페이스가 돌아와요.",
                     "kw": topic, "angle": angle}
     except Exception:
@@ -112,10 +112,10 @@ def _sig_missing_kw(t) -> dict | None:
         miss = sorted(r.get("missing") or [], key=lambda s: -(s.get("volume") or 0))
         if miss:
             kw, vol = miss[0]["keyword"], miss[0].get("volume") or 0
-            vol_txt = f"월 {vol:,}회 검색되는데 " if vol else ""
+            vol_txt = f"한 달에 {vol:,}번씩 " if vol else ""
             return {"score": _W_MISSING_KW + (5 if vol >= 1000 else 0), "kind": "missing_kw",
-                    "headline": f"'{kw}' — {vol_txt}사장님 가게가 아직 안 보여요.",
-                    "task": f"'{kw}' 선점 글 1편 — 사진 3장만 보내주세요",
+                    "headline": f"손님들이 {vol_txt}검색하는 말인데, 사장님 가게가 아직 안 보여요.",
+                    "task": "선점 글 1편 — 글감은 제가 정해뒀어요, 사진 3장만 보내주세요",
                     "reason": ("그 검색이 지금은 전부 다른 가게로 가고 있어요. "
                                "먼저 자리 잡은 글이 오래 갑니다."),
                     "kw": kw, "vol": vol, "angle": "review"}
@@ -164,8 +164,8 @@ def _sig_stuck(t) -> list[dict]:
             weak = next((w for w in (au.get("warnings") or []) if "경험" in w or "수치" in w), "")
             fix = "경험 문장을 보강하면" if weak else "같은 주제 글을 하나 더하면"
             out.append({"score": 74, "kind": "stuck",
-                        "headline": f"'{esc_kw(kw)}' 글이 {span}일째 {cur}위 부근에서 정체 중이에요.",
-                        "task": f"{fix} 올라갈 가능성이 있어요 — 리포트의 '왜 안 뜨나요? 진단'에서 원클릭 보강",
+                        "headline": f"발행하신 글 하나가 {span}일째 {cur}위 부근에서 정체 중이에요.",
+                        "task": f"{fix} 올라갈 가능성이 있어요 — 다음 글감에 자동 반영해뒀어요 (자세한 진단은 리포트에서)",
                         "reason": "정체는 신호 부족이라는 뜻이에요. 진단이 부족한 항목을 짚고 바로 보강해드려요. (순위 보장은 아니에요)",
                         "kw": kw, "angle": "review"})
             break
@@ -191,17 +191,18 @@ def _sig_race(t) -> list[dict]:
             if len(hist) < 2:
                 continue
             prev, cur = hist[-2]["rank"], hist[-1]["rank"]
+            _title = ((pub.get("post_title") or "")[:16] + "…") if pub.get("post_title") else "발행하신 글 하나"
             if cur and cur <= 10 and (not prev or prev > 10):
                 out.append({"score": 85, "kind": "race_first_page",
-                            "headline": f"'{esc_kw(kw)}' 글이 {prev or '31위 밖'} → {cur}위, 첫 페이지에 진입했어요!",
-                            "task": f"굳히기 타이밍 — '{kw}' 글 1편 더 (사진 3장이면 충분해요)",
+                            "headline": f"발행하신 글('{esc_kw(_title)}')이 {prev or '31위 밖'} → {cur}위, 첫 페이지에 진입했어요!",
+                            "task": "굳히기 타이밍 — 이어갈 글감은 제가 잡아뒀어요 (사진 3장이면 충분해요)",
                             "reason": ("첫 페이지에 막 오른 글은 지금 밀어주면 안착 가능성이 커요. (순위 보장은 아니에요)"
                                    + _analyst_line(pub.get("piece_id") or "")),
                             "kw": kw, "angle": "howto"})
             elif cur and prev and cur < prev:
                 out.append({"score": 72, "kind": "race_up",
-                            "headline": f"추적 중인 '{esc_kw(kw)}' 글이 어제 {prev}위 → 오늘 {cur}위로 올랐어요.",
-                            "task": f"이 페이스 유지 — '{kw}' 축 글 1편 더",
+                            "headline": f"발행하신 글('{esc_kw(_title)}')이 어제 {prev}위 → 오늘 {cur}위로 올랐어요.",
+                            "task": "이 페이스 유지 — 같은 주제 글 1편, 글감은 준비돼 있어요",
                             "reason": (("이 페이스면 첫 페이지 진입 가능성이 보여요 — 오르는 중 한 편이 제일 효율 좋아요."
                                        if cur > 10 else "상단 유지에는 꾸준함이 답이에요.")
                                        + _analyst_line(pub.get("piece_id") or "")),
@@ -235,20 +236,20 @@ def _sig_shop_market(t) -> list[dict]:
             s = caught[0]
             kw = s["keyword"]
             out.append({"score": _W_COMPETITOR - 5, "kind": "shop_chase",
-                        "headline": f"'{esc_kw(kw)}' 쇼핑 {s['rank']}위 — 위에 {s['rank'] - 1}개 상품이 있어요."
+                        "headline": f"쇼핑 검색에서 내 상품이 {s['rank']}위 — 위에 {s['rank'] - 1}개 상품이 있어요."
                                     + _top_line(kw),
-                        "task": f"'{kw}' 내돈내산 후기 글 1편 — 사진 3장만 보내주세요",
+                        "task": "내돈내산 후기 글 1편 — 글감은 제가 잡아뒀어요, 사진 3장만 보내주세요",
                         "reason": "구매 전 검색은 후기 글에서 갈려요. 후기 콘텐츠가 쌓이면 상품 클릭·전환이 같이 올라요.",
                         "kw": kw, "angle": "review"})
         miss = sorted(r.get("missing") or [], key=lambda s: -(s.get("volume") or 0))
         if miss:
             s = miss[0]
             kw, vol = s["keyword"], s.get("volume") or 0
-            vol_txt = f"월 {vol:,}회 검색되는데 " if vol else ""
+            vol_txt = f"한 달에 {vol:,}번씩 " if vol else ""
             out.append({"score": _W_MISSING_KW + (5 if vol >= 1000 else 0), "kind": "shop_missing",
-                        "headline": f"'{esc_kw(kw)}' — {vol_txt}상위 {r.get('scan_depth', 40)}위 안에 "
+                        "headline": f"손님들이 {vol_txt}검색하는 상품인데, 상위 {r.get('scan_depth', 40)}위 안에 "
                                     "내 상품이 안 보여요." + _top_line(kw),
-                        "task": f"'{kw}' 선점 후기 글 1편 — 사진 3장만 보내주세요",
+                        "task": "선점 후기 글 1편 — 글감은 제가 정해뒀어요, 사진 3장만 보내주세요",
                         "reason": "그 검색이 지금은 전부 다른 스토어로 가고 있어요. 후기 글이 검색 유입의 지렛대예요.",
                         "kw": kw, "vol": vol, "angle": "review"})
     except Exception:
@@ -284,7 +285,7 @@ def build_briefing(t, plan: str = "free") -> dict:
                  else f"{t.region} {t.industry}".strip() or "핵심 주제")
         best = {"score": _W_DEFAULT, "kind": "steady",
                 "headline": "오늘은 순위·경쟁에 특별한 변화가 없어요 — 좋은 신호예요.",
-                "task": f"꾸준함이 곧 순위예요 — '{topic}' 1편, 사진 3장이면 충분해요",
+                "task": "꾸준함이 곧 순위예요 — 오늘 1편, 글감은 제가 골라뒀어요 (사진 3장이면 충분)",
                 "reason": "네이버 C-Rank는 '같은 주제 꾸준한 발행'을 가장 오래 기억해요.",
                 "kw": topic, "angle": "review"}
     kw = best.get("kw") or ""

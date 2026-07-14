@@ -2046,7 +2046,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 _due_html = "".join(
                     "<div class='flex items-center gap-3 bg-violet-50 border border-violet-200 rounded-2xl p-4 mb-5'>"
                     f"<span class='text-violet-500'>{_ic('calendar', 'w-5 h-5 flex-shrink-0')}</span>"
-                    f"<div class='flex-1 text-sm text-violet-800'>오늘 발행할 글: <b>'{esc(d['keyword'])}'</b> — 복붙만 하면 돼요. 발행 후 주소는 자동 추적돼요.</div>"
+                    "<div class='flex-1 text-sm text-violet-800'>오늘 발행할 글이 <b>준비됐어요</b> — 복붙만 하면 돼요. 발행 후 주소는 자동 추적돼요.</div>"
                     f"<a href='/kit/{esc(d['asset_id'])}/naver' class='flex-shrink-0 bg-violet-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>발행 소재 열기</a></div>"
                     for d in _due if d.get("asset_id"))
             except Exception:
@@ -5419,7 +5419,7 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
         # 브리핑 원클릭: "사진만 보내면 나머지는 제가" — 짐을 나눠 지는 경험
         target_banner = ("<div class='flex items-center gap-2.5 bg-[#EEF2FF] border border-indigo-200 rounded-2xl p-3.5'>"
                          f"{_ic('wand', 'w-5 h-5 text-indigo-600 flex-shrink-0')}<div class='text-sm text-slate-700'>"
-                         f"오늘 브리핑에서 제안드린 <b>'{esc(target_kw)}'</b>"
+                         "오늘 브리핑의 글감은 제가 잡아뒀어요"
                          + (f" · <b>{_angle_lab}</b>" if _angle_lab else "")
                          + " — <b>사진 3장만</b> 올려주세요. 글·영상·발행 준비는 제가 할게요.</div>"
                          "<button type=button onclick=\"fetch('/api/briefing/pass',{method:'POST'}).then(r=>r.json())"
@@ -5428,7 +5428,7 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
     elif target_kw:
         target_banner = ("<div class='flex items-center gap-2.5 bg-amber-50 border border-amber-200 rounded-2xl p-3.5'>"
                          f"{_ic('target', 'w-5 h-5 text-amber-600 flex-shrink-0')}<div class='text-sm text-slate-700'>"
-                         f"이번 글은 <b>'{esc(target_kw)}'</b> 키워드를 겨냥해요"
+                         "이번 글의 글감은 AI가 정해뒀어요"
                          + (f" · <b>{_angle_lab}</b> 앵글" if _angle_lab else "")
                          + " — 제목·본문에 자연스럽게 반영돼요.</div>"
                          "<a href='/me' class='ml-auto text-xs text-slate-400 hover:text-slate-600 whitespace-nowrap'>해제 ×</a></div>")
