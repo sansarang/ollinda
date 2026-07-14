@@ -99,10 +99,12 @@ def extract_kw(title: str, industry: str = "", region: str = "") -> str:
     return " ".join(toks[:3])[:30]
 
 
-def _ext_id(url: str) -> str:
-    """외부 글(올린다 미생성)의 발행 기록 키 — URL 기반 결정적 id."""
+def _ext_id(tenant_id: str, url: str) -> str:
+    """외부 글(올린다 미생성)의 발행 기록 키 — tenant+URL 결정적 id.
+    ⚠️ tenant 스코프 필수: URL만 해시하면 같은 블로그를 여러 가게가 추적할 때 piece_id(PK)가
+    충돌해 upsert가 서로의 행을 뺏는다(마지막 동기화 tenant가 전부 가져감 — 실측으로 확인된 유실 원인)."""
     import hashlib
-    return "ext_" + hashlib.sha1(_norm(url).encode()).hexdigest()[:12]
+    return "ext_" + hashlib.sha1(f"{tenant_id}|{_norm(url)}".encode()).hexdigest()[:12]
 
 
 def auto_sync_tenant(t) -> dict:
@@ -148,7 +150,7 @@ def auto_sync_tenant(t) -> dict:
         kw = extract_kw(p.get("title") or "", t.industry or "", t.region or "")
         if not kw:
             continue
-        pid = _ext_id(p.get("link") or "")
+        pid = _ext_id(t.id, p.get("link") or "")
         db.record_blog_publish(t.id, pid, p.get("link") or "",
                                (pa.isoformat() if pa is not None and hasattr(pa, "isoformat") else ""),
                                "rss_auto", 0.0, p.get("title") or "", target_kw=kw)
