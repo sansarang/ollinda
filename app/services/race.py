@@ -172,10 +172,21 @@ def timeline(t, piece, publish: dict) -> dict:
         move = ""
         if prev and prev != cur:
             move = f" (어제 {prev}위 → 오늘 {cur}위 {'상승' if cur < prev else '하락'})"
+        auto_note = ""
+        if prev and cur > prev:      # 하락 — 실측 가능한 원인만 코멘트(분석가 P3, 추측 서사 금지)
+            try:
+                from app.services import blogrank
+                t1 = blogrank.scout_top(kw, 3)
+                fresh = next((x for x in t1 if (x.get("age_days") is not None and x["age_days"] <= 3)), None)
+                if fresh:
+                    auto_note = (f" 상위에 {fresh['age_days']}일 전 새 글이 들어왔어요 — "
+                                 "최신성에 밀린 것으로 보여요. 보강 발행이 답이에요.")
+            except Exception:
+                pass
         steps.append({"status": "ok" if cur <= 10 else "run",
                       "title": f"현재 블로그검색 {cur}위{move}",
-                      "detail": ("첫 페이지에 있어요 — 지금 굳히기가 제일 효율 좋아요." if cur <= 10
-                                 else "움직임이 보이는 구간이에요. 꾸준함이 답이에요.")})
+                      "detail": (("첫 페이지에 있어요 — 지금 굳히기가 제일 효율 좋아요." if cur <= 10
+                                 else "움직임이 보이는 구간이에요. 꾸준함이 답이에요.") + auto_note)})
         # 다음 관문
         if cur > 10:
             steps.append({"status": "gate", "title": "다음 관문: 10위 안 = 첫 페이지",

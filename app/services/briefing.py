@@ -124,6 +124,15 @@ def _sig_missing_kw(t) -> dict | None:
     return None
 
 
+def _analyst_line(pid: str) -> str:
+    try:
+        from app.services import analyst
+        line = analyst.cached_brief_line(pid)
+        return (" " + line) if line else ""
+    except Exception:
+        return ""
+
+
 def _sig_stuck(t) -> list[dict]:
     """추적 글 정체 진단(rx P4) — 5일+ 같은 자리(11위 밖)면 품질 경고 기반 처방을 브리핑으로.
     '보장' 금지 — '올라갈 가능성' 표현까지만. 실측(post 스냅샷·저장된 audit)만 사용."""
@@ -186,14 +195,16 @@ def _sig_race(t) -> list[dict]:
                 out.append({"score": 85, "kind": "race_first_page",
                             "headline": f"'{esc_kw(kw)}' 글이 {prev or '31위 밖'} → {cur}위, 첫 페이지에 진입했어요!",
                             "task": f"굳히기 타이밍 — '{kw}' 글 1편 더 (사진 3장이면 충분해요)",
-                            "reason": "첫 페이지에 막 오른 글은 지금 밀어주면 안착 가능성이 커요. (순위 보장은 아니에요)",
+                            "reason": ("첫 페이지에 막 오른 글은 지금 밀어주면 안착 가능성이 커요. (순위 보장은 아니에요)"
+                                   + _analyst_line(pub.get("piece_id") or "")),
                             "kw": kw, "angle": "howto"})
             elif cur and prev and cur < prev:
                 out.append({"score": 72, "kind": "race_up",
                             "headline": f"추적 중인 '{esc_kw(kw)}' 글이 어제 {prev}위 → 오늘 {cur}위로 올랐어요.",
                             "task": f"이 페이스 유지 — '{kw}' 축 글 1편 더",
-                            "reason": ("이 페이스면 첫 페이지 진입 가능성이 보여요 — 오르는 중 한 편이 제일 효율 좋아요."
-                                       if cur > 10 else "상단 유지에는 꾸준함이 답이에요."),
+                            "reason": (("이 페이스면 첫 페이지 진입 가능성이 보여요 — 오르는 중 한 편이 제일 효율 좋아요."
+                                       if cur > 10 else "상단 유지에는 꾸준함이 답이에요.")
+                                       + _analyst_line(pub.get("piece_id") or "")),
                             "kw": kw, "angle": "howto"})
     except Exception:
         pass
