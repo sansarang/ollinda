@@ -48,6 +48,7 @@ def _search_blog(keyword: str, display: int = TOP_N) -> list[dict]:
                 "link": (it.get("link") or "").strip(),
                 "bloggerlink": (it.get("bloggerlink") or "").strip(),
                 "bloggername": (it.get("bloggername") or "").strip(),
+                "description": re.sub(r"<[^>]+>", "", it.get("description", "")).strip(),  # 본문 앞부분 요약(분석가 P1)
                 "postdate": (it.get("postdate") or "").strip(),   # YYYYMMDD — 경쟁 정찰(생존신고 P4)
             })
         return out
