@@ -2043,11 +2043,20 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             try:
                 from app.services import mass as _mass
                 _due = _mass.due_today(t)
+                def _due_trust(d):
+                    """오늘 카드 안 근거 카드(접힘) — 실패해도 카드 표시를 막지 않음."""
+                    try:
+                        _pc0 = db.get_piece(d.get("piece_id") or "")
+                        return _trust_card_html(_pc0) if _pc0 else ""
+                    except Exception:
+                        return ""
                 _due_html = "".join(
-                    "<div class='flex items-center gap-3 bg-violet-50 border border-violet-200 rounded-2xl p-4 mb-5'>"
+                    "<div class='bg-violet-50 border border-violet-200 rounded-2xl p-4 mb-5'>"
+                    "<div class='flex items-center gap-3'>"
                     f"<span class='text-violet-500'>{_ic('calendar', 'w-5 h-5 flex-shrink-0')}</span>"
                     "<div class='flex-1 text-sm text-violet-800'>오늘 발행할 글이 <b>준비됐어요</b> — 복붙만 하면 돼요. 발행 후 주소는 자동 추적돼요.</div>"
                     f"<a href='/kit/{esc(d['asset_id'])}/naver' class='flex-shrink-0 bg-violet-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>발행 소재 열기</a></div>"
+                    f"{_due_trust(d)}</div>"
                     for d in _due if d.get("asset_id"))
             except Exception:
                 pass
@@ -2243,6 +2252,42 @@ def my_blog_published(request: Request, piece_id: str = Form(""), url: str = For
     return RedirectResponse(back + "?ok=" + _q("발행 기록 완료! 이 글의 순위 추적이 시작돼요"), status_code=303)
 
 
+def _trust_card_html(piece) -> str:
+    """근거 카드(읽기 전용, 접힘 기본) — 홈 오늘 카드/발행 상세/리포트 공용(PHASE 3-4 단일 컴포넌트).
+    글감 큐 연결(또는 mass 배치 생성) 없는 글은 카드 자체를 생략 — '근거 없음' 문구 노출 금지."""
+    try:
+        from app.services import trustcard
+        item = db.find_writing_by_piece(piece.id)
+        if not item:
+            pl = piece.payload or {}
+            _tkw = ((pl.get("target_kw") or "").strip()
+                    or ((pl.get("target_keywords") or [""])[0] or "").strip())
+            if pl.get("mass_batch") and _tkw:      # 배치(발굴) 생성분 — 기본 근거 템플릿
+                item = {"source_type": "P4", "target_keyword": _tkw,
+                        "angle": pl.get("angle") or "", "reason": ""}
+        card = trustcard.render_trust_card(item)
+        if not card:
+            return ""
+        _pub = None
+        try:
+            _pub = db.get_blog_publish(piece.id)
+        except Exception:
+            pass
+        lines = "".join(f"<div class='text-sm text-slate-600 leading-relaxed mb-1'>{esc(l)}</div>"
+                        for l in card["lines"])
+        publine = (f"<div class='text-sm font-semibold text-emerald-600 mt-2'>{esc(trustcard.PUBLISHED_LINE)}</div>"
+                   if _pub else "")
+        return ("<details class='trustcard mt-2'>"
+                f"<summary class='text-xs font-bold text-indigo-500 cursor-pointer select-none'>"
+                f"\u25b8 {esc(card['title'])}</summary>"
+                f"<div class='mt-2 bg-indigo-50/60 border border-indigo-100 rounded-xl p-3.5'>{lines}"
+                f"<div class='text-xs text-slate-400 mt-2'>{esc(card['footer'])}</div>{publine}</div></details>")
+    except Exception:
+        import logging
+        logging.getLogger("shopcast.trustcard").exception("[trustcard] 렌더 실패 piece=%s", getattr(piece, "id", ""))
+        return ""
+
+
 def _blog_connect_card(t, fw: str) -> str:
     """'내 네이버 블로그 연결' 카드 — 연결 전(입력 폼) / 연결 후(현황+해제)."""
     inp = "flex-1 border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
@@ -2334,7 +2379,9 @@ def _blog_connect_card(t, fw: str) -> str:
                     f"<span class='flex items-center gap-1.5'>{_chip}{race_btn}{btn}</span></div>"
                     f"<div class='text-xs text-slate-400'>{esc((p.get('published_at') or '')[:10])} · "
                     f"{'RSS자동' if p.get('matched_by') == 'rss' else '직접확인'}</div>"
-                    f"<div id='race_{_pid}'></div><div id='why_{_pid}'></div></div>")
+                    # 근거 카드(trust PHASE 3-3) — 큐 연결 없는 글(외부 발행 등)은 자동 생략
+                    + (_trust_card_html(_pc) if _pc else "")
+                    + f"<div id='race_{_pid}'></div><div id='why_{_pid}'></div></div>")
         pub_rows = "".join(_pub_row(p) for p in pubs)
         pub_box = ((f"<div class='mt-4'><div class='text-xs font-bold text-slate-500 mb-1'>최근 발행 확인 {len(pubs)}건</div>{pub_rows}</div>")
                    if pubs else ("<p class='text-xs text-slate-400 mt-3'>블로그 등록됨 — 새 글은 <b class='text-slate-600'>자동으로</b> 감지해 추적해요"
@@ -3874,6 +3921,8 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
         f"<div class='text-sm text-indigo-500 font-bold'>{esc(sname)}</div>"
         "<h1 class='text-2xl font-extrabold text-slate-900 mb-1'>네이버 블로그에 올리기</h1>"
         "<p class='text-slate-400 text-sm mb-5'>① 제목·본문 복사해서 붙여넣기 → ② 사진을 순서대로 저장 → ③ 본문 <b>[📷 사진N 위치]</b>에 네이버 사진버튼으로 올리기</p>"
+        # 근거 카드(trust PHASE 3) — 본문 위쪽, 접힘 기본(복붙 흐름 무간섭·읽기 전용)
+        + (f"<div class='{sec} pt-3 pb-3'>{_tc}</div>" if (_tc := _trust_card_html(blog)) else "")
         # 워크플로우 안내(블로그템플릿 PHASE 4) — PC/모바일/둘다 상황별 흐름
         + _workflow_guide(sec)
         # 제목
