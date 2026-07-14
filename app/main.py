@@ -1482,33 +1482,9 @@ def _perf_report(tenant_id: str) -> str:
              + _stat(_ic("package", "w-4 h-4"), len(sets), "bg-[#EEF2FF] text-indigo-600", "만든 세트")
              + _stat(_ic("grid", "w-4 h-4"), n_pieces, "bg-[#EEF2FF] text-indigo-600", "채널 발행물")
              + _stat(_ic("target", "w-4 h-4"), avg, "bg-[#EEF2FF] text-indigo-600", "평균 점수") + "</div>")
-    kw_html = ""
-    if kws:
-        def _chip(k):
-            return f"<span class='inline-block bg-slate-100 text-slate-600 text-xs px-2.5 py-1 rounded-full mr-1 mb-1'>{esc(k)}</span>"
-        head = "".join(_chip(k) for k in kws[:6])
-        rest = "".join(_chip(k) for k in kws[6:])
-        more_n = len(kws) - 6
-        more_btn = (f"<button type=button onclick=\"var m=document.getElementById('kwmore');m.classList.toggle('hidden');this.textContent=m.classList.contains('hidden')?'더보기 +{more_n}':'접기';\" "
-                    f"class='inline-block text-xs font-bold text-indigo-600 ml-1 align-middle'>더보기 +{more_n}</button>" if more_n > 0 else "")
-        kw_html = ("<div class='mb-2'><div class='text-sm font-bold text-slate-600 mb-2'>노리는 키워드 "
-                   f"<span class='text-xs text-slate-400 font-normal'>({len(kws)}개)</span></div>"
-                   f"<div class='max-h-24 overflow-hidden'>{head}<span id='kwmore' class='hidden'>{rest}</span>{more_btn}</div></div>")
+    kw_html = ""    # (auto) '노리는 키워드' 노출 제거 — AI 내부 재료
     # 🚀 before/after 순위 성장 카드 — 발행 후 자동 스냅샷 기반(성장 PHASE 2)
-    ba = ""
-    try:
-        imp = db.improving_keywords(tenant_id)
-        if imp:
-            rows = "".join(
-                f"<div class='flex items-center justify-between bg-emerald-50 rounded-xl px-3 py-2 mb-1.5'>"
-                f"<span class='text-sm font-bold text-slate-700'>{esc(x['keyword'])}</span>"
-                f"<span class='text-sm font-extrabold text-emerald-600'>"
-                f"{(x['first'] if x['first'] else '밖')}위 → {(x['last'] if x['last'] else '밖')}위 ⬆️</span></div>"
-                for x in imp[:3])
-            ba = ("<div class='mb-4'><div class='text-sm font-bold text-slate-600 mb-2'>순위 성장</div>"
-                  + rows + "</div>")
-    except Exception:
-        pass
+    ba = ""    # (auto) 키워드별 성장 나열 제거 — 글별 순위는 내 네이버 블로그에서
     return ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow p-5 sm:p-6 mb-5'>"
             "<h2 class='font-extrabold text-slate-900 mb-4 text-base'>성과 리포트</h2>"
             + ba + stats + kw_html
@@ -1903,12 +1879,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                   + _statc(_ic("package", "w-7 h-7"), "bg-[#EEF2FF] text-indigo-600", len(_sets2), "만든 세트")
                   + _statc(_ic("grid", "w-7 h-7"), "bg-[#EEF2FF] text-indigo-600", _np, "채널 발행물")
                   + _statc(_ic("target", "w-7 h-7"), "bg-[#EEF2FF] text-indigo-600", _avg, "평균 노출점수") + "</div>") if _sets2 else "")
-    kw_card = ""
-    if _kws2:
-        _chips = "".join(f"<span class='inline-block bg-slate-100 text-slate-600 text-xs px-3 py-1.5 rounded-full mr-1.5 mb-1.5'>{esc(_clean_kw(k))}</span>" for k in _kws2[:9])
-        kw_card = ("<div id='perfCard' class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5'>"
-                   "<h2 class='font-bold text-slate-900 mb-1'>성과 리포트 · 최근 키워드</h2>"
-                   f"<p class='text-xs text-slate-400 mb-3'>노리는 키워드 {len(_kws2)}개</p>{_chips}</div>")
+    kw_card = ""    # (auto) '노리는 키워드' 카드 제거
     view = (request.query_params.get("view") or "").strip()
     tab = (request.query_params.get("tab") or "").strip()
     result_html = _result_html(u, view, back_href="/me?tab=content", back_label="◀ 내 콘텐츠") if view else None
@@ -1925,32 +1896,9 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                       "<p class='text-sm text-slate-400 mb-5'>‘보기’를 누르면 결과가 크게 나와요.</p>" + hist + "</div>")
     elif tab == "report":                                 # 성과 리포트 · 최근 키워드 + 순위(자동) (전체 폭)
         active = "report"
-        _kwbox = ((f"<div class='{_fw}'><h2 class='text-2xl font-extrabold text-slate-900 mb-1'>성과 리포트 · 최근 키워드</h2>"
-                   f"<p class='text-sm text-slate-400 mb-5'>노리는 키워드 {len(_kws2)}개</p>{_chips}</div>") if _kws2 else "")
+        _kwbox = ""    # (auto) '노리는 키워드' 태그 제거 — AI 내부 재료
         # 키워드 순위 — 페이지 열면 자동 조회(네이버 지역검색)
-        _rankbox = (f"<div class='{_fw} mt-5'>"
-                    "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>키워드 순위</h2>"
-                    "<p class='text-sm text-slate-400 mb-4'>네이버에서 이 검색어로 <b class='text-slate-600'>내 가게가 몇 위인지</b> — "
-                    "매일 자동으로 확인해요. (네이버 지역검색 기준 · 위치·기기별 차이 있음)</p>"
-                    "<div id='rankbox' class='text-sm'><div class='flex items-center gap-2 text-slate-400'>"
-                    "<div class='w-4 h-4 border-2 border-slate-200 border-t-indigo-500 rounded-full animate-spin'></div>조회 중…</div></div>"
-                    "<script>(async function(){var b=document.getElementById('rankbox');if(!b)return;"
-                    "try{var d=await (await fetch('/me/rank')).json();"
-                    "if(!d.configured){b.innerHTML='<span class=\"text-slate-400\">네이버 키가 설정되면 순위가 표시됩니다.</span>';return;}"
-                    "if(!d.items||!d.items.length){b.innerHTML='<span class=\"text-slate-400\">아직 타겟 키워드가 없어요 — 콘텐츠를 만들고, 발행한 글 주소를 등록하면(내 네이버 블로그 카드 참고) 그 글의 키워드가 자동으로 여기 편입돼요.</span>';return;}"
-                    "function st(it){var r=it.rank;return (r===null)?'<span class=\"text-slate-400\">조회불가</span>':(r>=1?('<span class=\"text-emerald-600 font-bold\">네이버 지역 '+r+'위</span>'):'<span class=\"text-slate-400\">5위 밖</span>');}"
-                    "function chg(it){var c=it.rank,p=it.prev;if(c===null)return '';if(p===null||p===undefined)return '<span class=\"text-indigo-500 text-xs font-bold ml-2\">첫 측정</span>';var cc=(c===0?6:c),pp=(p===0?6:p);if(cc<pp)return '<span class=\"text-emerald-600 text-xs font-bold ml-2\">⬆️ '+(pp-cc)+'계단</span>';if(cc>pp)return '<span class=\"text-rose-500 text-xs font-bold ml-2\">⬇️ '+(cc-pp)+'계단</span>';return '<span class=\"text-slate-400 text-xs ml-2\">— 유지</span>';}"
-                    "function riv(it){if(it.rank===1)return '<div class=\"text-xs text-emerald-600 mt-1 font-semibold\">이 키워드 1위!</div>';if(it.rank>1&&it.rival)return '<div class=\"text-xs text-amber-600 mt-1\"><b>'+it.rival+'</b>만 넘으면 '+(it.rank-1)+'위</div>';if((it.rank===0)&&it.leader)return '<div class=\"text-xs text-slate-400 mt-1\">현재 1위: '+it.leader+' — 콘텐츠 꾸준히 올리면 진입해요</div>';return '';}"
-                    "function bl(it){if(it.blog_rank===undefined)return '';var r=it.blog_rank,p=it.blog_prev,s;"
-                    "if(r===null)s='<span class=\"text-slate-400\">조회불가</span>';"
-                    "else if(r>=1)s='<span class=\"text-emerald-600 font-bold\">블로그탭 '+r+'위</span>'+(it.blog_url?' <a href=\"'+it.blog_url+'\" target=_blank class=\"text-xs text-slate-400\">↗</a>':'');"
-                    "else s='<span class=\"text-slate-400\">30위 밖</span>';"
-                    "var c='';if(r!==null&&p!==null&&p!==undefined){var cc=(r===0?31:r),pp=(p===0?31:p);"
-                    "if(cc<pp)c=' <span class=\"text-emerald-600 text-xs font-bold\">⬆️'+(pp-cc)+'</span>';else if(cc>pp)c=' <span class=\"text-rose-500 text-xs font-bold\">⬇️'+(cc-pp)+'</span>';}"
-                    "return '<div class=\"flex items-center justify-between mt-1\"><span class=\"text-xs text-slate-400\">내 블로그(정확 매칭)</span><span class=\"text-sm whitespace-nowrap\">'+s+c+'</span></div>';}"
-                    "b.innerHTML=d.items.map(function(it){return '<div class=\"border-b border-slate-100 py-2.5\"><div class=\"flex items-center justify-between\"><span class=\"text-slate-700 font-medium\">'+it.kw+'</span><span class=\"whitespace-nowrap\">'+st(it)+chg(it)+'</span></div>'+bl(it)+riv(it)+'</div>';}).join('')"
-                    "+(d.blog_connected?'':'<div class=\"mt-3 text-xs text-slate-400\"><a href=\"#blog\" class=\"font-bold text-emerald-600\">내 블로그를 연결</a>하면 블로그탭 순위도 정확히 추적해요.</div>');"
-                    "}catch(e){b.innerHTML='<span class=\"text-rose-400\">조회 실패</span>';}})();</script></div>")
+        _rankbox = ""    # (auto) 키워드 순위 UI 제거 — /me/rank는 엔진 내부용으로 유지
         # 🔁 상위노출 루프 진행상황(상위노출 PHASE 6) — 진단→타겟생성→발행일관성→순위변화 한눈에
         _loopbox = ""
         try:
@@ -1981,35 +1929,8 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                         + "</div></div>")
         except Exception:
             _loopbox = ""
-        # 🎯 진단→생성 연결(상위노출 PHASE 1): 놓치는 키워드 → '이 키워드 잡는 글 만들기'
+        # (auto) '놓치는 키워드' 섹션 제거 — 미노출 키워드는 자동 글감 큐(P2)가 처리한다.
         _missbox = ""
-        if (t.industry or "").strip():
-            import json as _json
-            _is_seller = (getattr(t, "biz_type", "local") or "local") == "seller"
-            _diag_payload = _json.dumps({
-                "industry": t.industry or "",
-                "region": "" if _is_seller else (t.region or ""),
-                "name": ((getattr(t, "brand_name", "") or t.name or "") if _is_seller else (t.name or "")),
-                "brand": (getattr(t, "brand_name", "") or "") if _is_seller else "",
-                "mode": "seller" if _is_seller else ""}, ensure_ascii=False)
-            _missbox = (f"<div class='{_fw} mt-5'>"
-                        "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>놓치는 키워드</h2>"
-                        "<p class='text-sm text-slate-400 mb-4'>이 검색어로 사람들이 찾는데 <b class='text-slate-600'>내 가게가 안 나와요</b> — "
-                        "버튼 누르면 그 검색어를 겨냥한 글을 만들어드려요.</p>"
-                        "<div id='missbox' class='text-sm'><div class='flex items-center gap-2 text-slate-400'>"
-                        "<div class='w-4 h-4 border-2 border-slate-200 border-t-amber-500 rounded-full animate-spin'></div>진단 중…</div></div>"
-                        f"<script>(async function(){{var b=document.getElementById('missbox');if(!b)return;var td={_diag_payload};"
-                        "try{var fd=new FormData();fd.append('industry',td.industry);fd.append('region',td.region);fd.append('name',td.name);"
-                        "if(td.mode)fd.append('mode',td.mode);if(td.brand)fd.append('brand',td.brand);"
-                        "var d=await (await fetch('/api/rank-check',{method:'POST',body:fd})).json();"
-                        "if(d.error){b.innerHTML='<span class=\"text-slate-400\">'+d.error+'</span>';return;}"
-                        "if(!d.targets||!d.targets.length){b.innerHTML='<span class=\"text-emerald-600 font-bold\">지금 잡을 미노출 키워드가 없어요 — 잡은 키워드를 유지·강화해요</span>';return;}"
-                        "b.innerHTML=d.targets.map(function(tg){var v=tg.volume?('<span class=\"text-xs text-slate-400 ml-1\">월 '+tg.volume.toLocaleString()+'회 검색</span>'):'';"
-                        "return '<div class=\"flex items-center justify-between bg-amber-50 rounded-xl px-3.5 py-2.5 mb-2\">"
-                        "<div><span class=\"font-bold text-slate-700\">'+tg.keyword+'</span>'+v+' <span class=\"text-xs text-amber-600 font-bold\">'+(d.miss_label||'미노출')+'</span></div>"
-                        "<a href=\"'+tg.make_href+'\" class=\"bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition whitespace-nowrap\">✍️ 이 키워드 잡는 글 만들기</a></div>';}).join('')"
-                        "+(d.missed_volume?'<div class=\"text-xs text-slate-400 mt-1\">미노출 키워드 합계 월 '+d.missed_volume.toLocaleString()+'회 검색을 놓치는 중이에요.</div>':'');"
-                        "}catch(e){b.innerHTML='<span class=\"text-rose-400\">진단 실패</span>';}})();</script></div>")
         # 🎯 성과 실측 — 추적 링크/QR로 '이 콘텐츠 보고 온 손님' 집계
         _tl = _ensure_track_link(t)
         _clicks = sum(int(l.get("clicks") or 0) for l in db.list_links(t.id))
@@ -2050,19 +1971,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                           f"<div class='flex-1 min-w-0'><div class='text-sm font-bold text-slate-700 truncate'>{_tt}</div>"
                           f"<div class='text-[11px] text-slate-400'>{_cl}</div></div>"
                           f"<span class='text-xl font-extrabold text-violet-600'>{rk['n']}<span class='text-xs text-slate-400 font-bold ml-0.5'>명</span></span></div>")
-            # 성과→학습 코칭(추적 P3): 1위 콘텐츠의 키워드·앵글 → 다음 글 방향 제안
-            _coach = ""
-            if _rank3 and _rank3[0]["n"] >= 3:
-                _b1 = db.find_piece_brief(t.id, _rank3[0]["content_id"]) or {}
-                _kw1 = (_b1.get("keywords") or [""])[0]
-                _ang1 = _b1.get("angle") or "review"
-                _ang_lab = {"review": "후기형", "howto": "방법형", "price": "가격형"}.get(_ang1, "")
-                if _kw1:
-                    from urllib.parse import quote as _q3
-                    _coach = ("<div class='flex items-center gap-3 bg-violet-50 border border-violet-100 rounded-xl px-3.5 py-2.5 mt-2'>"
-                              f"<div class='flex-1 text-sm text-violet-800'>{('<b>' + esc(_ang_lab) + '</b>·' if _ang_lab else '')}"
-                              f"<b>'{esc(_kw1)}'</b> 글이 잘 됐어요 — 다음 글도 이 방향 어때요?</div>"
-                              f"<a href='/me?target_kw={_q3(_kw1)}&angle={_ang1}' class='flex-shrink-0 bg-violet-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>이 방향으로 만들기</a></div>")
+            _coach = ""    # (auto) 코칭 배너 제거 — 잘 되는 방향은 글감 큐(P3)가 자동 굳히기
             _top3 = ((f"<div class='mb-4'><div class='text-sm font-bold text-slate-600 mb-1'>가장 손님 많이 데려온 콘텐츠 TOP {len(_rank3)}</div>{_rows}{_coach}</div>")
                      if _rank3 else
                      ("<div class='mb-4 bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm text-slate-500'>"
@@ -2092,9 +2001,11 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 + "</div>" + _visitor_box(t) + "</div>")
         except Exception:
             _perfbox = ""
-        main_inner = (_sbadge + stats_row + _loopbox + _missbox + _growth_card(t, _fw)
+        # (auto) 순위 성장(키워드 나열)·키워드 순위·최근 키워드 섹션 제거 — AI 내부 재료.
+        # 사장님에게는 '글의 결과'(내 네이버 블로그 글별 순위)와 손님 실측만 보여준다.
+        main_inner = (_sbadge + _ai_summary(t) + stats_row + _loopbox + _missbox
                       + _blog_connect_card(t, _fw) + _place_card(t, _fw)
-                      + _trackbox + _perfbox + _rankbox + _kwbox)
+                      + _trackbox + _perfbox)
     else:                                                 # ✨ 만들기 (기본) — 완성되면 여기(만들기 대시보드)에 결과 표시
         active = "create"
         _made = (request.query_params.get("made") or "").strip()
@@ -2360,7 +2271,7 @@ def _blog_connect_card(t, fw: str) -> str:
                              f"<div class='text-xs text-slate-400'>연속 {cons['streak_weeks']}주 발행{_gap}</div></div>"
                              f"<div class='flex items-end gap-2 h-14'>{_bars}</div>"
                              "<div class='text-[10px] text-slate-400 mt-1'>← 4주 전 · · 이번 주 →</div>"
-                             "<p class='text-xs text-slate-500 mt-2'>꾸준한 발행은 C-Rank '활동 지속성' 신호예요. "
+                             "<p class='text-xs text-slate-500 mt-2'>꾸준한 발행이 네이버 신뢰를 쌓아요. "
                              f"주 {cons['weekly_target']}회 페이스를 유지해 봐요. (무조건 상위 보장은 아니에요)</p></div>")
         except Exception:
             pass
@@ -2415,7 +2326,7 @@ def _blog_connect_card(t, fw: str) -> str:
                    if (_pid and _pc) else "")   # 진단은 글 품질(audit)이 있는 올린다 글만
             race_btn = (f"<button type=button onclick=\"raceView('{_pid}',this)\" "
                         "class='text-[11px] font-bold text-violet-600 border border-violet-200 hover:bg-violet-50 "
-                        "px-2.5 py-1 rounded-lg transition whitespace-nowrap'>생존 신고</button>" if _pid else "")
+                        "px-2.5 py-1 rounded-lg transition whitespace-nowrap'>순위 추적</button>" if _pid else "")
             return (f"<div class='border-b border-slate-100 py-2'>"
                     f"<div class='flex items-center justify-between gap-2'>"
                     f"<a href='{esc(p.get('published_url') or '')}' target=_blank rel=noopener class='text-sm text-slate-700 font-medium truncate'>"
@@ -2485,12 +2396,12 @@ def _blog_connect_card(t, fw: str) -> str:
                 "btn.disabled=false;}"
                 # 생존 신고(생존신고 P3) — 발행→색인→진입→현재→다음 관문 타임라인
                 "async function raceView(pid,btn){var box=document.getElementById('race_'+pid);if(!box)return;"
-                "if(box.innerHTML){box.innerHTML='';btn.textContent='생존 신고';return;}"
+                "if(box.innerHTML){box.innerHTML='';btn.textContent='순위 추적';return;}"
                 "btn.disabled=true;btn.textContent='실측 중…';"
                 "try{var r=await fetch('/api/race/'+pid);var d=await r.json();"
-                "if(d.error){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">'+d.error+'</div>';btn.textContent='생존 신고';}"
-                "else{box.innerHTML=d.html;btn.textContent='실황 닫기';}"
-                "}catch(e){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">실측 실패 — 잠시 후 다시</div>';btn.textContent='생존 신고';}"
+                "if(d.error){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">'+d.error+'</div>';btn.textContent='순위 추적';}"
+                "else{box.innerHTML=d.html;btn.textContent='추적 닫기';}"
+                "}catch(e){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">실측 실패 — 잠시 후 다시</div>';btn.textContent='순위 추적';}"
                 "btn.disabled=false;}"
                 "</script></div>")
     return (f"<div id='blog' class='{fw} mt-5'>"
@@ -2823,6 +2734,30 @@ def _visitor_box(t) -> str:
               "(쿠키를 지우면 추적되지 않아요). 지역은 국가 단위까지만 봅니다.</p></div>")
 
 
+def _ai_summary(t) -> str:
+    """(auto 3-3) AI 활동 요약 한 줄 — 실측 집계만(이번 주 준비 글 수·1페이지 글 수). 키워드명 없음."""
+    try:
+        import datetime as _dt
+        week_ago = (_dt.datetime.utcnow() - _dt.timedelta(days=7)).isoformat()
+        n = 0
+        for s in db.list_sets(tenant_id=t.id, limit=30):
+            ps = db.get_set_pieces(s["asset_id"])
+            for p in ps:
+                if p.kind.value == "blog" and (getattr(p, "created_at", "") or s.get("created") or "") >= week_ago[:10]:
+                    n += 1
+                    break
+        from app.services import mass as _m
+        ev = _m.evidence(t)
+        m = ev.get("first_page") or 0
+        if not (n or m):
+            return ""
+        return ("<div class='bg-violet-50 border border-violet-100 rounded-2xl px-4 py-3 mb-5 text-sm text-violet-800'>"
+                f"이번 주 AI가 글 <b>{n}개</b>를 준비했고, 발행 글 중 <b>{m}개</b>가 1페이지에 있어요. "
+                "<span class='text-violet-500 text-xs'>(실측 기준 · 다음 글감도 자동으로 준비 중)</span></div>")
+    except Exception:
+        return ""
+
+
 def _guide_card(t) -> str:
     """첫 사용자 3스텝 온보딩(온보딩 P1) — ①첫 콘텐츠 ②네이버 발행 ③QR·링크 붙이기.
     완료 상태는 실데이터로 판정(체크 저장 불필요·정직). 다 하면 브리핑 안내, '다음에 하기'로 숨김."""
@@ -2889,29 +2824,18 @@ def api_whynot(piece_id: str, request: Request):
                  f"<span class='{cls} mt-0.5 flex-shrink-0'>{_ic(ic, 'w-4 h-4')}</span>"
                  f"<div><div class='text-sm font-bold text-slate-700'>{esc(ck['title'])}</div>"
                  f"<div class='text-xs text-slate-500'>{esc(ck['detail'])}</div></div></div>")
-    rx = ""
-    for p in d["prescriptions"]:
-        if p.get("enrich"):
-            # 처방 실행형(rx P2): 빠진 정보 한 줄 → 그 글 자체를 재작성(보강) — 분석에서 멈추지 않는다
-            _eid = esc(p["enrich"])
-            rx += (f"<div class='bg-indigo-50 border border-indigo-100 rounded-xl px-3.5 py-2.5 mt-2'>"
-                   f"<div class='text-sm text-slate-700'>{esc(p['text'])}</div>"
-                   f"<div class='flex gap-2 mt-2'>"
-                   f"<input id='enr_{_eid}' placeholder='빠진 실제 정보 (예: 시공 1시간 30분, 보증 5년)' "
-                   "class='flex-1 min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400'>"
-                   f"<button type=button onclick=\"enrichPiece('{_eid}',this)\" "
-                   "class='flex-shrink-0 bg-indigo-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>보강 실행</button></div>"
-                   f"<div id='enrmsg_{_eid}' class='text-xs mt-1.5'></div></div>")
-        else:
-            rx += (f"<div class='flex items-center gap-3 bg-indigo-50 border border-indigo-100 rounded-xl px-3.5 py-2.5 mt-2'>"
-                   f"<div class='flex-1 text-sm text-slate-700'>{esc(p['text'])}</div>"
-                   f"<a href='{esc(p['href'])}' class='flex-shrink-0 bg-indigo-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>{esc(p['label'])}</a></div>")
+    # (auto) 처방은 유저 버튼 없이 글감 큐가 자동 실행 — 문구만 결과로 보여준다
+    rx = "".join(
+        f"<div class='bg-indigo-50 border border-indigo-100 rounded-xl px-3.5 py-2.5 mt-2'>"
+        f"<div class='text-sm text-slate-700'>{esc(p['text'])}</div>"
+        "<div class='text-[11px] font-bold text-violet-500 mt-1'>→ AI가 다음 글감에 자동 반영해요 (따로 누를 건 없어요)</div></div>"
+        for p in d["prescriptions"])
     head = ("이미 노출되고 있어요 — 굳히기가 다음 수예요" if d["exposed"]
             else f"'{esc(d['kw'])}'가 아직 안 뜨는 이유")
     html = (f"<div class='bg-white border border-slate-200 rounded-2xl p-4 mt-2'>"
             f"<div class='text-sm font-extrabold text-slate-800 mb-2'>{head}</div>"
             + rows
-            + "<div class='text-xs font-bold text-slate-500 mt-3 mb-1'>처방전 — 뜨게 하는 법</div>" + rx
+            + "<div class='text-xs font-bold text-slate-500 mt-3 mb-1'>AI가 이렇게 대응 중이에요</div>" + rx
             + f"<p class='text-[11px] text-slate-400 mt-2.5'>{esc(d['note'])}</p></div>")
     return JSONResponse({"ok": True, "html": html, "exposed": d["exposed"]})
 
@@ -2958,7 +2882,7 @@ def api_race(piece_id: str, request: Request):
                       f"<span class='text-[9px] text-slate-400'>{esc(h['at'][5:])}</span></div>")
         bars = f"<div class='flex items-end gap-1.5 mt-2 overflow-x-auto'>{cells}</div>"
     html = (f"<div class='bg-white border border-slate-200 rounded-2xl p-4 mt-2'>"
-            f"<div class='text-sm font-extrabold text-slate-800 mb-2.5'>'{esc(d['kw'])}' 생존 신고 — {d['days']}일차</div>"
+            f"<div class='text-sm font-extrabold text-slate-800 mb-2.5'>'{esc(d['kw'])}' 순위 추적 — {d['days']}일차</div>"
             + rows + scout + bars
             + f"<button type=button onclick=\"analystView('{esc(piece_id)}',this)\" "
             "class='mt-2.5 text-[11px] font-bold text-violet-600 border border-violet-200 hover:bg-violet-50 "
@@ -2969,135 +2893,10 @@ def api_race(piece_id: str, request: Request):
 
 
 # ══ 대량 발행 — 승률 키워드 → 배치 생성 → 스케줄 → 증거(mass P1~P6) ══
-@app.get("/me/mass", response_class=HTMLResponse)
+@app.get("/me/mass")
 def mass_page(request: Request):
-    """대량 발행 대시보드 — 승률 키워드 발굴/배치 생성/발행 스케줄/상위노출 증거."""
-    u = auth.current_user(request)
-    if not u:
-        return RedirectResponse("/login", status_code=303)
-    t = _ensure_user_tenant(u)
-    from app.industries import resolve_industry
-    from app.services import mass
-    prof = resolve_industry(t.industry or "")
-    # P6 증거(실측)
-    ev = mass.evidence(t)
-    case_cards = "".join(
-        f"<div class='bg-white border border-emerald-100 rounded-2xl p-4 text-center'>"
-        f"<div class='text-xs text-slate-400 truncate'>{esc(c['title'] or c['keyword'])}</div>"
-        f"<div class='text-lg font-extrabold text-slate-900 mt-1'>'{esc(c['keyword'])}'</div>"
-        f"<div class='text-emerald-600 font-extrabold text-2xl mt-1'>"
-        + (f"발행 {c['days']}일 만에 " if c.get("days") is not None else "") + f"{c['best']}위</div>"
-        f"<div class='text-[10px] text-slate-400 mt-1'>블로그검색 실측 · 위치·기기별 차이</div></div>"
-        for c in ev["cases"][:3])
-    ev_html = (
-        "<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6 mb-5'>"
-        "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>상위노출 증거</h2>"
-        "<p class='text-sm text-slate-400 mb-4'>전부 생존신고 실측 기준 — 추정치 없음. 1페이지 = 블로그검색 10위 안.</p>"
-        "<div class='grid grid-cols-3 gap-4 text-center mb-4'>"
-        f"<div><div class='text-3xl font-extrabold text-slate-900'>{ev['published']}</div><div class='text-xs text-slate-400 font-bold mt-1'>발행 추적</div></div>"
-        f"<div><div class='text-3xl font-extrabold text-emerald-600'>{ev['first_page']}</div><div class='text-xs text-slate-400 font-bold mt-1'>1페이지 진입</div></div>"
-        f"<div><div class='text-3xl font-extrabold text-violet-600'>{ev['avg_days'] if ev['avg_days'] is not None else '—'}</div><div class='text-xs text-slate-400 font-bold mt-1'>평균 진입일</div></div></div>"
-        + (f"<div class='grid sm:grid-cols-3 gap-3'>{case_cards}</div>" if case_cards else
-           "<p class='text-sm text-slate-400'>아직 1페이지 진입 사례가 없어요 — 아래에서 승률 키워드로 발행을 쌓으면 여기 채워져요.</p>")
-        + "</div>")
-    # 최신 배치 + 스케줄
-    batches = db.list_keyword_batches(t.id, limit=1)
-    b = batches[0] if batches else None
-    axis_now = (getattr(t, "topic_axis", "") or "").strip()
-    axis_sug = mass.suggest_axis(t, prof, (b or {}).get("items") if b else None)
-    rows_html, sched_html = "", ""
-    if b:
-        for it in b["items"]:
-            st = it.get("status") or "candidate"
-            st_badge = {"candidate": "", "generating": "<span class='text-[10px] font-bold text-amber-600'>생성 중…</span>",
-                        "ready": "<span class='text-[10px] font-bold text-emerald-600'>글 준비됨</span>",
-                        "needs_fix": "<span class='text-[10px] font-bold text-amber-600'>보완 권장</span>",
-                        "failed": "<span class='text-[10px] font-bold text-rose-500'>실패</span>"}.get(st, "")
-            chk = (f"<input type=checkbox name=keywords value=\"{esc(it['keyword'])}\" class='accent-indigo-600'>"
-                   if st == "candidate" else "")
-            kit = (f"<a href='/kit/{esc(it.get('asset_id') or '')}/naver' class='text-[11px] font-bold text-indigo-600 underline'>발행 소재</a>"
-                   if it.get("asset_id") else "")
-            rows_html += (
-                "<tr class='border-b border-slate-100'>"
-                f"<td class='py-2 pr-1'>{chk}</td>"
-                f"<td class='py-2 text-sm font-semibold text-slate-700'>{esc(it['keyword'])}"
-                + (" <span class='text-[10px] font-bold text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded-full'>TOP10</span>" if it.get("top10") else "")
-                + f"</td><td class='py-2 text-xs text-slate-500 whitespace-nowrap'>월 {it['volume']:,}회</td>"
-                f"<td class='py-2 text-xs whitespace-nowrap'>{esc(it['difficulty'])}</td>"
-                f"<td class='py-2 text-xs font-bold text-indigo-600 whitespace-nowrap'>{it['win']}%</td>"
-                f"<td class='py-2 text-[11px] text-slate-400'>{esc(it.get('note') or '')}</td>"
-                f"<td class='py-2 text-right whitespace-nowrap'>{st_badge} {kit}"
-                + (f"<div class='text-[10px] text-slate-400'>{esc(it.get('scheduled_date') or '')}</div>" if it.get("scheduled_date") else "")
-                + "</td></tr>")
-        sched = {}
-        for it in b["items"]:
-            if it.get("scheduled_date"):
-                sched.setdefault(it["scheduled_date"], []).append(it)
-        if sched:
-            sched_html = ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6 mt-5'>"
-                          "<h2 class='text-xl font-extrabold text-slate-900 mb-1'>발행 스케줄 (하루 1~2개 분산)</h2>"
-                          "<p class='text-xs text-slate-400 mb-3'>한 번에 몰아 올리면 어뷰징으로 의심받아요 — 매일 꾸준히가 C-Rank에도 유리해요. 발행 후 URL은 자동 추적돼요.</p>"
-                          + "".join(
-                              f"<div class='flex items-center gap-2 py-1.5 border-b border-slate-100'>"
-                              f"<span class='text-xs font-bold text-slate-500 w-24'>{esc(d)}</span>"
-                              + " ".join(f"<span class='text-sm text-slate-700'>'{esc(x['keyword'])}'</span>"
-                                         + (f" <a href='/kit/{esc(x.get('asset_id') or '')}/naver' class='text-[11px] font-bold text-indigo-600 underline'>복붙 발행 →</a>" if x.get("asset_id") else "")
-                                         for x in xs)
-                              + "</div>" for d, xs in sorted(sched.items())) + "</div>")
-    mine_html = (
-        "<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6'>"
-        "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>승률 키워드 대량 발굴</h2>"
-        "<p class='text-sm text-slate-400 mb-1'>실검색량(searchad)·경쟁도·상위 글 나이로 '검색량 있고 경쟁 약한' 롱테일을 골라요.</p>"
-        "<p class='text-xs text-slate-400 mb-4'>※ 승률은 <b class='text-slate-600'>예상치</b>예요 — 보장이 아니고, 1페이지 진입은 보통 2~4주 이상 걸려요.</p>"
-        "<div class='flex gap-2 mb-4'>"
-        f"<input id='m_ind' value=\"{esc(t.industry or '')}\" placeholder='업종 (예: 썬팅, 꽃집)' class='flex-1 min-w-0 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-indigo-400'>"
-        "<button type=button onclick='massMine(this)' class='bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold px-5 py-3 rounded-xl transition whitespace-nowrap'>발굴하기</button></div>"
-        "<div id='m_msg' class='text-sm text-slate-500 mb-2'></div>"
-        + (("<form id='massGen'>"
-            f"<input type=hidden name=batch_id value='{esc(b['id'])}'>"
-            "<div class='overflow-x-auto'><table class='w-full text-left'>"
-            "<thead><tr class='text-[11px] text-slate-400 border-b border-slate-200'>"
-            "<th class='py-1.5'></th><th>키워드</th><th>검색량</th><th>난이도</th><th>승률(예상)</th><th>메모</th><th></th></tr></thead>"
-            f"<tbody>{rows_html}</tbody></table></div>"
-            "<div class='flex items-center gap-2 mt-4 flex-wrap'>"
-            "<input type=file name=photos multiple accept='image/*' class='text-xs'>"
-            "<button type=button onclick='massGen(this)' class='bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold px-5 py-3 rounded-xl transition'>선택 키워드로 배치 생성 (최대 5개)</button>"
-            "<span class='text-xs text-slate-400'>서로 다른 롱테일·앵글로 쓰고 유사문서를 걸러요 · 글당 1~2분</span></div>"
-            "<div id='g_msg' class='text-sm mt-2'></div></form>") if b else
-           "<p class='text-sm text-slate-400'>발굴하면 여기 결과 테이블이 나와요.</p>")
-        + "</div>")
-    axis_html = (
-        "<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6 mt-5'>"
-        "<h2 class='text-xl font-extrabold text-slate-900 mb-1'>전문 주제 축 (C-Rank)</h2>"
-        "<p class='text-xs text-slate-400 mb-3'>네이버는 '한 주제를 꾸준히 쓰는 블로그'를 신뢰해요 — 발굴 키워드에서 축을 뽑아드려요.</p>"
-        f"<div class='flex items-center gap-2 flex-wrap'><span class='text-sm text-slate-600'>현재 축: <b>{esc(axis_now) or '미설정'}</b></span>"
-        + ((f"<form method=post action='/me/topic-axis' class='flex items-center gap-2'>"
-            f"<input type=hidden name=axis value=\"{esc(axis_sug)}\">"
-            f"<span class='text-sm text-violet-700 font-bold'>제안: '{esc(axis_sug)}'</span>"
-            "<button class='bg-violet-600 text-white text-xs font-bold px-3 py-2 rounded-xl'>이 축으로 설정</button></form>")
-           if axis_sug and axis_sug != axis_now else "")
-        + "</div></div>")
-    js = ("<script>"
-          "async function massMine(btn){var m=document.getElementById('m_msg');btn.disabled=true;"
-          "m.textContent='발굴 중… (10~30초, 실검색량 조회)';"
-          "try{var fd=new FormData();fd.append('industry',document.getElementById('m_ind').value);"
-          "var r=await fetch('/api/mass/mine',{method:'POST',body:fd});var d=await r.json();"
-          "if(d.error){m.textContent=d.error;btn.disabled=false;return;}"
-          "m.textContent='✅ '+d.items.length+'개 발굴!';setTimeout(function(){location.reload();},700);"
-          "}catch(e){m.textContent='발굴 실패 — 잠시 후 다시';btn.disabled=false;}}"
-          "async function massGen(btn){var f=document.getElementById('massGen');var g=document.getElementById('g_msg');"
-          "var n=f.querySelectorAll('input[name=keywords]:checked').length;"
-          "if(!n){g.textContent='키워드를 선택해주세요 (체크박스)';return;}"
-          "btn.disabled=true;g.textContent='배치 생성 시작 중…';"
-          "try{var r=await fetch('/api/mass/generate',{method:'POST',body:new FormData(f)});var d=await r.json();"
-          "if(d.error){g.textContent=d.error;btn.disabled=false;return;}"
-          "g.textContent=d.message;setTimeout(function(){location.reload();},2500);"
-          "}catch(e){g.textContent='시작 실패 — 잠시 후 다시';btn.disabled=false;}}"
-          "</script>")
-    inner = ("<a href='/me' class='text-sm text-slate-500 font-bold'>← 내 작업실</a>"
-             "<h1 class='text-2xl font-extrabold mt-2 mb-4'>대량 발행 · 상위노출 증거</h1>"
-             + ev_html + mine_html + axis_html + sched_html + js)
-    return _subscriber_page("대량 발행", inner)
+    """(auto) 발굴·배치 UI 제거 — 키워드·승률은 AI 내부 재료. 엔진(mine/generate)은 큐가 내부 호출."""
+    return RedirectResponse("/me?tab=report", status_code=303)
 
 
 @app.post("/api/mass/mine")
@@ -3188,19 +2987,19 @@ def api_analyst(piece_id: str, request: Request):
     from app.services import analyst
     d = analyst.analyze(t, piece, pub)
     rank_txt = f"{d['rank']}위" if d.get("rank") else "10위 밖"
-    gap_rows = ""
-    for g in d["gaps"]:
-        gap_rows += (f"<div class='bg-indigo-50 border border-indigo-100 rounded-xl px-3.5 py-2.5 mt-2'>"
-                     f"<div class='text-[11px] font-bold text-indigo-500 mb-0.5'>실측: {esc(g['why'])}</div>"
-                     f"<div class='flex items-center gap-3'><div class='flex-1 text-sm text-slate-700'>{esc(g['text'])}</div>"
-                     f"<a href='{esc(g['href'])}' class='flex-shrink-0 bg-indigo-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>{esc(g['label'])}</a></div></div>")
+    gap_rows = "".join(
+        f"<div class='bg-indigo-50 border border-indigo-100 rounded-xl px-3.5 py-2.5 mt-2'>"
+        f"<div class='text-[11px] font-bold text-indigo-500 mb-0.5'>실측: {esc(g['why'])}</div>"
+        f"<div class='text-sm text-slate-700'>{esc(g['text'])}</div>"
+        "<div class='text-[11px] font-bold text-violet-500 mt-1'>→ AI가 다음 글감에 자동 반영해요</div></div>"
+        for g in d["gaps"])
     _sec = lambda title, body: ((f"<div class='mt-2.5'><div class='text-xs font-bold text-slate-500 mb-0.5'>{title}</div>"
                                  f"<div class='text-sm text-slate-700'>{esc(body)}</div></div>") if body else "")
     html = (f"<div class='bg-white border border-violet-200 rounded-2xl p-4 mt-2'>"
             f"<div class='text-sm font-extrabold text-slate-800'>AI 순위 분석 — '{esc(d['kw'])}' 현재 {rank_txt}</div>"
             + _sec("왜 이 순위까지 왔나", d.get("why_here"))
             + _sec("왜 1위가 아닌가", d.get("why_not_first"))
-            + "<div class='text-xs font-bold text-slate-500 mt-3 mb-0.5'>어떻게 이기나 — 격차별 처방</div>" + gap_rows
+            + "<div class='text-xs font-bold text-slate-500 mt-3 mb-0.5'>어떻게 이기나 — AI가 자동 대응</div>" + gap_rows
             + f"<p class='text-[11px] text-slate-400 mt-2.5'>{esc(d['note'])}</p></div>")
     return JSONResponse({"ok": True, "html": html})
 
@@ -3310,7 +3109,7 @@ def _calendar_card(t, plan: str) -> str:
     axis = esc(getattr(t, "topic_axis", "") or "")
     inp = "flex-1 border border-slate-200 rounded-xl px-3 py-2 text-sm"
     axis_form = ("<details class='mt-2'><summary class='text-xs text-slate-400 cursor-pointer select-none'>"
-                 f"전문 주제 축 {('· <b class=\"text-slate-600\">' + axis + '</b>') if axis else '설정(권장)'} — 같은 주제 꾸준함이 C-Rank 신호</summary>"
+                 f"전문 주제 축 {('· <b class=\"text-slate-600\">' + axis + '</b>') if axis else '설정(권장)'} — 같은 주제 꾸준함이 노출 신호</summary>"
                  "<form method=post action='/me/topic-axis' class='flex gap-2 mt-2'>"
                  f"<input name=topic_axis value=\"{axis}\" placeholder='예: 부산 썬팅, 열차단 필름 (쉼표로 여러 개)' class='{inp}'>"
                  "<button class='px-4 bg-slate-900 text-white rounded-xl text-xs font-bold'>저장</button></form></details>")
@@ -3982,7 +3781,7 @@ def _internal_link_box(blog, sec: str) -> str:
         f"<a href='{esc(r['url'])}' target=_blank rel=noopener class='text-xs text-indigo-500 font-bold whitespace-nowrap ml-2'>보기 ↗</a></div>"
         for r in rel[:3])
     return (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>내부링크 — 같은 주제 내 글과 연결 "
-            "<span class='text-emerald-600'>(주제 응집도 = C-Rank 신호)</span></div>"
+            "<span class='text-emerald-600'>(같은 주제 글끼리 서로 도움)</span></div>"
             "<p class='text-xs text-slate-500 mb-2'>발행할 때 본문 끝에 아래 글 링크를 넣어보세요. 같은 주제 글끼리 연결되면 "
             "블로그의 주제 전문성이 쌓여요.</p>" + rows +
             f"<textarea id='nvRel' class='hidden'>{esc(links_text)}</textarea>"
