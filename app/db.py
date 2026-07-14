@@ -1241,6 +1241,46 @@ def daily_click_series(tenant_id: str, days: int = 7) -> list[dict]:
     return out
 
 
+# ── 승률 키워드 배치(대량 P1·P3·P4) ──────────────────────────
+def save_keyword_batch(bid: str, tenant_id: str, industry: str, items: list) -> None:
+    with _conn() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS keyword_batches("
+                  "id TEXT PRIMARY KEY, tenant_id TEXT, industry TEXT, items TEXT, created_at TEXT)")
+        ex = c.execute("SELECT created_at FROM keyword_batches WHERE id=?", (bid,)).fetchone()
+        c.execute("INSERT OR REPLACE INTO keyword_batches(id, tenant_id, industry, items, created_at) "
+                  "VALUES(?,?,?,?,?)",
+                  (bid, tenant_id, industry, json.dumps(items, ensure_ascii=False),
+                   (ex["created_at"] if ex else _now())))
+
+
+def get_keyword_batch(bid: str) -> Optional[dict]:
+    try:
+        with _conn() as c:
+            r = c.execute("SELECT * FROM keyword_batches WHERE id=?", (bid,)).fetchone()
+        if not r:
+            return None
+        d = dict(r)
+        d["items"] = json.loads(d.get("items") or "[]")
+        return d
+    except Exception:
+        return None
+
+
+def list_keyword_batches(tenant_id: str, limit: int = 5) -> list[dict]:
+    try:
+        with _conn() as c:
+            rows = c.execute("SELECT * FROM keyword_batches WHERE tenant_id=? "
+                             "ORDER BY created_at DESC LIMIT ?", (tenant_id, limit)).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["items"] = json.loads(d.get("items") or "[]")
+            out.append(d)
+        return out
+    except Exception:
+        return []
+
+
 def visitor_stats(tenant_id: str, days: int = 30) -> dict:
     """익명 방문자 특성 요약(방문자 B1·B2) — 전부 link_clicks 행 기반, 신원 정보 없음.
     반환: {total, device:{mobile,pc}, top_hour_band, top_channel, top_region,
