@@ -1241,6 +1241,81 @@ def daily_click_series(tenant_id: str, days: int = 7) -> list[dict]:
     return out
 
 
+# ── 자동 글감 큐(auto P1~P4) — AI가 판단한 다음 글감. 유저 버튼 없이 엔진이 소비 ──
+def enqueue_writing(tenant_id: str, source_type: str, keyword: str, angle: str = "review",
+                    reason: str = "") -> bool:
+    """큐 적재 — dedupe_key(tenant|keyword|source) UNIQUE로 중복 차단. 적재됐으면 True."""
+    keyword = " ".join((keyword or "").split())
+    if not keyword:
+        return False
+    dk = f"{tenant_id}|{keyword}|{source_type}"
+    try:
+        with _conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS writing_queue("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, source_type TEXT, "
+                      "target_keyword TEXT, angle TEXT, reason TEXT, status TEXT DEFAULT 'pending', "
+                      "dedupe_key TEXT UNIQUE, piece_id TEXT, attempts INTEGER DEFAULT 0, created_at TEXT)")
+            cur = c.execute("INSERT OR IGNORE INTO writing_queue"
+                            "(tenant_id, source_type, target_keyword, angle, reason, status, dedupe_key, created_at) "
+                            "VALUES(?,?,?,?,?,?,?,?)",
+                            (tenant_id, source_type, keyword, angle, reason[:300], "pending", dk, _now()))
+            return cur.rowcount > 0
+    except Exception:
+        return False
+
+
+def claim_writing(tenant_id: str) -> Optional[dict]:
+    """pending 1건을 P1→P2→P3→P4 순으로 원자적 클레임(status→generating).
+    UPDATE ... RETURNING(SQLite 3.35+) — 동시 요청에도 이중 소비 없음."""
+    try:
+        with _conn() as c:
+            r = c.execute(
+                "UPDATE writing_queue SET status='generating' WHERE id=("
+                "  SELECT id FROM writing_queue WHERE tenant_id=? AND status='pending' "
+                "  ORDER BY source_type ASC, created_at ASC LIMIT 1) RETURNING *",
+                (tenant_id,)).fetchone()
+        return dict(r) if r else None
+    except Exception:
+        return None
+
+
+def mark_writing(qid: int, status: str, piece_id: str = "", reason_append: str = "") -> None:
+    try:
+        with _conn() as c:
+            if reason_append:
+                c.execute("UPDATE writing_queue SET status=?, piece_id=?, reason=reason || ' | ' || ? WHERE id=?",
+                          (status, piece_id, reason_append[:150], qid))
+            else:
+                c.execute("UPDATE writing_queue SET status=?, piece_id=? WHERE id=?", (status, piece_id, qid))
+    except Exception:
+        pass
+
+
+def rollback_writing(qid: int, max_attempts: int = 2) -> None:
+    """생성 실패 롤백 — attempts+1, 상한 도달 시 skipped(재시도 폭주 금지)."""
+    try:
+        with _conn() as c:
+            c.execute("UPDATE writing_queue SET attempts=attempts+1, "
+                      "status=CASE WHEN attempts+1 >= ? THEN 'skipped' ELSE 'pending' END WHERE id=?",
+                      (max_attempts, qid))
+    except Exception:
+        pass
+
+
+def writing_queue_rows(tenant_id: str, status: str = "", limit: int = 30) -> list[dict]:
+    try:
+        with _conn() as c:
+            if status:
+                rows = c.execute("SELECT * FROM writing_queue WHERE tenant_id=? AND status=? "
+                                 "ORDER BY source_type, created_at LIMIT ?", (tenant_id, status, limit)).fetchall()
+            else:
+                rows = c.execute("SELECT * FROM writing_queue WHERE tenant_id=? "
+                                 "ORDER BY source_type, created_at LIMIT ?", (tenant_id, limit)).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
 # ── 승률 키워드 배치(대량 P1·P3·P4) ──────────────────────────
 def save_keyword_batch(bid: str, tenant_id: str, industry: str, items: list) -> None:
     with _conn() as c:

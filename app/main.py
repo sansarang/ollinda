@@ -2140,6 +2140,18 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                     for d in _due if d.get("asset_id"))
             except Exception:
                 pass
+            if not _due_html:
+                try:
+                    from app.services import autoqueue as _aq2
+                    _st = _aq2.state(t)
+                    if _st.get("need_photos"):
+                        _due_html = ("<div class='flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-5'>"
+                                     f"<span class='text-amber-500'>{_ic('camera', 'w-5 h-5 flex-shrink-0')}</span>"
+                                     "<div class='flex-1 text-sm text-amber-800'>다음 글감은 준비됐는데 <b>쓸 사진이 없어요</b> — "
+                                     "사진 3장만 올려주시면 글은 AI가 알아서 써둘게요.</div>"
+                                     "<a href='/me#makebox' class='flex-shrink-0 bg-amber-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>사진 올리기</a></div>")
+                except Exception:
+                    pass
             main_inner = (greeting + _upsell + _due_html + _guide_card(t) + _briefing_card(t, _plan) + _notice_html
                           + _calendar_card(t, _plan)
                           + _blog_nudge + upload_section
@@ -5888,6 +5900,26 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
     def _bg_generate():
         try:
             _prune_old_media(tenant.id, keep_recent=5)   # 생성 전 오래된 영상 정리(디스크 확보)
+            # 자동 글감(auto): 타겟 미지정 업로드면 큐가 다음 글감(키워드·앵글)을 결정한다
+            nonlocal target_kw, angle
+            _q_claim = None
+            if not (target_kw or "").strip():
+                try:
+                    from app.services import autoqueue as _aq
+                    from app import db as _db2
+                    if not _db2.writing_queue_rows(tenant.id, status="pending", limit=1):
+                        _aq.refill(tenant)
+                    _q_claim = _db2.claim_writing(tenant.id)
+                    if _q_claim:
+                        target_kw = _q_claim["target_keyword"]
+                        if _q_claim.get("angle") in ("review", "howto", "price"):
+                            angle = _q_claim["angle"]
+                        import logging as _lg
+                        _lg.getLogger("shopcast.autoqueue").info(
+                            "[autoqueue] 업로드 소비 %s t=%s kw=%r reason=%s",
+                            _q_claim["source_type"], tenant.id, target_kw, _q_claim["reason"])
+                except Exception:
+                    _q_claim = None
             if _ind:
                 from app.industries import ensure_profile
                 ensure_profile(_ind)
@@ -5896,10 +5928,21 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
                        "analysis": (vision_analysis or "").strip()[:4000],
                        "answers": _si.parse_answers(answers),
                        "experience": experience.strip()[:200]}
-            made = ingest_upload(tenant, files, full_note,
+            _note2 = full_note
+            if _q_claim and "근소격차" in (_q_claim.get("reason") or ""):
+                _note2 += ("\n[경쟁 격차 공략] 바로 위 경쟁 글보다 더 구체적인 실측·경험·사진 설명을 담아라. "
+                           "같은 의도를 더 정확히 충족하는 글이 이긴다(비방 금지).")
+            made = ingest_upload(tenant, files, _note2,
                                  target_kw=target_kw.strip()[:40],
                                  angle=(angle.strip() if angle.strip() in ("review", "howto", "price") else ""),
                                  intake=_intake)
+            if made and _q_claim:
+                _bp = next((p for p in made if p.kind.value == "blog"), None)
+                from app import db as _db3
+                _db3.mark_writing(_q_claim["id"], "done", piece_id=(_bp.id if _bp else ""))
+            elif _q_claim:
+                from app import db as _db3
+                _db3.rollback_writing(_q_claim["id"])
             if not made:
                 _refund_usage(owner)               # 생성 결과 없음 → 예약 원복
         except Exception:

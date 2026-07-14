@@ -101,6 +101,16 @@ def _rank_track() -> None:
         race.track_all_publishes()
     except Exception:
         logging.exception("[scheduler] 발행 글 실황 추적 실패")
+    try:      # 자동 글감 큐 적재(auto) — 스냅샷 갱신 직후 P1~P4 소스로 채움
+        from app.services import autoqueue
+        autoqueue.refill_all()
+    except Exception:
+        logging.exception("[scheduler] 글감 큐 적재 실패")
+    try:      # 발행 슬롯 공백 자동 채움(auto) — 유료 플랜만, tenant당 1글
+        from app.services import autoqueue
+        autoqueue.slot_fill_all()
+    except Exception:
+        logging.exception("[scheduler] 슬롯 자동 채움 실패")
 
 
 def _publish_reminder() -> None:

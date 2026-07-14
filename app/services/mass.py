@@ -306,7 +306,8 @@ def generate_batch(t, batch_id: str, keywords: list[str], files: list, note: str
 
 
 def due_today(t) -> list[dict]:
-    """P4 — 오늘 발행 예정(복붙 안내용). [{keyword, piece_id, asset_id}]."""
+    """P4 — 오늘 발행 예정(복붙 안내용). 배치 생성분 + 자동 글감 큐 생성분(payload.scheduled_date).
+    [{keyword, piece_id, asset_id}]."""
     today = datetime.utcnow().date().isoformat()
     out = []
     for b in db.list_keyword_batches(t.id, limit=5):
@@ -315,6 +316,17 @@ def due_today(t) -> list[dict]:
                     and it.get("piece_id") and not db.get_blog_publish(it["piece_id"]):
                 out.append({"keyword": it["keyword"], "piece_id": it["piece_id"],
                             "asset_id": it.get("asset_id", "")})
+    for row in db.writing_queue_rows(t.id, status="done", limit=20):
+        pid = row.get("piece_id") or ""
+        if not pid or db.get_blog_publish(pid):
+            continue
+        piece = db.get_piece(pid)
+        if not piece:
+            continue
+        sd = (piece.payload or {}).get("scheduled_date") or ""
+        if sd and sd <= today:                        # 밀린 예정분도 오늘 카드로(방치 방지)
+            out.append({"keyword": row.get("target_keyword") or "", "piece_id": pid,
+                        "asset_id": piece.asset_id})
     return out[:2]
 
 
