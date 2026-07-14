@@ -33,7 +33,8 @@ def test_seller_gets_shop_signals_not_local():
                       lambda *a, **k: (_ for _ in ()).throw(AssertionError("셀러가 지역 진단 호출"))):
         b = briefing.build_briefing(t, "free")
     assert b["kind"] == "shop_chase"
-    assert "쇼핑 7위" in b["headline"] and "박스나라" in b["headline"]
+    assert "7위" in b["headline"] and "박스나라" in b["headline"]
+    assert "캠핑 폴딩박스" not in b["headline"] + b["task"]   # (auto) 키워드 미노출
     # 매장 냄새 없음
     for bad in ("지역", "플레이스", "방문", "매장"):
         assert bad not in b["headline"] + b["task"], bad
@@ -46,7 +47,8 @@ def test_seller_missing_signal_and_honest_fallback():
     with patch.object(diagnose, "diagnose_product_rank", lambda *a, **k: miss_only), \
          patch.object(place, "shop_top", lambda kw, limit=3: []):
         b = briefing.build_briefing(t, "free")
-    assert b["kind"] == "shop_missing" and "1,900회" in b["headline"]
+    assert b["kind"] == "shop_missing" and "1,900번씩" in b["headline"]   # (auto) 키워드 미노출 문구
+    assert "차박 수납박스" not in b["headline"] + b["task"]               # 키워드 자체는 숨김
     # 조회 불가(estimated)면 신호를 지어내지 않고 steady 폴백(정직)
     with patch.object(diagnose, "diagnose_product_rank", lambda *a, **k: {"estimated": True}):
         b2 = briefing.build_briefing(t, "free")
