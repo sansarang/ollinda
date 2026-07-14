@@ -9,6 +9,8 @@ import os
 
 MODEL = "claude-opus-4-8"
 
+last_finish_reason = ""   # 직전 호출의 stop_reason(생성 절단 검증 V1) — 생성기가 payload에 기록
+
 
 def _dummy(prompt: str) -> str:
     """ANTHROPIC_API_KEY 없을 때 골격 검증용 더미(형식 유지) — 기존 동작 보존."""
@@ -34,4 +36,8 @@ def call(prompt: str, model: str = MODEL, max_tokens: int = 1200) -> str:
             thinking={"type": "adaptive"},
             messages=[{"role": "user", "content": prompt}],
         )
+    global last_finish_reason
+    last_finish_reason = getattr(resp, "stop_reason", "") or ""
+    import logging
+    logging.getLogger("shopcast.llm").info("[llm] stop_reason=%s max_tokens=%s", last_finish_reason, max_tokens)
     return next((b.text for b in resp.content if b.type == "text"), "")

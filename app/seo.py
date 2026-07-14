@@ -556,6 +556,10 @@ def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> d
                 warnings.append(f"타깃 외 키워드('{_ok}')가 소제목에 — 1글 1키워드 위반")
                 score -= 8
                 break
+        # 절단 검증(V1): 재시도 후에도 max_tokens면 본문이 중간에서 끊긴 것 — 게이트 실패급
+        if (payload.get("gen_finish") or "") == "max_tokens":
+            warnings.append("생성이 토큰 한도로 절단됨(stop_reason=max_tokens) — 본문 미완결")
+            score -= 15
         # 업체명 정합(재검증 STEP 1-2a): 본문 업체명 ≠ 프로필 업체명 → 게이트 실패(-30)
         _bname = (payload.get("business_name") or "").strip()
         if _bname:

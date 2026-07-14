@@ -226,9 +226,19 @@ class BlogDraftGenerator(Generator):
                      "target_kw": tkw,
                      "business_name": tenant.name,      # 게이트 업체명 정합 검사용(재검증 STEP 1-2a)
                      "brand_name": getattr(tenant, "brand_name", "") or "",
+                     "gen_finish": _last_finish(),      # stop_reason 기록(절단 검증 V1)
                      "fixed_info_block": fixed_block,      # 발행 화면 컴포넌트 가이드용(템플릿 PHASE 2·3)
                      "raw": raw, "image_path": imgs[0], "image_paths": imgs},
             status=ContentStatus.DRAFT)
+
+
+def _last_finish() -> str:
+    """직전 LLM 호출의 stop_reason(절단 검증 V1) — 무키 더미 등은 빈 문자열."""
+    try:
+        from app import llm
+        return llm.last_finish_reason
+    except Exception:
+        return ""
 
 
 def _kw_natural_directive(kw0: str, region: str) -> str:
