@@ -180,7 +180,7 @@ class BlogDraftGenerator(Generator):
             "[이미지배치]\n(- 각 사진을 어디에 왜)\n"
             "[키워드]\n(쉼표로 5~8개, 타겟 키워드 우선)"
         )
-        raw = _call_llm(prompt, self.model, 3600)
+        raw = _call_llm(prompt, self.model, 5000)
         d = _parse_sections(raw, ["제목후보", "제목", "메타설명", "본문", "이미지배치", "키워드"])
         # ① 제목 3안 → 상위노출 최적 1개 자동 선택 ([제목]으로 준 경우도 흡수)
         title_cands = [t.strip().lstrip("-*·0123456789.) ").strip()

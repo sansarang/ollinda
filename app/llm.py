@@ -28,4 +28,10 @@ def call(prompt: str, model: str = MODEL, max_tokens: int = 1200) -> str:
         thinking={"type": "adaptive"},
         messages=[{"role": "user", "content": prompt}],
     )
+    if getattr(resp, "stop_reason", "") == "max_tokens":   # thinking이 예산을 잠식해 본문이 잘림 → 2배로 1회 재시도
+        resp = client.messages.create(
+            model=model, max_tokens=max_tokens * 2,
+            thinking={"type": "adaptive"},
+            messages=[{"role": "user", "content": prompt}],
+        )
     return next((b.text for b in resp.content if b.type == "text"), "")
