@@ -10,6 +10,7 @@ import os
 import base64
 import secrets
 import time
+import uuid
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -2088,7 +2089,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 + "<div class='grid sm:grid-cols-2 gap-6'>"
                 + f"<div><div class='text-sm font-bold text-slate-600 mb-1'>채널별 유입 (30일)</div>{_sp_rows or '<span class=\"text-sm text-slate-400\">아직 유입이 없어요 — 블로그·인스타·매장 QR별로 나눠 보여드려요</span>'}</div>"
                 + f"<div><div class='text-sm font-bold text-slate-600 mb-1'>최근 7일 추이</div><div class='flex items-end gap-1.5 h-16'>{_bars}</div></div>"
-                + "</div></div>")
+                + "</div>" + _visitor_box(t) + "</div>")
         except Exception:
             _perfbox = ""
         main_inner = (_sbadge + stats_row + _loopbox + _missbox + _growth_card(t, _fw)
@@ -2416,7 +2417,15 @@ def _blog_connect_card(t, fw: str) -> str:
                 "<form method=post action='/me/blog' class='ml-auto' onsubmit=\"return confirm('블로그 연결을 해제할까요? 발행 확인·순위 매칭이 꺼져요.')\">"
                 "<input type=hidden name=blog value=''>"
                 "<button class='text-xs text-slate-400 hover:text-rose-500 font-semibold'>연결 해제</button></form>"
-                "</div>" + cons_html + pub_box +
+                "</div>"
+                # 네이버 통계 딥링크(방문자 B3) — 조회수·성별연령·유입검색어는 네이버만 보여준다(정직)
+                + ("<div class='flex items-center gap-3 bg-emerald-50/60 border border-emerald-100 rounded-xl px-3.5 py-2.5 mt-3'>"
+                   "<div class='flex-1 text-xs text-slate-600'><b class='text-slate-700'>조회수·성별·연령·유입 검색어</b>는 "
+                   "네이버 블로그 통계에서만 볼 수 있어요. 특히 <b class='text-emerald-700'>유입 검색어</b>를 보세요 — "
+                   "손님이 어떤 말로 검색해 들어왔는지가 곧 다음 글 소재예요.</div>"
+                   f"<a href='https://admin.blog.naver.com/AnalyticsMainView.naver?blogId={esc(t.blog_id)}' target=_blank rel=noopener "
+                   "class='flex-shrink-0 bg-emerald-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>네이버 통계 열기 ↗</a></div>")
+                + cons_html + pub_box +
                 "<script>async function blogChk(btn){var m=document.getElementById('blogChkMsg');m.textContent='확인 중…';btn.disabled=true;"
                 "try{var r=await fetch('/api/blog/check-published',{method:'POST'});var d=await r.json();"
                 "if(d.error){m.textContent=d.error;btn.disabled=false;return;}"
@@ -2743,6 +2752,43 @@ def _place_card(t, fw: str) -> str:
             f"<div><div class='text-xs font-bold text-slate-500 mb-1'>정보 완성도 체크리스트</div>{chk}</div>"
             f"<div><div class='text-xs font-bold text-slate-500 mb-1'>리뷰 요청 키트</div>{rv}{qr}</div>"
             "</div></div>")
+
+
+def _visitor_box(t) -> str:
+    """손님 특성 요약(방문자 B1·B2) — 익명 집계만. '누가'는 모르고 알 수도 없다(명시)."""
+    try:
+        vs = db.visitor_stats(t.id, days=30)
+    except Exception:
+        return ""
+    _ch_lab = {"naver_blog": "블로그", "instagram": "인스타", "marketplace": "판매글", "qr": "매장 QR", "x": "X"}
+    if not vs.get("total"):
+        return ("<div class='mt-5 pt-4 border-t border-slate-100'>"
+                "<div class='text-sm font-bold text-slate-600 mb-1'>손님 특성 (익명)</div>"
+                "<p class='text-sm text-slate-400'>아직 데이터가 없어요 — 추적링크·QR로 손님이 오면 "
+                "기기·시간대·재방문 같은 특성이 여기 요약돼요. (개인을 식별하지 않아요)</p></div>")
+    dv = vs.get("device") or {}
+    dv_total = sum(dv.values()) or 1
+    dv_txt = f"모바일 {round(100 * dv.get('mobile', 0) / dv_total)}%" if dv else ""
+    bits = [b for b in [
+        ("주로 " + dv_txt) if dv_txt else "",
+        (vs.get("top_hour_band") and f"{vs['top_hour_band']}에 많이 와요"),
+        (vs.get("top_channel") and f"{_ch_lab.get(vs['top_channel'], vs['top_channel'])} 유입이 1위"),
+        (vs.get("top_region") and f"지역(국가 단위): {vs['top_region']}")] if b]
+    rows = ("<div class='text-sm text-slate-700 font-semibold'>" + " · ".join(bits) + "</div>" if bits else "")
+    visits = (f"<div class='text-sm text-slate-600 mt-1'>새 손님 <b class='text-violet-600'>{vs['new_visitors']}명</b> · "
+              f"다시 온 손님 <b class='text-violet-600'>{vs['returning_visitors']}명</b>"
+              + (f" · 글 보고 매장 QR까지 온 여정 <b class='text-violet-600'>{vs['journeys']}건</b>" if vs.get("journeys") else "")
+              + "</div>")
+    hot = ((f"<div class='flex items-center gap-3 bg-violet-50 border border-violet-100 rounded-xl px-3.5 py-2.5 mt-2'>"
+            f"<div class='flex-1 text-sm text-violet-800'>이번 주 3번 이상 온 <b>관심 손님 {vs['hot_visitors']}명</b> — "
+            "이벤트·새 소식 알릴 타이밍이에요.</div>"
+            "<a href='/me' class='flex-shrink-0 bg-violet-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>소식 글 만들기</a></div>")
+           if vs.get("hot_visitors") else "")
+    return ("<div class='mt-5 pt-4 border-t border-slate-100'>"
+            "<div class='text-sm font-bold text-slate-600 mb-1'>손님 특성 (익명)</div>"
+            + rows + visits + hot
+            + "<p class='text-[11px] text-slate-400 mt-2'>개인정보는 수집하지 않아요 — 익명 쿠키로 '같은 방문'만 구분해요"
+              "(쿠키를 지우면 추적되지 않아요). 지역은 국가 단위까지만 봅니다.</p></div>")
 
 
 def _guide_card(t) -> str:
@@ -3158,13 +3204,25 @@ def link_redirect(code: str, request: Request, utm_source: str = "", src: str = 
     link = db.get_link(code)
     if not link or not link.get("target"):
         return RedirectResponse("/", status_code=302)
+    # 익명 방문자 특성(방문자 B1) — 신원 파악 금지: 익명 쿠키(방문 구분)·기기·국가(CF 헤더)까지만
+    ua = request.headers.get("user-agent", "")
+    device = "mobile" if ("Mobi" in ua or "Android" in ua) else "pc"
+    region = (request.headers.get("cf-ipcountry") or "").strip()[:8]   # 국가 단위(도시 아님 — 정직)
+    vid = (request.cookies.get("ovid") or "").strip()[:32]
+    new_cookie = not vid
+    if new_cookie:
+        vid = uuid.uuid4().hex[:16]
     db.incr_link_click(code, referrer=request.headers.get("referer", ""),
-                       ua=request.headers.get("user-agent", ""), utm_source=utm_source,
-                       content_id=content, channel=(src or utm_source))
+                       ua=ua, utm_source=utm_source,
+                       content_id=content, channel=(src or utm_source),
+                       visitor_id=vid, device=device, region=region)
     target = link["target"]
     if not target.startswith(("http://", "https://")):
         target = "https://" + target
-    return RedirectResponse(target, status_code=302)
+    resp = RedirectResponse(target, status_code=302)
+    if new_cookie:      # 익명 방문 구분용 — 쿠키를 지우면 추적되지 않음(리포트에 명시)
+        resp.set_cookie("ovid", vid, max_age=31536000, samesite="lax")
+    return resp
 
 
 @app.get("/me/connect/{channel}/start")
