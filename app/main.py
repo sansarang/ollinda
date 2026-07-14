@@ -2079,7 +2079,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 f"<span class='text-[10px] text-slate-400'>{d['date']}</span></div>" for d in _series)
             _perfbox = (
                 f"<div class='{_fw} mt-5'>"
-                "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>콘텐츠 성과 · 링크 클릭 실측</h2>"
+                "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>콘텐츠 성과 · 링크 클릭 실측 <a href='/me/mass' class='text-sm font-bold text-violet-600 underline ml-2'>대량 발행·증거 →</a></h2>"
                 "<p class='text-sm text-slate-500 mb-1'>내가 만든 글에 넣은 링크를 손님이 몇 번 눌렀는지 — "
                 "<b class='text-slate-700'>어느 글이 손님을 데려오는지</b> 보여요.</p>"
                 "<p class='text-sm text-slate-400 mb-4'>집계는 올린다 추적링크 클릭 기준이에요 — "
@@ -2127,7 +2127,20 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         else:
             # '오늘 할 일'은 브리핑 카드 하나로 통합(온보딩 P3) — 기존 '오늘의 액션'(_daily_action)
             # 카드는 브리핑과 중복이라 제거. 신규 사장님은 시작 가이드가 다음 할 일을 안내.
-            main_inner = (greeting + _upsell + _guide_card(t) + _briefing_card(t, _plan) + _notice_html
+            # 오늘 발행 예정(대량 P4) — "오늘 이 글 복붙 발행하세요" 반자동 안내
+            _due_html = ""
+            try:
+                from app.services import mass as _mass
+                _due = _mass.due_today(t)
+                _due_html = "".join(
+                    "<div class='flex items-center gap-3 bg-violet-50 border border-violet-200 rounded-2xl p-4 mb-5'>"
+                    f"<span class='text-violet-500'>{_ic('calendar', 'w-5 h-5 flex-shrink-0')}</span>"
+                    f"<div class='flex-1 text-sm text-violet-800'>오늘 발행할 글: <b>'{esc(d['keyword'])}'</b> — 복붙만 하면 돼요. 발행 후 주소는 자동 추적돼요.</div>"
+                    f"<a href='/kit/{esc(d['asset_id'])}/naver' class='flex-shrink-0 bg-violet-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>발행 소재 열기</a></div>"
+                    for d in _due if d.get("asset_id"))
+            except Exception:
+                pass
+            main_inner = (greeting + _upsell + _due_html + _guide_card(t) + _briefing_card(t, _plan) + _notice_html
                           + _calendar_card(t, _plan)
                           + _blog_nudge + upload_section
                           + "<div class='mt-5'></div>" + _store_info_card(t))
@@ -2941,6 +2954,203 @@ def api_race(piece_id: str, request: Request):
             f"<div id='anl_{esc(piece_id)}'></div>"
             + f"<p class='text-[11px] text-slate-400 mt-2.5'>{esc(d['note'])}</p></div>")
     return JSONResponse({"ok": True, "html": html})
+
+
+# ══ 대량 발행 — 승률 키워드 → 배치 생성 → 스케줄 → 증거(mass P1~P6) ══
+@app.get("/me/mass", response_class=HTMLResponse)
+def mass_page(request: Request):
+    """대량 발행 대시보드 — 승률 키워드 발굴/배치 생성/발행 스케줄/상위노출 증거."""
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    t = _ensure_user_tenant(u)
+    from app.industries import resolve_industry
+    from app.services import mass
+    prof = resolve_industry(t.industry or "")
+    # P6 증거(실측)
+    ev = mass.evidence(t)
+    case_cards = "".join(
+        f"<div class='bg-white border border-emerald-100 rounded-2xl p-4 text-center'>"
+        f"<div class='text-xs text-slate-400 truncate'>{esc(c['title'] or c['keyword'])}</div>"
+        f"<div class='text-lg font-extrabold text-slate-900 mt-1'>'{esc(c['keyword'])}'</div>"
+        f"<div class='text-emerald-600 font-extrabold text-2xl mt-1'>"
+        + (f"발행 {c['days']}일 만에 " if c.get("days") is not None else "") + f"{c['best']}위</div>"
+        f"<div class='text-[10px] text-slate-400 mt-1'>블로그검색 실측 · 위치·기기별 차이</div></div>"
+        for c in ev["cases"][:3])
+    ev_html = (
+        "<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6 mb-5'>"
+        "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>상위노출 증거</h2>"
+        "<p class='text-sm text-slate-400 mb-4'>전부 생존신고 실측 기준 — 추정치 없음. 1페이지 = 블로그검색 10위 안.</p>"
+        "<div class='grid grid-cols-3 gap-4 text-center mb-4'>"
+        f"<div><div class='text-3xl font-extrabold text-slate-900'>{ev['published']}</div><div class='text-xs text-slate-400 font-bold mt-1'>발행 추적</div></div>"
+        f"<div><div class='text-3xl font-extrabold text-emerald-600'>{ev['first_page']}</div><div class='text-xs text-slate-400 font-bold mt-1'>1페이지 진입</div></div>"
+        f"<div><div class='text-3xl font-extrabold text-violet-600'>{ev['avg_days'] if ev['avg_days'] is not None else '—'}</div><div class='text-xs text-slate-400 font-bold mt-1'>평균 진입일</div></div></div>"
+        + (f"<div class='grid sm:grid-cols-3 gap-3'>{case_cards}</div>" if case_cards else
+           "<p class='text-sm text-slate-400'>아직 1페이지 진입 사례가 없어요 — 아래에서 승률 키워드로 발행을 쌓으면 여기 채워져요.</p>")
+        + "</div>")
+    # 최신 배치 + 스케줄
+    batches = db.list_keyword_batches(t.id, limit=1)
+    b = batches[0] if batches else None
+    axis_now = (getattr(t, "topic_axis", "") or "").strip()
+    axis_sug = mass.suggest_axis(t, prof, (b or {}).get("items") if b else None)
+    rows_html, sched_html = "", ""
+    if b:
+        for it in b["items"]:
+            st = it.get("status") or "candidate"
+            st_badge = {"candidate": "", "generating": "<span class='text-[10px] font-bold text-amber-600'>생성 중…</span>",
+                        "ready": "<span class='text-[10px] font-bold text-emerald-600'>글 준비됨</span>",
+                        "needs_fix": "<span class='text-[10px] font-bold text-amber-600'>보완 권장</span>",
+                        "failed": "<span class='text-[10px] font-bold text-rose-500'>실패</span>"}.get(st, "")
+            chk = (f"<input type=checkbox name=keywords value=\"{esc(it['keyword'])}\" class='accent-indigo-600'>"
+                   if st == "candidate" else "")
+            kit = (f"<a href='/kit/{esc(it.get('asset_id') or '')}/naver' class='text-[11px] font-bold text-indigo-600 underline'>발행 소재</a>"
+                   if it.get("asset_id") else "")
+            rows_html += (
+                "<tr class='border-b border-slate-100'>"
+                f"<td class='py-2 pr-1'>{chk}</td>"
+                f"<td class='py-2 text-sm font-semibold text-slate-700'>{esc(it['keyword'])}"
+                + (" <span class='text-[10px] font-bold text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded-full'>TOP10</span>" if it.get("top10") else "")
+                + f"</td><td class='py-2 text-xs text-slate-500 whitespace-nowrap'>월 {it['volume']:,}회</td>"
+                f"<td class='py-2 text-xs whitespace-nowrap'>{esc(it['difficulty'])}</td>"
+                f"<td class='py-2 text-xs font-bold text-indigo-600 whitespace-nowrap'>{it['win']}%</td>"
+                f"<td class='py-2 text-[11px] text-slate-400'>{esc(it.get('note') or '')}</td>"
+                f"<td class='py-2 text-right whitespace-nowrap'>{st_badge} {kit}"
+                + (f"<div class='text-[10px] text-slate-400'>{esc(it.get('scheduled_date') or '')}</div>" if it.get("scheduled_date") else "")
+                + "</td></tr>")
+        sched = {}
+        for it in b["items"]:
+            if it.get("scheduled_date"):
+                sched.setdefault(it["scheduled_date"], []).append(it)
+        if sched:
+            sched_html = ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6 mt-5'>"
+                          "<h2 class='text-xl font-extrabold text-slate-900 mb-1'>발행 스케줄 (하루 1~2개 분산)</h2>"
+                          "<p class='text-xs text-slate-400 mb-3'>한 번에 몰아 올리면 어뷰징으로 의심받아요 — 매일 꾸준히가 C-Rank에도 유리해요. 발행 후 URL은 자동 추적돼요.</p>"
+                          + "".join(
+                              f"<div class='flex items-center gap-2 py-1.5 border-b border-slate-100'>"
+                              f"<span class='text-xs font-bold text-slate-500 w-24'>{esc(d)}</span>"
+                              + " ".join(f"<span class='text-sm text-slate-700'>'{esc(x['keyword'])}'</span>"
+                                         + (f" <a href='/kit/{esc(x.get('asset_id') or '')}/naver' class='text-[11px] font-bold text-indigo-600 underline'>복붙 발행 →</a>" if x.get("asset_id") else "")
+                                         for x in xs)
+                              + "</div>" for d, xs in sorted(sched.items())) + "</div>")
+    mine_html = (
+        "<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6'>"
+        "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>승률 키워드 대량 발굴</h2>"
+        "<p class='text-sm text-slate-400 mb-1'>실검색량(searchad)·경쟁도·상위 글 나이로 '검색량 있고 경쟁 약한' 롱테일을 골라요.</p>"
+        "<p class='text-xs text-slate-400 mb-4'>※ 승률은 <b class='text-slate-600'>예상치</b>예요 — 보장이 아니고, 1페이지 진입은 보통 2~4주 이상 걸려요.</p>"
+        "<div class='flex gap-2 mb-4'>"
+        f"<input id='m_ind' value=\"{esc(t.industry or '')}\" placeholder='업종 (예: 썬팅, 꽃집)' class='flex-1 min-w-0 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-indigo-400'>"
+        "<button type=button onclick='massMine(this)' class='bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold px-5 py-3 rounded-xl transition whitespace-nowrap'>발굴하기</button></div>"
+        "<div id='m_msg' class='text-sm text-slate-500 mb-2'></div>"
+        + (("<form id='massGen'>"
+            f"<input type=hidden name=batch_id value='{esc(b['id'])}'>"
+            "<div class='overflow-x-auto'><table class='w-full text-left'>"
+            "<thead><tr class='text-[11px] text-slate-400 border-b border-slate-200'>"
+            "<th class='py-1.5'></th><th>키워드</th><th>검색량</th><th>난이도</th><th>승률(예상)</th><th>메모</th><th></th></tr></thead>"
+            f"<tbody>{rows_html}</tbody></table></div>"
+            "<div class='flex items-center gap-2 mt-4 flex-wrap'>"
+            "<input type=file name=photos multiple accept='image/*' class='text-xs'>"
+            "<button type=button onclick='massGen(this)' class='bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold px-5 py-3 rounded-xl transition'>선택 키워드로 배치 생성 (최대 5개)</button>"
+            "<span class='text-xs text-slate-400'>서로 다른 롱테일·앵글로 쓰고 유사문서를 걸러요 · 글당 1~2분</span></div>"
+            "<div id='g_msg' class='text-sm mt-2'></div></form>") if b else
+           "<p class='text-sm text-slate-400'>발굴하면 여기 결과 테이블이 나와요.</p>")
+        + "</div>")
+    axis_html = (
+        "<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6 mt-5'>"
+        "<h2 class='text-xl font-extrabold text-slate-900 mb-1'>전문 주제 축 (C-Rank)</h2>"
+        "<p class='text-xs text-slate-400 mb-3'>네이버는 '한 주제를 꾸준히 쓰는 블로그'를 신뢰해요 — 발굴 키워드에서 축을 뽑아드려요.</p>"
+        f"<div class='flex items-center gap-2 flex-wrap'><span class='text-sm text-slate-600'>현재 축: <b>{esc(axis_now) or '미설정'}</b></span>"
+        + ((f"<form method=post action='/me/topic-axis' class='flex items-center gap-2'>"
+            f"<input type=hidden name=axis value=\"{esc(axis_sug)}\">"
+            f"<span class='text-sm text-violet-700 font-bold'>제안: '{esc(axis_sug)}'</span>"
+            "<button class='bg-violet-600 text-white text-xs font-bold px-3 py-2 rounded-xl'>이 축으로 설정</button></form>")
+           if axis_sug and axis_sug != axis_now else "")
+        + "</div></div>")
+    js = ("<script>"
+          "async function massMine(btn){var m=document.getElementById('m_msg');btn.disabled=true;"
+          "m.textContent='발굴 중… (10~30초, 실검색량 조회)';"
+          "try{var fd=new FormData();fd.append('industry',document.getElementById('m_ind').value);"
+          "var r=await fetch('/api/mass/mine',{method:'POST',body:fd});var d=await r.json();"
+          "if(d.error){m.textContent=d.error;btn.disabled=false;return;}"
+          "m.textContent='✅ '+d.items.length+'개 발굴!';setTimeout(function(){location.reload();},700);"
+          "}catch(e){m.textContent='발굴 실패 — 잠시 후 다시';btn.disabled=false;}}"
+          "async function massGen(btn){var f=document.getElementById('massGen');var g=document.getElementById('g_msg');"
+          "var n=f.querySelectorAll('input[name=keywords]:checked').length;"
+          "if(!n){g.textContent='키워드를 선택해주세요 (체크박스)';return;}"
+          "btn.disabled=true;g.textContent='배치 생성 시작 중…';"
+          "try{var r=await fetch('/api/mass/generate',{method:'POST',body:new FormData(f)});var d=await r.json();"
+          "if(d.error){g.textContent=d.error;btn.disabled=false;return;}"
+          "g.textContent=d.message;setTimeout(function(){location.reload();},2500);"
+          "}catch(e){g.textContent='시작 실패 — 잠시 후 다시';btn.disabled=false;}}"
+          "</script>")
+    inner = ("<a href='/me' class='text-sm text-slate-500 font-bold'>← 내 작업실</a>"
+             "<h1 class='text-2xl font-extrabold mt-2 mb-4'>대량 발행 · 상위노출 증거</h1>"
+             + ev_html + mine_html + axis_html + sched_html + js)
+    return _subscriber_page("대량 발행", inner)
+
+
+@app.post("/api/mass/mine")
+@app.post("/api/mass/mine")
+async def api_mass_mine(request: Request, industry: str = Form("")):
+    """승률 키워드 대량 발굴(P1) — searchad 실검색량+경쟁도+상위 글 나이. 실패=실패 표기(추정 금지)."""
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"error": "로그인이 필요해요."}, status_code=401)
+    t = _ensure_user_tenant(u)
+    from app import ratelimit
+    if not ratelimit.allow("massmine:" + t.id, 2, 4):   # 발굴 1회 = searchad ~12콜 + 검색 20콜
+        return JSONResponse({"error": "발굴이 잠깐 몰렸어요 — 잠시 후 다시 시도해주세요."}, status_code=429)
+    import asyncio
+    from app.services import mass
+    r = await asyncio.to_thread(mass.mine, t, industry)
+    return JSONResponse(r, status_code=(200 if r.get("ok") else 400))
+
+
+@app.post("/api/mass/generate")
+async def api_mass_generate(request: Request):
+    """배치 글 생성(P3) — 선택 승률 키워드 최대 5개, 백그라운드(유사문서 회피+업종 게이트+스케줄 배분)."""
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"error": "로그인이 필요해요."}, status_code=401)
+    t = _ensure_user_tenant(u)
+    from app import ratelimit
+    if not ratelimit.allow("massgen:" + t.id, 1, 3):
+        return JSONResponse({"error": "배치 생성이 이미 진행 중이거나 몰렸어요 — 잠시 후 다시."}, status_code=429)
+    form = await request.form()
+    batch_id = (form.get("batch_id") or "").strip()
+    kws = [k for k in form.getlist("keywords") if (k or "").strip()][:5]
+    note = (form.get("note") or "").strip()[:200]
+    if not (batch_id and kws):
+        return JSONResponse({"error": "배치와 키워드를 선택해주세요."}, status_code=400)
+    files = []
+    for ph in form.getlist("photos"):
+        if ph is not None and getattr(ph, "filename", ""):
+            data = await ph.read()
+            if data and len(data) <= MAX_UPLOAD_BYTES:
+                files.append((data, ph.filename))
+    from app.services import mass
+    batch = db.get_keyword_batch(batch_id)
+    if not batch or batch["tenant_id"] != t.id:
+        return JSONResponse({"error": "배치를 찾을 수 없어요."}, status_code=404)
+    for it in batch["items"]:
+        if it["keyword"] in set(kws):
+            it["status"] = "generating"
+    db.save_keyword_batch(batch_id, t.id, batch["industry"], batch["items"])
+    import threading
+    threading.Thread(target=mass.generate_batch, args=(t, batch_id, kws, files, note), daemon=True).start()
+    return JSONResponse({"ok": True, "started": len(kws),
+                         "message": f"{len(kws)}개 글을 생성 중이에요 — 글당 1~2분, 끝나면 이 페이지에 스케줄과 함께 표시돼요."})
+
+
+@app.get("/api/mass/batch/{bid}")
+def api_mass_batch(bid: str, request: Request):
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"error": "로그인이 필요해요."}, status_code=401)
+    t = _ensure_user_tenant(u)
+    b = db.get_keyword_batch(bid)
+    if not b or b["tenant_id"] != t.id:
+        return JSONResponse({"error": "없음"}, status_code=404)
+    return JSONResponse({"ok": True, "items": b["items"]})
 
 
 @app.get("/api/analyst/{piece_id}")
