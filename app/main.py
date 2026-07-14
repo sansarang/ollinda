@@ -3131,13 +3131,18 @@ async def api_mass_generate(request: Request):
     batch = db.get_keyword_batch(batch_id)
     if not batch or batch["tenant_id"] != t.id:
         return JSONResponse({"error": "배치를 찾을 수 없어요."}, status_code=404)
+    matched = 0
     for it in batch["items"]:
         if it["keyword"] in set(kws):
             it["status"] = "generating"
+            matched += 1
+    if not matched:      # 전송 인코딩 문제 등으로 배치와 안 맞으면 정직하게 거절(유령 started 방지)
+        return JSONResponse({"error": "선택한 키워드가 이 배치와 일치하지 않아요 — 페이지를 새로고침 후 다시 선택해주세요."},
+                            status_code=400)
     db.save_keyword_batch(batch_id, t.id, batch["industry"], batch["items"])
     import threading
     threading.Thread(target=mass.generate_batch, args=(t, batch_id, kws, files, note), daemon=True).start()
-    return JSONResponse({"ok": True, "started": len(kws),
+    return JSONResponse({"ok": True, "started": matched,
                          "message": f"{len(kws)}개 글을 생성 중이에요 — 글당 1~2분, 끝나면 이 페이지에 스케줄과 함께 표시돼요."})
 
 
