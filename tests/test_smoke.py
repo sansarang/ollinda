@@ -130,6 +130,7 @@ def test_target_banner_only_with_param():
     db.update_tenant_classification(t.id, "seller", "coupang", "", "블루투스 이어폰", "")
     db.set_user_tenant(u["id"], t.id)
     client.cookies.set(auth.COOKIE, auth.make_session(u["id"]))
-    assert "키워드를 겨냥해요" not in client.get("/me").text
-    assert "키워드를 겨냥해요" not in client.get("/me?made=x").text
-    assert "키워드를 겨냥해요" in client.get("/me?target_kw=블루투스 이어폰").text
+    # (auto) 키워드 미노출 원칙: 배너 문구는 '글감은 AI가 정해뒀어요' — 파라미터 진입 시에만 표시
+    assert "글감은 AI가 정해뒀어요" not in client.get("/me").text
+    assert "글감은 AI가 정해뒀어요" not in client.get("/me?made=x").text
+    assert "글감은 AI가 정해뒀어요" in client.get("/me?target_kw=블루투스 이어폰").text
