@@ -529,6 +529,17 @@ def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> d
     if kind == "blog":
         title = payload.get("title", "")
         main_kw = (payload.get("target_keywords") or [""])[0]
+        # 입력 원문 노출(생성품질 E2E #2): '썬팅,광택' 같은 쉼표 나열형이 제목/첫문단에 그대로 박히면 감점
+        if re.search(r"[가-힣A-Za-z]{2,},[가-힣A-Za-z]{2,}", title + " " + text[:150]):
+            warnings.append("쉼표 나열형 입력이 원문 그대로 노출 — 자연어로 풀어 쓰기('썬팅과 광택')")
+            score -= 10
+        # 1글 1키워드(생성품질 E2E #3): 타깃 외 추적 키워드가 소제목(##)으로 헤딩화되면 감점
+        _heads = [ln.lstrip("#").strip() for ln in text.splitlines() if ln.strip().startswith("##")]
+        for _ok in (payload.get("target_keywords") or [])[1:6]:
+            if _ok and len(_ok) >= 4 and _ok != main_kw and any(_ok in h for h in _heads):
+                warnings.append(f"타깃 외 키워드('{_ok}')가 소제목에 — 1글 1키워드 위반")
+                score -= 8
+                break
         if main_kw and main_kw not in title:
             warnings.append(f"제목에 핵심키워드 '{main_kw}' 없음 → 상위노출 크게 불리")
             score -= 12
