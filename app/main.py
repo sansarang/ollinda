@@ -1937,7 +1937,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                     "<script>(async function(){var b=document.getElementById('rankbox');if(!b)return;"
                     "try{var d=await (await fetch('/me/rank')).json();"
                     "if(!d.configured){b.innerHTML='<span class=\"text-slate-400\">네이버 키가 설정되면 순위가 표시됩니다.</span>';return;}"
-                    "if(!d.items||!d.items.length){b.innerHTML='<span class=\"text-slate-400\">아직 타겟 키워드가 없어요. 콘텐츠를 만들면 채워져요.</span>';return;}"
+                    "if(!d.items||!d.items.length){b.innerHTML='<span class=\"text-slate-400\">아직 타겟 키워드가 없어요 — 콘텐츠를 만들고, 발행한 글 주소를 등록하면(내 네이버 블로그 카드 참고) 그 글의 키워드가 자동으로 여기 편입돼요.</span>';return;}"
                     "function st(it){var r=it.rank;return (r===null)?'<span class=\"text-slate-400\">조회불가</span>':(r>=1?('<span class=\"text-emerald-600 font-bold\">네이버 지역 '+r+'위</span>'):'<span class=\"text-slate-400\">5위 밖</span>');}"
                     "function chg(it){var c=it.rank,p=it.prev;if(c===null)return '';if(p===null||p===undefined)return '<span class=\"text-indigo-500 text-xs font-bold ml-2\">첫 측정</span>';var cc=(c===0?6:c),pp=(p===0?6:p);if(cc<pp)return '<span class=\"text-emerald-600 text-xs font-bold ml-2\">⬆️ '+(pp-cc)+'계단</span>';if(cc>pp)return '<span class=\"text-rose-500 text-xs font-bold ml-2\">⬇️ '+(cc-pp)+'계단</span>';return '<span class=\"text-slate-400 text-xs ml-2\">— 유지</span>';}"
                     "function riv(it){if(it.rank===1)return '<div class=\"text-xs text-emerald-600 mt-1 font-semibold\">이 키워드 1위!</div>';if(it.rank>1&&it.rival)return '<div class=\"text-xs text-amber-600 mt-1\"><b>'+it.rival+'</b>만 넘으면 '+(it.rank-1)+'위</div>';if((it.rank===0)&&it.leader)return '<div class=\"text-xs text-slate-400 mt-1\">현재 1위: '+it.leader+' — 콘텐츠 꾸준히 올리면 진입해요</div>';return '';}"
@@ -2404,7 +2404,10 @@ def _blog_connect_card(t, fw: str) -> str:
                     f"<div id='race_{_pid}'></div><div id='why_{_pid}'></div></div>")
         pub_rows = "".join(_pub_row(p) for p in pubs)
         pub_box = ((f"<div class='mt-4'><div class='text-xs font-bold text-slate-500 mb-1'>최근 발행 확인 {len(pubs)}건</div>{pub_rows}</div>")
-                   if pubs else "<p class='text-xs text-slate-400 mt-3'>아직 확인된 발행이 없어요. 글 발행 후 '자동 확인'을 눌러보세요.</p>")
+                   if pubs else ("<p class='text-xs text-slate-400 mt-3'>아직 확인된 발행이 없어요 — 채우는 법 2가지: "
+                                 "① 위 <b class='text-slate-600'>발행 자동 확인</b>을 누르면 블로그 최근 글과 올린다 글을 자동으로 맞춰봐요. "
+                                 "② 또는 <a href='/me?tab=content' class='text-emerald-600 font-bold underline'>내 콘텐츠 → 보기 → 네이버에 올리기</a> "
+                                 "화면 맨 아래에 발행한 글 주소를 붙여넣으세요. 등록되면 색인·순위 추적이 자동으로 시작돼요.</p>"))
         return (f"<div id='blog' class='{fw} mt-5'>"
                 "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>내 네이버 블로그</h2>"
                 f"<p class='text-sm text-slate-400 mb-3'>연결됨 · 공개 RSS로 발행 여부와 순위를 추적해요.</p>"
