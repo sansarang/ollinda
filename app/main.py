@@ -2270,23 +2270,17 @@ def api_blog_check_published(request: Request):
     t = _ensure_user_tenant(u)
     if not getattr(t, "blog_id", ""):
         return JSONResponse({"error": "먼저 내 네이버 블로그를 연결해 주세요.", "need_blog": True}, status_code=400)
-    from app.services import blogsync
+    # 완전 자동 동기화와 동일 경로(pipesync) — 이 버튼은 '지금 새로고침' 보조일 뿐(주기 폴링이 기본)
+    from app.services import blogsync, pipesync
     feed = blogsync.fetch_feed(t.blog_id)
     if not feed["ok"]:
         return JSONResponse({"error": "지금 블로그 확인이 어려워요. 잠시 후 다시 시도해 주세요."}, status_code=502)
     if not feed["exists"]:
         return JSONResponse({"error": "블로그를 찾지 못했어요. 연결을 다시 확인해 주세요."}, status_code=400)
-    pending = [p for p in _tenant_blog_pieces(t.id) if not db.get_blog_publish(p.id)]
-    found = blogsync.find_published(pending, feed["posts"])
-    by_id = {p.id: p for p in pending}
-    for f in found:
-        piece = by_id.get(f["piece_id"])
-        if piece:
-            _confirm_blog_publish(t, piece, f["url"], "rss", f["score"], f["post_title"],
-                                  (f["published_at"].isoformat() if f.get("published_at") else ""))
-    return JSONResponse({"checked": len(pending), "rss_posts": len(feed["posts"]),
-                         "found": [{"piece_id": f["piece_id"], "url": f["url"],
-                                    "post_title": f["post_title"], "score": f["score"]} for f in found]})
+    r = pipesync.auto_sync_tenant(t)
+    n = r["auto"] + r["external"]
+    return JSONResponse({"rss_posts": len(feed.get("posts") or []),
+                         "found": [{"n": n}] if n else [], "synced": n})
 
 
 @app.post("/me/blog/published")
@@ -2371,9 +2365,11 @@ def _blog_connect_card(t, fw: str) -> str:
             _chip = (f"<span class='text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full whitespace-nowrap'>"
                      f"{_d}일차</span>" if _d >= 0 else "")
             # 생존신고 요약(파이프 A4) — 저장된 실측 스냅샷만(렌더 시 네이버 콜 없음)
+            _pc = None
             try:
                 _pc = db.get_piece(p.get("piece_id") or "")
-                _pkw = (((_pc.payload or {}).get("target_keywords") or [""])[0] or "").strip() if _pc else ""
+                _pkw = ((((_pc.payload or {}).get("target_keywords") or [""])[0] or "").strip() if _pc
+                        else (p.get("target_kw") or "").strip())   # 외부 글(rss_auto)은 자동 추출 키워드
                 _ph = [h for h in db.rank_history(t.id, _pkw, kind="post") if h.get("rank") is not None] if _pkw else []
                 if _ph:
                     _pr, _pp = _ph[-1]["rank"], (_ph[-2]["rank"] if len(_ph) >= 2 else None)
@@ -2390,7 +2386,8 @@ def _blog_connect_card(t, fw: str) -> str:
             _pid = esc(p.get("piece_id") or "")
             btn = (f"<button type=button onclick=\"whyNot('{_pid}',this)\" "
                    "class='text-[11px] font-bold text-indigo-600 border border-indigo-200 hover:bg-indigo-50 "
-                   "px-2.5 py-1 rounded-lg transition whitespace-nowrap'>왜 안 뜨나요? 진단</button>" if _pid else "")
+                   "px-2.5 py-1 rounded-lg transition whitespace-nowrap'>왜 안 뜨나요? 진단</button>"
+                   if (_pid and _pc) else "")   # 진단은 글 품질(audit)이 있는 올린다 글만
             race_btn = (f"<button type=button onclick=\"raceView('{_pid}',this)\" "
                         "class='text-[11px] font-bold text-violet-600 border border-violet-200 hover:bg-violet-50 "
                         "px-2.5 py-1 rounded-lg transition whitespace-nowrap'>생존 신고</button>" if _pid else "")
@@ -2404,18 +2401,16 @@ def _blog_connect_card(t, fw: str) -> str:
                     f"<div id='race_{_pid}'></div><div id='why_{_pid}'></div></div>")
         pub_rows = "".join(_pub_row(p) for p in pubs)
         pub_box = ((f"<div class='mt-4'><div class='text-xs font-bold text-slate-500 mb-1'>최근 발행 확인 {len(pubs)}건</div>{pub_rows}</div>")
-                   if pubs else ("<p class='text-xs text-slate-400 mt-3'>아직 확인된 발행이 없어요 — 채우는 법 2가지: "
-                                 "① 위 <b class='text-slate-600'>발행 자동 확인</b>을 누르면 블로그 최근 글과 올린다 글을 자동으로 맞춰봐요. "
-                                 "② 또는 <a href='/me?tab=content' class='text-emerald-600 font-bold underline'>내 콘텐츠 → 보기 → 네이버에 올리기</a> "
-                                 "화면 맨 아래에 발행한 글 주소를 붙여넣으세요. 등록되면 색인·순위 추적이 자동으로 시작돼요.</p>"))
+                   if pubs else ("<p class='text-xs text-slate-400 mt-3'>블로그 등록됨 — 새 글은 <b class='text-slate-600'>자동으로</b> 감지해 추적해요"
+                                 "(2시간 주기 · 방금 발행했다면 '지금 새로고침'). 여기엔 추적 중인 글이 표시돼요.</p>"))
         return (f"<div id='blog' class='{fw} mt-5'>"
                 "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>내 네이버 블로그</h2>"
-                f"<p class='text-sm text-slate-400 mb-3'>연결됨 · 공개 RSS로 발행 여부와 순위를 추적해요.</p>"
+                f"<p class='text-sm text-slate-400 mb-3'>연결됨 · 새 글을 자동으로 감지해 색인·순위까지 추적해요 — 따로 누를 건 없어요.</p>"
                 "<div class='flex items-center gap-3 flex-wrap'>"
                 f"<a href='{esc(t.naver_blog_url)}' target=_blank rel=noopener "
                 "class='inline-flex items-center gap-2 bg-emerald-50 text-emerald-700 font-bold text-sm px-4 py-2.5 rounded-xl'>"
                 f"✅ blog.naver.com/{esc(t.blog_id)} ↗</a>"
-                "<button type=button onclick='blogChk(this)' class='bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition'>발행 자동 확인</button>"
+                "<span class='text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-2 rounded-xl'>새 글 자동 추적 중 (2시간마다)</span><button type=button onclick='blogChk(this)' class='text-xs font-bold text-slate-500 border border-slate-200 hover:bg-slate-50 px-3 py-2 rounded-xl transition'>지금 새로고침</button>"
                 "<span id='blogChkMsg' class='text-xs text-slate-400'></span>"
                 "<form method=post action='/me/blog' class='ml-auto' onsubmit=\"return confirm('블로그 연결을 해제할까요? 발행 확인·순위 매칭이 꺼져요.')\">"
                 "<input type=hidden name=blog value=''>"
@@ -2432,8 +2427,8 @@ def _blog_connect_card(t, fw: str) -> str:
                 "<script>async function blogChk(btn){var m=document.getElementById('blogChkMsg');m.textContent='확인 중…';btn.disabled=true;"
                 "try{var r=await fetch('/api/blog/check-published',{method:'POST'});var d=await r.json();"
                 "if(d.error){m.textContent=d.error;btn.disabled=false;return;}"
-                "if(d.found&&d.found.length){m.textContent='✅ 발행 '+d.found.length+'건 확인!';setTimeout(function(){location.reload();},900);}"
-                "else{m.textContent='새로 확인된 발행이 없어요 (RSS 최근글 '+d.rss_posts+'건 대조).';btn.disabled=false;}"
+                "if(d.synced){m.textContent='✅ 새 글 '+d.synced+'건 추적 시작!';setTimeout(function(){location.reload();},900);}"
+                "else{m.textContent='새 글 없음 — 이미 다 추적 중이에요 (RSS '+d.rss_posts+'건 대조).';btn.disabled=false;}"
                 "}catch(e){m.textContent='확인 실패';btn.disabled=false;}}"
                 # '왜 안 뜨나요?' 원클릭 진단(whynot P1~P3) — 결과는 해당 발행 항목 아래 삽입
                 "async function whyNot(pid,btn){var box=document.getElementById('why_'+pid);if(!box)return;"
@@ -2896,7 +2891,7 @@ def api_race(piece_id: str, request: Request):
     t = _ensure_user_tenant(u)
     piece = db.get_piece(piece_id)
     pub = db.get_blog_publish(piece_id)
-    if not piece or piece.tenant_id != t.id or not pub:
+    if not pub or pub.get("tenant_id") != t.id or (piece and piece.tenant_id != t.id):
         return JSONResponse({"error": "발행 기록을 찾을 수 없어요."}, status_code=404)
     from app import ratelimit
     if not ratelimit.allow("race:" + t.id, 6, 20):   # 실측 1회 = 네이버 콜 2~3회
@@ -3761,8 +3756,8 @@ def _naver_publish_confirm_box(tenant, blog, sec: str, cbtn: str, ok: str = "", 
                 "<script>async function nvChk(btn){var m=document.getElementById('nvChkMsg');m.textContent='확인 중…';btn.disabled=true;"
                 "try{var r=await fetch('/api/blog/check-published',{method:'POST'});var d=await r.json();"
                 "if(d.error){m.textContent=d.error;btn.disabled=false;return;}"
-                "if(d.found&&d.found.length){m.textContent='✅ 발행 '+d.found.length+'건 확인!';setTimeout(function(){location.reload();},900);}"
-                "else{m.textContent='아직 RSS에서 못 찾았어요 — 발행 직후엔 몇 분 걸려요. 아래에 주소를 붙여넣어도 돼요.';btn.disabled=false;}"
+                "if(d.synced){m.textContent='✅ 새 글 '+d.synced+'건 추적 시작!';setTimeout(function(){location.reload();},900);}"
+                "else{m.textContent='아직 RSS에 안 잡혔어요 — 몇 분 뒤 자동으로 추적돼요. 급하면 아래에 주소를 붙여넣어도 돼요.';btn.disabled=false;}"
                 "}catch(e){m.textContent='확인 실패';btn.disabled=false;}}</script>")
     else:
         auto = ("<p class='text-xs text-amber-600 mb-3'><a href='/me?tab=report#blog' class='font-bold underline'>내 블로그를 연결</a>하면 "

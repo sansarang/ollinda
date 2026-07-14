@@ -22,7 +22,14 @@ HONEST_NOTE = ("순위는 위치·기기·시점에 따라 다르게 보일 수 
 
 
 def _kw_of(piece) -> str:
+    if piece is None:
+        return ""
     return ((piece.payload or {}).get("target_keywords") or [""])[0].strip()
+
+
+def _kw_for(piece, publish: dict) -> str:
+    """추적 키워드 — 올린다 글은 target_keywords, 외부 글은 publish.target_kw(자동 추출분)."""
+    return _kw_of(piece) or ((publish or {}).get("target_kw") or "").strip()
 
 
 def _days_since(ts: str) -> int:
@@ -36,11 +43,12 @@ def track_publish(t, piece, publish: dict) -> dict:
     """발행 글 1건 실측(스케줄러·API 공용) — 색인 확인 + 포스트 순위 스냅샷(kind='post').
     반환 {indexed, rank}. 실패는 None으로 정직 표기."""
     from app.services import blogrank
-    kw = _kw_of(piece)
+    kw = _kw_for(piece, publish)
     url = (publish or {}).get("published_url") or ""
     title = (publish or {}).get("post_title") or ""
+    pid = (publish or {}).get("piece_id") or (piece.id if piece else "")
     out = {"indexed": None, "rank": None}
-    if not (kw and url):
+    if not (kw and url and pid):
         return out
     if not title:
         # 수동 발행확인은 제목이 비어 있음 — RSS에서 실제 글 제목을 찾아야 색인 검사가 정확(오검출 방지)
@@ -53,7 +61,7 @@ def track_publish(t, piece, publish: dict) -> dict:
                     break
         except Exception:
             pass
-        title = title or (piece.payload or {}).get("title") or ""
+        title = title or ((piece.payload or {}).get("title") if piece else "") or ""
     # 색인: 이미 확인됐으면 재조회 안 함(API 절약)
     if (publish or {}).get("indexed_at"):
         out["indexed"] = True
@@ -61,7 +69,7 @@ def track_publish(t, piece, publish: dict) -> dict:
         idx = blogrank.check_indexed(title, url)
         out["indexed"] = idx
         if idx:
-            db.mark_publish_indexed(piece.id)
+            db.mark_publish_indexed(pid)
     pr = blogrank.post_rank(kw, url)
     out["rank"] = pr.get("rank")
     if pr.get("rank") is not None:
@@ -90,9 +98,7 @@ def track_all_publishes(days: int = 45) -> dict:
                 continue
             if d > 14 and datetime.utcnow().weekday() != 0:
                 continue      # 비용 가드: 2주 지난 글은 주 1회(월요일)만 실측
-            piece = db.get_piece(pub.get("piece_id") or "")
-            if not piece:
-                continue
+            piece = db.get_piece(pub.get("piece_id") or "")   # 외부 글(rss_auto)은 piece 없음 — 그래도 추적
             try:
                 track_publish(t, piece, pub)
                 n += 1
@@ -127,7 +133,7 @@ def _scout_line(kw: str, my_days: int) -> str:
 def timeline(t, piece, publish: dict) -> dict:
     """생존 신고 타임라인 데이터(P3) — {kw, days, steps:[{status, title, detail}], scout, note}.
     steps: 발행 → 색인 → 첫 진입 → 현재 위치(이동) → 다음 관문."""
-    kw = _kw_of(piece)
+    kw = _kw_for(piece, publish)
     days = _days_since((publish or {}).get("published_at") or "")
     live = track_publish(t, piece, publish)          # 지금 실측(색인+오늘 순위 스냅샷 포함)
     hist = [h for h in db.rank_history(t.id, kw, kind="post", limit=60) if h.get("rank") is not None]

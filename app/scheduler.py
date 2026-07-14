@@ -46,9 +46,12 @@ def start() -> None:
         sch.add_job(_evening_feedback, "cron", hour=20, minute=0,
                     id="evening_feedback", replace_existing=True)
         # RSS 자동 매칭(파이프 A1 보조 경로) — 3시간마다 새 글 감지→자동 연결/확인 요청
-        sch.add_job(_rss_autosync, "cron", hour="*/3", minute=20,
+        sch.add_job(_rss_autosync, "cron", hour="*/2", minute=20,
                     id="rss_autosync", replace_existing=True)
         sch.start()
+        # 배포/재시작 직후 1회 소급 동기화(완전 자동 A) — 버튼 없이 등록 블로그 새 글을 즉시 추적
+        import threading as _th
+        _th.Timer(40, _rss_autosync).start()
         _scheduler = sch
         logging.info("[scheduler] 경쟁사 일일 자동 스캔 등록(매일 %02d:00 KST)", hour)
         logging.info("[scheduler] 주간 블로그 리포트 등록(요일=%d %02d:10 KST)",

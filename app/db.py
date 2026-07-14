@@ -757,15 +757,25 @@ def save_intake_insight(industry: str, answers: dict, experience: str = "") -> N
 
 # ── 블로그 발행 기록(블로그등록 PHASE 2) ──
 def record_blog_publish(tenant_id: str, piece_id: str, url: str, published_at: str = "",
-                        matched_by: str = "manual", score: float = 1.0, post_title: str = "") -> None:
-    """발행 확인 기록 upsert(1글=1기록). matched_by: rss(자동매칭) | manual(사용자 확인)."""
+                        matched_by: str = "manual", score: float = 1.0, post_title: str = "",
+                        target_kw: str = "") -> None:
+    """발행 확인 기록 upsert(1글=1기록). matched_by: rss(자동매칭) | rss_auto(외부 글 자동추적) | manual.
+    target_kw: 외부 글(올린다 미생성)의 추적 키워드 — piece가 없어도 순위 추적 가능(자동화)."""
     try:
         with _conn() as c:
+            try:
+                c.execute("ALTER TABLE blog_publishes ADD COLUMN target_kw TEXT")
+            except sqlite3.OperationalError:
+                pass
+            ex = c.execute("SELECT indexed_at, target_kw FROM blog_publishes WHERE piece_id=?",
+                           (piece_id,)).fetchone()
             c.execute("INSERT OR REPLACE INTO blog_publishes"
-                      "(piece_id, tenant_id, published_url, published_at, matched_by, match_score, post_title, created_at) "
-                      "VALUES(?,?,?,?,?,?,?,?)",
+                      "(piece_id, tenant_id, published_url, published_at, matched_by, match_score, post_title, "
+                      "created_at, indexed_at, target_kw) VALUES(?,?,?,?,?,?,?,?,?,?)",
                       (piece_id, tenant_id, (url or "").strip(), published_at or _now(),
-                       matched_by, score, post_title, _now()))
+                       matched_by, score, post_title, _now(),
+                       (ex["indexed_at"] if ex else None),          # 재기록 시 색인 확인 보존
+                       (target_kw or (ex["target_kw"] if ex else "") or "")[:40]))
     except sqlite3.OperationalError:
         pass
 

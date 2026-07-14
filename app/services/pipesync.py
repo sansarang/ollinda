@@ -76,68 +76,116 @@ def confirm_publish(t, piece, url: str, matched_by: str, score: float = 1.0,
         pass
 
 
-def auto_sync_all() -> dict:
-    """RSS 폴링(A1 보조 경로, 스케줄 2~4시간) — 새 글 감지 → 생성글 자동 매칭/확인 요청/외부 글 안내.
-    반환 {auto, ask, external}."""
-    from app import ratelimit
+EXT_MAX_PER_RUN = 6      # 외부 글 자동 등록 상한(첫 소급 시 RSS 폭주 방지)
+EXT_MAX_AGE_DAYS = 30    # 이보다 오래된 외부 글은 자동 추적 안 함(관심 밖 이력)
+
+
+def extract_kw(title: str, industry: str = "", region: str = "") -> str:
+    """외부 글 제목 → 추적 키워드 자동 추출. 검색형 제목은 키워드를 앞에 두므로
+    업종 토큰이 나오는 지점까지를 키워드로(예: '부산광역시 동구 썬팅업체 후기…' → '부산광역시 동구 썬팅업체').
+    업종 토큰이 없으면 앞 3어절. 날조 없음 — 제목에 있는 말만 쓴다."""
+    import re
+    t = re.split(r"[,|(\[]", (title or "").strip())[0].strip()
+    toks = [w for w in re.split(r"[\s·—–-]+", t) if w]
+    if not toks:
+        return ""
+    ind = (industry or "").strip()
+    idx = None
+    for i, w in enumerate(toks[:6]):
+        if ind and (ind in w or w in ind) and len(w) >= 2:
+            idx = i
+    if idx is not None:
+        return " ".join(toks[:idx + 1])[:30]
+    return " ".join(toks[:3])[:30]
+
+
+def _ext_id(url: str) -> str:
+    """외부 글(올린다 미생성)의 발행 기록 키 — URL 기반 결정적 id."""
+    import hashlib
+    return "ext_" + hashlib.sha1(_norm(url).encode()).hexdigest()[:12]
+
+
+def auto_sync_tenant(t) -> dict:
+    """한 가게 RSS 완전 자동 동기화 — 새 글 감지 시 버튼 없이:
+    올린다 글이면 자동 매칭 연결, 외부 글이어도 키워드 자동 추출로 추적 시작.
+    반환 {auto, external}. 스케줄러(2시간)·'지금 새로고침' 버튼 공용."""
+    bid = getattr(t, "blog_id", "") if t else ""
+    if not (t and bid):
+        return {"auto": 0, "external": 0}
     from app.services import blogsync
-    auto = ask = ext = 0
+    feed = blogsync.fetch_feed(bid)
+    posts = feed.get("posts") or []
+    if not (feed.get("ok") and posts):
+        return {"auto": 0, "external": 0}
+    known = {(_norm(p.get("published_url"))) for p in db.list_blog_publishes(t.id, limit=50)}
+    new_posts = [p for p in posts if _norm(p.get("link")) not in known]
+    if not new_posts:
+        return {"auto": 0, "external": 0}
+    auto = ext = 0
+    pending = [p for p in _blog_pieces(t.id) if not db.get_blog_publish(p.id)]
+    found = blogsync.find_published(pending, new_posts)
+    by_id = {p.id: p for p in pending}
+    matched_urls = set()
+    for f in found:
+        piece = by_id.get(f["piece_id"])
+        if piece and (f.get("score") or 0) >= AUTO_MATCH_MIN:
+            confirm_publish(t, piece, f["url"], "rss", f["score"], f["post_title"],
+                            (f["published_at"].isoformat() if f.get("published_at") else ""))
+            matched_urls.add(_norm(f["url"]))
+            auto += 1
+    # 외부(또는 매칭 실패) 글 — 그래도 자동 추적: 제목에서 키워드 추출 → 발행 기록 + 생존신고
+    from datetime import datetime, timedelta
+    cutoff = datetime.utcnow() - timedelta(days=EXT_MAX_AGE_DAYS)
+    for p in new_posts:
+        if ext >= EXT_MAX_PER_RUN:
+            break
+        nu = _norm(p.get("link"))
+        if nu in matched_urls:
+            continue
+        pa = p.get("published_at")
+        if pa is not None and hasattr(pa, "isoformat") and pa.replace(tzinfo=None) < cutoff:
+            continue
+        kw = extract_kw(p.get("title") or "", t.industry or "", t.region or "")
+        if not kw:
+            continue
+        pid = _ext_id(p.get("link") or "")
+        db.record_blog_publish(t.id, pid, p.get("link") or "",
+                               (pa.isoformat() if pa is not None and hasattr(pa, "isoformat") else ""),
+                               "rss_auto", 0.0, p.get("title") or "", target_kw=kw)
+        pub = db.get_blog_publish(pid)
+        try:
+            from app.services import race
+            race.track_publish(t, None, pub or {})
+        except Exception:
+            _log.exception("[pipesync] 외부 글 추적 시작 실패 %s", pid)
+        ext += 1
+    if auto or ext:
+        db.add_notice(t.id, "pipe_auto",
+                      f"블로그 새 글 {auto + ext}건을 자동으로 추적하기 시작했어요 — "
+                      "색인·순위는 리포트 '내 네이버 블로그'에서 실시간으로 보여드려요.")
+        _log.info("[pipesync] auto_sync tenant=%s auto=%d ext=%d", t.id, auto, ext)
+    return {"auto": auto, "external": ext}
+
+
+def auto_sync_all() -> dict:
+    """전 가게 RSS 완전 자동 동기화(스케줄 2시간 + 배포 직후 1회 소급)."""
+    auto = ext = 0
     for u in db.list_users():
         tid = u.get("tenant_id")
         if not tid:
             continue
         t = db.get_tenant(tid)
-        bid = getattr(t, "blog_id", "") if t else ""
-        if not (t and bid):
+        if not (t and getattr(t, "blog_id", "")):
             continue
         try:
-            feed = blogsync.fetch_feed(bid)
-            posts = feed.get("posts") or []
-            if not (feed.get("ok") and posts):
-                continue
-            known = {(_norm(p.get("published_url"))) for p in db.list_blog_publishes(tid, limit=30)}
-            new_posts = [p for p in posts if _norm(p.get("link")) not in known]
-            if not new_posts:
-                continue
-            pending = [p for p in _blog_pieces(tid) if not db.get_blog_publish(p.id)]
-            found = blogsync.find_published(pending, new_posts)
-            by_id = {p.id: p for p in pending}
-            matched_urls = set()
-            for f in found:
-                piece = by_id.get(f["piece_id"])
-                if not piece:
-                    continue
-                if (f.get("score") or 0) >= AUTO_MATCH_MIN:
-                    confirm_publish(t, piece, f["url"], "rss", f["score"], f["post_title"],
-                                    (f["published_at"].isoformat() if f.get("published_at") else ""))
-                    db.add_notice(tid, "pipe_auto",
-                                  f"새 발행 글을 자동 연결했어요 — '{(f['post_title'] or '')[:40]}'. "
-                                  "맞는지 리포트에서 한 번만 확인해주세요. 순위 추적은 이미 시작했어요.")
-                    matched_urls.add(_norm(f["url"]))
-                    auto += 1
-                else:
-                    db.add_notice(tid, "pipe_ask",
-                                  f"블로그에서 새 글을 발견했어요 — '{(f['post_title'] or '')[:40]}'. "
-                                  "올린다에서 만든 글이면 리포트 → 발행 확인에서 주소를 붙여넣어 주세요.")
-                    ask += 1
-            # 외부에서 직접 쓴 글(매칭 후보조차 없음) — 사실만 알림(재알림은 4일 캐시로 억제)
-            for p in new_posts:
-                nu = _norm(p.get("link"))
-                if nu in matched_urls:
-                    continue
-                ck = "extpost:" + nu
-                if ratelimit.cache_get(ck, 4 * 86400) is not None:
-                    continue
-                ratelimit.cache_set(ck, 1)
-                db.add_notice(tid, "pipe_ext",
-                              f"직접 쓰신 글 '{(p.get('title') or '')[:40]}'을 발견했어요 — 이 글도 순위 추적을 원하시면 "
-                              "그 글 주소와 타겟 키워드를 알려주세요. (리포트 → 발행 확인)")
-                ext += 1
+            r = auto_sync_tenant(t)
+            auto += r["auto"]
+            ext += r["external"]
         except Exception:
             _log.exception("[pipesync] auto_sync 실패 tenant=%s", tid)
-    if auto or ask or ext:
-        _log.info("[pipesync] RSS 자동매칭 auto=%d ask=%d ext=%d", auto, ask, ext)
-    return {"auto": auto, "ask": ask, "external": ext}
+    if auto or ext:
+        _log.info("[pipesync] RSS 완전자동 동기화 auto=%d ext=%d", auto, ext)
+    return {"auto": auto, "external": ext}
 
 
 def _norm(u: str) -> str:
