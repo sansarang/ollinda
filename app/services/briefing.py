@@ -124,6 +124,41 @@ def _sig_missing_kw(t) -> dict | None:
     return None
 
 
+def _sig_race(t) -> list[dict]:
+    """추적 중인 발행 글의 순위 이동(생존신고 P5) — rank_snapshots(kind='post') 실측 비교.
+    첫 페이지(10위) 진입은 축하(성취=리텐션), 상승은 '가능성' 표현까지만(보장 금지)."""
+    out = []
+    try:
+        for pub in db.list_blog_publishes(t.id, limit=5):
+            piece = db.get_piece(pub.get("piece_id") or "")
+            if not piece:
+                continue
+            kw = ((piece.payload or {}).get("target_keywords") or [""])[0].strip()
+            if not kw:
+                continue
+            hist = [h for h in db.rank_history(t.id, kw, kind="post", limit=10)
+                    if h.get("rank") is not None]
+            if len(hist) < 2:
+                continue
+            prev, cur = hist[-2]["rank"], hist[-1]["rank"]
+            if cur and cur <= 10 and (not prev or prev > 10):
+                out.append({"score": 85, "kind": "race_first_page",
+                            "headline": f"'{esc_kw(kw)}' 글이 {prev or '31위 밖'} → {cur}위, 첫 페이지에 진입했어요!",
+                            "task": f"굳히기 타이밍 — '{kw}' 글 1편 더 (사진 3장이면 충분해요)",
+                            "reason": "첫 페이지에 막 오른 글은 지금 밀어주면 안착 가능성이 커요. (순위 보장은 아니에요)",
+                            "kw": kw, "angle": "howto"})
+            elif cur and prev and cur < prev:
+                out.append({"score": 72, "kind": "race_up",
+                            "headline": f"추적 중인 '{esc_kw(kw)}' 글이 어제 {prev}위 → 오늘 {cur}위로 올랐어요.",
+                            "task": f"이 페이스 유지 — '{kw}' 축 글 1편 더",
+                            "reason": ("이 페이스면 첫 페이지 진입 가능성이 보여요 — 오르는 중 한 편이 제일 효율 좋아요."
+                                       if cur > 10 else "상단 유지에는 꾸준함이 답이에요."),
+                            "kw": kw, "angle": "howto"})
+    except Exception:
+        pass
+    return out
+
+
 # ── 셀러 신호(셀러 C1) — 지역·플레이스 대신 상품 키워드 쇼핑검색 축 ──
 def _sig_shop_market(t) -> list[dict]:
     """셀러: 쇼핑검색 실측 — ① 상위권인데 1위 아님(추격+상위 상품 가격 실측)
@@ -180,10 +215,10 @@ def build_briefing(t, plan: str = "free") -> dict:
     if (getattr(t, "biz_type", "local") or "local") == "seller":
         # 셀러: 상품 키워드 쇼핑검색 축(추격/선점) + 순위 변화(kind=shop 포함) + 발행 공백.
         # 지역·플레이스 기반 신호(경쟁사·지역 미노출)는 셀러에겐 안 씀(매장 냄새 제거).
-        cand = _sig_shop_market(t) + _sig_rank_moves(t) + [_sig_publish_gap(t, plan)]
+        cand = _sig_shop_market(t) + _sig_rank_moves(t) + [_sig_publish_gap(t, plan)] + _sig_race(t)
     else:
         cand = ([_sig_competitor(t)] + _sig_rank_moves(t)
-                + [_sig_publish_gap(t, plan), _sig_missing_kw(t)])
+                + [_sig_publish_gap(t, plan), _sig_missing_kw(t)] + _sig_race(t))
     for s in cand:
         if s:
             signals.append(s)

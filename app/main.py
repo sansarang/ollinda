@@ -2327,14 +2327,17 @@ def _blog_connect_card(t, fw: str) -> str:
             btn = (f"<button type=button onclick=\"whyNot('{_pid}',this)\" "
                    "class='text-[11px] font-bold text-indigo-600 border border-indigo-200 hover:bg-indigo-50 "
                    "px-2.5 py-1 rounded-lg transition whitespace-nowrap'>왜 안 뜨나요? 진단</button>" if _pid else "")
+            race_btn = (f"<button type=button onclick=\"raceView('{_pid}',this)\" "
+                        "class='text-[11px] font-bold text-violet-600 border border-violet-200 hover:bg-violet-50 "
+                        "px-2.5 py-1 rounded-lg transition whitespace-nowrap'>생존 신고</button>" if _pid else "")
             return (f"<div class='border-b border-slate-100 py-2'>"
                     f"<div class='flex items-center justify-between gap-2'>"
                     f"<a href='{esc(p.get('published_url') or '')}' target=_blank rel=noopener class='text-sm text-slate-700 font-medium truncate'>"
                     f"{esc(p.get('post_title') or (p.get('published_url') or '')[:50])}</a>"
-                    f"<span class='flex items-center gap-1.5'>{_chip}{btn}</span></div>"
+                    f"<span class='flex items-center gap-1.5'>{_chip}{race_btn}{btn}</span></div>"
                     f"<div class='text-xs text-slate-400'>{esc((p.get('published_at') or '')[:10])} · "
                     f"{'RSS자동' if p.get('matched_by') == 'rss' else '직접확인'}</div>"
-                    f"<div id='why_{_pid}'></div></div>")
+                    f"<div id='race_{_pid}'></div><div id='why_{_pid}'></div></div>")
         pub_rows = "".join(_pub_row(p) for p in pubs)
         pub_box = ((f"<div class='mt-4'><div class='text-xs font-bold text-slate-500 mb-1'>최근 발행 확인 {len(pubs)}건</div>{pub_rows}</div>")
                    if pubs else "<p class='text-xs text-slate-400 mt-3'>아직 확인된 발행이 없어요. 글 발행 후 '자동 확인'을 눌러보세요.</p>")
@@ -2366,6 +2369,15 @@ def _blog_connect_card(t, fw: str) -> str:
                 "else{box.innerHTML=d.html;btn.textContent='진단 닫기';}"
                 "}catch(e){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">진단 실패 — 잠시 후 다시</div>';}"
                 "btn.disabled=false;if(btn.textContent.indexOf('진단 중')>=0)btn.textContent='왜 안 뜨나요? 진단';}"
+                # 생존 신고(생존신고 P3) — 발행→색인→진입→현재→다음 관문 타임라인
+                "async function raceView(pid,btn){var box=document.getElementById('race_'+pid);if(!box)return;"
+                "if(box.innerHTML){box.innerHTML='';btn.textContent='생존 신고';return;}"
+                "btn.disabled=true;btn.textContent='실측 중…';"
+                "try{var r=await fetch('/api/race/'+pid);var d=await r.json();"
+                "if(d.error){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">'+d.error+'</div>';btn.textContent='생존 신고';}"
+                "else{box.innerHTML=d.html;btn.textContent='실황 닫기';}"
+                "}catch(e){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">실측 실패 — 잠시 후 다시</div>';btn.textContent='생존 신고';}"
+                "btn.disabled=false;}"
                 "</script></div>")
     return (f"<div id='blog' class='{fw} mt-5'>"
             "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>내 네이버 블로그 연결</h2>"
@@ -2739,6 +2751,54 @@ def api_whynot(piece_id: str, request: Request):
             + "<div class='text-xs font-bold text-slate-500 mt-3 mb-1'>처방전 — 뜨게 하는 법</div>" + rx
             + f"<p class='text-[11px] text-slate-400 mt-2.5'>{esc(d['note'])}</p></div>")
     return JSONResponse({"ok": True, "html": html, "exposed": d["exposed"]})
+
+
+@app.get("/api/race/{piece_id}")
+def api_race(piece_id: str, request: Request):
+    """생존 신고 타임라인(생존신고 P3) — 발행→색인→첫 진입→현재 위치→다음 관문 실황(HTML 조각)."""
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"error": "로그인이 필요해요."}, status_code=401)
+    t = _ensure_user_tenant(u)
+    piece = db.get_piece(piece_id)
+    pub = db.get_blog_publish(piece_id)
+    if not piece or piece.tenant_id != t.id or not pub:
+        return JSONResponse({"error": "발행 기록을 찾을 수 없어요."}, status_code=404)
+    from app import ratelimit
+    if not ratelimit.allow("race:" + t.id, 6, 20):   # 실측 1회 = 네이버 콜 2~3회
+        return JSONResponse({"error": "실황 조회가 잠깐 몰렸어요 — 잠시 후 다시 눌러주세요."}, status_code=429)
+    from app.services import race
+    d = race.timeline(t, piece, pub)
+    _st = {"ok": ("check", "text-emerald-500"), "run": ("arrowup", "text-indigo-500"),
+           "wait": ("clock", "text-amber-500"), "gate": ("target", "text-violet-500"),
+           "info": ("help", "text-slate-400")}
+    rows = ""
+    for i, s in enumerate(d["steps"]):
+        ic, cls = _st.get(s["status"], ("help", "text-slate-400"))
+        line = "" if i == len(d["steps"]) - 1 else "<div class='absolute left-[9px] top-6 bottom-0 w-0.5 bg-slate-100'></div>"
+        rows += (f"<div class='relative flex items-start gap-2.5 pb-3'>{line}"
+                 f"<span class='{cls} bg-white relative z-10 flex-shrink-0 mt-0.5'>{_ic(ic, 'w-[18px] h-[18px]')}</span>"
+                 f"<div><div class='text-sm font-bold text-slate-700'>{esc(s['title'])}</div>"
+                 + (f"<div class='text-xs text-slate-500'>{esc(s['detail'])}</div>" if s.get("detail") else "")
+                 + "</div></div>")
+    scout = (f"<div class='bg-slate-50 border border-slate-100 rounded-xl px-3.5 py-2.5 mt-1 text-xs text-slate-600'>"
+             f"<b class='text-slate-700'>경쟁 정찰</b> · {esc(d['scout'])}</div>" if d.get("scout") else "")
+    # 발행일 기준 미니 추이(있을 때만) — 낮은 순위(1위)가 높은 막대
+    bars = ""
+    if d.get("history"):
+        cells = ""
+        for h in d["history"]:
+            v = h["rank"] or 31
+            hh = max(4, int(40 * (31 - min(v, 31)) / 30))
+            cells += (f"<div class='flex flex-col items-center gap-0.5'>"
+                      f"<div class='w-2.5 rounded-t {'bg-indigo-400' if h['rank'] else 'bg-slate-200'}' style='height:{hh}px'></div>"
+                      f"<span class='text-[9px] text-slate-400'>{esc(h['at'][5:])}</span></div>")
+        bars = f"<div class='flex items-end gap-1.5 mt-2 overflow-x-auto'>{cells}</div>"
+    html = (f"<div class='bg-white border border-slate-200 rounded-2xl p-4 mt-2'>"
+            f"<div class='text-sm font-extrabold text-slate-800 mb-2.5'>'{esc(d['kw'])}' 생존 신고 — {d['days']}일차</div>"
+            + rows + scout + bars
+            + f"<p class='text-[11px] text-slate-400 mt-2.5'>{esc(d['note'])}</p></div>")
+    return JSONResponse({"ok": True, "html": html})
 
 
 @app.post("/me/guide/dismiss")

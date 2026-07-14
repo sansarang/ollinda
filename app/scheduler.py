@@ -81,6 +81,11 @@ def _rank_track() -> None:
         ranktrack.track_all()
     except Exception:
         logging.exception("[scheduler] 순위 자동추적 실패")
+    try:      # 생존 신고(생존신고 P1·P2) — 발행 글 포스트 단위 색인·순위 일별 실측
+        from app.services import race
+        race.track_all_publishes()
+    except Exception:
+        logging.exception("[scheduler] 발행 글 실황 추적 실패")
 
 
 def _publish_reminder() -> None:

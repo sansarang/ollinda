@@ -99,6 +99,10 @@ def init_db() -> None:
                   "piece_id TEXT PRIMARY KEY, tenant_id TEXT, published_url TEXT, "
                   "published_at TEXT, matched_by TEXT, match_score REAL, post_title TEXT, created_at TEXT)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_blogpub_t ON blog_publishes(tenant_id, published_at)")
+        try:      # 색인 확인 시각(생존신고 P2) — 네이버 검색에서 글이 처음 검출된 때
+            c.execute("ALTER TABLE blog_publishes ADD COLUMN indexed_at TEXT")
+        except sqlite3.OperationalError:
+            pass
         # 주간 성과 리포트(블로그등록 PHASE 4) — 발행 수·순위 변화 종합(앱내 + 이메일/카톡 스텁)
         c.execute("CREATE TABLE IF NOT EXISTS weekly_reports("
                   "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, week TEXT, "
@@ -773,6 +777,16 @@ def get_blog_publish(piece_id: str) -> Optional[dict]:
         return dict(r) if r else None
     except sqlite3.OperationalError:
         return None
+
+
+def mark_publish_indexed(piece_id: str) -> None:
+    """색인 확인 기록(생존신고 P2) — 최초 검출 시각 1회만."""
+    try:
+        with _conn() as c:
+            c.execute("UPDATE blog_publishes SET indexed_at=? WHERE piece_id=? AND "
+                      "(indexed_at IS NULL OR indexed_at='')", (_now(), piece_id))
+    except sqlite3.OperationalError:
+        pass
 
 
 def list_blog_publishes(tenant_id: str, limit: int = 30) -> list[dict]:
