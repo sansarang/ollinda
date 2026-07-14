@@ -1918,7 +1918,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                         "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>상위노출 실행 루프</h2>"
                         "<p class='text-sm text-slate-400 mb-4'>진단 → 타겟 글 → 꾸준한 발행 → 순위 추적·학습. 올린다가 이 루프를 돌려요.</p>"
                         "<div class='flex gap-2.5 flex-wrap'>"
-                        + _step(1, _ic("search", "w-4 h-4 mx-auto"), "진단", _has_diag, "놓치는 키워드 찾기" if _has_diag else "가게 정보를 설정하세요")
+                        + _step(1, _ic("search", "w-4 h-4 mx-auto"), "진단", _has_diag, "AI가 기회를 자동 탐색" if _has_diag else "가게 정보를 설정하세요")
                         + _step(2, _ic("pen", "w-4 h-4 mx-auto"), "타겟 생성", len(db.list_sets(tenant_id=t.id, limit=1)) > 0,
                                 "미노출 키워드 겨냥 글")
                         + _step(3, _ic("calendar", "w-4 h-4 mx-auto"), "발행 일관성", _wp2["done"] >= 1,
@@ -2375,16 +2375,7 @@ def _blog_connect_card(t, fw: str) -> str:
                 "else{box.innerHTML=d.html;btn.textContent='진단 닫기';}"
                 "}catch(e){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">진단 실패 — 잠시 후 다시</div>';}"
                 "btn.disabled=false;if(btn.textContent.indexOf('진단 중')>=0)btn.textContent='왜 안 뜨나요? 진단';}"
-                # 처방 실행(rx P2) — 진단 카드의 '이 글 보강하기' 인라인 폼에서 호출
-                "async function enrichPiece(pid,btn){var inp=document.getElementById('enr_'+pid),m=document.getElementById('enrmsg_'+pid);"
-                "btn.disabled=true;btn.textContent='보강 중… (30초쯤)';m.className='text-xs mt-1.5 text-slate-500';m.textContent='';"
-                "try{var fd=new FormData();fd.append('note',(inp&&inp.value)||'');"
-                "var r=await fetch('/api/piece/'+pid+'/enrich',{method:'POST',body:fd});var d=await r.json();"
-                "if(d.error){m.className='text-xs mt-1.5 text-rose-500';m.textContent=d.error;}"
-                "else{m.className='text-xs mt-1.5 text-emerald-600 font-bold';"
-                "m.innerHTML=d.msg+' <a href=\"'+d.kit+'\" class=\"underline\">발행 소재 열기</a>';}"
-                "}catch(e){m.className='text-xs mt-1.5 text-rose-500';m.textContent='보강 실패 — 잠시 후 다시';}"
-                "btn.disabled=false;btn.textContent='보강 실행';}"
+                # (auto) enrich 인라인 폼 제거 — 보강은 품질 게이트가 자동 수행
                 # AI 순위 분석(분석가 P3) — 타임라인 안 버튼에서 호출
                 "async function analystView(pid,btn){var box=document.getElementById('anl_'+pid);if(!box)return;"
                 "if(box.innerHTML){box.innerHTML='';btn.textContent='왜 이 순위? AI 분석';return;}"
@@ -2739,13 +2730,9 @@ def _ai_summary(t) -> str:
     try:
         import datetime as _dt
         week_ago = (_dt.datetime.utcnow() - _dt.timedelta(days=7)).isoformat()
-        n = 0
-        for s in db.list_sets(tenant_id=t.id, limit=30):
-            ps = db.get_set_pieces(s["asset_id"])
-            for p in ps:
-                if p.kind.value == "blog" and (getattr(p, "created_at", "") or s.get("created") or "") >= week_ago[:10]:
-                    n += 1
-                    break
+        with db._conn() as _c:
+            n = _c.execute("SELECT COUNT(*) FROM content_pieces WHERE tenant_id=? AND kind='blog' "
+                           "AND created_at >= ?", (t.id, week_ago)).fetchone()[0]
         from app.services import mass as _m
         ev = _m.evidence(t)
         m = ev.get("first_page") or 0
