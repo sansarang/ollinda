@@ -29,8 +29,17 @@ def weekly_target(tenant, plan: str = "free") -> int:
 
 
 def _topics(tenant, limit: int = 3) -> list[str]:
-    """이번 주 제안 주제 — 전문 주제 축(topic_axis) 우선. 없으면 사업형태 자동분기(C2):
-    매장형 = 지역+업종(방문 검색), 셀러형 = 상품·브랜드 키워드(구매 검색)."""
+    """이번 주 제안 주제 — ① 발굴된 승률 키워드 TOP(대량 P2, 미생성분) ② 주제 축(topic_axis)
+    ③ 사업형태 자동분기(C2). 승률 키워드가 있으면 캘린더 제안이 업종 맞춤으로 자동 채워진다."""
+    try:
+        from app import db as _db
+        for b in _db.list_keyword_batches(tenant.id, limit=1):
+            wins = [it["keyword"] for it in b["items"]
+                    if it.get("top10") and (it.get("status") or "candidate") == "candidate"]
+            if wins:
+                return wins[:limit] if len(wins) >= limit else (wins * limit)[:limit]
+    except Exception:
+        pass
     axis = (getattr(tenant, "topic_axis", "") or "").strip()
     if axis:
         toks = [t.strip() for t in axis.replace("\n", ",").split(",") if t.strip()]
