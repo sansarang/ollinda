@@ -185,13 +185,23 @@ def infer_industry_from_text(text: str) -> str:
 
 
 # ── vision 선추측(PHASE 2) ─────────────────────────────
-def guess_from_photos(paths: list[str], industry: str = "") -> dict:
-    """사진 → {guess(확인용 한 줄), analysis(전체 분석)}. 무키/실패 시 guess=''.
-    guess는 '[전체]' 요약 라인 우선, 없으면 첫 사진의 '무엇이 보이는가' 첫 줄."""
+def guess_from_photos(paths: list[str], industry: str = "", context: str | None = None) -> dict:
+    """사진 → {guess(확인용 한 줄), analysis(①무엇 — 사실 채널), interpretation(②가게 관점 해석),
+    confidence(high/low), choices(의도 이지선다)}. 무키/실패 시 guess=''.
+    ②해석·확신도·선택지 라인은 analysis(→gen_source 사실 대조 기준)에서 제거해 분리 —
+    미확인 해석이 날조 대조를 통과하는 통로를 만들지 않는다(V6)."""
     from app import vision
-    analysis = vision.analyze_all(paths, industry)
-    if not analysis:
-        return {"guess": "", "analysis": ""}
+    raw = vision.analyze_all(paths, industry, context=(context if context is not None else (industry or None)))
+    if not raw:
+        return {"guess": "", "analysis": "", "interpretation": "", "confidence": "", "choices": []}
+    interp = (re.search(r"\[해석\]\s*(.+)", raw) or [None, ""])[1].strip()
+    conf = (re.search(r"\[확신도\]\s*(\w+)", raw) or [None, ""])[1].strip().lower()
+    conf = conf if conf in ("high", "low") else ("low" if interp else "")
+    ch_raw = (re.search(r"\[선택지\]\s*(.+)", raw) or [None, ""])[1].strip()
+    choices = ([] if (not ch_raw or ch_raw.startswith("없음")) else
+               [c.strip() for c in ch_raw.split("|") if 2 <= len(c.strip()) <= 20][:3])
+    # ① 사실 채널: 해석·확신도·선택지 라인 제거본
+    analysis = re.sub(r"^\[(해석|확신도|선택지)\].*$", "", raw, flags=re.M).strip()
     guess = ""
     m = re.search(r"\[전체\]\s*(.+)", analysis)
     if m:
@@ -205,7 +215,26 @@ def guess_from_photos(paths: list[str], industry: str = "") -> dict:
                 break
     # 사진 기반 업종 추론(버그2) — 상호명만 입력해도 질문을 업종에 맞출 수 있게
     return {"guess": guess[:120], "analysis": analysis,
+            "interpretation": interp[:120], "confidence": conf, "choices": choices,
             "industry_guess": infer_industry_from_text(analysis)}
+
+
+def intent_directive(intent: str) -> str:
+    """확정된 의도(사장님 확인 사실) → 글 소재 유형 지시(vision-intent 3-1).
+    사실이 글의 '소재 유형'을 정하고, 키워드·앵글(전략)은 자동 큐가 그 안에서 정한다."""
+    i = " ".join((intent or "").split())[:40]
+    if not i:
+        return ""
+    if any(k in i for k in ("판매", "매물", "입고")):
+        struct = "매물·상품 소개형(사양·상태·구매 안내 중심)"
+    elif any(k in i for k in ("시공", "작업", "수리", "재시공")):
+        struct = "작업 후기형(과정·전후·경험 중심)"
+    elif any(k in i for k in ("재배", "수확")):
+        struct = "생산 이야기형(재배·수확 과정 중심)"
+    else:
+        struct = f"'{i}' 중심 구성"
+    return (f"\n[이 글의 소재 유형 — 사장님 확인 사실] 이 사진은 '{i}'에 관한 것이다. "
+            f"글 구조는 {struct}으로 잡아라. 이 사실과 어긋나는 관점(예: 시공 대상 차량을 판매 매물처럼)으로 쓰지 마라.\n")
 
 
 # ── 답변 → 생성 주입 블록(PHASE 4) ─────────────────────

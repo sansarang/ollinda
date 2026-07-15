@@ -26,7 +26,25 @@ def _media_type(path: str) -> str:
     return "image/jpeg"
 
 
-def analyze(image_path: str, industry_name: str = "") -> str:
+def _context_block(context: str) -> str:
+    """가게 맥락 주입(의도 오분류 해결) — '무엇'(객관)과 별개로 '이 가게 관점의 해석'을 요구.
+    맥락은 해석에만 쓰고 사진에 없는 것을 지어내지 않게 명시. 맥락 없으면 해석 보류."""
+    head = (f"[가게 맥락] {context}\n" if (context or "").strip()
+            else "[가게 맥락] 없음(업종 미상) — 해석을 단정하지 말고 확신도 low로.\n")
+    return (
+        head
+        + "※ 맥락은 아래 '[해석]'에만 사용하라. 사진에 보이지 않는 사물·상태를 맥락 때문에 있다고 말하지 마라.\n"
+        "출력 마지막에 다음 3줄을 반드시 추가하라:\n"
+        "[해석] 이 가게 관점에서 이 사진(들)이 무엇에 관한 것인지 한 줄"
+        "(예: '썬팅 시공 대상 차량으로 보여요' / 맥락 없으면 '업종을 알려주시면 더 정확해져요')\n"
+        "[확신도] high 또는 low 한 단어 — 맥락과 사진이 자연스럽게 맞으면 high, "
+        "맥락이 없거나 사진의 의도가 갈리면(예: 차량=시공 대상일 수도 판매 매물일 수도) low\n"
+        "[선택지] 확신도 low면 그럴듯한 의도 2~3개를 '|'로 구분해 사장님 말로 짧게"
+        "(예: 시공 이야기|판매 매물 / 재배·수확 이야기|매장 판매 상품). high면 '없음'\n"
+    )
+
+
+def analyze(image_path: str, industry_name: str = "", context: str | None = None) -> str:
     """사진 → 마케팅 관점 분석 텍스트. 미설정/실패 시 ""(빈 문자열)."""
     if not (configured() and image_path and os.path.exists(image_path)):
         return ""
@@ -43,6 +61,7 @@ def analyze(image_path: str, industry_name: str = "") -> str:
             "3) 사진 속 글자(간판/가격표/메뉴판 등 보이면 그대로, 없으면 '없음')\n"
             "4) 마케팅에서 강조하면 좋을 포인트\n"
             "※ 사진에 실제로 보이는 것만. 추측·과장 금지."
+            + ("\n" + _context_block(context) if context is not None else "")
         )
         resp = client.messages.create(
             model=MODEL, max_tokens=500,
@@ -57,14 +76,15 @@ def analyze(image_path: str, industry_name: str = "") -> str:
         return ""
 
 
-def analyze_all(image_paths: list[str], industry_name: str = "", max_imgs: int = 6) -> str:
+def analyze_all(image_paths: list[str], industry_name: str = "", max_imgs: int = 6,
+                context: str | None = None) -> str:
     """여러 사진을 '한 번의 호출'로 전부 분석 — 사진마다 뭐가 담겼는지 + 이어지는 이야기.
     사진을 여러 장 줘도 1장만 반영되던 문제 해결(비전 강화). 실패/무키 시 ""."""
     paths = [p for p in (image_paths or []) if p and os.path.exists(p)][:max_imgs]
     if not (configured() and paths):
         return ""
     if len(paths) == 1:
-        return analyze(paths[0], industry_name)
+        return analyze(paths[0], industry_name, context)
     try:
         import anthropic
         content = []
@@ -78,7 +98,8 @@ def analyze_all(image_paths: list[str], industry_name: str = "", max_imgs: int =
             f"위 사진 {len(paths)}장을 한국 소상공인 마케팅 관점에서 분석하라. 업종: {industry_name or '일반'}.\n"
             "각 사진마다 '[사진N]'으로 구분해서 무엇이 보이는지 구체적으로(피사체·제품·차종·전후 변화·사진 속 글자 그대로).\n"
             "마지막에 '[전체]'로, 사진들이 이어지는 하나의 이야기를 한 줄로(예: 시공 전→과정→완성, 제품→사용→결과).\n"
-            "※ 사진에 실제로 보이는 것만. 추측·과장 금지. 각 항목 간결히.")})
+            "※ 사진에 실제로 보이는 것만. 추측·과장 금지. 각 항목 간결히."
+            + ("\n" + _context_block(context) if context is not None else ""))})
         client = anthropic.Anthropic()
         resp = client.messages.create(
             model=MODEL, max_tokens=1000,
