@@ -713,10 +713,11 @@ def _spawn_profile_gen(industry: str) -> bool:
 
 
 @app.post("/api/intake/guess")
-async def intake_guess(request: Request, industry: str = Form(""),
+async def intake_guess(request: Request, industry: str = Form(""), purpose: str = Form(""),
                        photos: list[UploadFile] = File(None)):
     """사진 → AI 선추측(확인용 한 줄) + 분석 전문(PHASE 2). 무료·유료 공용.
-    분석 전문은 hidden으로 되돌려받아 생성 시 vision 재호출을 생략(비용 1콜 유지)."""
+    분석 전문은 hidden으로 되돌려받아 생성 시 vision 재호출을 생략(비용 1콜 유지).
+    (vision-intent) 가게 맥락 주입 → ①무엇 + ②이 가게 관점 해석·확신도·의도 선택지."""
     from app import ratelimit
     ip = (request.headers.get("cf-connecting-ip")
           or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
@@ -755,7 +756,30 @@ async def intake_guess(request: Request, industry: str = Form(""),
                 with open(p, "wb") as f:
                     f.write(data)
             paths.append(p)
-        return JSONResponse(smart_intake.guess_from_photos(paths, industry.strip()))
+        # 가게 맥락(vision-intent 1-1·1-3): 로그인=프로필, 무료=입력 업종 텍스트, 미입력=""(해석 보류)
+        _u = auth.current_user(request)
+        _t = db.get_tenant(_u["tenant_id"]) if (_u and _u.get("tenant_id")) else None
+        if _t and (_t.industry or "").strip():
+            _bt = {"local": "매장형", "seller": "셀러형", "hybrid": "매장+온라인"}.get(
+                (_t.biz_type or "local"), "매장형")
+            ctx = f"{_t.name} · {_t.industry} · {_bt}"
+            industry = industry.strip() or _t.industry
+        else:
+            ctx = f"업종/상품: {industry.strip()}" if industry.strip() else ""
+        if purpose.strip():
+            ctx = (ctx + f" · 이번 글 목적: {purpose.strip()[:30]}").strip(" ·")
+        out = smart_intake.guess_from_photos(paths, industry.strip(), context=ctx)
+        # tenant 학습 기본값(3-2·3-3): 같은 의도 연속 선택 시 묻지 않고 기본값 표시.
+        # 단, 학습값이 이번 사진의 해석·선택지 어디에도 안 비치면(맥락-사진 불일치) 무시하고 다시 묻는다.
+        if _t and out.get("confidence") == "low":
+            _learned = db.default_intent(_t.id)
+            _hay = " ".join([out.get("interpretation") or "", out.get("analysis") or ""]
+                            + (out.get("choices") or []))
+            import re as _re2
+            _toks = [w for w in _re2.split(r"[\s·]+", _learned) if len(w) >= 2]
+            if _learned and _toks and any(w in _hay for w in _toks):
+                out["learned_intent"] = _learned
+        return JSONResponse(out)
     finally:
         import shutil as _sh
         _sh.rmtree(tmp, ignore_errors=True)
@@ -5541,7 +5565,7 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
       <div><label class='{lb}'>4. 목적 <span class='text-slate-400 font-normal text-xs'>(선택)</span></label>
         <div class='flex flex-wrap gap-2'>{chips}</div></div>
       <div><label class='{lb}'>5. 사진 확인·정보 <span class='text-slate-400 font-normal text-xs'>(선택 · 넣을수록 글이 구체적으로 좋아져요)</span></label>
-        <input type=hidden name=confirmed id=pg_confirmed><input type=hidden name=vision_analysis id=pg_vision>
+        <input type=hidden name=confirmed id=pg_confirmed><input type=hidden name=intent id=pg_intent><input type=hidden name=vision_analysis id=pg_vision>
         <input type=hidden name=answers id=pg_answers><input type=hidden name=experience id=pg_experience>
         <div id=pg_guess class='mb-2'></div>
         <div id=pg_questions class='mb-2'></div>
@@ -5600,10 +5624,12 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
           "var to=setTimeout(function(){if(fin||seq!==_pgseq)return;fin=true;clearInterval(st);"
           "box.innerHTML='';pdReady(true,'사진 확인이 오래 걸려 건너뛰었어요 — 바로 만들 수 있어요');},tmo);"
           "var fd=new FormData();fd.append('industry',(document.getElementById('s_industry')||{}).value||'');"
+          "fd.append('purpose',(document.querySelector('input[name=purpose]:checked')||{}).value||'');"
           "PM.f.slice(0,6).forEach(function(f){fd.append('photos',f);});"
           "try{var r=await fetch('/api/intake/guess',{method:'POST',body:fd});var d=await r.json();"
           "if(fin||seq!==_pgseq)return;fin=true;clearTimeout(to);clearInterval(st);"
-          "if(d.guess&&window.intakeConfirmUI){intakeConfirmUI(box,d.guess,d.analysis||'','pg_confirmed','pg_vision',function(){pdReady(true,'');});"
+          "if(d.guess&&window.intakeConfirmUI){intakeConfirmUI(box,d.guess,d.analysis||'','pg_confirmed','pg_vision',function(){pdReady(true,'');},"
+          "{interp:d.interpretation||'',conf:d.confidence||'',choices:d.choices||[],learned:d.learned_intent||'',iid:'pg_intent'});"
           "var s=document.createElement('button');s.type='button';s.className='block mx-auto mt-1.5 text-[11px] text-slate-400 underline';"
           "s.textContent='확인 건너뛰고 진행';s.onclick=function(){box.innerHTML='';pdReady(true,'');};box.appendChild(s);"
           "pdReady(false,'위 사진 확인(맞아요/수정) 후 만들 수 있어요');}"
@@ -5688,7 +5714,7 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
                  s_map: str = Form(""), s_market: str = Form(""), s_brand: str = Form(""),
                  s_search: str = Form(""), target_kw: str = Form(""), angle: str = Form(""),
                  confirmed: str = Form(""), vision_analysis: str = Form(""),
-                 answers: str = Form(""), experience: str = Form("")):
+                 answers: str = Form(""), experience: str = Form(""), intent: str = Form("")):
     tenant, _ = db.get_tenant_by_token(token)
     if not tenant:
         return HTMLResponse("<p>잘못된 링크입니다.</p>", status_code=404)
@@ -5762,7 +5788,14 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
             _intake = {"confirmed": confirmed.strip()[:120],
                        "analysis": (vision_analysis or "").strip()[:4000],
                        "answers": _si.parse_answers(answers),
-                       "experience": experience.strip()[:200]}
+                       "experience": experience.strip()[:200],
+                       "intent": intent.strip()[:40]}
+            if intent.strip():                          # (vision-intent 3-2) 선택 이력 학습
+                try:
+                    from app import db as _dbi
+                    _dbi.record_intent(tenant.id, intent.strip())
+                except Exception:
+                    pass
             _note2 = full_note
             if _q_claim and "근소격차" in (_q_claim.get("reason") or ""):
                 _note2 += ("\n[경쟁 격차 공략] 바로 위 경쟁 글보다 더 구체적인 실측·경험·사진 설명을 담아라. "

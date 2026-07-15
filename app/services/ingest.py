@@ -28,6 +28,7 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
         from app.services import smart_intake
         _block = smart_intake.build_intake_note(tenant.industry, intake.get("confirmed", ""),
                                                 intake.get("answers"), intake.get("experience", ""))
+        _block += smart_intake.intent_directive(intake.get("intent", ""))   # 확정 의도 → 소재 유형(3-1)
         if _block:
             note = (_block + "\n" + (note or "")).strip()
         smart_intake.record_insight(tenant.industry, intake.get("answers"), intake.get("experience", ""))

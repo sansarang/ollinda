@@ -1316,6 +1316,33 @@ def writing_queue_rows(tenant_id: str, status: str = "", limit: int = 30) -> lis
         return []
 
 
+def record_intent(tenant_id: str, intent: str) -> None:
+    """(vision-intent 3-2) 업로드에서 확정된 의도 기록 — 연속 선택 학습용."""
+    intent = " ".join((intent or "").split())[:40]
+    if not (tenant_id and intent):
+        return
+    try:
+        with _conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS tenant_intent_prefs("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, intent TEXT, created_at TEXT)")
+            c.execute("INSERT INTO tenant_intent_prefs(tenant_id, intent, created_at) VALUES(?,?,?)",
+                      (tenant_id, intent, _now()))
+    except Exception:
+        logging.exception("[db] record_intent 실패 t=%s", tenant_id)
+
+
+def default_intent(tenant_id: str, streak: int = 2) -> str:
+    """(vision-intent 3-2) 최근 선택이 같은 의도로 streak회 연속이면 그 의도를 기본값으로."""
+    try:
+        with _conn() as c:
+            rows = c.execute("SELECT intent FROM tenant_intent_prefs WHERE tenant_id=? "
+                             "ORDER BY id DESC LIMIT ?", (tenant_id, streak)).fetchall()
+        vals = [r["intent"] for r in rows]
+        return vals[0] if (len(vals) >= streak and len(set(vals)) == 1) else ""
+    except Exception:
+        return ""
+
+
 def find_writing_by_piece(piece_id: str) -> Optional[dict]:
     """생성된 글(piece) ← 큐 항목 역조회 — 근거 카드(trust) 렌더용."""
     if not piece_id:
