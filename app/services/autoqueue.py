@@ -176,7 +176,8 @@ def _schedule_date(t) -> str:
                 counts[d] = counts.get(d, 0) + 1
     for row in db.writing_queue_rows(t.id, status="done", limit=30):
         pass                                          # 큐 생성분은 batch에 없음 — piece 스케줄은 아래 별도 기록
-    day = datetime.utcnow().date()
+    from app.services.mass import kst_today
+    day = kst_today()
     for _ in range(14):
         if counts.get(day.isoformat(), 0) < 1:        # 자동 생성분은 하루 1개 기본
             return day.isoformat()

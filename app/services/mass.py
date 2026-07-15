@@ -293,7 +293,7 @@ def generate_batch(t, batch_id: str, keywords: list[str], files: list, note: str
     # P4 — 발행 스케줄 배분: 하루 1~2개(한 번에 몰아 올리면 어뷰징 의심 → 분산)
     ready = [it for it in items if it.get("status") in ("ready", "needs_fix") and not it.get("scheduled_date")]
     per_day = 2 if len(ready) > 7 else 1
-    day = datetime.utcnow().date() + timedelta(days=1)
+    day = kst_today() + timedelta(days=1)
     slot = 0
     for it in ready:
         it["scheduled_date"] = day.isoformat()
@@ -305,10 +305,15 @@ def generate_batch(t, batch_id: str, keywords: list[str], files: list, note: str
     return {"ok": True, "made": made, "items": items}
 
 
+def kst_today():
+    """KST(UTC+9) 기준 오늘 — 사장님 체감 날짜. 스케줄 부여·오늘 카드 판정 공용(4b)."""
+    return (datetime.utcnow() + timedelta(hours=9)).date()
+
+
 def due_today(t) -> list[dict]:
     """P4 — 오늘 발행 예정(복붙 안내용). 배치 생성분 + 자동 글감 큐 생성분(payload.scheduled_date).
     [{keyword, piece_id, asset_id}]."""
-    today = datetime.utcnow().date().isoformat()
+    today = kst_today().isoformat()
     out = []
     for b in db.list_keyword_batches(t.id, limit=5):
         for it in b["items"]:
