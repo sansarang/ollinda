@@ -139,21 +139,56 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
  const esc=s=>(s||'').replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
  // AI 선추측 확인(스마트 입력 PHASE 2) — 무료·유료 공용(대시보드에서도 사용).
  // onDone: 사용자가 응답(맞아요/수정 저장)한 순간 호출 — 무료 위젯의 생성버튼 활성화 트리거.
- window.intakeConfirmUI=function(box,guess,analysis,cid,vid,onDone){
-   var c=document.getElementById(cid),v=document.getElementById(vid);
+ // opts(vision-intent): {interp:해석, conf:'high|low', choices:[의도], learned:학습 기본값, iid:intent hidden id}
+ // 원칙: 전략은 묻지 않는다 / 사실(이 사진이 무엇에 관한 것인가)은 모호하면 묻는다.
+ window.intakeConfirmUI=function(box,guess,analysis,cid,vid,onDone,opts){
+   opts=opts||{};
+   var c=document.getElementById(cid),v=document.getElementById(vid),
+       it=opts.iid?document.getElementById(opts.iid):null;
    if(v)v.value=analysis||'';
    if(!guess){box.innerHTML='';if(c)c.value='';return;}
-   box.innerHTML='<div class="bg-[#EEF2FF] border border-indigo-100 rounded-xl px-3 py-2.5 text-sm">'
-     +'<div class="text-[11px] font-bold text-indigo-500 mb-0.5">확인해주세요</div>'
-     +'<div class="text-slate-700">이 사진, <b>'+esc(guess)+'</b>(으)로 보여요. 맞나요?</div>'
-     +'<div class="flex gap-2 mt-2"><button type="button" data-g="ok" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold">맞아요</button>'
-     +'<button type="button" data-g="fix" class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 text-xs font-bold">수정할게요</button></div></div>';
    function confirmedLine(v){return '<div class="text-xs text-indigo-600 font-bold py-1 truncate cursor-pointer" '
      +'title="'+esc(v)+'" onclick="this.classList.toggle(&quot;truncate&quot;)">확인됨: '+esc(v)+'</div>';}
-   box.querySelector('[data-g=ok]').onclick=function(){if(c)c.value=guess;
-     box.innerHTML=confirmedLine(guess);   // 1줄 요약(넘치면 … · 탭하면 전체)
-     onDone&&onDone();};
-   box.querySelector('[data-g=fix]').onclick=function(){
+   function settle(val,intent){if(c)c.value=val;if(it)it.value=intent||'';
+     box.innerHTML=confirmedLine(val);onDone&&onDone();}
+   var choices=(opts.choices||[]).slice(0,3);
+   // ③ 학습 기본값(3-2): 묻지 않고 "○○로 준비할게요 (변경)" 표시만 — 변경 탭하면 이지선다
+   if(opts.learned&&choices.length){
+     var lv=guess+' — '+opts.learned;
+     if(c)c.value=lv;if(it)it.value=opts.learned;
+     box.innerHTML='<div class="bg-[#EEF2FF] border border-indigo-100 rounded-xl px-3 py-2.5 text-sm">'
+       +'<div class="text-slate-700 truncate" title="'+esc(guess)+'"><b>'+esc(opts.learned)+'</b>(으)로 준비할게요.'
+       +' <button type="button" data-g="chg" class="text-xs text-indigo-500 underline font-semibold">변경</button></div></div>';
+     box.querySelector('[data-g=chg]').onclick=function(){renderChoices();};
+     onDone&&onDone();
+     return;
+   }
+   // ② 저확신 이지선다(2-1·2-2): 사실 확인 — 이 사진이 어떤 이야기인지
+   function renderChoices(){
+     var h='<div class="bg-[#EEF2FF] border border-indigo-100 rounded-xl px-3 py-2.5 text-sm">'
+       +'<div class="text-[11px] font-bold text-indigo-500 mb-0.5">확인해주세요</div>'
+       +'<div class="text-slate-700">이 사진, <b>'+esc(guess)+'</b>(으)로 보여요. 어떤 이야기인가요?</div>'
+       +'<div class="flex flex-wrap gap-2 mt-2">';
+     choices.forEach(function(ch,i){h+='<button type="button" data-ci="'+i+'" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold">'+esc(ch)+'</button>';});
+     h+='<button type="button" data-g="fix" class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 text-xs font-bold">직접 입력</button></div></div>';
+     box.innerHTML=h;
+     box.querySelectorAll('[data-ci]').forEach(function(b){b.onclick=function(){
+       var ch=choices[+b.dataset.ci];settle(guess+' — '+ch,ch);};});
+     box.querySelector('[data-g=fix]').onclick=fixFlow;
+   }
+   if(opts.conf==='low'&&choices.length){renderChoices();var _fx=1;}
+   else{
+     // ① 고확신(기존): 맞아요/수정할게요 — 해석은 확인을 거쳐야 사실이 됨
+     var disp=guess+(opts.interp?(' — '+opts.interp):'');
+     box.innerHTML='<div class="bg-[#EEF2FF] border border-indigo-100 rounded-xl px-3 py-2.5 text-sm">'
+       +'<div class="text-[11px] font-bold text-indigo-500 mb-0.5">확인해주세요</div>'
+       +'<div class="text-slate-700">이 사진, <b>'+esc(disp)+'</b>(으)로 보여요. 맞나요?</div>'
+       +'<div class="flex gap-2 mt-2"><button type="button" data-g="ok" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold">맞아요</button>'
+       +'<button type="button" data-g="fix" class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 text-xs font-bold">수정할게요</button></div></div>';
+     box.querySelector('[data-g=ok]').onclick=function(){settle(disp,opts.interp||'');};
+     box.querySelector('[data-g=fix]').onclick=fixFlow;
+   }
+   function fixFlow(){
      // DOM으로 직접 조립(버그2-a 재발 방지) — 추측 텍스트에 어떤 특수문자가 있어도 입력란이 항상 뜬다
      box.innerHTML='';
      var row=document.createElement('div');row.className='flex gap-2';
@@ -265,7 +300,8 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
      if(d.industry_guess)window.demoQs&&demoQs();   // 사진이 알려준 업종으로 질문 갱신(상호명 입력 커버)
      if(d.guess){
        window.intakeConfirmUI(box,d.guess,d.analysis||'','d_confirmed','d_vision',
-         function(){setDemoReady(true,'');});
+         function(){setDemoReady(true,'');},
+         {interp:d.interpretation||'',conf:d.confidence||'',choices:d.choices||[],learned:d.learned_intent||''});
        demoSkipLink(box);
        setDemoReady(false,'위 사진 확인(맞아요/수정) 후 만들 수 있어요');
      }else{box.innerHTML='';setDemoReady(true,'');}
