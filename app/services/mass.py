@@ -313,7 +313,8 @@ def due_today(t) -> list[dict]:
     for b in db.list_keyword_batches(t.id, limit=5):
         for it in b["items"]:
             if it.get("scheduled_date") == today and it.get("status") in ("ready", "needs_fix") \
-                    and it.get("piece_id") and not db.get_blog_publish(it["piece_id"]):
+                    and it.get("piece_id") and db.get_piece(it["piece_id"]) \
+                    and not db.get_blog_publish(it["piece_id"]):   # 세트 삭제분은 카드 제외(깨진 링크 방지)
                 out.append({"keyword": it["keyword"], "piece_id": it["piece_id"],
                             "asset_id": it.get("asset_id", "")})
     for row in db.writing_queue_rows(t.id, status="done", limit=20):
