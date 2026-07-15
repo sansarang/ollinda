@@ -773,10 +773,12 @@ async def intake_guess(request: Request, industry: str = Form(""), purpose: str 
         # 단, 학습값이 이번 사진의 해석·선택지 어디에도 안 비치면(맥락-사진 불일치) 무시하고 다시 묻는다.
         if _t and out.get("confidence") == "low":
             _learned = db.default_intent(_t.id)
-            _hay = " ".join([out.get("interpretation") or "", out.get("analysis") or ""]
-                            + (out.get("choices") or []))
+            # 불일치 감지(3-3): 학습값은 vision이 제시한 '긍정 후보(선택지)'와 겹칠 때만 적용.
+            # 해석문 전체 매칭은 부정 표현("시공과 연결되지 않아요")의 토큰에 오탐 — 선택지로 한정.
+            _hay = " ".join(out.get("choices") or [])
             import re as _re2
-            _toks = [w for w in _re2.split(r"[\s·]+", _learned) if len(w) >= 2]
+            _stop = {"이야기", "소개", "관련", "상품", "안내", "홍보"}
+            _toks = [w for w in _re2.split(r"[\s·]+", _learned) if len(w) >= 2 and w not in _stop]
             if _learned and _toks and any(w in _hay for w in _toks):
                 out["learned_intent"] = _learned
         return JSONResponse(out)
