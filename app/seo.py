@@ -338,6 +338,9 @@ FACTS_RULE = (
     "- 아래 [사실 정보]([✅ 사장님 제공 실제 정보]·[매장 정보]·[가게])에 있는 내용만 사실로 서술하라. "
     "비어 있는 항목(보증 기간·시공 시간·금액 등)은 그 주제의 문장 자체를 만들지 말고 자연스럽게 생략하라. "
     "업체명·주소·전화는 [가게]/[매장 정보]의 값만 그대로 써라.\n"
+    "- 고객·손님에 관한 구체 일화(방문 시점, 직업, 나이, 대화 내용, 반응)는 [사장님 제공 실제 정보]의 "
+    "경험담에 있는 것만 서술하라. 없으면 특정 일화를 지어내지 말고 일반 서술"
+    "('이런 고민으로 오시는 분들이 많습니다')로만 써라 — 가짜 후기·가짜 사례는 절대 금지.\n"
     "- 상품 등급/성능(예: 노이즈캔슬링·방수)과 가격이 안 맞게 쓰지 마라 — 확실치 않은 사실은 쓰지 말고 비워둬라.\n"
     "- 모르는 정보는 '지어내기'보다 '생략'. 추측을 사실처럼 단정하지 마라.\n"
     "- 과장·낚시 금지: 최고/최저가/100%/무조건/보장/완벽/1위/유일/대박.\n"
@@ -482,6 +485,39 @@ def keywords_line(kws: list[str]) -> str:
 # 경험/후기 신호(D.I.A 가점)
 _EXPERIENCE_WORDS = ["후기", "직접", "경험", "먹어보", "써보", "방문", "가봤", "시공해", "느꼈"]
 
+# 고객 일화(서사형 날조) 신호 — 특정 시점·특정 인물 표지가 있는 문장만(일반 서술 '오시는 분들'은 제외)
+_ANECDOTE_RE = re.compile(
+    r"지난\s?(번|주|달|해)|어제|엊그제|얼마 전|며칠 전|최근에 오|"
+    r"[0-9]+대\s?(남성|여성|사장님|손님|고객|차주|어머니|아버지)|"
+    r"한 분이 오|손님(이|께서) 오셨|고객님(이|께서) 오|차주분(이|께서) 오|오신 손님|오셨어요|오셨습니다")
+# 일화 문장 대조 시 무시할 일반어(업종 공통) — 이것만 겹쳐선 근거로 안 침
+_ANECDOTE_STOP = {"손님", "고객", "사장님", "차주", "여성", "남성", "어머니", "아버지",
+                  "방문", "매장", "저희", "때문", "이야기", "그래서", "그런데", "하시", "하셨",
+                  "오셨", "오시", "오셔", "지난", "어제", "엊그제", "그저께", "최근", "며칠", "얼마"}
+
+
+def _ungrounded_anecdote(text: str, source: str) -> str:
+    """입력(경험담·확인 사진)에 근거 없는 고객 일화 문장 탐지 → 해당 문장(없으면 '').
+    경험담을 인용한 문장은 통과: 문장의 '구별 토큰'이 source에 하나라도 있으면 근거 있음."""
+    src = (source or "")
+    for sent in re.split(r"(?<=[.!?다요])\s+|\n", text or ""):
+        sent = sent.strip()
+        if not (10 <= len(sent) <= 200) or not _ANECDOTE_RE.search(sent):
+            continue
+        toks = [t for t in re.findall(r"[가-힣A-Za-z0-9]{2,}", sent)
+                if not any(t.startswith(s) for s in _ANECDOTE_STOP)
+                and not re.fullmatch(r"[0-9]+대?", t)]
+        distinct = [t for t in toks if len(t) >= 2][:12]
+        if not distinct:
+            continue                                  # 구체 정보가 없는 일반 문장 — 날조로 안 봄
+        # 근거 판정: 3자+ 토큰의 포함, 또는 짧은 토큰의 단어 단위 일치('분이'⊂'차주분이' 오매칭 방지)
+        grounded = (any(t in src for t in distinct if len(t) >= 3)
+                    or any(t in src.split() for t in distinct))
+        if not grounded:
+            return sent
+    return ""
+
+
 # 행정구역 풀네임(본문 반복 시 기계 삽입 티) — 키워드 자연 변형 게이트(재검증 STEP 1-2b)
 _ADMIN_FULL_RE = re.compile(r"[가-힣]{2,}(?:광역시|특별시|특별자치시|특별자치도)")
 
@@ -516,6 +552,11 @@ def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> d
         if fabricated:
             warnings.append(f"입력에 없는 수치/금액 {fabricated[:4]} → 날조 의심(제거 권장)")
             score -= min(20, 8 * len(fabricated))
+        # 고객 일화 창작(서사형 날조): 입력 경험담에 없는 특정 일화 → 게이트 실패(-30, 자동 재생성)
+        _anec = _ungrounded_anecdote(text, source)
+        if _anec:
+            warnings.append(f"입력에 없는 고객 일화 '{_anec[:40]}…' — 가짜 사례 창작(게이트 실패)")
+            score -= 30
         # 보증 기간 날조(폼사실 게이트 1-3b): 폼에 없는 'N년/N개월 보증'은 게이트 실패급
         _src_flat = source.replace(" ", "").replace(",", "")
         for g in re.findall(r"(\d+)\s*(년|개월)\s*(?:무상|무료|하자)?\s*보증|보증\s*(?:기간)?\s*(\d+)\s*(년|개월)", text):
