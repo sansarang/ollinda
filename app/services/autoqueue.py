@@ -38,20 +38,7 @@ def refill(t, plan: str = "free") -> dict:
     """기존 분석 산출물 → 큐 적재. 반환 {P1,P2,P3,P4} 적재 수."""
     from app.services import ranktrack
     added = {"P1": 0, "P2": 0, "P3": 0, "P4": 0}
-    # P1 — 정체 키워드 앵글 재도전(기존 처방 로직 출력 그대로)
-    try:
-        for s in ranktrack.stagnant_keywords(t.id, limit=2):
-            if _bad_kw(s["keyword"]):
-                continue
-            if db.enqueue_writing(t.id, "P1", s["keyword"], s["retry_angle"],
-                                  _reason(f"정체(스냅샷 {s['first']}→{s['last']}) — {s['prev_label']} 대신 {s['retry_label']} 재도전",
-                                          first=s["first"], last=s["last"], days=s.get("days"),
-                                          prev=s["prev_label"], retry=s["retry_label"])):
-                added["P1"] += 1
-                _log.info("[autoqueue] 적재 P1 t=%s kw=%r angle=%s", t.id, s["keyword"], s["retry_angle"])
-    except Exception:
-        _log.exception("[autoqueue] P1 적재 실패 t=%s", t.id)
-    # P1b — 저CTR 재도전(CTR 4-3): 1페이지(post rank≤10) 7일 이상인데 추적링크 유입 0 → 제목 매력 부족
+    # P1b — 저CTR 재도전(CTR 4-3, 정체보다 우선 — 순위는 있는데 유입 0이면 처방은 '제목'): 1페이지(post rank≤10) 7일 이상인데 추적링크 유입 0 → 제목 매력 부족
     try:
         from datetime import date
         clicks = db.content_click_counts(t.id, days=30)
@@ -83,6 +70,19 @@ def refill(t, plan: str = "free") -> dict:
             break                                     # 저CTR 재도전은 1건이면 충분
     except Exception:
         _log.exception("[autoqueue] P1(저CTR) 적재 실패 t=%s", t.id)
+    # P1 — 정체 키워드 앵글 재도전(기존 처방 로직 출력 그대로)
+    try:
+        for s in ranktrack.stagnant_keywords(t.id, limit=2):
+            if _bad_kw(s["keyword"]):
+                continue
+            if db.enqueue_writing(t.id, "P1", s["keyword"], s["retry_angle"],
+                                  _reason(f"정체(스냅샷 {s['first']}→{s['last']}) — {s['prev_label']} 대신 {s['retry_label']} 재도전",
+                                          first=s["first"], last=s["last"], days=s.get("days"),
+                                          prev=s["prev_label"], retry=s["retry_label"])):
+                added["P1"] += 1
+                _log.info("[autoqueue] 적재 P1 t=%s kw=%r angle=%s", t.id, s["keyword"], s["retry_angle"])
+    except Exception:
+        _log.exception("[autoqueue] P1 적재 실패 t=%s", t.id)
     # P2 — 미노출(놓치는) 키워드 선점(기존 진단 재사용, 매장/셀러 분기)
     try:
         from app.services import diagnose
