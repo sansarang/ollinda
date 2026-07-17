@@ -294,7 +294,7 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
             from app import config as _cfg
             return JSONResponse({"limit": True,
                                  "message": (f"무료 {FREE_LIMIT}회를 모두 사용했어요. 방금 만든 품질 그대로 계속하려면 "
-                                             f"베이직 월 {_cfg.PRICE_BASIC:,}원 — 순위 추적·경쟁사 비교까지 열려요.")})
+                                             f"베이직 월 {_cfg.PRICE_BASIC:,}원 — 순위 성장 추적까지 열려요.")})
         left = (FREE_LIMIT - used) if free else None
         return JSONResponse({"go_dashboard": True,
                              "message": "내 작업실에서 사진을 올리면 바로 만들어드려요!"
@@ -932,76 +932,12 @@ def competitor_report(request: Request):
     return JSONResponse(rep)
 
 
-@app.get("/me/competitors", response_class=HTMLResponse)
+@app.get("/me/competitors")
 def competitors_page(request: Request):
-    """경쟁사 추적 대시보드 페이지(PHASE 4). 등록·현황·수동스캔·업그레이드 CTA."""
-    from app import gating, config as _cfg
-    from app.services import competitor
-    u = auth.current_user(request)
-    if not u:
-        return RedirectResponse("/login", status_code=303)
-    t = _ensure_user_tenant(u)
-    comps = db.list_competitors(t.id)
-    rep = competitor.report(t, comps)
-    usage = gating.usage_summary(db.get_user(u["id"]), "competitor_scans")
-    cmax = _cfg.plan_limit(u.get("plan") or "free", "competitors_max")
-    used_label = ("무제한" if usage["limit"] == -1 else f"{usage['used']}/{usage['limit']}회")
-    cmax_label = ("무제한" if cmax == -1 else f"{cmax}개")
-
-    alerts = "".join(
-        f"<div class='bg-rose-50 border border-rose-200 text-rose-700 rounded-xl px-4 py-2.5 mb-2 text-sm'>⚠️ {esc(a)}</div>"
-        for a in rep.get("alerts", []))
-    cards = ""
-    for c in rep.get("cards", []):
-        rows = "".join(
-            f"<div class='flex items-center justify-between border-b border-slate-100 py-1.5 text-sm'>"
-            f"<span class='text-slate-500'>{esc(r['keyword'])}</span>"
-            f"<span class='text-slate-700'>나 <b>{esc(r['my_label'])}</b> · 상대 <b>{esc(r['competitor_label'])}</b> "
-            f"<span class='ml-1'>{esc(r['verdict'])}</span></span></div>"
-            for r in c.get("rows", []))
-        empty = "" if c.get("scanned") else "<div class='text-xs text-slate-400 py-2'>아직 스캔 전이에요. ‘지금 스캔’을 눌러보세요.</div>"
-        cards += (f"<div class='bg-white rounded-2xl border border-slate-100 p-5 mb-3'>"
-                  f"<div class='flex items-center justify-between mb-2'><div class='font-bold text-slate-800'>🥊 {esc(c['name'])}</div>"
-                  f"<button onclick=\"delComp('{c['id']}')\" class='text-xs text-slate-400 hover:text-rose-500'>삭제</button></div>"
-                  f"{rows}{empty}</div>")
-    if not comps:
-        cards = "<div class='bg-slate-50 rounded-2xl p-6 text-center text-slate-500 text-sm'>아직 등록한 경쟁사가 없어요. 옆집·경쟁 매장 상호를 등록하면 매일 자동으로 순위를 비교해 드려요.</div>"
-
-    upgrade = ("" if usage["limit"] == -1 or usage["remaining"] > 0 else
-               "<a href='/#pricing' class='block text-center bg-indigo-600 text-white font-bold py-3 rounded-xl mt-3'>업그레이드하고 더 추적하기 →</a>")
-
-    inner = (
-        f"<a href='/me' class='text-sm text-slate-500 font-bold'>← 내 작업실</a>"
-        "<div class='flex items-center justify-between mt-2 mb-1'>"
-        "<h1 class='text-2xl font-extrabold'>🥊 경쟁사 추적</h1>"
-        f"<span class='text-xs text-slate-400'>이번 달 스캔 {used_label} · 경쟁사 {cmax_label}</span></div>"
-        "<p class='text-slate-500 text-sm mb-5'>옆집보다 위에 뜨고 있는지, 매일 자동으로 체크해 드려요. (네이버 지역검색 상위 5위 기준)</p>"
-        + alerts +
-        "<div class='bg-white rounded-2xl border border-slate-100 p-5 mb-4'>"
-        "<div class='font-bold text-slate-800 mb-2'>+ 경쟁사 등록</div>"
-        "<input id='c_name' placeholder='경쟁사 상호(예: 옆집모터스)' class='w-full rounded-xl border px-3 py-2.5 mb-2 text-sm outline-none'>"
-        "<input id='c_kw' placeholder='비교할 키워드(선택, 쉼표로 여러 개 · 비우면 자동)' class='w-full rounded-xl border px-3 py-2.5 mb-2 text-sm outline-none'>"
-        "<button onclick='addComp()' class='w-full bg-slate-900 text-white font-bold py-2.5 rounded-xl text-sm'>등록</button>"
-        "<div id='c_msg' class='text-xs mt-2'></div></div>"
-        "<button onclick='scanNow()' class='w-full grad-btn text-white font-bold py-3 rounded-xl mb-4'>🔄 지금 스캔 (내 순위 vs 경쟁사)</button>"
-        + cards + upgrade +
-        "<script>"
-        "async function addComp(){var n=document.getElementById('c_name').value,k=document.getElementById('c_kw').value;"
-        "var m=document.getElementById('c_msg');if(!n){m.textContent='상호를 입력해주세요';m.className='text-xs mt-2 text-rose-500';return;}"
-        "var fd=new FormData();fd.append('name',n);fd.append('keywords',k);"
-        "var r=await fetch('/api/competitor',{method:'POST',body:fd});var d=await r.json();"
-        "if(d.ok){location.reload();}else{m.textContent=d.error||'등록 실패';m.className='text-xs mt-2 text-rose-500';"
-        "if(d.upgrade){m.innerHTML+=' <a href=\"/#pricing\" class=\"underline text-indigo-600\">업그레이드</a>';}}}"
-        "async function delComp(id){if(!confirm('삭제할까요?'))return;await fetch('/api/competitor/'+id+'/delete',{method:'POST'});location.reload();}"
-        "async function scanNow(){var b=event.target;b.textContent='스캔 중…';b.disabled=true;"
-        "var r=await fetch('/api/competitor/scan',{method:'POST'});var d=await r.json();"
-        "if(d.error){alert(d.error);b.disabled=false;b.textContent='🔄 지금 스캔';if(d.upgrade)location.href='/#pricing';return;}"
-        "location.reload();}"
-        "</script>")
-    return HTMLResponse(_subscriber_page("", inner))
+    """(UI 정리) 경쟁사 페이지 제거 — 경쟁 분석은 백엔드(자동 큐 P3 격차·브리핑 신호)에서만 동작."""
+    return RedirectResponse("/me", status_code=303)
 
 
-# ══ 신규기능②: 인쇄물 자동 생성 ══
 @app.post("/api/print/generate")
 async def print_generate(request: Request):
     """인쇄물 생성 — 타입·항목·사진 → 렌더 → URL. print_items 한도 차감(PHASE 7)."""
@@ -1080,129 +1016,59 @@ def print_file(jid: str, request: Request):
     return HTMLResponse("<p>파일을 찾을 수 없어요.</p>", status_code=404)
 
 
-@app.get("/me/print", response_class=HTMLResponse)
-def print_page(request: Request):
-    """인쇄물 생성 페이지(PHASE 7). 타입 선택·항목 입력·생성·다운로드·한도."""
-    from app import gating
-    from app.services import printable
-    u = auth.current_user(request)
-    if not u:
-        return RedirectResponse("/login", status_code=303)
-    t = _ensure_user_tenant(u)
-    usage = gating.usage_summary(db.get_user(u["id"]), "print_items")
-    used_label = ("무제한" if usage["limit"] == -1 else f"{usage['used']}/{usage['limit']}장")
-    jobs = db.list_print_jobs(t.id, limit=12)
-
-    type_opts = "".join(f"<option value='{k}'>{esc(v['label'])}</option>" for k, v in printable.PRINT_TYPES.items())
-    made = "".join(
-        f"<a href='/print/file/{j['id']}' target='_blank' class='flex items-center justify-between bg-white border border-slate-100 rounded-xl px-4 py-2.5 mb-2 hover:shadow-sm'>"
-        f"<span class='text-sm text-slate-700'>🖨️ {esc(j.get('label') or j.get('ptype'))}</span>"
-        f"<span class='text-xs text-indigo-600 font-bold'>다운로드 ↓</span></a>"
-        for j in jobs) or "<div class='text-sm text-slate-400 text-center py-4'>아직 만든 인쇄물이 없어요.</div>"
-
-    upgrade = ("" if usage["limit"] == -1 or usage["remaining"] > 0 else
-               "<a href='/#pricing' class='block text-center bg-indigo-600 text-white font-bold py-3 rounded-xl mt-3'>업그레이드하고 더 만들기 →</a>")
-
-    inner = (
-        f"<a href='/me' class='text-sm text-slate-500 font-bold'>← 내 작업실</a>"
-        "<div class='flex items-center justify-between mt-2 mb-1'>"
-        "<h1 class='text-2xl font-extrabold'>🖨️ 인쇄물 만들기</h1>"
-        f"<span class='text-xs text-slate-400'>이번 달 {used_label}</span></div>"
-        "<p class='text-slate-500 text-sm mb-5'>메뉴판·가격표·전단지·POP을 사진 한 장과 항목만으로. (가격은 입력하신 그대로, 지어내지 않아요)</p>"
-        "<div class='bg-white rounded-2xl border border-slate-100 p-5 mb-4'>"
-        f"<select id='p_type' class='w-full rounded-xl border px-3 py-2.5 mb-2 text-sm bg-white'>{type_opts}</select>"
-        "<input id='p_note' placeholder='제목/이벤트 메모(선택, 예: 봄맞이 신메뉴)' class='w-full rounded-xl border px-3 py-2.5 mb-2 text-sm outline-none'>"
-        "<div id='p_items'></div>"
-        "<button onclick='addRow()' class='text-xs text-indigo-600 font-bold mb-2'>+ 항목 추가</button>"
-        "<label class='block text-xs text-slate-500 mb-1'>대표 사진(선택)</label>"
-        "<input id='p_photo' type='file' accept='image/*' class='w-full text-xs mb-2'>"
-        "<label class='flex items-center gap-2 text-xs text-slate-600 mb-3'>"
-        "<input id='p_qr' type='checkbox' checked class='accent-indigo-600'> 매장 QR 넣기 — 손님이 찍으면 리포트에 '매장 QR' 유입으로 집계돼요</label>"
-        "<button onclick='genPrint()' class='w-full grad-btn text-white font-bold py-3 rounded-xl'>인쇄물 생성</button>"
-        "<div id='p_msg' class='text-sm mt-2'></div></div>"
-        "<div class='font-bold text-slate-700 mb-2'>내가 만든 인쇄물</div>" + made + upgrade +
-        "<script>"
-        "function addRow(){var d=document.getElementById('p_items');var r=document.createElement('div');r.className='flex gap-2 mb-2';"
-        "r.innerHTML='<input class=\"pn flex-1 rounded-lg border px-3 py-2 text-sm\" placeholder=\"항목명\"><input class=\"pp w-28 rounded-lg border px-3 py-2 text-sm\" placeholder=\"가격\">';d.appendChild(r);}"
-        "addRow();addRow();"
-        "async function genPrint(){var msg=document.getElementById('p_msg');msg.textContent='생성 중… (10~20초)';"
-        "var items=[];document.querySelectorAll('#p_items > div').forEach(function(row){var n=row.querySelector('.pn').value,p=row.querySelector('.pp').value;if(n)items.push({name:n,price:p});});"
-        "var fd=new FormData();fd.append('type',document.getElementById('p_type').value);fd.append('note',document.getElementById('p_note').value);fd.append('items',JSON.stringify(items));"
-        "var q=document.getElementById('p_qr');fd.append('qr',(q&&q.checked)?'1':'0');"
-        "var ph=document.getElementById('p_photo').files[0];if(ph)fd.append('photo',ph);"
-        "try{var r=await fetch('/api/print/generate',{method:'POST',body:fd});var d=await r.json();"
-        "if(d.ok){msg.innerHTML='✅ 완성! <a href=\"'+d.download+'\" target=\"_blank\" class=\"text-indigo-600 underline font-bold\">다운로드</a>';setTimeout(function(){location.reload();},1200);}"
-        "else{msg.textContent=d.error||'생성 실패';msg.className='text-sm mt-2 text-rose-500';if(d.upgrade)location.href='/#pricing';}}"
-        "catch(e){msg.textContent='생성 실패 — 잠시 후 다시';}}"
-        "</script>")
-    return HTMLResponse(_subscriber_page("", inner))
-
-
-def _short_region(addr: str) -> str:
-    """전체 주소 → '부산 동구' / '부산 동구 초량동'처럼 짧은 지역(키워드용)."""
-    toks = (addr or "").split()
-    if not toks:
+def _print_block(t) -> str:
+    """인쇄물 만들기(리뷰 QR·전단·POP) — 플레이스 섹션으로 일원화(UI 정리 1-2). 접힘 기본."""
+    try:
+        from app import gating
+        from app.services import printable
+        owner = db.get_user_by_tenant(t.id)
+        usage = gating.usage_summary(owner, "print_items") if owner else {"limit": 0, "used": 0, "remaining": 0}
+        used_label = ("무제한" if usage["limit"] == -1 else f"{usage['used']}/{usage['limit']}장")
+        jobs = db.list_print_jobs(t.id, limit=8)
+        type_opts = "".join(f"<option value='{k}'>{esc(v['label'])}</option>" for k, v in printable.PRINT_TYPES.items())
+        made = "".join(
+            f"<a href='/print/file/{j['id']}' target='_blank' class='flex items-center justify-between bg-white border border-slate-100 rounded-xl px-4 py-2.5 mb-2 hover:shadow-sm'>"
+            f"<span class='text-sm text-slate-700'>🖨️ {esc(j.get('label') or j.get('ptype'))}</span>"
+            f"<span class='text-xs text-indigo-600 font-bold'>다운로드 ↓</span></a>"
+            for j in jobs) or "<div class='text-sm text-slate-400 text-center py-3'>아직 만든 인쇄물이 없어요.</div>"
+        return (
+            "<details class='mt-5 bg-slate-50 border border-slate-200 rounded-2xl p-4'>"
+            "<summary class='cursor-pointer text-sm font-bold text-slate-700 select-none'>🖨️ 인쇄물 만들기 — 메뉴판·가격표·전단·POP "
+            f"<span class='text-xs text-slate-400 font-normal'>(이번 달 {used_label} · 가격은 입력한 그대로)</span></summary>"
+            "<div class='mt-3'>"
+            f"<select id='p_type' class='w-full rounded-xl border px-3 py-2.5 mb-2 text-sm bg-white'>{type_opts}</select>"
+            "<input id='p_note' placeholder='제목/이벤트 메모(선택, 예: 봄맞이 신메뉴)' class='w-full rounded-xl border px-3 py-2.5 mb-2 text-sm outline-none'>"
+            "<div id='p_items'></div>"
+            "<button type=button onclick='addRow()' class='text-xs text-indigo-600 font-bold mb-2'>+ 항목 추가</button>"
+            "<label class='block text-xs text-slate-500 mb-1'>대표 사진(선택)</label>"
+            "<input id='p_photo' type='file' accept='image/*' class='w-full text-xs mb-2'>"
+            "<label class='flex items-center gap-2 text-xs text-slate-600 mb-3'>"
+            "<input id='p_qr' type='checkbox' checked class='accent-indigo-600'> 매장 QR 넣기 — 손님이 찍으면 리포트에 '매장 QR' 유입으로 집계돼요</label>"
+            "<button type=button onclick='genPrint()' class='w-full grad-btn text-white font-bold py-3 rounded-xl'>인쇄물 생성</button>"
+            "<div id='p_msg' class='text-sm mt-2'></div>"
+            "<div class='font-bold text-slate-700 mt-4 mb-2 text-sm'>내가 만든 인쇄물</div>" + made + "</div>"
+            "<script>"
+            "function addRow(){var d=document.getElementById('p_items');var r=document.createElement('div');r.className='flex gap-2 mb-2';"
+            "r.innerHTML='<input class=\"pn flex-1 rounded-lg border px-3 py-2 text-sm\" placeholder=\"항목명\"><input class=\"pp w-28 rounded-lg border px-3 py-2 text-sm\" placeholder=\"가격\">';d.appendChild(r);}"
+            "addRow();addRow();"
+            "async function genPrint(){var msg=document.getElementById('p_msg');msg.textContent='생성 중… (10~20초)';"
+            "var items=[];document.querySelectorAll('#p_items > div').forEach(function(row){var n=row.querySelector('.pn').value,p=row.querySelector('.pp').value;if(n)items.push({name:n,price:p});});"
+            "var fd=new FormData();fd.append('type',document.getElementById('p_type').value);fd.append('note',document.getElementById('p_note').value);fd.append('items',JSON.stringify(items));"
+            "var q=document.getElementById('p_qr');fd.append('qr',(q&&q.checked)?'1':'0');"
+            "var ph=document.getElementById('p_photo').files[0];if(ph)fd.append('photo',ph);"
+            "try{var r=await fetch('/api/print/generate',{method:'POST',body:fd});var d=await r.json();"
+            "if(d.ok){msg.innerHTML='✅ 완성! <a href=\"'+d.download+'\" target=\"_blank\" class=\"text-indigo-600 underline font-bold\">다운로드</a>';setTimeout(function(){location.reload();},1200);}"
+            "else{msg.textContent=d.error||'생성 실패';msg.className='text-sm mt-2 text-rose-500';if(d.upgrade)location.href='/#pricing';}}"
+            "catch(e){msg.textContent='생성 실패 — 잠시 후 다시';}}"
+            "</script></details>")
+    except Exception:
         return ""
-    sido = toks[0]
-    for suf in ("특별자치도", "특별자치시", "광역시", "특별시", "자치도", "도", "시"):
-        if sido.endswith(suf) and len(sido) > len(suf):
-            sido = sido[:-len(suf)]
-            break
-    parts = [sido]
-    if len(toks) > 1:
-        parts.append(toks[1])                       # 구/군/시
-    dong = next((t for t in toks[2:5] if t.endswith(("동", "읍", "면", "가", "리"))), "")
-    if dong:
-        parts.append(dong)
-    return " ".join(parts)
 
 
-def _clean_kw(k: str) -> str:
-    """주소범벅 키워드를 짧게 — '부산광역시 동구 …274번길 7-7 1층 105호 썬팅업체 추천' → '부산 동구 썬팅업체 추천'."""
-    import re as _re
-    if not _re.search(r"[0-9]|번길|[0-9]층|[0-9]호|대로|번지", k or ""):
-        return k                               # 주소 안 낀 정상 키워드는 그대로
-    region = _short_region(k)                  # 부산 동구 (+동)
-    rset = set(region.split())
-    tail = [t for t in (k or "").split()
-            if t not in rset
-            and not _re.search(r"[0-9]|번길|대로|^.+로$|^.+길$|광역시|특별시|특별자치|자치도|^.+도$", t)
-            and t not in ("시", "군", "구", "읍", "면")]
-    out = (region + " " + " ".join(tail)).strip()
-    return out or region
-
-
-def _detect_market(text: str) -> str:
-    """URL/몰이름 → 마켓 코드(폼 마켓칸 자동 선택)."""
-    t = (text or "").lower()
-    if "coupang" in t or "쿠팡" in t:
-        return "coupang"
-    if "smartstore" in t or "스마트스토어" in t:
-        return "smartstore"
-    if "11st" in t or "11번가" in t or "elevenst" in t:
-        return "11st"
-    if "gmarket" in t or "지마켓" in t:
-        return "gmarket"
-    return ""
-
-
-_KW_COLORS = {"그레이", "블랙", "화이트", "네이비", "베이지", "브라운", "핑크", "레드", "블루",
-              "카키", "와인", "아이보리", "차콜", "옐로우", "그린", "퍼플", "오렌지", "민트"}
-_KW_JUNK = {"정품", "무료배송", "당일발송", "신상", "특가", "선택", "옵션", "공용", "남녀공용",
-            "freesize", "free", "세트", "택1", "단품"}
-
-
-def _seller_search_kw(name: str, brand: str = "") -> str:
-    """상품명 → '검색어 유도' 핵심 키워드(브랜드·괄호·색상·옵션 제거, 상품종류 위주)."""
-    import re as _r
-    n = _r.sub(r"\([^)]*\)|\[[^\]]*\]", " ", name or "")   # 괄호·대괄호 제거
-    if brand:
-        n = n.replace(brand, " ")
-    n = _r.sub(r"[^0-9A-Za-z가-힣 ]", " ", n)
-    words = [w for w in n.split() if len(w) >= 2 and w.lower() not in _KW_JUNK]
-    while words and (words[-1] in _KW_COLORS or words[-1].lower() in _KW_JUNK):   # 뒤 색상·잡토큰 제거
-        words.pop()
-    return " ".join(words[-2:]) if len(words) >= 2 else (words[-1] if words else "")
+@app.get("/me/print")
+def print_page(request: Request):
+    """(UI 정리) 인쇄물 페이지 제거 — 리포트 > 플레이스 섹션의 '인쇄물 만들기'로 일원화."""
+    return RedirectResponse("/me?tab=report#place", status_code=303)
 
 
 @app.get("/api/lookup")
@@ -2002,7 +1868,8 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                      if _rank3 else
                      ("<div class='mb-4 bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm text-slate-500'>"
                       "아직 유입이 없어요 — 발행물 속 추적링크·매장 QR로 온 손님이 여기 콘텐츠별로 집계돼요. "
-                      "글을 발행하고 링크가 눌리면 TOP 3가 채워집니다.</div>"))
+                      "글을 발행하고 링크가 눌리면 TOP 3가 채워집니다."
+                      "<div class='mt-1.5'><a href='/me' class='text-xs font-semibold text-indigo-600'>첫 글을 발행하면 여기가 채워져요 — 홈에서 사진을 올려주세요 →</a></div></div>"))
             _sp_rows = "".join(
                 f"<div class='flex items-center justify-between py-1.5'><span class='text-sm text-slate-600'>{_ch_lab.get(k, esc(k))}</span>"
                 f"<span class='text-base font-extrabold text-violet-600'>{v}<span class='text-xs text-slate-400 font-bold ml-0.5'>클릭</span></span></div>"
@@ -2014,7 +1881,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 f"<span class='text-[10px] text-slate-400'>{d['date']}</span></div>" for d in _series)
             _perfbox = (
                 f"<div class='{_fw} mt-5'>"
-                "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>콘텐츠 성과 · 링크 클릭 실측 <a href='/me/mass' class='text-sm font-bold text-violet-600 underline ml-2'>대량 발행·증거 →</a></h2>"
+                "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>콘텐츠 성과 · 링크 클릭 실측</h2>"
                 "<p class='text-sm text-slate-500 mb-1'>내가 만든 글에 넣은 링크를 손님이 몇 번 눌렀는지 — "
                 "<b class='text-slate-700'>어느 글이 손님을 데려오는지</b> 보여요.</p>"
                 "<p class='text-sm text-slate-400 mb-4'>집계는 올린다 추적링크 클릭 기준이에요 — "
@@ -2022,7 +1889,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 "온라인 글(블로그·인스타) 유입과 매장 QR(오프라인) 유입은 구분 집계돼요.</p>"
                 + _top3
                 + "<div class='grid sm:grid-cols-2 gap-6'>"
-                + f"<div><div class='text-sm font-bold text-slate-600 mb-1'>채널별 유입 (30일)</div>{_sp_rows or '<span class=\"text-sm text-slate-400\">아직 유입이 없어요 — 블로그·인스타·매장 QR별로 나눠 보여드려요</span>'}</div>"
+                + f"<div><div class='text-sm font-bold text-slate-600 mb-1'>채널별 유입 (30일)</div>{_sp_rows or '<span class=\"text-sm text-slate-400\">아직 유입이 없어요 — 블로그·인스타·매장 QR별로 나눠 보여드려요<div class=\'mt-1.5\'><a href=\'/me\' class=\'text-xs font-semibold text-indigo-600\'>첫 글을 발행하면 여기가 채워져요 — 홈에서 사진을 올려주세요 →</a></div></span>'}</div>"
                 + f"<div><div class='text-sm font-bold text-slate-600 mb-1'>최근 7일 추이</div><div class='flex items-end gap-1.5 h-16'>{_bars}</div></div>"
                 + "</div>" + _visitor_box(t) + "</div>")
         except Exception:
@@ -2111,9 +1978,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         main_inner = _backban + main_inner
     from app import landing
     _navitems = [("wand", "홈", "/me", "create"), ("book", "내 콘텐츠", "/me?tab=content", "content"),
-                 ("chart", "리포트", "/me?tab=report", "report"),
-                 ("trophy", "경쟁사", "/me/competitors", "competitors"),
-                 ("printer", "인쇄물", "/me/print", "print")]
+                 ("chart", "리포트", "/me?tab=report", "report")]
 
     def _navlink(i, l, h, key):
         cls = ("bg-[#EEF2FF] text-indigo-700" if key == active
@@ -2732,9 +2597,11 @@ def _place_card(t, fw: str) -> str:
             ic, cls = "⬜", "text-slate-700 font-semibold"
         else:
             ic, cls = "·", "text-slate-600"
+        _go = ("<a href='https://smartplace.naver.com/' target=_blank rel=noopener "
+               "class='text-indigo-600 font-bold'> 네이버 플레이스 관리에서 하기 ↗</a>" if i["done"] is False else "")
         chk += (f"<details class='py-1.5 border-b border-slate-100'><summary class='cursor-pointer text-sm {cls} select-none'>"
                 f"{ic} {esc(i['label'])} <span class='text-[11px] text-slate-400 font-normal'>— {esc(i['why'])}</span></summary>"
-                f"<div class='text-xs text-slate-500 mt-1 pl-6'>{esc(i['how'])}</div></details>")
+                f"<div class='text-xs text-slate-500 mt-1 pl-6'>{esc(i['how'])}{_go}</div></details>")
     # 리뷰 요청 키트
     rv = ""
     for idx, r in enumerate(s["reviews"]):
@@ -2750,7 +2617,7 @@ def _place_card(t, fw: str) -> str:
           "<div class='text-xs text-slate-600'>이 QR을 카운터에 두면 손님이 바로 내 플레이스로 가요.<br>"
           f"<a href='/me/review-card.png' download class='text-indigo-600 font-bold'>⬇ 리뷰 요청 카드(인쇄용)</a> · "
           f"<a href='/me/qr/{_tl['code']}.png' download class='text-indigo-600 font-bold'>⬇ QR 저장</a></div></div>") if _tl else ""
-    return (f"<div class='{fw} mt-5'>"
+    return (f"<div id='place' class='{fw} mt-5'>"
             "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>플레이스 최적화 (매장)</h2>"
             f"<p class='text-sm text-slate-400 mb-4'>동네매장은 지도 상위노출이 방문에 직결돼요 · 정보 완성 {s['done']}/{s['known']}"
             " · 리뷰는 <b>실제 방문 손님</b>에게만 정당하게 요청해요(가짜 리뷰 금지).</p>"
@@ -2758,7 +2625,9 @@ def _place_card(t, fw: str) -> str:
             + "<div class='grid sm:grid-cols-2 gap-5'>"
             f"<div><div class='text-xs font-bold text-slate-500 mb-1'>정보 완성도 체크리스트</div>{chk}</div>"
             f"<div><div class='text-xs font-bold text-slate-500 mb-1'>리뷰 요청 키트</div>{rv}{qr}</div>"
-            "</div></div>")
+            "</div>"
+            + _print_block(t)
+            + "</div>")
 
 
 def _visitor_box(t) -> str:

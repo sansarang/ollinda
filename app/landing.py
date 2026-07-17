@@ -702,7 +702,7 @@ def _features() -> str:
             ("store", "소상공인·셀러 자동분기", "지도·방문 ↔ 구매링크·검색어 자동 전환"),
             ("tag", "업종 무제한 자동", "어떤 업종이든 맞춤 톤 자동 생성"),
             ("link", "계정 1회 연결 자동발행", "비번 없이 연결, 발행 누르면 끝"),
-            ("trophy", "경쟁 추월 + 성과 실측", "옆집 대비 순위 + QR 유입 집계"),
+            ("chart", "성과 실측", "발행 후 순위·QR 유입 자동 집계"),
             ("wand", "사진 자동 보정", "폰 사진을 전문가 톤으로, 음식은 먹음직하게"),
             ("cpu", "쓸수록 똑똑해짐", "순위 오른 키워드를 학습해 다음 콘텐츠 강화")]
     big = "".join(f"<div class='reveal card p-7'>{_icon_chip(ic, size='lg')}"
@@ -721,33 +721,8 @@ def _features() -> str:
 
 
 def _new_features() -> str:
-    from app import config as _cfg
-    fl = _cfg.PLAN_LIMITS["free"]
-    b = _cfg.PLAN_LIMITS["basic"]
-    cards = [
-        ("trophy", "경쟁사 추적기", "옆집보다 위에 뜨고 있나요? 매일 자동 체크",
-         "경쟁 매장 상호만 등록하면, 같은 키워드에서 <b>내 순위 vs 경쟁사 순위</b>를 매일 자동 비교해요. "
-         "역전당하면 바로 알려드려요.",
-         f"무료 {fl['competitor_scans']}회 체험 → 베이직 월 {b['competitor_scans']}회",
-         "/login/kakao"),
-        ("printer", "인쇄물 자동 생성", "메뉴판·전단지도 사진 한 장으로",
-         "메뉴판·가격표·이벤트 전단·POP을 <b>사진 한 장과 항목만으로</b> 자동 디자인. "
-         "가격은 입력하신 그대로 — 없는 가격 지어내지 않아요.",
-         f"무료 {fl['print_items']}장 체험 → 베이직 월 {b['print_items']}장",
-         "/login/kakao"),
-    ]
-    body = ""
-    for ic, title, sub, desc, trial, href in cards:
-        body += (f"<div class='reveal card p-8'>{_icon_chip(ic)}"
-                 f"<div class='font-bold text-xl mb-1 text-slate-900'>{title}</div>"
-                 f"<div class='text-indigo-600 text-sm font-bold mb-3'>{sub}</div>"
-                 f"<p class='text-slate-500 text-sm leading-relaxed mb-4'>{desc}</p>"
-                 f"<div class='text-xs text-slate-400 mb-4'>{trial}</div>"
-                 f"<a href='{href}' class='block text-center bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition'>무료로 체험하기</a></div>")
-    return ("<section class='bg-white py-24'><div class='max-w-5xl mx-auto px-5'>"
-            "<h2 class='reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900'>상위노출, 그다음까지</h2>"
-            "<p class='reveal text-center text-slate-500 mb-14'>순위만 올리는 게 아니라 — 경쟁사를 이기고, 매장 밖 마케팅까지.</p>"
-            f"<div class='grid sm:grid-cols-2 gap-6'>{body}</div></div></section>")
+    """(UI 정리) 경쟁사·인쇄물 소개 섹션 제거 — 3단(사진→글→순위) 구조."""
+    return ""
 
 
 def _pricing() -> str:
@@ -760,12 +735,13 @@ def _pricing() -> str:
         d = L.get(plan, L["free"])
         cm = "무제한" if d["competitors_max"] == -1 else f"{d['competitors_max']}개"
         pi = "무제한" if d["print_items"] == -1 else f"월 {d['print_items']}장"
-        return [f"경쟁사 추적 {cm}", f"인쇄물 {pi}"]
+        _ = (cm, pi)                     # (UI 정리) 경쟁사·인쇄물 행 제거 — 백엔드 한도는 유지
+        return []
     plans = [("베이직", f"월 {b:,}원", f"월 8건 · 처음 시작용 · 연결제 시 월 {by:,}원",
               ["사진만 올리면 5채널 생성", "검색 상위노출에 유리한 구조로 작성", "사진 자동 보정 + 이미지 SEO"] + _flim("basic"),
               "basic", False),
              ("프로", f"월 {p:,}원", f"무제한 · 성과까지 · 연결제 시 월 {py:,}원",
-              ["콘텐츠 무제한 생성", "순위 성장 추적 + 경쟁 추월", "성과 실측(QR·유입 집계)", "우선 생성 · 다중 가게"] + _flim("pro"),
+              ["콘텐츠 무제한 생성", "순위 성장 추적", "성과 실측(QR·유입 집계)", "우선 생성 · 다중 가게"] + _flim("pro"),
               "pro", True),
              ("대행", f"월 {af//10000}만원~", "사진만 보내면 발행까지 대행",
               ["카톡으로 사진만 보내면 끝", "올린다 팀이 발행까지 운영 대행", "정기 발행 · 성과 리포트"] + _flim("agency"),
@@ -1059,7 +1035,7 @@ def render() -> str:
             + _why_rank() + _rank_loop() + _briefing_sell()
             + _results() + _honesty()
             + _stats() + _features() + _modes()
-            + _new_features() + _pricing() + _faq() + _contact() + _cta() + _footer()
+            + _pricing() + _faq() + _contact() + _cta() + _footer()
             + _sticky_cta() + _FOOT)
 
 
