@@ -118,3 +118,33 @@ def remind_stale_tenants() -> dict:
         n += 1
     logging.info("[pubcal] 발행 리마인더 %d건", n)
     return {"reminded": n}
+
+
+# ── 발행 골든타임(3-1) — 산식:
+# 1) 실측 우선: 최근 30일 추적링크 클릭(KST 시간대 히스토그램)이 총 10회 이상이면
+#    최빈 시간대(피크)를 찾아 '피크 1시간 전'을 추천 — 손님이 검색을 시작하기 직전에
+#    글이 올라가 있어야 색인·노출 타이밍이 맞물린다.
+# 2) 실측 부족: 업종 프로필 기본 상수(_GOLDEN_DEFAULT_PROFILE), 없으면
+#    사업형태 기본(매장형 11시 — 점심 전 검색 / 셀러형 20시 — 저녁 모바일 쇼핑).
+_GOLDEN_DEFAULT_BIZ = {"local": 11, "hybrid": 11, "seller": 20}
+_GOLDEN_DEFAULT_PROFILE = {"restaurant": 10, "cafe": 10, "hair": 12, "tinting": 9, "usedcar": 9}
+
+
+def golden_hour(t) -> dict:
+    """발행 추천 시각 — {"hour": 0~23, "basis": "measured"|"default", "peak": int|None}."""
+    try:
+        hist = db.click_hour_histogram(t.id, days=30)
+    except Exception:
+        hist = {}
+    total = sum(hist.values())
+    if total >= 10:
+        peak = max(hist, key=hist.get)
+        return {"hour": (peak - 1) % 24, "basis": "measured", "peak": peak}
+    from app.industries import resolve_industry
+    try:
+        key = resolve_industry(getattr(t, "industry", "") or "").key
+    except Exception:
+        key = ""
+    hour = _GOLDEN_DEFAULT_PROFILE.get(
+        key, _GOLDEN_DEFAULT_BIZ.get(getattr(t, "biz_type", "local") or "local", 11))
+    return {"hour": hour, "basis": "default", "peak": None}

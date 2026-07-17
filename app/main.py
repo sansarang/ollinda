@@ -1943,14 +1943,36 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                         return _trust_card_html(_pc0) if _pc0 else ""
                     except Exception:
                         return ""
-                _due_html = "".join(
-                    "<div class='bg-violet-50 border border-violet-200 rounded-2xl p-4 mb-5'>"
-                    "<div class='flex items-center gap-3'>"
-                    f"<span class='text-violet-500'>{_ic('calendar', 'w-5 h-5 flex-shrink-0')}</span>"
-                    "<div class='flex-1 text-sm text-violet-800'>오늘 발행할 글이 <b>준비됐어요</b> — 복붙만 하면 돼요. 발행 후 주소는 자동 추적돼요.</div>"
-                    f"<a href='/kit/{esc(d['asset_id'])}/naver' class='flex-shrink-0 bg-violet-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>발행 소재 열기</a></div>"
-                    f"{_due_trust(d)}</div>"
-                    for d in _due if d.get("asset_id"))
+                def _golden_line():
+                    """골든타임 안내(3-2) — 정보 제공만, 버튼·설정 없음. 시각 경과 시 문구 전환."""
+                    try:
+                        from datetime import datetime as _dtg, timedelta as _tdg
+                        from app.services import pubcal as _pc
+                        g = _pc.golden_hour(t)
+                        now_h = (_dtg.utcnow() + _tdg(hours=9)).hour
+                        if now_h < g["hour"]:
+                            why = (f"손님들이 가장 많이 찾아오는 시간({g['peak']}시) 직전이에요" if g["basis"] == "measured"
+                                   else "손님들이 검색을 시작하기 직전이에요")
+                            txt = f"오늘은 {g['hour']}시~{g['hour'] + 1}시 사이 발행이 제일 좋아요 — {why}."
+                        else:
+                            txt = "지금 바로 발행해도 좋아요."
+                        return f"<div class='text-xs text-violet-600 mt-2'>{esc(txt)}</div>"
+                    except Exception:
+                        return ""
+                _gl = _golden_line()
+                _cards = []
+                for d in _due:
+                    if not d.get("asset_id"):
+                        continue
+                    _cards.append(
+                        "<div class='bg-violet-50 border border-violet-200 rounded-2xl p-4 mb-5'>"
+                        "<div class='flex items-center gap-3'>"
+                        f"<span class='text-violet-500'>{_ic('calendar', 'w-5 h-5 flex-shrink-0')}</span>"
+                        "<div class='flex-1 text-sm text-violet-800'>오늘 발행할 글이 <b>준비됐어요</b> — 복붙만 하면 돼요. 발행 후 주소는 자동 추적돼요.</div>"
+                        f"<a href='/kit/{esc(d['asset_id'])}/naver' class='flex-shrink-0 bg-violet-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>발행 소재 열기</a></div>"
+                        + (_gl if not _cards else "")          # 골든타임은 첫 카드에만(중복 방지)
+                        + f"{_due_trust(d)}</div>")
+                _due_html = "".join(_cards)
             except Exception:
                 pass
             if not _due_html:

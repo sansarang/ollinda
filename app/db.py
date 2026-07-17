@@ -1190,6 +1190,28 @@ def incr_link_click(code: str, referrer: str = "", ua: str = "", utm_source: str
 
 # ── 콘텐츠별 클릭 실측(추적 P2·P3) — 전부 link_clicks 행 기반. '조회수'가 아니라
 #    '추적링크 경유 클릭'이다 — UI 표기도 이 이상 주장하지 않는다(정직). ──
+def click_hour_histogram(tenant_id: str, days: int = 30) -> dict:
+    """(골든타임 3-1) 최근 N일 추적링크 클릭의 KST 시간대 분포 {0~23: n} — 실측만."""
+    try:
+        from datetime import timedelta
+        since = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+        with _conn() as c:
+            rows = c.execute(
+                "SELECT lc.ts FROM link_clicks lc JOIN links l ON lc.code=l.code "
+                "WHERE l.tenant_id=? AND lc.ts >= ?", (tenant_id, since)).fetchall()
+        hist: dict = {}
+        for r in rows:
+            try:
+                from datetime import datetime as _dt, timedelta as _td
+                h = (_dt.fromisoformat(r["ts"][:19]) + _td(hours=9)).hour   # UTC 저장 → KST
+                hist[h] = hist.get(h, 0) + 1
+            except Exception:
+                continue
+        return hist
+    except Exception:
+        return {}
+
+
 def content_click_counts(tenant_id: str, days: int = 90) -> dict:
     """content_id(피스 id 앞 16자) → 클릭 수. '내 콘텐츠' 뱃지용."""
     try:
