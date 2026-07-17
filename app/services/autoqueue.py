@@ -51,6 +51,38 @@ def refill(t, plan: str = "free") -> dict:
                 _log.info("[autoqueue] 적재 P1 t=%s kw=%r angle=%s", t.id, s["keyword"], s["retry_angle"])
     except Exception:
         _log.exception("[autoqueue] P1 적재 실패 t=%s", t.id)
+    # P1b — 저CTR 재도전(CTR 4-3): 1페이지(post rank≤10) 7일 이상인데 추적링크 유입 0 → 제목 매력 부족
+    try:
+        from datetime import date
+        clicks = db.content_click_counts(t.id, days=30)
+        for pub in db.list_blog_publishes(t.id, limit=10):
+            pid = pub.get("piece_id") or ""
+            piece = db.get_piece(pid) if pid else None
+            if not piece:
+                continue
+            kw = (((piece.payload or {}).get("target_keywords") or [""])[0] or "").strip()
+            if not kw or _bad_kw(kw):
+                continue
+            hist = [h for h in db.rank_history(t.id, kw, kind="post") if h.get("rank")]
+            if not hist or not (hist[-1]["rank"] and hist[-1]["rank"] <= 10):
+                continue
+            first_top = next((h for h in hist if h["rank"] and h["rank"] <= 10), None)
+            try:
+                days = (date.today() - date.fromisoformat((first_top.get("checked_at") or "")[:10])).days
+            except Exception:
+                continue
+            if days < 7 or clicks.get(pid[:16], 0) > 0:
+                continue
+            from app.services import ranktrack as _rt2
+            ang = _rt2.next_angle(_rt2._last_angle(t.id, kw))
+            if db.enqueue_writing(t.id, "P1", kw, ang,
+                                  _reason(f"저CTR(1페이지 {days}일·추적 유입 0) — 제목 매력 부족 재도전",
+                                          lowctr=True, last=hist[-1]["rank"], days=days)):
+                added["P1"] += 1
+                _log.info("[autoqueue] 적재 P1(저CTR) t=%s kw=%r rank=%s days=%s", t.id, kw, hist[-1]["rank"], days)
+            break                                     # 저CTR 재도전은 1건이면 충분
+    except Exception:
+        _log.exception("[autoqueue] P1(저CTR) 적재 실패 t=%s", t.id)
     # P2 — 미노출(놓치는) 키워드 선점(기존 진단 재사용, 매장/셀러 분기)
     try:
         from app.services import diagnose
@@ -218,6 +250,9 @@ def consume(t, files: list | None = None, plan: str = "free") -> dict:
         try:
             prof = resolve_industry(t.industry or "")
             note = ("[자동 글감] " + (q.get("reason") or ""))
+            if "제목 매력" in (q.get("reason") or ""):
+                note += ("\n[제목 재도전 — 저CTR] 이전 글과 완전히 다른 스타일의 제목 후보를 뽑아라"
+                         "(질문형/구체 숫자형/경험 고백형 등). 본문이 답할 수 있는 약속만 제목에 담아라.")
             if "근소격차" in (q.get("reason") or ""):
                 note += ("\n[경쟁 격차 공략] 바로 위 경쟁 글을 이기려면 그 글보다 더 구체적인 실측·경험·"
                          "사진 설명을 담아라. 같은 의도를 더 정확히 충족하는 글이 이긴다(비방 금지).")

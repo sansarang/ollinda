@@ -5711,6 +5711,9 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
                 except Exception:
                     pass
             _note2 = full_note
+            if _q_claim and "제목 매력" in (_q_claim.get("reason") or ""):
+                _note2 += ("\n[제목 재도전 — 저CTR] 이전 글과 완전히 다른 스타일의 제목 후보를 뽑아라"
+                           "(질문형/구체 숫자형/경험 고백형 등). 본문이 답할 수 있는 약속만 제목에 담아라.")
             if _q_claim and "근소격차" in (_q_claim.get("reason") or ""):
                 _note2 += ("\n[경쟁 격차 공략] 바로 위 경쟁 글보다 더 구체적인 실측·경험·사진 설명을 담아라. "
                            "같은 의도를 더 정확히 충족하는 글이 이긴다(비방 금지).")

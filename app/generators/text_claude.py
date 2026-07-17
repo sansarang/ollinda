@@ -17,27 +17,41 @@ from app import seo
 MODEL = "claude-opus-4-8"
 
 
-def _pick_title(cands: list[str], kw0: str) -> str:
-    """제목 3안 중 상위노출 최적 1개 자동 선택 — 키워드 맨앞·적정길이·숫자 가점."""
+def _pick_title(cands: list[str], kw0: str, body: str = "") -> tuple[str, str]:
+    """제목 3안 중 1개 내부 자동 선택(CTR 최적화 4-1) — 유저에게 3안 비노출, 사유는 payload 로그.
+    선택 기준(순서대로):
+    ① 게이트 선통과: 타깃 키워드 원형 포함 필수(제목 1회 규칙과 정합) — 미포함 후보는 탈락
+       (전부 탈락이면 원본 후보로 폴백해 기존 동작 유지)
+    ② 낚시성 배제(정직): 제목의 숫자·'비용/가격' 약속이 본문에 없으면 감점 -4
+       (본문이 답 못 주는 제목 금지)
+    ③ 키워드 앞배치 +5 / 포함 +2 (네이버 제목 가중치)
+    ④ 구체성: 숫자·차종 등 구체 토큰 +2, 검색의도 단어(후기·방법·비용…) +1
+    ⑤ 길이: 22~35자 +3 (30자 내외 최적)"""
     import re
-    best, best_score = "", -1
-    for c in cands:
-        c = c.strip()
-        if not c or len(c) < 8:
-            continue
-        s = 0
+    pool = [c.strip() for c in cands if c.strip() and len(c.strip()) >= 8]
+    gated = [c for c in pool if (not kw0 or kw0 in c)]           # ① 게이트 선통과
+    pool2 = gated or pool
+    best, best_score, why = "", -999, ""
+    for c in pool2:
+        s, notes = 0, []
         if kw0 and c.startswith(kw0):
-            s += 5                                   # 핵심키워드 맨 앞(네이버 제목 가중치)
+            s += 5; notes.append("키워드 맨앞")
         elif kw0 and kw0 in c:
-            s += 2
-        s += 3 if 22 <= len(c) <= 35 else (1 if 18 <= len(c) <= 40 else 0)  # 롱테일 적정길이
-        if re.search(r"\d", c):
-            s += 2                                   # 숫자 → 클릭률
+            s += 2; notes.append("키워드 포함")
+        s += 3 if 22 <= len(c) <= 35 else (1 if 18 <= len(c) <= 40 else 0)
+        _nums = re.findall(r"[0-9]+", c)
+        if _nums:
+            if body and not all(n in body for n in _nums):
+                s -= 4; notes.append("숫자 근거 없음(-)")       # ② 낚시 배제
+            else:
+                s += 2; notes.append("구체 숫자")
+        if re.search(r"비용|가격", c) and body and not re.search(r"비용|가격|견적", body):
+            s -= 4; notes.append("가격 약속 근거 없음(-)")
         if re.search(r"추천|후기|방법|비교|가격|정리|총정리|BEST|베스트", c):
-            s += 1                                   # 검색의도 단어
+            s += 1; notes.append("의도 단어")
         if s > best_score:
-            best, best_score = c, s
-    return best
+            best, best_score, why = c, s, ", ".join(notes) or "기본"
+    return best, f"{why} (점수 {best_score}, 후보 {len(pool)}·게이트 통과 {len(gated)})"
 
 
 def _kw_density(body: str, kw: str) -> dict:
@@ -184,7 +198,9 @@ class BlogDraftGenerator(Generator):
         # ① 제목 3안 → 상위노출 최적 1개 자동 선택 ([제목]으로 준 경우도 흡수)
         title_cands = [t.strip().lstrip("-*·0123456789.) ").strip()
                        for t in ((d.get("제목후보") or d.get("제목") or "")).split("\n") if t.strip()]
-        title = _pick_title(title_cands, kw0) or (title_cands[0] if title_cands else (d.get("제목") or "제목 [기입필요]"))
+        _body_for_pick = d.get("본문") or raw
+        title, _pick_why = _pick_title(title_cands, kw0, _body_for_pick)
+        title = title or (title_cands[0] if title_cands else (d.get("제목") or "제목 [기입필요]"))
         parsed = [k.strip().lstrip("#") for k in (d.get("키워드", "")).replace("\n", ",").split(",") if k.strip()]
         # 파싱된 키워드 + 타겟 키워드 병합(중복 제거)
         tags = list(dict.fromkeys(parsed + kws))[:10]
@@ -238,6 +254,8 @@ class BlogDraftGenerator(Generator):
                      "business_name": tenant.name,      # 게이트 업체명 정합 검사용(재검증 STEP 1-2a)
                      "brand_name": getattr(tenant, "brand_name", "") or "",
                      "gen_finish": _last_finish(),      # stop_reason 기록(절단 검증 V1)
+                     "title_pick": {"candidates": title_cands[:3], "picked": title,
+                                    "why": _pick_why},          # 제목 3안 내부 선택 로그(CTR 4-2 — 유저 비노출)
                      "gen_source": (asset.note or "")[:4000],   # 날조 대조용 입력 스냅샷(게이트 경로 폴백)
                      "request_check": request_check,            # '꼭 반영할 요청' 셀프체크(1-3d)
                      "fixed_info_block": fixed_block,      # 발행 화면 컴포넌트 가이드용(템플릿 PHASE 2·3)

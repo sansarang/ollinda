@@ -49,6 +49,11 @@ def render_trust_card(item: dict | None) -> dict | None:
     meta = _meta(item.get("reason") or "")
 
     lines: list[str] = []
+    if st == "P1" and meta.get("lowctr"):
+        # 저CTR 재도전(CTR 4-3): 순위는 있는데 클릭이 없는 글 — 제목을 바꿔 재도전
+        lines = [f"'{kw}' 검색 첫 페이지에는 있는데 클릭이 적어서,",
+                 "제목을 바꿔 다시 도전하는 글이에요."]
+        return {"title": TITLE, "lines": lines, "footer": FOOTER}
     if st == "P1":
         rank, days = meta.get("last"), meta.get("days")
         l1 = f"'{kw}' 검색에서 내 글이 "
