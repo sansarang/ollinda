@@ -2165,6 +2165,54 @@ def my_blog_published(request: Request, piece_id: str = Form(""), url: str = For
     return RedirectResponse(back + "?ok=" + _q("발행 기록 완료! 이 글의 순위 추적이 시작돼요"), status_code=303)
 
 
+def _seo_photo_name(tenant, blog) -> str:
+    """(이미지 SEO 5-1) 다운로드 파일명 — {지역}-{업종핵심어}-{피사체}. 피사체는 사장님이 확인한
+    사진 내용(confirmed)에서만(없으면 생략 — 날조 금지). 한글 파일명은 최신 브라우저 UTF-8 정상."""
+    import re as _r
+    region = seo._kw_shorten(getattr(tenant, "region", "") or "").replace(" ", "-")
+    ind = ((getattr(tenant, "industry", "") or "").replace("/", ",").split(",")[0] or "").strip()
+    subject = ""
+    m = _r.search(r"사진 내용\(사장님 확인[^)]*\):\s*([^\n]+)", (blog.payload or {}).get("gen_source") or "")
+    if m:
+        toks = [t for t in _r.findall(r"[가-힣A-Za-z0-9]{2,}", m.group(1)) if t not in ("사진", "모습", "장면")][:2]
+        subject = "-".join(toks)
+    parts = [p for p in (region, ind, subject) if p]
+    name = _r.sub(r"[^가-힣A-Za-z0-9\-]", "", "-".join(parts))
+    return name or "photo"
+
+
+def _photo_captions(tenant, blog, n: int) -> list[str]:
+    """(이미지 SEO 5-2) 사진별 붙여넣기 캡션 — vision 분석의 [사진N] 묘사(사실)만 사용 +
+    자연 변형 키워드 1회. 분석 없으면 빈 리스트(날조 캡션 금지)."""
+    import re as _r
+    srcnote = (blog.payload or {}).get("gen_source") or ""
+    kw = seo._kw_shorten(((blog.payload or {}).get("target_keywords") or [""])[0] or "")
+    out = []
+    for i in range(1, n + 1):
+        m = _r.search(rf"\[사진{i}\]\s*([^\n]+)", srcnote)
+        if not m:
+            return []                                  # 부분 누락이면 전체 생략(순번 어긋남 방지)
+        desc = _r.sub(r"^\d\)\s*", "", m.group(1)).strip().rstrip(".")[:60]
+        out.append(f"{desc} — {kw} 현장 사진입니다." if kw else f"{desc}.")
+    return out
+
+
+def _caption_box(tenant, blog, n: int) -> str:
+    """(이미지 SEO 5-2) 사진별 캡션 붙여넣기 박스 — 분석 없으면 렌더 생략."""
+    caps = _photo_captions(tenant, blog, n)
+    if not caps:
+        return ""
+    rows = "".join(
+        f"<div class='flex items-start gap-2 py-1.5 border-b border-slate-100'>"
+        f"<span class='text-xs font-bold text-slate-400 flex-shrink-0 mt-0.5'>사진{i + 1}</span>"
+        f"<span class='flex-1 text-xs text-slate-600'>{esc(c)}</span>"
+        f"<textarea id='cap{i}' class='hidden'>{esc(c)}</textarea>"
+        f"<button type=button onclick=\"nvcp('cap{i}',this)\" class='flex-shrink-0 text-[11px] font-bold text-indigo-600'>복사</button></div>"
+        for i, c in enumerate(caps))
+    return ("<div class='mt-3 bg-slate-50 rounded-xl p-3'>"
+            "<div class='text-xs font-bold text-slate-500 mb-1'>사진 캡션 (사진 아래 붙여넣기)</div>" + rows + "</div>")
+
+
 def _index_label(pub: dict) -> str:
     """(색인 가속 2-4) 색인 상태 실측 라벨 — indexed_at/published_at 차이로 소요시간 계산. 추정 금지."""
     try:
@@ -3847,10 +3895,11 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
     photos = [im for im in imgs if im]                          # /dl이 R2로 서빙
     vid = next((p for p in pieces if p.kind.value == "short" and p.payload.get("video_path")), None)
     vurl = f"/dl/{asset_id}/{os.path.basename(vid.payload['video_path'])}" if vid else ""  # 블로그 본문 삽입용
+    _fn_base = _seo_photo_name(tenant, blog)               # 이미지 SEO(5-1): 지역-업종-피사체
     photo_cells = "".join(
         f"<div class='relative'><img src='/dl/{asset_id}/{os.path.basename(im)}' class='w-full aspect-square object-cover rounded-xl border border-slate-200'>"
         f"<div class='absolute top-2 left-2 w-7 h-7 rounded-full bg-black/75 text-white text-sm font-bold flex items-center justify-center'>{i+1}</div>"
-        f"<a href='/dl/{asset_id}/{os.path.basename(im)}' download class='absolute bottom-2 right-2 bg-white/95 text-slate-700 text-xs font-bold px-2 py-1 rounded-lg shadow hover:bg-white'>⬇ 저장</a></div>"
+        f"<a href='/dl/{asset_id}/{os.path.basename(im)}' download='{_fn_base}-{i+1:02d}.jpg' class='absolute bottom-2 right-2 bg-white/95 text-slate-700 text-xs font-bold px-2 py-1 rounded-lg shadow hover:bg-white'>⬇ 저장</a></div>"
         for i, im in enumerate(photos))
     sec = "bg-white rounded-2xl border border-slate-200 shadow-sm p-5 mb-5"
     cbtn = "px-4 py-2.5 rounded-xl text-white text-sm font-bold transition active:scale-[.98]"
@@ -3877,7 +3926,9 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
         + (f"<div class='{sec}'><div class='flex items-center justify-between mb-3'>"
            "<div class='text-xs font-bold text-slate-400'>3. 사진 <span class='text-slate-500'>(순서대로)</span></div>"
            f"<a href='/kit/{asset_id}/pack/{blog.id}' class='text-xs font-bold text-indigo-600'>⬇ 전체 ZIP 받기</a></div>"
-           f"<div class='grid grid-cols-3 sm:grid-cols-4 gap-3'>{photo_cells}</div></div>" if photos else "")
+           f"<div class='grid grid-cols-3 sm:grid-cols-4 gap-3'>{photo_cells}</div>"
+           "<p class='text-xs text-slate-400 mt-2'>사진은 이 파일명 그대로, 캡션은 사진 아래 붙여넣으면 검색에 더 잘 잡혀요.</p>"
+           + _caption_box(tenant, blog, len(photos)) + "</div>" if photos else "")
         # 4. 동영상 본문 삽입 (D.I.A.+ 가점) — #1
         + (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>4. 동영상도 본문에 넣기 <span class='text-emerald-600'>(상위노출 유리)</span></div>"
            "<p class='text-xs text-slate-500 mb-3'>네이버는 <b>15초+ 동영상이 들어간 글에 가점(D.I.A.+)</b>을 줍니다. 아래 영상을 받아 본문 중간(예: 첫 소제목 아래)에 넣어보세요.</p>"
