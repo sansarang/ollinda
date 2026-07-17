@@ -337,7 +337,9 @@ def slot_fill_all() -> None:
             continue
         try:
             st = state(t)
-            if st["ready_unpub"] or not st["pending"]:
+            # 발행 리듬(6-1): '내일 발행분'까지 선제 준비 — 미발행 준비 글 2개(오늘+내일) 버퍼 유지.
+            # 하루 1회 잡이라 tenant당 최대 1글/일 생성은 그대로(비용 가드).
+            if st["ready_unpub"] >= 2 or not st["pending"]:
                 continue
             if not photo_pool(t):
                 continue                              # 사진 없으면 홈 need_photos 상태로만

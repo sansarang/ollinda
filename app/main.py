@@ -1982,9 +1982,27 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                     if _st.get("need_photos"):
                         _due_html = ("<div class='flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-5'>"
                                      f"<span class='text-amber-500'>{_ic('camera', 'w-5 h-5 flex-shrink-0')}</span>"
-                                     "<div class='flex-1 text-sm text-amber-800'>다음 글감은 준비됐는데 <b>쓸 사진이 없어요</b> — "
-                                     "사진 3장만 올려주시면 글은 AI가 알아서 써둘게요.</div>"
+                                     "<div class='flex-1 text-sm text-amber-800'><b>다음 글을 만들려면 사진이 필요해요</b> — "
+                                     "가게 사진 3장만 올려주시면 글은 AI가 알아서 써둘게요.</div>"
                                      "<a href='/me#makebox' class='flex-shrink-0 bg-amber-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>사진 올리기</a></div>")
+                except Exception:
+                    pass
+            # 발행 리듬 리마인드(6-2): 마지막 발행(RSS 실측) 2일↑ 공백 + 준비 글 있음 → 화면 내 텍스트만
+            if not _due_html:
+                try:
+                    from app.services import autoqueue as _aq3
+                    _st3 = _aq3.state(t)
+                    _pubs3 = db.list_blog_publishes(t.id, limit=1)
+                    if _st3.get("ready_unpub") and _pubs3:
+                        from datetime import datetime as _dtr, timedelta as _tdr
+                        _gap = ((_dtr.utcnow() + _tdr(hours=9)).date()
+                                - _dtr.fromisoformat((_pubs3[0].get("published_at") or "")[:19]).date()).days
+                        if _gap >= 2:
+                            _due_html = ("<div class='flex items-center gap-3 bg-violet-50 border border-violet-200 rounded-2xl p-4 mb-5'>"
+                                         f"<span class='text-violet-500'>{_ic('calendar', 'w-5 h-5 flex-shrink-0')}</span>"
+                                         f"<div class='flex-1 text-sm text-violet-800'><b>{'이틀' if _gap == 2 else str(_gap) + '일'} 쉬었어요</b> — "
+                                         "꾸준함이 쌓아온 신호가 아까워요. 오늘 글이 준비돼 있어요.</div>"
+                                         "<a href='/me?tab=content' class='flex-shrink-0 bg-violet-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>준비된 글 보기</a></div>")
                 except Exception:
                     pass
             main_inner = (greeting + _upsell + _due_html + _guide_card(t) + _briefing_card(t, _plan) + _notice_html
@@ -2281,8 +2299,8 @@ def _blog_connect_card(t, fw: str) -> str:
             if _feed.get("ok") and _feed.get("exists"):
                 _target = (getattr(t, "publish_schedule", 0) or 0) or _cfg.BLOG_WEEKLY_TARGET
                 cons = _bs.posting_consistency(_feed["posts"], weekly_target=_target)
-                _pace = ("<span class='text-emerald-600'>목표 달성 ✓</span>" if cons["on_pace"]
-                         else f"<span class='text-amber-600'>이번 주 {cons['this_week']}/{cons['weekly_target']}회</span>")
+                _pace = ("<span class='text-emerald-600'>이번 주 목표 달성 ✓ — 꾸준함이 신호를 쌓고 있어요</span>" if cons["on_pace"]
+                         else f"<span class='text-amber-600'>이번 주 {cons['this_week']}/{cons['weekly_target']}회 — 꾸준함이 쌓아온 신호가 아까워요</span>")
                 _mx = max(cons["week_counts"] + [1])
                 _bars = "".join(
                     f"<div class='flex flex-col items-center gap-1'><div class='w-7 rounded-t bg-emerald-400' "
