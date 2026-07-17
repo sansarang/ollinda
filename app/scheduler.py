@@ -46,6 +46,8 @@ def start() -> None:
         sch.add_job(_evening_feedback, "cron", hour=20, minute=0,
                     id="evening_feedback", replace_existing=True)
         # RSS 자동 매칭(파이프 A1 보조 경로) — 3시간마다 새 글 감지→자동 연결/확인 요청
+        sch.add_job(_fresh_index_check, "cron", minute="*/30",
+                    id="fresh_index", replace_existing=True)   # 발행 후 24h 집중 색인 체크(2-3)
         sch.add_job(_rss_autosync, "cron", hour="*/2", minute=20,
                     id="rss_autosync", replace_existing=True)
         sch.start()
@@ -78,6 +80,26 @@ def _evening_feedback() -> None:
         briefing.send_evening()
     except Exception:
         logging.exception("[scheduler] 저녁 피드백 실패")
+
+
+def _fresh_index_check() -> None:
+    """(색인 가속 2-3) 발행 후 첫 24시간은 30분 간격 집중 색인 확인 — 이후엔 기존 주기(race)로 복귀.
+    실측만: 제목 블로그검색으로 URL 검출 시에만 indexed_at 기록. 외부 핑 없음(합법 수단 부재 — CHANGES 참고)."""
+    import logging
+    from app import db
+    from app.services import blogrank
+    try:
+        for p in db.recent_unindexed_publishes(hours=24, limit=20):
+            try:
+                ok = blogrank.check_indexed(p.get("post_title") or "", p.get("published_url") or "")
+                if ok:
+                    db.mark_publish_indexed(p["piece_id"])
+                    logging.getLogger("shopcast.index").info(
+                        "[index] 색인 확인 piece=%s (발행 %s)", p["piece_id"], p.get("published_at"))
+            except Exception:
+                logging.getLogger("shopcast.index").exception("[index] 체크 실패 piece=%s", p.get("piece_id"))
+    except Exception:
+        logging.getLogger("shopcast.index").exception("[index] 집중 체크 실패")
 
 
 def _rss_autosync() -> None:

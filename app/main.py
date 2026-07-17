@@ -2143,6 +2143,19 @@ def my_blog_published(request: Request, piece_id: str = Form(""), url: str = For
     return RedirectResponse(back + "?ok=" + _q("발행 기록 완료! 이 글의 순위 추적이 시작돼요"), status_code=303)
 
 
+def _index_label(pub: dict) -> str:
+    """(색인 가속 2-4) 색인 상태 실측 라벨 — indexed_at/published_at 차이로 소요시간 계산. 추정 금지."""
+    try:
+        from datetime import datetime
+        t0 = datetime.fromisoformat((pub.get("published_at") or "")[:19])
+        t1 = datetime.fromisoformat((pub.get("indexed_at") or "")[:19])
+        h = max(0, (t1 - t0).total_seconds()) / 3600
+        took = (f"{int(h * 60)}분" if h < 1 else f"{h:.0f}시간") if h < 48 else f"{h / 24:.0f}일"
+        return f"네이버가 글을 받았어요({took} 만에)"
+    except Exception:
+        return "네이버가 글을 받았어요"
+
+
 def _trust_card_html(piece) -> str:
     """근거 카드(읽기 전용, 접힘 기본) — 홈 오늘 카드/발행 상세/리포트 공용(PHASE 3-4 단일 컴포넌트).
     글감 큐 연결(또는 mass 배치 생성) 없는 글은 카드 자체를 생략 — '근거 없음' 문구 노출 금지."""
@@ -2166,7 +2179,13 @@ def _trust_card_html(piece) -> str:
             pass
         lines = "".join(f"<div class='text-sm text-slate-600 leading-relaxed mb-1'>{esc(l)}</div>"
                         for l in card["lines"])
-        publine = (f"<div class='text-sm font-semibold text-emerald-600 mt-2'>{esc(trustcard.PUBLISHED_LINE)}</div>"
+        _idx = ""
+        if _pub:
+            if _pub.get("indexed_at"):
+                _idx = f"<div class='text-xs text-emerald-600 mt-1'>{esc(_index_label(_pub))}</div>"
+            else:
+                _idx = "<div class='text-xs text-slate-400 mt-1'>네이버 접수 확인 중이에요</div>"
+        publine = (f"<div class='text-sm font-semibold text-emerald-600 mt-2'>{esc(trustcard.PUBLISHED_LINE)}</div>{_idx}"
                    if _pub else "")
         return ("<details class='trustcard mt-2'>"
                 f"<summary class='text-xs font-bold text-indigo-500 cursor-pointer select-none'>"
@@ -2252,7 +2271,9 @@ def _blog_connect_card(t, fw: str) -> str:
                     else:
                         _chip += "<span class='ml-1 text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full whitespace-nowrap'>31위 밖</span>"
                 elif p.get("indexed_at"):
-                    _chip += "<span class='ml-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full whitespace-nowrap'>색인됨</span>"
+                    _chip += f"<span class='ml-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full whitespace-nowrap'>{_index_label(p)}</span>"
+                elif _d >= 0 and _d < 1:
+                    _chip += "<span class='ml-1 text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full whitespace-nowrap'>네이버 접수 확인 중이에요</span>"
             except Exception:
                 pass
             _pid = esc(p.get("piece_id") or "")

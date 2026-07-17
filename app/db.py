@@ -801,6 +801,20 @@ def mark_publish_indexed(piece_id: str) -> None:
         pass
 
 
+def recent_unindexed_publishes(hours: int = 24, limit: int = 20) -> list[dict]:
+    """(색인 가속 2-3) 발행 후 N시간 내·색인 미확인 글 — 30분 집중 체크 대상(전 가게)."""
+    from datetime import datetime, timedelta
+    cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+    try:
+        with _conn() as c:
+            rows = c.execute(
+                "SELECT * FROM blog_publishes WHERE (indexed_at IS NULL OR indexed_at='') "
+                "AND published_at >= ? ORDER BY published_at DESC LIMIT ?", (cutoff, limit)).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.OperationalError:
+        return []
+
+
 def list_blog_publishes(tenant_id: str, limit: int = 30) -> list[dict]:
     try:
         with _conn() as c:
