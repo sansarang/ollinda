@@ -373,6 +373,13 @@ class ShortVideoGenerator(Generator):
             except Exception:
                 pass
         variants = self._aspect_variants(video_path, out_dir) if video_path else {}
+        # 네이버용 정보형 영상(추가 산출물) — 실패해도 릴스·글 흐름에 영향 없음(R1·R3)
+        naver_path, naver_meta = None, {}
+        try:
+            naver_path, naver_meta = self._naver_video(tenant, asset, vid_imgs, kws, strat, out_dir)
+        except Exception:
+            import logging
+            logging.getLogger("shopcast.video").exception("[naver-video] 생성 실패 t=%s", tenant.id)
         for _vp in vid_imgs:                       # 영상용 다운스케일 임시파일 정리(디스크 누수 방지)
             if _vp not in imgs and _vp.endswith("_vid.jpg") and os.path.exists(_vp):
                 try:
@@ -397,6 +404,7 @@ class ShortVideoGenerator(Generator):
                 "video_path": video_path, "image_path": imgs[0] if imgs else asset.path,
                 "image_paths": imgs, "duration_sec": dur_sec, "cover_path": cover_path,
                 "video_variants": variants,    # {square, feed45} 다중 화면비
+                "naver_video": naver_meta,     # 네이버용 정보형 영상(블로그 첨부·클립) — 없으면 {}
                 "assemble_note": note, "_scene_note": _scene_note,
                 # 품질 게이트(영상강화 PHASE 6) — 규격·길이·훅·자막·워터마크 부재 자동점검
                 "quality_gate": (_quality_gate(video_path, hook_first=_scene_ok,
@@ -405,6 +413,73 @@ class ShortVideoGenerator(Generator):
                                  else {"pass": False, "error": "no video"}),
             },
             status=ContentStatus.DRAFT)
+
+    def _naver_video(self, tenant, asset, vid_imgs, kws, strat, out_dir):
+        """네이버용 정보형 영상(블로그 첨부·클립 겸용) — 릴스와 별도 산출물.
+        구성: [키워드 질문형 오프닝] → [핵심 답 3(글 소제목 축약)] → [사진 장면+본문 발췌 캡션]
+              → [마무리: 가게명+지역+'자세한 내용은 본문에']. 감성 훅·밈 금지 — 검색어에 답하는 구조.
+        정직성(R2): 자막은 게이트 통과한 글 본문·확정 사실에서 '그대로 발췌'만(LLM 재작성 없음 =
+        날조 원천 차단). 실패 시 (None, {}) — 키트에서 블록만 생략, 글 발행 흐름 유지."""
+        import re as _r
+        try:
+            from app import db as _db
+            blog = next((p for p in _db.get_set_pieces(asset.id) if p.kind.value == "blog"), None)
+        except Exception:
+            blog = None
+        if not (blog and vid_imgs):
+            return None, {}
+        pl = blog.payload or {}
+        body = (pl.get("body") or "").strip()
+        kw0 = ((pl.get("target_keywords") or [""])[0] or (kws[0] if kws else "")).strip()
+        if not (body and kw0):
+            return None, {}
+        kw_nat = seo._kw_shorten(kw0)
+        # 핵심 답 3 = 글 소제목 축약(구조 섹션 제외 — 정보 소제목만)
+        heads = [ln.lstrip("#").strip().strip('"“”') for ln in body.splitlines()
+                 if ln.strip().startswith("##")]
+        heads = [h for h in heads if not any(x in h for x in ("한눈 요약", "자주 묻", "가격", "영업 안내", "마무리"))][:3]
+        if not heads:
+            return None, {}
+        # 사진 캡션 = 본문 문단 첫 문장 발췌(사진 수만큼)
+        paras = [p.strip() for p in body.split("\n") if len(p.strip()) >= 20
+                 and not p.strip().startswith(("#", "|", "[", "!"))]
+        caps = []
+        for p in paras:
+            s = _r.split(r"(?<=[.!?])\s", p)[0].strip()      # 문장부호 기준(중간 절단 방지)
+            if 10 <= len(s) <= 60:
+                caps.append(s)
+            if len(caps) >= max(1, len(vid_imgs) - 1):
+                break
+        opening = f"{kw_nat}, 궁금하셨죠?"                      # 질문형 오프닝(타깃 키워드 포함, 2~3초)
+        sent = [f"핵심 {i + 1}. {h[:26]}" for i, h in enumerate(heads)] + caps
+        sent = sent[:6]                                          # 30~60초 목표(씬당 ~5초)
+        region_short = seo._kw_shorten(getattr(tenant, "region", "") or "")
+        outro = f"{tenant.name} · {region_short}\n자세한 내용은 본문에"
+        path, note, dur, _cover = self._build_scene_video(
+            vid_imgs, opening, sent, kws, tenant, strat, f"{kw0} 정리", outro)
+        if not (path and os.path.exists(path)):
+            return None, {}
+        # SEO 파일명으로 out_dir 확정 복사(이미지 SEO와 동일 규칙)
+        ind0 = ((getattr(tenant, "industry", "") or "").replace("/", ",").split(",")[0] or "").strip()
+        core = " ".join(kw_nat.replace(region_short, "").split()) or ind0
+        _parts = list(dict.fromkeys(                      # 중복 토큰 제거('썬팅-썬팅' 방지)
+            [x for p in (region_short, ind0, core) for x in p.split() if x] )) + ["영상"]
+        fname = _r.sub(r"[^가-힣A-Za-z0-9\-]", "", "-".join(_parts)) + ".mp4"
+        final = os.path.join(out_dir, f"naver_{uuid.uuid4().hex}.mp4")
+        try:
+            shutil.copy(path, final)
+        except Exception:
+            return None, {}
+        blog_title = (pl.get("title") or "").strip()
+        vtitle = f"{kw0} 핵심만 정리했어요"                       # 글 제목과 중복되지 않는 변형
+        if vtitle == blog_title:
+            vtitle = f"{kw0} — 영상으로 보는 핵심"
+        desc = (f"{kw_nat} 관련 내용을 영상으로 정리했어요.\n"
+                f"{tenant.name} · {region_short}\n"
+                "자세한 과정과 안내는 블로그 본문에 있어요.")
+        meta = {"path": final, "title": vtitle, "desc": desc, "filename": fname,
+                "duration_sec": dur, "opening": opening, "scene_texts": [opening] + sent + [outro]}
+        return final, meta
 
     def _downscale_for_video(self, imgs):
         """영상용 사진 다운스케일 — 대용량 원본(예: 5712×4284)은 zoompan/scale이 느려

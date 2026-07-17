@@ -3913,6 +3913,8 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
     photos = [im for im in imgs if im]                          # /dl이 R2로 서빙
     vid = next((p for p in pieces if p.kind.value == "short" and p.payload.get("video_path")), None)
     vurl = f"/dl/{asset_id}/{os.path.basename(vid.payload['video_path'])}" if vid else ""  # 블로그 본문 삽입용
+    _nv = (vid.payload.get("naver_video") or {}) if vid else {}          # 네이버용 정보형 영상(있으면)
+    _nv = _nv if (_nv.get("path") and os.path.exists(_nv["path"])) else {}
     _fn_base = _seo_photo_name(tenant, blog)               # 이미지 SEO(5-1): 지역-업종-피사체
     photo_cells = "".join(
         f"<div class='relative'><img src='/dl/{asset_id}/{os.path.basename(im)}' class='w-full aspect-square object-cover rounded-xl border border-slate-200'>"
@@ -3951,6 +3953,18 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
         + (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>4. 동영상도 본문에 넣기 <span class='text-emerald-600'>(상위노출 유리)</span></div>"
            "<p class='text-xs text-slate-500 mb-3'>네이버는 <b>15초+ 동영상이 들어간 글에 가점(D.I.A.+)</b>을 줍니다. 아래 영상을 받아 본문 중간(예: 첫 소제목 아래)에 넣어보세요.</p>"
            f"<a href='{vurl}' download class='{cbtn} bg-indigo-600 hover:bg-indigo-700 inline-block'>⬇ 동영상 받기</a></div>" if vurl else "")
+        # 네이버용 정보형 영상(블로그 첨부·클립 겸용) — 없으면 블록 생략(V3)
+        + ((f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>네이버용 영상 <span class='text-emerald-600'>(블로그 첨부 · 클립 겸용)</span></div>"
+            "<p class='text-xs text-slate-500 mb-3'>글 안에 이 영상을 넣으면 검색 노출에 도움돼요. 같은 영상을 네이버 클립에도 올리면 지면이 하나 더 생겨요.</p>"
+            f"<div class='text-sm font-bold text-slate-800 mb-1'>{esc(_nv.get('title', ''))}</div>"
+            f"<textarea id='nvVT' class='hidden'>{esc(_nv.get('title', ''))}</textarea>"
+            f"<div class='text-xs text-slate-500 whitespace-pre-wrap mb-2'>{esc(_nv.get('desc', ''))}</div>"
+            f"<textarea id='nvVD' class='hidden'>{esc(_nv.get('desc', ''))}</textarea>"
+            "<div class='flex flex-wrap gap-2'>"
+            f"<a href='/dl/{asset_id}/{os.path.basename(_nv.get('path', ''))}' download='{esc(_nv.get('filename', 'naver-video.mp4'))}' class='{cbtn} bg-emerald-500 hover:bg-emerald-600 inline-block'>⬇ 영상 받기</a>"
+            f"<button onclick=\"nvcp('nvVT',this)\" class='{cbtn} bg-indigo-600 hover:bg-indigo-700'>제목 복사</button>"
+            f"<button onclick=\"nvcp('nvVD',this)\" class='{cbtn} bg-indigo-600 hover:bg-indigo-700'>설명 복사</button></div>"
+            f"<div class='text-[11px] text-slate-400 mt-2'>파일명: {esc(_nv.get('filename', ''))} · 길이 약 {int(_nv.get('duration_sec') or 0)}초</div></div>") if _nv else "")
         # 5. 발행 후 마무리 — 사진 6장 권장(#3) + 서치어드바이저 색인(#3)
         + (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>{'5' if vurl else '4'}. 발행 후 — 상위노출 마무리</div>"
            "<ul class='text-xs text-slate-600 space-y-1.5 mb-3 list-none'>"
