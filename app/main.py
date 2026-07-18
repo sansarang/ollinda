@@ -3971,8 +3971,9 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
            + (f"<li>사진은 <b>6장 이상</b>이면 더 유리해요 (지금 {len(photos)}장). 다음엔 더 올려보세요.</li>"
               if len(photos) < 6 else "<li>사진 6장+ ✓ 좋아요.</li>")
            + "<li>직접 찍은 동영상까지 넣으면 D.I.A.+ 가점.</li>"
-           + "<li>발행 직후 <b>서치어드바이저에 URL 색인 요청</b>하면 검색 반영이 수일→수시간으로 빨라져요.</li></ul>"
-           f"<a href='https://searchadvisor.naver.com/console/board/registration' target='_blank' rel='noopener' class='{cbtn} bg-indigo-600 hover:bg-indigo-700 inline-block'>서치어드바이저 색인 요청 →</a></div>")
+           # (색인 버튼 제거) 서치어드바이저는 blog.naver.com 소유확인 불가 → 수동 색인 요청 접수 불가.
+           # 실구현된 fresh_index 크론(30분 집중 확인) 사실만 안내한다.
+           + "<li>발행 직후 <b>24시간은 저희가 30분마다 색인을 자동 확인</b>해요 — 확인되면 리포트에 '네이버가 글을 받았어요'로 표시돼요.</li></ul></div>")
         # 🗺 네이버 장소 컴포넌트 가이드(블로그템플릿 PHASE 3) — 고정정보 블록 위치
         + _naver_component_guide(tenant, blog, sec)
         # 내부링크 제안(상위노출 PHASE 4) — 같은 주제 발행글 서로 링크(주제 응집도 = C-Rank 신호)

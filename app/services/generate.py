@@ -8,6 +8,9 @@ from app.domain.models import Asset, ContentKind, ContentPiece, Tenant
 from app.registry import get_generator
 
 
+LAST_ERRORS: dict = {}   # {kind: 최근 실패 사유} — 비동기 잡 상태 기록용
+
+
 def generate_for(tenant: Tenant, asset: Asset, kinds: list[ContentKind],
                  images: list[str] | None = None) -> list[ContentPiece]:
     """요청된 종류(kinds)별로 콘텐츠 초안을 생성한다. images=업로드된 사진 경로들(여러 장)."""
@@ -16,7 +19,8 @@ def generate_for(tenant: Tenant, asset: Asset, kinds: list[ContentKind],
         try:
             gen = get_generator(kind)   # 미등록이면 KeyError
             pieces.append(gen.generate(tenant, asset, images))
-        except Exception:               # 한 채널 실패(예: AI 크레딧 부족)해도 나머지는 진행
+        except Exception as e:          # 한 채널 실패(예: AI 크레딧 부족)해도 나머지는 진행
             import logging
             logging.exception("[generate] %s 생성 실패", kind)
+            LAST_ERRORS[str(kind)] = repr(e)[:200]   # 잡 상태 기록용(영상 워치독) — 사유 포착
     return pieces

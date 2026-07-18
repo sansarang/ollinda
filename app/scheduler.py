@@ -100,6 +100,11 @@ def _fresh_index_check() -> None:
                 logging.getLogger("shopcast.index").exception("[index] 체크 실패 piece=%s", p.get("piece_id"))
     except Exception:
         logging.getLogger("shopcast.index").exception("[index] 집중 체크 실패")
+    try:
+        from app.services.ingest import video_watchdog
+        video_watchdog()                    # 죽은 영상 잡 감지·1회 재시도(같은 30분 주기에 얹음)
+    except Exception:
+        logging.getLogger("shopcast.video").exception("[video-watchdog] 크론 실패")
 
 
 def _rss_autosync() -> None:

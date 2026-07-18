@@ -137,6 +137,7 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
         p.payload["experts"] = ex
         db.save_piece(p)
     # 🎬 영상(SHORT)+릴스+캐러셀 = 백그라운드에서 생성(요청 막지 않음, /kit·폴링으로 표시)
+    _set_video_job(asset.id, "registered")             # 잡 상태 기록(영상 증발 재발 방지) — 조용한 실종 금지
     _spawn_video_bundle(tenant, asset, paths, brief_public)
     # 🔗 내부링크 제안(상위노출 PHASE 4) — 같은 주제 축의 발행 확인된 내 글(주제 응집도 = C-Rank 신호)
     try:
@@ -197,6 +198,68 @@ def _autopilot(tenant: Tenant, pieces: list[ContentPiece]) -> None:
         publish_and_record(p)
 
 
+def video_watchdog() -> None:
+    """(영상 증발 재발 방지) 죽은 영상 잡 감지·1회 자동 재시도 — 기존 30분 크론(fresh_index)에 얹힘.
+    판정: 최근 24h 세트에 블로그는 있는데 SHORT가 없고, video_job이 done/failed 어느 쪽도 아니며
+    30분 이상 경과 → 죽은 잡(스레드 사망·배포 킬·기록 이전 구건). retried 1회 제한(폭주 금지)."""
+    import logging
+    import os as _os
+    from datetime import datetime, timedelta
+    log = logging.getLogger("shopcast.video")
+    try:
+        for row in db.recent_blog_piece_rows(hours=24, limit=50):
+            try:
+                pieces = db.get_set_pieces(row["asset_id"])
+                if any(p.kind == ContentKind.SHORT for p in pieces):
+                    continue
+                blog = next((p for p in pieces if p.kind == ContentKind.BLOG), None)
+                if not blog:
+                    continue
+                vj = blog.payload.get("video_job") or {}
+                if vj.get("status") in ("done", "failed") or vj.get("retried"):
+                    continue
+                ref = (vj.get("ts") or row.get("created_at") or "")[:19]
+                try:
+                    if datetime.utcnow() - datetime.fromisoformat(ref) < timedelta(minutes=30):
+                        continue
+                except Exception:
+                    pass
+                tenant = db.get_tenant(row["tenant_id"])
+                asset = db.get_asset(row["asset_id"])
+                paths = [p for p in (blog.payload.get("image_paths") or []) if p and _os.path.exists(p)]
+                if not (tenant and asset and paths):
+                    _set_video_job(row["asset_id"], "failed", error="재시도 불가(가게/사진 소실)", retried=True)
+                    continue
+                _set_video_job(row["asset_id"], "retrying", retried=True)   # 1회 제한 선기록(폭주 방지)
+                log.info("[video-watchdog] 죽은 영상 잡 재시도 asset=%s t=%s", row["asset_id"], row["tenant_id"])
+                _spawn_video_bundle(tenant, asset, paths, blog.payload.get("brief") or {})
+            except Exception:
+                log.exception("[video-watchdog] 처리 실패 asset=%s", row.get("asset_id"))
+    except Exception:
+        log.exception("[video-watchdog] 스캔 실패")
+
+
+def _set_video_job(asset_id: str, status: str, error: str = "", retried: bool | None = None) -> None:
+    """영상 잡 상태를 블로그 피스 payload.video_job에 기록(영상 증발 재발 방지).
+    registered→running→done/failed(+사유). 실패·미실행이 조용히 사라지는 구조 금지."""
+    try:
+        from datetime import datetime
+        blog = next((p for p in db.get_set_pieces(asset_id) if p.kind == ContentKind.BLOG), None)
+        if not blog:
+            return
+        vj = dict(blog.payload.get("video_job") or {})
+        vj.update({"status": status, "ts": datetime.utcnow().isoformat()})
+        if error:
+            vj["error"] = error[:200]
+        if retried is not None:
+            vj["retried"] = retried
+        blog.payload["video_job"] = vj
+        db.save_piece(blog)
+    except Exception:
+        import logging
+        logging.exception("[ingest] video_job 기록 실패 asset=%s", asset_id)
+
+
 def _spawn_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: dict) -> None:
     """영상(SHORT)+릴스+캐러셀을 별도 스레드에서 생성·저장 — 요청을 막지 않음(폴링/새로고침으로 표시)."""
     import threading
@@ -205,10 +268,12 @@ def _spawn_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: d
         from app.generators.video import RENDER_SEM   # 동시 렌더 상한(ffmpeg 폭주 방지, PHASE 12)
         with RENDER_SEM:
             try:
+                _set_video_job(asset.id, "running")
                 _make_video_bundle(tenant, asset, paths, brief_public)
-            except Exception:
+            except Exception as e:
                 import logging
                 logging.exception("[ingest] 비동기 영상 번들 실패 tenant=%s", tenant.id)
+                _set_video_job(asset.id, "failed", error=repr(e))
     threading.Thread(target=_run, daemon=True).start()
 
 
@@ -225,7 +290,11 @@ def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: di
     short = next((p for p in shorts if p.kind == ContentKind.SHORT
                   and p.channel == Channel.YOUTUBE and p.payload.get("video_path")), None)
     if not short:
+        from app.services.generate import LAST_ERRORS
+        _set_video_job(asset.id, "failed",
+                       error=LAST_ERRORS.get("ContentKind.SHORT", "영상 미생성(로그 참조)"))
         return
+    _set_video_job(asset.id, "done")
     saved = db.get_set_pieces(asset.id)
     caption = next((p for p in saved if p.kind == ContentKind.CAPTION), None)
     reel = ContentPiece(
