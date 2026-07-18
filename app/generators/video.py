@@ -56,6 +56,42 @@ _SYS_FONTS = [
 ]
 
 
+from dataclasses import dataclass, field
+
+
+@dataclass
+class SceneScript:
+    """자막 소스 계약(근본수정) — 렌더러는 이 타입'만' 받는다. 문자열 아무거나 못 받게 해
+    내부 프롬프트·브리프·vision 원문·라벨이 자막 경로에 도달하는 배선을 구조적으로 차단.
+    source: 'caption_llm'(쇼츠·릴스 = 캡션 생성기의 시청자용 최종 출력)
+            | 'body_excerpt'(네이버 영상 = 게이트 통과 본문 발췌)"""
+    hook: str
+    sentences: list
+    outro: str
+    source: str = "caption_llm"
+
+
+# 내부 텍스트 시그니처(지시문·라벨) — 자막에 하나라도 보이면 렌더 차단
+_SUBTITLE_BAN = __import__("re").compile(
+    r"서술하라|하라\(|하지 마라|지어내지|반드시 |프롬프트|= 사실\)|사장님 확인|사장님 제공|"
+    r"\[사진 내용|\[반영 규칙|\[입력 정보|\[가게\]|\[경험 중심|D\.I\.A|C-Rank|아래 형식|대괄호 머리표")
+
+
+def _subtitle_gate(script: "SceneScript") -> str:
+    """자막 게이트(렌더 직전) — 위반 사유 반환(통과 시 ''). 명령형 어미로 끝나는 자막은 무조건 실패."""
+    import re as _r
+    for t in [script.hook] + list(script.sentences) + [script.outro]:
+        for line in (t or "").split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            if _SUBTITLE_BAN.search(line):
+                return f"내부 텍스트 시그니처: '{line[:40]}'"
+            if _r.search(r"(하라|마라)[.)!」\"']?$", line):
+                return f"명령형 어미: '{line[:40]}'"
+    return ""
+
+
 def _per_image(n: int) -> float:
     n = max(n, 1)
     return min(PER_IMAGE_SECONDS, MAX_SHORT_SECONDS / n)
@@ -104,9 +140,16 @@ def _parse_dropped(note: str) -> int:
     return int(m.group(1)) if m else 0
 
 
-def _quality_gate(path: str, hook_first: bool, subs_burned: bool, dropped: int = 0) -> dict:
+def _quality_gate(path: str, hook_first: bool, subs_burned: bool, dropped: int = 0,
+                  subtitles: list | None = None) -> dict:
     """영상 품질 자동 점검(영상강화 PHASE 6) — 규격·길이·오디오·훅·자막·워터마크 부재.
     발행을 막지 않고 진단 결과를 payload에 남긴다(검수 화면·로그용)."""
+    # (근본수정 4) 자막 텍스트 검사 — 오염 자막(내부 지시문·라벨)이 채점 입력에 없던 구멍 봉합
+    if subtitles:
+        _s = SceneScript(hook="", sentences=[t for t in subtitles if t], outro="", source="audit")
+        _bad = _subtitle_gate(_s)
+        if _bad:
+            return {"pass": False, "score": 0, "error": f"자막 오염: {_bad}", "checks": {}}
     import json
     import logging
     gate = {"pass": False, "checks": {}, "dropped_scenes": dropped}
@@ -328,20 +371,27 @@ class ShortVideoGenerator(Generator):
         _llm_route = dict(_llm.LAST_ROUTE.get("caption") or {})
         d = _parse_sections(raw, ["제목", "길이", "플랫폼", "훅후보", "훅", "내레이션", "장면"])
         scenes_meta = _parse_scenes(d.get("장면", ""))
-        title = d.get("제목") or (asset.note[:30] or "shorts")
+        title = d.get("제목") or "shorts"          # (근본수정) note 폴백 제거
         # 첫 3초 훅(영상강화 PHASE 1) — 3~5안 중 손실회피·숫자·적정길이 점수로 최강 1개 선택
         hook_cands = [h.strip().lstrip("-*·0123456789.) ").strip()
                       for h in (d.get("훅후보") or d.get("훅") or "").split("\n") if h.strip()]
         hook = (_pick_hook(hook_cands, kws)
-                or (scenes_meta[0]["on_screen_text"] if scenes_meta else asset.note[:18])).strip()
+                or (scenes_meta[0]["on_screen_text"] if scenes_meta else title[:18])).strip()
         narration = d.get("내레이션", "")
 
-        # 씬 텍스트 = 내레이션 문장(없으면 장면 자막 → 메모)
-        sent = _split_sentences(narration)
-        if not sent:
-            sent = [s["on_screen_text"] for s in scenes_meta if s.get("on_screen_text")]
-        if not sent:
-            sent = _split_sentences(asset.note) or [asset.note[:30] or title]
+        # 씬 텍스트 = 캡션 생성기의 '시청자용 최종 출력'(내레이션→장면 자막)만.
+        # (근본수정) asset.note 폴백 제거 — 내부 프롬프트·라벨이 자막에 노출되던 배선 차단.
+        def _viewer_sentences(dd):
+            s = _split_sentences(dd.get("내레이션", ""))
+            if not s:
+                s = [x["on_screen_text"] for x in _parse_scenes(dd.get("장면", "")) if x.get("on_screen_text")]
+            return s
+        sent = _viewer_sentences(d)
+        if not sent:                                   # 스크립트 형식 미준수 → 캡션 1회 재생성
+            raw = _llm.call_task("caption", prompt, 1500, default_model=self.model)
+            d = _parse_sections(raw, ["제목", "길이", "플랫폼", "훅후보", "훅", "내레이션", "장면"])
+            scenes_meta = _parse_scenes(d.get("장면", ""))
+            sent = _viewer_sentences(d)
         sent = sent[:MAX_SCENES]
 
         if strat.closing in ("buy", "both") and buy:
@@ -352,17 +402,30 @@ class ShortVideoGenerator(Generator):
             outro_cta = (f"📍 네이버 '{tenant.name}' 검색\n방문·예약 환영" if tenant.name else "방문·예약 환영")
         outro_cta += "\n🔖 저장해두고 필요할 때 보세요"       # 저장 유도(정보성 포맷 = 저장 신호, PHASE 5)
 
-        video_path, note, dur_sec, cover_path = self._build_scene_video(
-            vid_imgs, hook, sent, kws, tenant, strat, title, outro_cta)
-        _scene_note = note                                    # 씬 경로 결과/오류(진단용)
-        _scene_ok = bool(video_path)
-        # 폴백: 씬 파이프라인 실패 → 기존 슬라이드쇼 + 단일자막 + 오디오
-        if not video_path:
-            per = _per_image(len(vid_imgs))
-            video_path, note = self._assemble_legacy(vid_imgs, hook, tenant.id, per)
-            video_path, _t, _b, _ = self._add_audio(video_path, narration, tenant.id)
-            dur_sec = round(max(len(imgs), 1) * per)
-            cover_path = imgs[0] if imgs else asset.path
+        script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm")
+        _gate_bad = _subtitle_gate(script) if sent else "자막 소스 없음(스크립트 파싱 실패)"
+        if _gate_bad:                                  # 자막 게이트 — 오염/부재 시 1회 재생성 후 재검
+            raw = _llm.call_task("caption", prompt, 1500, default_model=self.model)
+            d = _parse_sections(raw, ["제목", "길이", "플랫폼", "훅후보", "훅", "내레이션", "장면"])
+            sent = _viewer_sentences(d)[:MAX_SCENES]
+            narration = d.get("내레이션", narration)
+            script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm")
+            _gate_bad = _subtitle_gate(script) if sent else "자막 소스 없음(재생성 후에도)"
+        if _gate_bad:
+            video_path, note, dur_sec, cover_path = None, f"자막 게이트 차단: {_gate_bad}", 0, None
+            _scene_note, _scene_ok = note, False
+        else:
+            video_path, note, dur_sec, cover_path = self._build_scene_video(
+                vid_imgs, script, kws, tenant, strat, title)
+            _scene_note = note                                # 씬 경로 결과/오류(진단용)
+            _scene_ok = bool(video_path)
+            # 폴백: 씬 파이프라인 실패 → 기존 슬라이드쇼 + 단일자막 + 오디오(게이트 통과 자막만 도달)
+            if not video_path:
+                per = _per_image(len(vid_imgs))
+                video_path, note = self._assemble_legacy(vid_imgs, hook, tenant.id, per)
+                video_path, _t, _b, _ = self._add_audio(video_path, narration, tenant.id)
+                dur_sec = round(max(len(imgs), 1) * per)
+                cover_path = imgs[0] if imgs else asset.path
         # 다중 화면비(1:1·4:5) 변형 자동 생성 (#1)
         out_dir = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), tenant.id)
         # video_path 확정: 중간파일(video.mp4)/작업폴더 경로면 out_dir로 복사(재생 404 원천차단 — 모든 경로 공통)
@@ -399,6 +462,7 @@ class ShortVideoGenerator(Generator):
                 "hook_strategy": hook, "subtitle": hook, "hook_candidates": hook_cands,
                 "narration": narration, "scenes": scenes_meta, "script": raw,
                 "scene_texts": sent, "outro_cta": outro_cta, "viral_format": fmt.name,
+                "subtitles": [hook] + list(sent) + [outro_cta],   # 자막 전문 기록(사후 감사·채점 입력)
                 "trending_sound_tip": "발행 시 인스타/유튜브 앱에서 '트렌딩 사운드'를 입히면 도달이 크게 늘어요(공식 API 미지원→앱에서 1탭).",
                 "save_share_cta": {"youtube": seo.save_share_line("youtube"),
                                    "instagram": seo.save_share_line("instagram")},   # 설명란 삽입용(PHASE 5)
@@ -411,7 +475,8 @@ class ShortVideoGenerator(Generator):
                 "assemble_note": note, "_scene_note": _scene_note,
                 # 품질 게이트(영상강화 PHASE 6) — 규격·길이·훅·자막·워터마크 부재 자동점검
                 "quality_gate": (_quality_gate(video_path, hook_first=_scene_ok,
-                                               subs_burned=_scene_ok, dropped=_parse_dropped(note))
+                                               subs_burned=_scene_ok, dropped=_parse_dropped(note),
+                                               subtitles=[hook] + list(sent) + [outro_cta])
                                  if video_path and os.path.exists(video_path)
                                  else {"pass": False, "error": "no video"}),
             },
@@ -459,7 +524,8 @@ class ShortVideoGenerator(Generator):
         region_short = seo._kw_shorten(getattr(tenant, "region", "") or "")
         outro = f"{tenant.name} · {region_short}\n자세한 내용은 본문에"
         path, note, dur, _cover = self._build_scene_video(
-            vid_imgs, opening, sent, kws, tenant, strat, f"{kw0} 정리", outro)
+            vid_imgs, SceneScript(hook=opening, sentences=sent, outro=outro, source="body_excerpt"),
+            kws, tenant, strat, f"{kw0} 정리")
         if not (path and os.path.exists(path)):
             return None, {}
         # SEO 파일명으로 out_dir 확정 복사(이미지 SEO와 동일 규칙)
@@ -508,9 +574,15 @@ class ShortVideoGenerator(Generator):
         return out or imgs
 
     # ───────────────────── 씬 기반 빌드 (핵심) ─────────────────────
-    def _build_scene_video(self, imgs, hook, sentences, kws, tenant, strat, title, outro_cta):
-        """글→씬 변환 영상. 영상은 씬별 클립으로, 오디오는 '하나의 연속 트랙'으로 만들어
-        정확히 mux → 씬마다 음성·화면이 어긋나지 않음. 성공 시 (path,note,dur)."""
+    def _build_scene_video(self, imgs, script, kws, tenant, strat, title):
+        """글→씬 변환 영상 — 자막 소스는 SceneScript 계약 타입만 받는다(근본수정: 임의 문자열 차단).
+        렌더 직전 자막 게이트를 한 번 더 강제. 성공 시 (path,note,dur,cover)."""
+        if not isinstance(script, SceneScript):
+            return None, "자막 소스 계약 위반(SceneScript 아님)", 0, None
+        _bad = _subtitle_gate(script)
+        if _bad:
+            return None, f"자막 게이트 차단: {_bad}", 0, None
+        hook, sentences, outro_cta = script.hook, list(script.sentences), script.outro
         if not shutil.which("ffmpeg"):
             return None, "ffmpeg 미설치", 0, None
         try:

@@ -1681,6 +1681,12 @@ def _row_to_piece(r: sqlite3.Row) -> ContentPiece:
         payload=json.loads(r["payload"] or "{}"), status=ContentStatus(r["status"]))
 
 
+def delete_piece(pid: str, tenant_id: str) -> None:
+    """피스 단건 삭제(본인 가게 것만) — 영상 폐기·재생성용."""
+    with _conn() as c:
+        c.execute("DELETE FROM content_pieces WHERE id=? AND tenant_id=?", (pid, tenant_id))
+
+
 def get_set_pieces(asset_id: str) -> list[ContentPiece]:
     """한 업로드(세트)에서 나온 모든 채널 콘텐츠."""
     with _conn() as c:

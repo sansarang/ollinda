@@ -3914,7 +3914,16 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
     vid = next((p for p in pieces if p.kind.value == "short" and p.payload.get("video_path")), None)
     vurl = f"/dl/{asset_id}/{os.path.basename(vid.payload['video_path'])}" if vid else ""  # 블로그 본문 삽입용
     _nv = (vid.payload.get("naver_video") or {}) if vid else {}          # 네이버용 정보형 영상(있으면)
-    _nv = _nv if (_nv.get("path") and os.path.exists(_nv["path"])) else {}
+    def _media_exists(p_):
+        """로컬 또는 R2 미러 존재 — 컨테이너 교체로 로컬만 사라진 경우 오탐 방지(근본수정 [결함2])."""
+        if p_ and os.path.exists(p_):
+            return True
+        try:
+            from app import storage as _st
+            return bool(p_ and _st.r2_media_url(vid.tenant_id, os.path.basename(p_)))
+        except Exception:
+            return False
+    _nv = _nv if (_nv.get("path") and _media_exists(_nv["path"])) else {}
     _fn_base = _seo_photo_name(tenant, blog)               # 이미지 SEO(5-1): 지역-업종-피사체
     photo_cells = "".join(
         f"<div class='relative'><img src='/dl/{asset_id}/{os.path.basename(im)}' class='w-full aspect-square object-cover rounded-xl border border-slate-200'>"
@@ -5960,7 +5969,10 @@ def _media(pid: str, p) -> str:
     if p.kind == ContentKind.BLOG:
         return _blog_preview(pid, p)
     if p.kind == ContentKind.SHORT:
-        if p.payload.get("video_path") and os.path.exists(p.payload["video_path"]):
+        _vp = p.payload.get("video_path") or ""
+        _vok = _vp and (os.path.exists(_vp) or __import__("app.storage", fromlist=["x"]).r2_media_url(
+            p.tenant_id, os.path.basename(_vp)))
+        if _vok:
             return (f"<video src='/video/{pid}' controls class='w-full max-h-96 rounded-xl bg-black mb-2'></video>"
                     + _gallery(pid, p))
         return (_gallery(pid, p)
@@ -6035,6 +6047,21 @@ def review_save(pid: str, text: str = Form(None), title: str = Form(None),
 def review_approve(pid: str):
     db.set_piece_status(pid, ContentStatus.APPROVED)
     return RedirectResponse(f"/admin/review/{pid}", status_code=303)
+
+
+@app.post("/admin/set/{asset_id}/regen-video")
+def admin_regen_video(asset_id: str):
+    """영상 폐기 후 재생성 — SHORT 피스 삭제 + video_job 리셋(retried 해제) → 워치독이 재생성.
+    글·사진·기존 키트 산출물 불변(영상 피스만)."""
+    from app.domain.models import ContentKind as _CK
+    n = 0
+    for p in db.get_set_pieces(asset_id):
+        if p.kind == _CK.SHORT:
+            db.delete_piece(p.id, p.tenant_id)
+            n += 1
+    from app.services.ingest import _set_video_job
+    _set_video_job(asset_id, "registered", retried=False)
+    return RedirectResponse(f"/admin/set/{asset_id}?ok=영상 {n}건 폐기·재생성 예약", status_code=303)
 
 
 @app.post("/admin/review/{pid}/reject")
