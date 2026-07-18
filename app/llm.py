@@ -84,7 +84,7 @@ def _gemini_generate(parts: list, model: str, max_tokens: int) -> str:
     r = _rq.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                  params={"key": key},
                  json={"contents": [{"parts": parts}],
-                       "generationConfig": {"maxOutputTokens": max(max_tokens, 2000)}},
+                       "generationConfig": {"maxOutputTokens": max(max_tokens * 3, 6000)}},   # thinking 잠식 절단 방지
                  timeout=90)
     d = r.json()
     if r.status_code != 200:

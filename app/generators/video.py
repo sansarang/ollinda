@@ -83,13 +83,14 @@ def _strip_labels(t: str) -> str:
     import re as _r
     t = _r.sub(r"^[①②③④⑤⑥⑦⑧⑨⑩\s]*", "", (t or "").strip())
     t = _r.sub(r"^(\d+[.)]|STEP ?\d+[:.]?|훅 ?\d[:.]?)\s*", "", t, flags=_r.I)
+    t = _r.sub(r"^\d*\s*안?\s*\([^)]{2,12}\)\s*[:：]?\s*", "", t)   # '2안(손실회피):' 류 후보 라벨
     t = _r.sub(r"^(결과 먼저|문제 제기|호기심 갭|손실 회피)\s*[:：]\s*", "", t)
     return t.strip()
 
 
 # 경쟁·가격 저격(정직성·상도의) — 훅/자막 전면 금지 패턴
 _RIVAL_JAB = __import__("re").compile(
-    r"(비싸게|바가지|덤터기|호구 ?잡|딴 데|다른 (업체|가게|집)|타 ?업체)")
+    r"(비싸게|바가지|덤터기|호구 ?잡|딴 데|다른 (업체|가게|집)|타 ?업체|(남들|다들)[^.]{0,12}(비싼|비싸))")
 
 
 def _subtitle_gate(script: "SceneScript", source: str = "") -> str:
@@ -594,6 +595,11 @@ class ShortVideoGenerator(Generator):
         desc = (f"{kw_nat} 관련 내용을 영상으로 정리했어요.\n"
                 f"{tenant.name} · {region_short}\n"
                 "자세한 과정과 안내는 블로그 본문에 있어요.")
+        try:
+            from app import storage as _st
+            _st.mirror_to_r2(final)                    # 로컬 정리 후에도 키트·다운로드 유지(R2 폴백)
+        except Exception:
+            pass
         _nlog.warning("[naver-video] 성공 path=%s dur=%s size=%s", final, dur,
                        os.path.getsize(final) if os.path.exists(final) else 0)
         meta = {"path": final, "title": vtitle, "desc": desc, "filename": fname,
