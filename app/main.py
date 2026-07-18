@@ -6050,17 +6050,37 @@ def review_approve(pid: str):
 
 
 @app.post("/admin/set/{asset_id}/regen-video")
-def admin_regen_video(asset_id: str):
+def admin_regen_video(asset_id: str, sync: str = ""):
     """영상 폐기 후 재생성 — SHORT 피스 삭제 + video_job 리셋(retried 해제) → 워치독이 재생성.
+    sync=1이면 요청 안에서 동기 실행해 실패 사유를 그대로 반환(보이지 않는 스레드 진단용).
     글·사진·기존 키트 산출물 불변(영상 피스만)."""
     from app.domain.models import ContentKind as _CK
     n = 0
+    blog = None
     for p in db.get_set_pieces(asset_id):
         if p.kind == _CK.SHORT:
             db.delete_piece(p.id, p.tenant_id)
             n += 1
+        if p.kind == _CK.BLOG:
+            blog = p
     from app.services.ingest import _set_video_job
     _set_video_job(asset_id, "registered", retried=False)
+    if sync == "1" and blog:
+        import os as _os
+        import traceback
+        try:
+            from app.services.ingest import _make_video_bundle
+            tenant = db.get_tenant(blog.tenant_id)
+            asset = db.get_asset(asset_id)
+            paths = [p_ for p_ in (blog.payload.get("image_paths") or []) if p_ and _os.path.exists(p_)]
+            if not (tenant and asset and paths):
+                return HTMLResponse(f"<pre>사전 조건 실패: tenant={bool(tenant)} asset={bool(asset)} paths={len(paths)}</pre>")
+            _set_video_job(asset_id, "running", retried=True)
+            _make_video_bundle(tenant, asset, paths, blog.payload.get("brief") or {})
+            _set_video_job(asset_id, "done")
+            return HTMLResponse("<pre>동기 재생성 완료</pre>")
+        except Exception:
+            return HTMLResponse(f"<pre>동기 재생성 실패:\n{esc(traceback.format_exc()[-1800:])}</pre>")
     return RedirectResponse(f"/admin/set/{asset_id}?ok=영상 {n}건 폐기·재생성 예약", status_code=303)
 
 
