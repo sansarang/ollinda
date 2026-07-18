@@ -41,3 +41,18 @@ def call(prompt: str, model: str = MODEL, max_tokens: int = 1200) -> str:
     import logging
     logging.getLogger("shopcast.llm").info("[llm] stop_reason=%s max_tokens=%s", last_finish_reason, max_tokens)
     return next((b.text for b in resp.content if b.type == "text"), "")
+
+
+def ping() -> bool:
+    """API 사용 가능 여부(크레딧 등) 초저가 확인 — 워치독이 헛 재시도로 1회 제한을 소진하지 않게.
+    True=사용 가능/판단 불가(진행), False=크레딧 소진 확정."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return False
+    try:
+        import anthropic
+        anthropic.Anthropic(timeout=15.0).messages.create(
+            model="claude-haiku-4-5-20251001", max_tokens=1,
+            messages=[{"role": "user", "content": "."}])
+        return True
+    except Exception as e:
+        return "credit" not in repr(e).lower()

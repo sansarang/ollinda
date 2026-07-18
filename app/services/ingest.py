@@ -230,6 +230,10 @@ def video_watchdog() -> None:
                 if not (tenant and asset and paths):
                     _set_video_job(row["asset_id"], "failed", error="재시도 불가(가게/사진 소실)", retried=True)
                     continue
+                from app import llm as _llm
+                if not _llm.ping():          # 크레딧 소진이면 재시도 1회를 아껴 다음 주기로(충전 후 자동 복구)
+                    log.info("[video-watchdog] 크레딧 없음 — 재시도 보류 asset=%s", row["asset_id"])
+                    continue
                 _set_video_job(row["asset_id"], "retrying", retried=True)   # 1회 제한 선기록(폭주 방지)
                 log.info("[video-watchdog] 죽은 영상 잡 재시도 asset=%s t=%s", row["asset_id"], row["tenant_id"])
                 _spawn_video_bundle(tenant, asset, paths, blog.payload.get("brief") or {})
