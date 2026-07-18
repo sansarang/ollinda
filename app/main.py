@@ -6079,7 +6079,18 @@ def admin_regen_video(asset_id: str, sync: str = ""):
             _set_video_job(asset_id, "running", retried=True)
             _make_video_bundle(tenant, asset, paths, blog.payload.get("brief") or {})
             _set_video_job(asset_id, "done")
-            return HTMLResponse("<pre>동기 재생성 완료</pre>")
+            import json as _json
+            _short = next((p for p in db.get_set_pieces(asset_id)
+                           if p.kind == _CK.SHORT and (p.payload or {}).get("video_path")), None)
+            _out = {"done": True}
+            if _short:
+                pl = _short.payload or {}
+                nv = pl.get("naver_video") or {}
+                _out = {"done": True, "video_path": pl.get("video_path"),
+                        "subtitles": pl.get("subtitles"), "llm_route": pl.get("llm_route"),
+                        "naver_video": {k: nv.get(k) for k in ("path", "title", "filename", "duration_sec")},
+                        "naver_scene_texts": nv.get("scene_texts")}
+            return HTMLResponse(f"<pre>{esc(_json.dumps(_out, ensure_ascii=False, indent=1))}</pre>")
         except Exception:
             return HTMLResponse(f"<pre>동기 재생성 실패:\n{esc(traceback.format_exc()[-1800:])}</pre>")
     return RedirectResponse(f"/admin/set/{asset_id}?ok=영상 {n}건 폐기·재생성 예약", status_code=303)

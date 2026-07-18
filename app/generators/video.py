@@ -69,6 +69,7 @@ class SceneScript:
     sentences: list
     outro: str
     source: str = "caption_llm"
+    evidence: str = ""            # 인용 근거 대조용(폼 경험담·본문) — 게이트가 창작 인용 검출에 사용
 
 
 # 내부 텍스트 시그니처(지시문·라벨) — 자막에 하나라도 보이면 렌더 차단
@@ -77,8 +78,24 @@ _SUBTITLE_BAN = __import__("re").compile(
     r"\[사진 내용|\[반영 규칙|\[입력 정보|\[가게\]|\[경험 중심|D\.I\.A|C-Rank|아래 형식|대괄호 머리표")
 
 
-def _subtitle_gate(script: "SceneScript") -> str:
-    """자막 게이트(렌더 직전) — 위반 사유 반환(통과 시 ''). 명령형 어미로 끝나는 자막은 무조건 실패."""
+def _strip_labels(t: str) -> str:
+    """원문자·번호·구조 라벨 스트립(①②③, 1., STEP N, '결과 먼저:' 류) — 시청자 자막에 노출 금지."""
+    import re as _r
+    t = _r.sub(r"^[①②③④⑤⑥⑦⑧⑨⑩\s]*", "", (t or "").strip())
+    t = _r.sub(r"^(\d+[.)]|STEP ?\d+[:.]?|훅 ?\d[:.]?)\s*", "", t, flags=_r.I)
+    t = _r.sub(r"^(결과 먼저|문제 제기|호기심 갭|손실 회피)\s*[:：]\s*", "", t)
+    return t.strip()
+
+
+# 경쟁·가격 저격(정직성·상도의) — 훅/자막 전면 금지 패턴
+_RIVAL_JAB = __import__("re").compile(
+    r"(비싸게|바가지|덤터기|호구 ?잡|딴 데|다른 (업체|가게|집)|타 ?업체)")
+
+
+def _subtitle_gate(script: "SceneScript", source: str = "") -> str:
+    """자막 게이트(렌더 직전) — 위반 사유 반환(통과 시 '').
+    검사: 내부 텍스트 시그니처 / 명령형 어미 / 근거 없는 따옴표 인용(source 대조) /
+    경쟁·가격 저격 톤 / (번호 라벨은 사전 스트립 후에도 남으면 실패)."""
     import re as _r
     for t in [script.hook] + list(script.sentences) + [script.outro]:
         for line in (t or "").split("\n"):
@@ -89,6 +106,15 @@ def _subtitle_gate(script: "SceneScript") -> str:
                 return f"내부 텍스트 시그니처: '{line[:40]}'"
             if _r.search(r"(하라|마라)[.)!」\"']?$", line):
                 return f"명령형 어미: '{line[:40]}'"
+            if _r.search(r"^[①②③④⑤⑥⑦⑧⑨⑩]|^\d+[.)]\s|^STEP ?\d", line, _r.I):
+                return f"번호·구조 라벨 노출: '{line[:40]}'"
+            if _RIVAL_JAB.search(line):
+                return f"경쟁·가격 저격 톤: '{line[:40]}'"
+            # 근거 없는 따옴표 인용(창작 발화) — 인용 내용의 구별 토큰이 입력(경험담·본문)에 없으면 실패
+            for q in _r.findall(r"[\"“]([^\"”]{6,60})[\"”]", line):
+                toks = [w for w in _r.findall(r"[가-힣A-Za-z0-9]{3,}", q)][:8]
+                if toks and source and not any(w in source for w in toks):
+                    return f"근거 없는 인용: '{q[:36]}'"
     return ""
 
 
@@ -361,6 +387,10 @@ class ShortVideoGenerator(Generator):
             "[루프] 마지막 장면이 첫 장면과 자연스럽게 이어지게(끝→처음 루프 = 재생 반복 → 재노출). 길이 30~45초 목표.\n\n"
             "위 규칙으로 인스타 릴스/유튜브 쇼츠를 기획하라. 아래 형식 그대로(대괄호 머리표 유지):\n"
             "[제목]\n(후킹 제목)\n[길이]\n(예: 25초)\n[플랫폼]\n(인스타 릴스/유튜브 쇼츠)\n"
+            "[훅 규칙 — 정직성] 따옴표 인용문은 위 입력(경험담·본문)에 원문이 있을 때만. 없는 발화를 "
+            "지어내 인용하지 마라. 가격·견적 표현은 입력에 해당 서술이 있을 때만 — '비싸게만 받으셨나요' 류 "
+            "경쟁·비교 저격 톤 금지(동네 동업자 저격은 훅으로도 부적격). 번호·라벨(①, 1., STEP)을 자막 문장에 "
+            "넣지 마라. 훅은 평서·질문형 사실 기반(예: '신차 첫 썬팅, 뭘 봐야 할까요' / '모닝 신차패키지, 이렇게 마감했습니다').\n"
             "[훅후보]\n(첫 3초 훅 4안 — 한 줄씩. 검색 유입자가 공감할 문제제기·손실회피형 우선"
             "(예: '여름 앞유리 이거 모르면 손해'). 각 8~16자, 훅 공식(결과/손실회피/호기심갭/숫자) 서로 다르게)\n"
             "[내레이션]\n(한 문장씩 줄바꿈. 각 문장이 한 장면이 됨. 5~6문장, 구어체, 마지막은 CTA)\n"
@@ -402,15 +432,25 @@ class ShortVideoGenerator(Generator):
             outro_cta = (f"📍 네이버 '{tenant.name}' 검색\n방문·예약 환영" if tenant.name else "방문·예약 환영")
         outro_cta += "\n🔖 저장해두고 필요할 때 보세요"       # 저장 유도(정보성 포맷 = 저장 신호, PHASE 5)
 
-        script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm")
-        _gate_bad = _subtitle_gate(script) if sent else "자막 소스 없음(스크립트 파싱 실패)"
+        _evidence = (asset.note or "")
+        try:                                            # 본문(있으면)도 인용 근거에 포함
+            from app import db as _dbe
+            _bp = next((p for p in _dbe.get_set_pieces(asset.id) if p.kind.value == "blog"), None)
+            if _bp:
+                _evidence += "\n" + ((_bp.payload or {}).get("body") or "")
+        except Exception:
+            pass
+        hook = _strip_labels(hook)
+        sent = [_strip_labels(s) for s in sent if _strip_labels(s)]
+        script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm", evidence=_evidence)
+        _gate_bad = _subtitle_gate(script, _evidence) if sent else "자막 소스 없음(스크립트 파싱 실패)"
         if _gate_bad:                                  # 자막 게이트 — 오염/부재 시 1회 재생성 후 재검
             raw = _llm.call_task("caption", prompt, 1500, default_model=self.model)
             d = _parse_sections(raw, ["제목", "길이", "플랫폼", "훅후보", "훅", "내레이션", "장면"])
-            sent = _viewer_sentences(d)[:MAX_SCENES]
+            sent = [_strip_labels(s) for s in _viewer_sentences(d)[:MAX_SCENES] if _strip_labels(s)]
             narration = d.get("내레이션", narration)
-            script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm")
-            _gate_bad = _subtitle_gate(script) if sent else "자막 소스 없음(재생성 후에도)"
+            script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm", evidence=_evidence)
+            _gate_bad = _subtitle_gate(script, _evidence) if sent else "자막 소스 없음(재생성 후에도)"
         if _gate_bad:
             video_path, note, dur_sec, cover_path = None, f"자막 게이트 차단: {_gate_bad}", 0, None
             _scene_note, _scene_ok = note, False
@@ -489,17 +529,22 @@ class ShortVideoGenerator(Generator):
         정직성(R2): 자막은 게이트 통과한 글 본문·확정 사실에서 '그대로 발췌'만(LLM 재작성 없음 =
         날조 원천 차단). 실패 시 (None, {}) — 키트에서 블록만 생략, 글 발행 흐름 유지."""
         import re as _r
+        import logging as _lg
+        _nlog = _lg.getLogger("shopcast.video")
+        _nlog.warning("[naver-video] 진입 asset=%s imgs=%d", getattr(asset, "id", "?"), len(vid_imgs or []))
         try:
             from app import db as _db
             blog = next((p for p in _db.get_set_pieces(asset.id) if p.kind.value == "blog"), None)
         except Exception:
             blog = None
         if not (blog and vid_imgs):
+            _nlog.warning("[naver-video] 중단: blog=%s imgs=%d", bool(blog), len(vid_imgs or []))
             return None, {}
         pl = blog.payload or {}
         body = (pl.get("body") or "").strip()
         kw0 = ((pl.get("target_keywords") or [""])[0] or (kws[0] if kws else "")).strip()
         if not (body and kw0):
+            _nlog.warning("[naver-video] 중단: body=%d kw0=%r", len(body), kw0)
             return None, {}
         kw_nat = seo._kw_shorten(kw0)
         # 핵심 답 3 = 글 소제목 축약(구조 섹션 제외 — 정보 소제목만)
@@ -507,6 +552,7 @@ class ShortVideoGenerator(Generator):
                  if ln.strip().startswith("##")]
         heads = [h for h in heads if not any(x in h for x in ("한눈 요약", "자주 묻", "가격", "영업 안내", "마무리"))][:3]
         if not heads:
+            _nlog.warning("[naver-video] 중단: 소제목 0 (본문 구조 확인 필요)")
             return None, {}
         # 사진 캡션 = 본문 문단 첫 문장 발췌(사진 수만큼)
         paras = [p.strip() for p in body.split("\n") if len(p.strip()) >= 20
@@ -524,9 +570,10 @@ class ShortVideoGenerator(Generator):
         region_short = seo._kw_shorten(getattr(tenant, "region", "") or "")
         outro = f"{tenant.name} · {region_short}\n자세한 내용은 본문에"
         path, note, dur, _cover = self._build_scene_video(
-            vid_imgs, SceneScript(hook=opening, sentences=sent, outro=outro, source="body_excerpt"),
+            vid_imgs, SceneScript(hook=opening, sentences=sent, outro=outro, source="body_excerpt", evidence=body),
             kws, tenant, strat, f"{kw0} 정리")
         if not (path and os.path.exists(path)):
+            _nlog.warning("[naver-video] 중단: 씬 빌드 실패 — note=%s", note)
             return None, {}
         # SEO 파일명으로 out_dir 확정 복사(이미지 SEO와 동일 규칙)
         ind0 = ((getattr(tenant, "industry", "") or "").replace("/", ",").split(",")[0] or "").strip()
@@ -538,6 +585,7 @@ class ShortVideoGenerator(Generator):
         try:
             shutil.copy(path, final)
         except Exception:
+            _nlog.warning("[naver-video] 중단: 파일 복사 실패 %s", final)
             return None, {}
         blog_title = (pl.get("title") or "").strip()
         vtitle = f"{kw0} 핵심만 정리했어요"                       # 글 제목과 중복되지 않는 변형
@@ -546,6 +594,8 @@ class ShortVideoGenerator(Generator):
         desc = (f"{kw_nat} 관련 내용을 영상으로 정리했어요.\n"
                 f"{tenant.name} · {region_short}\n"
                 "자세한 과정과 안내는 블로그 본문에 있어요.")
+        _nlog.warning("[naver-video] 성공 path=%s dur=%s size=%s", final, dur,
+                       os.path.getsize(final) if os.path.exists(final) else 0)
         meta = {"path": final, "title": vtitle, "desc": desc, "filename": fname,
                 "duration_sec": dur, "opening": opening, "scene_texts": [opening] + sent + [outro]}
         return final, meta
@@ -579,7 +629,7 @@ class ShortVideoGenerator(Generator):
         렌더 직전 자막 게이트를 한 번 더 강제. 성공 시 (path,note,dur,cover)."""
         if not isinstance(script, SceneScript):
             return None, "자막 소스 계약 위반(SceneScript 아님)", 0, None
-        _bad = _subtitle_gate(script)
+        _bad = _subtitle_gate(script, script.evidence)
         if _bad:
             return None, f"자막 게이트 차단: {_bad}", 0, None
         hook, sentences, outro_cta = script.hook, list(script.sentences), script.outro
