@@ -6072,7 +6072,8 @@ def admin_regen_video(asset_id: str, sync: str = ""):
             from app.services.ingest import _make_video_bundle
             tenant = db.get_tenant(blog.tenant_id)
             asset = db.get_asset(asset_id)
-            paths = [p_ for p_ in (blog.payload.get("image_paths") or []) if p_ and _os.path.exists(p_)]
+            from app.services.ingest import _restore_media
+            paths = _restore_media(blog.tenant_id, blog.payload.get("image_paths") or [])
             if not (tenant and asset and paths):
                 return HTMLResponse(f"<pre>사전 조건 실패: tenant={bool(tenant)} asset={bool(asset)} paths={len(paths)}</pre>")
             _set_video_job(asset_id, "running", retried=True)

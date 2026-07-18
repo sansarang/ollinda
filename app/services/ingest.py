@@ -201,6 +201,34 @@ def _autopilot(tenant: Tenant, pieces: list[ContentPiece]) -> None:
         publish_and_record(p)
 
 
+def _restore_media(tenant_id: str, paths: list) -> list:
+    """(근본수정) 로컬에서 사라진 사진을 R2 미러에서 복원 — 저장소 정리로 로컬만 지워진 세트도
+    영상 재생성 가능. 복원 실패 파일은 제외하고 존재분만 반환."""
+    import os as _os
+    out = []
+    for p in paths or []:
+        if not p:
+            continue
+        if _os.path.exists(p):
+            out.append(p)
+            continue
+        try:
+            from app import storage as _st
+            import requests as _rq
+            url = _st.r2_media_url(tenant_id, _os.path.basename(p))
+            if not url:
+                continue
+            r = _rq.get(url, timeout=60)
+            if r.status_code == 200 and r.content:
+                _os.makedirs(_os.path.dirname(p), exist_ok=True)
+                with open(p, "wb") as f:
+                    f.write(r.content)
+                out.append(p)
+        except Exception:
+            continue
+    return out
+
+
 def video_watchdog() -> None:
     """(영상 증발 재발 방지) 죽은 영상 잡 감지·1회 자동 재시도 — 기존 30분 크론(fresh_index)에 얹힘.
     판정: 최근 24h 세트에 블로그는 있는데 SHORT가 없고, video_job이 done/failed 어느 쪽도 아니며
@@ -229,9 +257,9 @@ def video_watchdog() -> None:
                     pass
                 tenant = db.get_tenant(row["tenant_id"])
                 asset = db.get_asset(row["asset_id"])
-                paths = [p for p in (blog.payload.get("image_paths") or []) if p and _os.path.exists(p)]
+                paths = _restore_media(row["tenant_id"], blog.payload.get("image_paths") or [])
                 if not (tenant and asset and paths):
-                    _set_video_job(row["asset_id"], "failed", error="재시도 불가(가게/사진 소실)", retried=True)
+                    _set_video_job(row["asset_id"], "failed", error="재시도 불가(가게/사진 소실 — R2 복원도 실패)", retried=True)
                     continue
                 from app import llm as _llm
                 # 캡션이 Anthropic 라우팅일 때만 크레딧 핑(이원화 후 Gemini 라우팅이면 Anthropic 불필요)
