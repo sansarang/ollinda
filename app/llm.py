@@ -56,3 +56,88 @@ def ping() -> bool:
         return True
     except Exception as e:
         return "credit" not in repr(e).lower()
+
+
+# ── 작업 유형별 provider 라우팅(비용 이원화) ────────────────────────
+# env: LLM_VISION / LLM_CAPTION / LLM_BODY = "provider:model" (예: gemini:gemini-flash-latest)
+# 미설정 시 기본값 = 현행 Anthropic 경로 그대로(변수 없어도 기존과 동일 동작 — 배포 안전).
+USAGE = {"gemini": {"n": 0, "in": 0, "out": 0}, "anthropic": {"n": 0}}
+LAST_ROUTE: dict = {}   # {task: {"provider","model","fallback","error"}} — payload 기록용(원가 추적)
+
+
+def route(task: str) -> tuple[str, str]:
+    """작업 유형 → (provider, model). 미설정이면 ('anthropic', 기본 모델)."""
+    v = (os.environ.get(f"LLM_{task.upper()}") or "").strip()
+    if ":" in v:
+        p, m = v.split(":", 1)
+        if p.strip().lower() in ("gemini", "anthropic") and m.strip():
+            return p.strip().lower(), m.strip()
+    return "anthropic", MODEL
+
+
+def _gemini_generate(parts: list, model: str, max_tokens: int) -> str:
+    """Gemini REST 호출 — parts는 [{text}|{inline_data}] 목록. 실패 시 예외(상위에서 폴백)."""
+    import requests as _rq
+    key = os.environ.get("GEMINI_API_KEY", "")
+    if not key:
+        raise RuntimeError("GEMINI_API_KEY 미설정")
+    r = _rq.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                 params={"key": key},
+                 json={"contents": [{"parts": parts}],
+                       "generationConfig": {"maxOutputTokens": max(max_tokens, 2000)}},
+                 timeout=90)
+    d = r.json()
+    if r.status_code != 200:
+        raise RuntimeError(f"gemini {r.status_code}: {str(d)[:160]}")
+    u = d.get("usageMetadata", {})
+    USAGE["gemini"]["n"] += 1
+    USAGE["gemini"]["in"] += u.get("promptTokenCount", 0)
+    USAGE["gemini"]["out"] += u.get("candidatesTokenCount", 0) + u.get("thoughtsTokenCount", 0)
+    try:
+        return d["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except Exception:
+        raise RuntimeError(f"gemini 응답 파싱 실패: {str(d)[:160]}")
+
+
+def call_task(task: str, prompt: str, max_tokens: int = 1200,
+              default_model: str | None = None,
+              images: list | None = None) -> str:
+    """작업 유형별 라우팅 호출. images=[(media_type, b64), ...]면 멀티모달.
+    Gemini 실패(429 포함) → 1회 재시도 → Anthropic 폴백(LAST_ROUTE에 기록).
+    Anthropic도 불가면 예외 → 호출부의 기존 실패 처리(산출물 생략)로 — 글 파이프라인 안 막음."""
+    import logging
+    import time
+    log = logging.getLogger("shopcast.llm")
+    provider, model = route(task)
+    info = {"provider": provider, "model": model, "fallback": False}
+    if provider == "gemini":
+        parts = ([{"inline_data": {"mime_type": mt, "data": b64}} for mt, b64 in (images or [])]
+                 + [{"text": prompt}])
+        for attempt in (1, 2):                        # 1회 재시도(rate limit 폭주 금지)
+            try:
+                out = _gemini_generate(parts, model, max_tokens)
+                LAST_ROUTE[task] = info
+                return out
+            except Exception as e:
+                log.warning("[llm] gemini %s 실패(%d/2): %s", task, attempt, repr(e)[:120])
+                info["error"] = repr(e)[:150]
+                if attempt == 1:
+                    time.sleep(2)
+        info["fallback"] = True                       # → Anthropic 폴백(원가 추적용 기록)
+        LAST_ROUTE[task] = info
+        log.warning("[llm] gemini %s → anthropic 폴백", task)
+    else:
+        LAST_ROUTE[task] = info
+    # Anthropic 경로(기본/폴백)
+    USAGE["anthropic"]["n"] += 1
+    am = default_model or MODEL
+    if images:
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            raise RuntimeError("anthropic 키 없음(비전 폴백 불가)")
+        import anthropic
+        content = ([{"type": "image", "source": {"type": "base64", "media_type": mt, "data": b64}}
+                    for mt, b64 in images] + [{"type": "text", "text": prompt}])
+        resp = anthropic.Anthropic(timeout=60.0).messages.create(
+            model=am, max_tokens=max_tokens, messages=[{"role": "user", "content": content}])
+        return next((b.text for b in resp.content if b.type == "text"), "").strip()
+    return call(prompt, am, max_tokens)

@@ -103,7 +103,10 @@ class CaptionGenerator(Generator):
         strat = resolve_strategy(tenant)
         kws = seo.target_keywords(prof.name, tenant.region, asset.note,
                                   axis=strat.keyword_axis, brand=tenant.brand_name)
-        text = _call_llm(self._prompt(tenant, asset, len(imgs), kws), self.model, 1200)
+        from app import llm as _llm
+        text = _llm.call_task("caption", self._prompt(tenant, asset, len(imgs), kws), 1200,
+                              default_model=self.model)   # 인스타 캡션(이원화)
+        _cap_route = dict(_llm.LAST_ROUTE.get("caption") or {})
         # 저장·공유 CTA 자동 삽입(영상강화 PHASE 5) — 저장·공유가 좋아요보다 3~5배 가중치.
         # LLM이 이미 넣었으면 중복 삽입하지 않음. 해시태그 앞에 배치.
         if text and "저장" not in text:
@@ -114,7 +117,7 @@ class CaptionGenerator(Generator):
             id=str(uuid.uuid4()), tenant_id=tenant.id, asset_id=asset.id,
             channel=Channel.INSTAGRAM, kind=self.kind,
             payload={"text": text, "image_path": imgs[0], "image_paths": imgs[:10],
-                     "target_keywords": kws},
+                     "target_keywords": kws, "llm_route": _cap_route},
             status=ContentStatus.DRAFT)
 
 

@@ -12,6 +12,10 @@ MODEL = "claude-opus-4-8"
 
 
 def configured() -> bool:
+    """비전 사용 가능 여부 — 라우팅이 gemini면 GEMINI 키로도 동작(이원화)."""
+    from app import llm
+    if llm.route("vision")[0] == "gemini" and os.environ.get("GEMINI_API_KEY"):
+        return True
     return bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
@@ -51,8 +55,6 @@ def analyze(image_path: str, industry_name: str = "", context: str | None = None
     try:
         with open(image_path, "rb") as f:
             data = base64.standard_b64encode(f.read()).decode()
-        import anthropic
-        client = anthropic.Anthropic()
         prompt = (
             f"이 사진을 한국 소상공인 마케팅 관점에서 분석하라. 업종: {industry_name or '일반'}.\n"
             "다음을 한국어로 간결히(각 1줄):\n"
@@ -63,15 +65,9 @@ def analyze(image_path: str, industry_name: str = "", context: str | None = None
             "※ 사진에 실제로 보이는 것만. 추측·과장 금지."
             + ("\n" + _context_block(context) if context is not None else "")
         )
-        resp = client.messages.create(
-            model=MODEL, max_tokens=500,
-            messages=[{"role": "user", "content": [
-                {"type": "image", "source": {"type": "base64",
-                 "media_type": _media_type(image_path), "data": data}},
-                {"type": "text", "text": prompt},
-            ]}],
-        )
-        return next((b.text for b in resp.content if b.type == "text"), "").strip()
+        from app import llm
+        return llm.call_task("vision", prompt, 500, default_model=MODEL,
+                             images=[(_media_type(image_path), data)]).strip()
     except Exception:
         return ""
 
@@ -86,25 +82,20 @@ def analyze_all(image_paths: list[str], industry_name: str = "", max_imgs: int =
     if len(paths) == 1:
         return analyze(paths[0], industry_name, context)
     try:
-        import anthropic
-        content = []
+        imgs64 = []
         for i, p in enumerate(paths):
             with open(p, "rb") as f:
-                data = base64.standard_b64encode(f.read()).decode()
-            content.append({"type": "text", "text": f"[사진{i + 1}]"})
-            content.append({"type": "image", "source": {"type": "base64",
-                            "media_type": _media_type(p), "data": data}})
-        content.append({"type": "text", "text": (
+                imgs64.append((_media_type(p), base64.standard_b64encode(f.read()).decode()))
+        prompt_all = (
             f"위 사진 {len(paths)}장을 한국 소상공인 마케팅 관점에서 분석하라. 업종: {industry_name or '일반'}.\n"
             "각 사진마다 '[사진N]'으로 구분해서 무엇이 보이는지 구체적으로(피사체·제품·차종·전후 변화·사진 속 글자 그대로).\n"
             "마지막에 '[전체]'로, 사진들이 이어지는 하나의 이야기를 한 줄로(예: 시공 전→과정→완성, 제품→사용→결과).\n"
             "※ 사진에 실제로 보이는 것만. 추측·과장 금지. 각 항목 간결히."
-            + ("\n" + _context_block(context) if context is not None else ""))})
-        client = anthropic.Anthropic()
-        resp = client.messages.create(
-            model=MODEL, max_tokens=1000,
-            messages=[{"role": "user", "content": content}])
-        return next((b.text for b in resp.content if b.type == "text"), "").strip()
+            + ("\n" + _context_block(context) if context is not None else ""))
+        # 사진 순서 표기는 프롬프트에 명시(각 이미지가 순서대로 [사진N]) — 어댑터는 이미지 나열 후 텍스트
+        prompt_all = "이미지들은 순서대로 [사진1]..[사진N]이다.\n" + prompt_all
+        from app import llm
+        return llm.call_task("vision", prompt_all, 1000, default_model=MODEL, images=imgs64).strip()
     except Exception:
         return ""
 

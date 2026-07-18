@@ -323,7 +323,9 @@ class ShortVideoGenerator(Generator):
             "[내레이션]\n(한 문장씩 줄바꿈. 각 문장이 한 장면이 됨. 5~6문장, 구어체, 마지막은 CTA)\n"
             "[장면]\n1) 0-3초 | 비주얼: .. | 자막: .. | 내레이션: ..\n2) .."
         )
-        raw = _call_llm(prompt, self.model, 1500)
+        from app import llm as _llm
+        raw = _llm.call_task("caption", prompt, 1500, default_model=self.model)   # 릴스 캡션·훅(이원화)
+        _llm_route = dict(_llm.LAST_ROUTE.get("caption") or {})
         d = _parse_sections(raw, ["제목", "길이", "플랫폼", "훅후보", "훅", "내레이션", "장면"])
         scenes_meta = _parse_scenes(d.get("장면", ""))
         title = d.get("제목") or (asset.note[:30] or "shorts")
@@ -405,6 +407,7 @@ class ShortVideoGenerator(Generator):
                 "image_paths": imgs, "duration_sec": dur_sec, "cover_path": cover_path,
                 "video_variants": variants,    # {square, feed45} 다중 화면비
                 "naver_video": naver_meta,     # 네이버용 정보형 영상(블로그 첨부·클립) — 없으면 {}
+                "llm_route": _llm_route,       # 캡션·훅 라우팅(폴백 여부 — 원가 추적)
                 "assemble_note": note, "_scene_note": _scene_note,
                 # 품질 게이트(영상강화 PHASE 6) — 규격·길이·훅·자막·워터마크 부재 자동점검
                 "quality_gate": (_quality_gate(video_path, hook_first=_scene_ok,

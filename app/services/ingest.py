@@ -117,7 +117,10 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
         if _exp and p.kind in (ContentKind.BLOG, ContentKind.CAPTION, ContentKind.X_POST):
             p.payload["owner_story"] = _exp                     # '내 말이 글이 됐네' 실감 재료
         p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value, p.payload, source=asset.note)
-        if p.kind == ContentKind.BLOG:                          # GEO(AI검색 준비) 점수 — 블로그만(B2)
+        if p.kind == ContentKind.BLOG:
+            from app import llm as _llm
+            if _llm.LAST_ROUTE.get("vision"):
+                p.payload["vision_route"] = dict(_llm.LAST_ROUTE["vision"])   # 폴백 기록(원가 추적)                          # GEO(AI검색 준비) 점수 — 블로그만(B2)
             p.payload["geo_audit"] = seo.geo_audit(
                 "blog", p.payload, name=tenant.name, industry=tenant.industry,
                 region=tenant.region or "", biz_type=getattr(tenant, "biz_type", "local") or "local")
@@ -231,7 +234,8 @@ def video_watchdog() -> None:
                     _set_video_job(row["asset_id"], "failed", error="재시도 불가(가게/사진 소실)", retried=True)
                     continue
                 from app import llm as _llm
-                if not _llm.ping():          # 크레딧 소진이면 재시도 1회를 아껴 다음 주기로(충전 후 자동 복구)
+                # 캡션이 Anthropic 라우팅일 때만 크레딧 핑(이원화 후 Gemini 라우팅이면 Anthropic 불필요)
+                if _llm.route("caption")[0] == "anthropic" and not _llm.ping():
                     log.info("[video-watchdog] 크레딧 없음 — 재시도 보류 asset=%s", row["asset_id"])
                     continue
                 _set_video_job(row["asset_id"], "retrying", retried=True)   # 1회 제한 선기록(폭주 방지)

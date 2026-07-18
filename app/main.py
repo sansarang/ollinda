@@ -2210,7 +2210,7 @@ def _photo_captions(tenant, blog, n: int) -> list[str]:
         m = _r.search(rf"\[사진{i}\]\s*([^\n]+)", srcnote)
         if not m:
             return []                                  # 부분 누락이면 전체 생략(순번 어긋남 방지)
-        desc = _r.sub(r"^\d\)\s*", "", m.group(1)).strip().rstrip(".")[:60]
+        desc = _r.sub(r"^[\d)*\-•\s]+", "", m.group(1)).strip().rstrip(".")[:60]   # 번호·불릿 머리 제거(Gemini 마크다운 대응)
         out.append(f"{desc} — {kw} 현장 사진입니다." if kw else f"{desc}.")
     return out
 
