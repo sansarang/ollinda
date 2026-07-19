@@ -25,16 +25,15 @@ def call(prompt: str, model: str = MODEL, max_tokens: int = 1200) -> str:
         return _dummy(prompt)
     import anthropic
     client = anthropic.Anthropic(timeout=60.0)   # 무한 대기 방지(SDK 기본 재시도 유지)
+    _kw = {} if "haiku" in model else {"thinking": {"type": "adaptive"}}   # Haiku는 adaptive thinking 미지원(400)
     resp = client.messages.create(
         model=model, max_tokens=max_tokens,
-        thinking={"type": "adaptive"},
-        messages=[{"role": "user", "content": prompt}],
+        messages=[{"role": "user", "content": prompt}], **_kw,
     )
     if getattr(resp, "stop_reason", "") == "max_tokens":   # thinking이 예산을 잠식해 본문이 잘림 → 2배로 1회 재시도
         resp = client.messages.create(
             model=model, max_tokens=max_tokens * 2,
-            thinking={"type": "adaptive"},
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": prompt}], **_kw,
         )
     global last_finish_reason
     last_finish_reason = getattr(resp, "stop_reason", "") or ""
