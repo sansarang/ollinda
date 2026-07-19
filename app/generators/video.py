@@ -156,6 +156,30 @@ def _pil_font(size: int, weight: str = "Bold"):
         return ImageFont.load_default()
 
 
+# 화질 기준(R3) — 코드에 고정: 짧은 변 1080 이상 + 비트레이트 하한. 본체 블러·재스케일 금지.
+MIN_SHORT_SIDE = 1080
+MIN_BITRATE = 1_500_000     # 1.5Mbps — 실측 정상 산출물(쇼츠 2.5M·클립 3.3M) 대비 보수 하한
+
+
+def _probe_quality(path: str) -> tuple[bool, dict]:
+    """렌더 산출물 화질 자동 검사 — (합격 여부, {width,height,bitrate}). 프로브 실패는 통과(발행 흐름 유지)."""
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+                            "-show_entries", "stream=width,height", "-show_entries", "format=bit_rate",
+                            "-of", "json", path], capture_output=True, timeout=30)
+        import json as _j
+        d = _j.loads(r.stdout.decode("utf-8", "ignore") or "{}")
+        st = (d.get("streams") or [{}])[0]
+        w, h = int(st.get("width") or 0), int(st.get("height") or 0)
+        br = int((d.get("format") or {}).get("bit_rate") or 0)
+        spec = {"width": w, "height": h, "bitrate": br}
+        if not (w and h):
+            return True, spec
+        return (min(w, h) >= MIN_SHORT_SIDE and (br == 0 or br >= MIN_BITRATE)), spec
+    except Exception:
+        return True, {}
+
+
 def _run_ff(cmd: list, timeout: int, tag: str = "") -> bool:
     """ffmpeg 실행 + 실패 시 stderr 로깅(소실 방지, 영상강화 PHASE 6). 성공 True."""
     import logging
@@ -500,6 +524,14 @@ class ShortVideoGenerator(Generator):
         except Exception:
             import logging
             logging.getLogger("shopcast.video").exception("[naver-video] 생성 실패 t=%s", tenant.id)
+        # 화질 자동 검사(R3) — 쇼츠도 동일 기준으로 계측(미달은 경고+기록, 발행 흐름은 유지)
+        _vq_ok, _vq_spec = (True, {})
+        if video_path and os.path.exists(video_path):
+            _vq_ok, _vq_spec = _probe_quality(video_path)
+            if not _vq_ok:
+                import logging
+                logging.getLogger("shopcast.video").warning(
+                    "[quality] 쇼츠 화질 미달 %s t=%s", _vq_spec, tenant.id)
         for _vp in vid_imgs:                       # 영상용 다운스케일 임시파일 정리(디스크 누수 방지)
             if _vp not in imgs and _vp.endswith("_vid.jpg") and os.path.exists(_vp):
                 try:
@@ -525,6 +557,7 @@ class ShortVideoGenerator(Generator):
                 "video_path": video_path, "image_path": imgs[0] if imgs else asset.path,
                 "image_paths": imgs_all, "duration_sec": dur_sec, "cover_path": cover_path,
                 "video_variants": variants,    # {square, feed45} 다중 화면비
+                "video_quality": {**_vq_spec, "pass": _vq_ok},   # 화질 게이트 계측(R3)
                 "naver_video": naver_meta,     # 네이버용 정보형 영상(블로그 첨부·클립) — 없으면 {}
                 "llm_route": _llm_route,       # 캡션·훅 라우팅(폴백 여부 — 원가 추적)
                 "assemble_note": note, "_scene_note": _scene_note,
@@ -615,6 +648,25 @@ class ShortVideoGenerator(Generator):
         except Exception:
             _nlog.warning("[naver-video] 중단: 파일 복사 실패 %s", final)
             return None, {}
+        # 화질 게이트(R3): 9:16 원본 그대로 제공 — 블러 패딩·리스케일 파일 생성 금지.
+        # 기준 미달(1080 미만 또는 저비트레이트)이면 재빌드 1회 — 저품질이 조용히 발행되는 구조 금지.
+        _q_ok, _spec = _probe_quality(final)
+        if not _q_ok:
+            _nlog.warning("[naver-video] 화질 미달 %s — 재빌드 1회", _spec)
+            path2, note2, dur2, _c2 = self._build_scene_video(
+                vid_imgs, SceneScript(hook=opening, sentences=sent, outro=outro, source="body_excerpt", evidence=body),
+                kws, tenant, strat, f"{kw0} 정리")
+            if path2 and os.path.exists(path2):
+                _q2, _spec2 = _probe_quality(path2)
+                if _q2:
+                    try:
+                        shutil.copy(path2, final)
+                        dur = dur2 or dur
+                        _spec = _spec2
+                    except Exception:
+                        pass
+                else:
+                    _nlog.warning("[naver-video] 재빌드도 미달 %s — 원본 유지(사유 기록)", _spec2)
         blog_title = (pl.get("title") or "").strip()
         vtitle = f"{kw0} 핵심만 정리했어요"                       # 글 제목과 중복되지 않는 변형
         if vtitle == blog_title:
@@ -622,18 +674,9 @@ class ShortVideoGenerator(Generator):
         desc = (f"{kw_nat} 관련 내용을 영상으로 정리했어요.\n"
                 f"{tenant.name} · {region_short}\n"
                 "자세한 과정과 안내는 블로그 본문에 있어요.")
-        # 본문 삽입용 16:9(스마트에디터 가로 플레이어 가독) — 같은 씬·자막 소스 리레이아웃(재생성 아님)
-        wide = os.path.join(out_dir, f"naver_wide_{uuid.uuid4().hex}.mp4")
-        _wide_ok = _run_ff(["ffmpeg", "-y", "-i", final,
-                            "-vf", "split[o][b];[b]scale=1920:1080,boxblur=24:6[bg];"
-                                   "[o]scale=-2:1080[fg];[bg][fg]overlay=(W-w)/2:0",
-                            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-                            "-c:a", "aac", "-movflags", "+faststart", wide], 300, "naver-wide")
         try:
             from app import storage as _st
             _st.mirror_to_r2(final)                    # 로컬 정리 후에도 키트·다운로드 유지(R2 폴백)
-            if _wide_ok and os.path.exists(wide):
-                _st.mirror_to_r2(wide)
         except Exception:
             pass
         _nlog.warning("[naver-video] 성공 path=%s dur=%s size=%s", final, dur,
@@ -649,10 +692,7 @@ class ShortVideoGenerator(Generator):
         hashtags = hashtags[:5]
         desc = desc + "\n" + " ".join(hashtags)       # 설명 복사에 포함(클립 업로드용)
         meta = {"path": final, "title": vtitle, "desc": desc, "filename": fname,
-                "body_path": (wide if _wide_ok and os.path.exists(wide) else ""),
-                "filename_body": fname.replace("-영상.mp4", "-영상-본문용.mp4"),
-                "filename_clip": fname.replace("-영상.mp4", "-영상-클립용.mp4"),
-                "hashtags": hashtags,
+                "hashtags": hashtags, "quality": _spec,
                 "duration_sec": dur, "opening": opening, "scene_texts": [opening] + sent + [outro]}
         return final, meta
 

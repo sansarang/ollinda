@@ -3475,11 +3475,12 @@ def _result_naver_video(pieces, asset_id: str) -> str:
         from app.domain.models import ContentKind as _CKr
         short = next((p for p in pieces if p.kind == _CKr.SHORT and (p.payload or {}).get("naver_video")), None)
         nv = (short.payload.get("naver_video") or {}) if short else {}
-        src_p = nv.get("body_path") or nv.get("path") or ""
+        src_p = nv.get("path") or ""
         if src_p:
-            return (f"<div class='mt-3'><div class='text-xs font-bold text-slate-400 mb-1'>네이버용 영상 (본문 삽입·클립 겸용)</div>"
+            return (f"<div class='mt-3'><div class='text-xs font-bold text-slate-400 mb-1'>네이버용 영상 (본문 첨부·클립 겸용 · 9:16)</div>"
+                    f"<div class='mx-auto bg-black rounded-xl overflow-hidden' style='max-width:280px;aspect-ratio:9/16'>"
                     f"<video src='/dl/{asset_id}/{os.path.basename(src_p)}' controls preload='none' "
-                    "class='w-full max-h-72 rounded-xl bg-black'></video></div>")
+                    "class='w-full h-full' style='object-fit:contain'></video></div></div>")
         blog = next((p for p in pieces if p.kind == _CKr.BLOG), None)
         vj = (blog.payload.get("video_job") or {}) if blog else {}
         if vj.get("status") in ("registered", "running", "retrying"):   # 실패·부재는 생략(무한 '만드는 중' 방지)
@@ -4157,16 +4158,15 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
         + ((f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>4. 네이버용 영상 <span class='text-emerald-600'>(블로그 첨부 · 클립 겸용)</span></div>"
             "<p class='text-xs text-slate-500 mb-3'>이 영상을 <b>본문 첫 소제목 아래</b>에 넣으세요 — 15초+ 영상은 검색 가점(D.I.A.+). "
             "같은 영상을 네이버 클립에도 올리면 지면이 하나 더 생겨요.</p>"
-            f"<video src='/dl/{asset_id}/{os.path.basename(_nv.get('body_path') or _nv.get('path', ''))}' controls preload='none' "
-            "class='w-full max-h-80 rounded-xl bg-black mb-3'></video>"
+            f"<div class='mx-auto bg-black rounded-xl overflow-hidden mb-3' style='max-width:320px;aspect-ratio:9/16'>"
+            f"<video src='/dl/{asset_id}/{os.path.basename(_nv.get('path', ''))}' controls preload='none' "
+            "class='w-full h-full' style='object-fit:contain'></video></div>"
             f"<div class='text-sm font-bold text-slate-800 mb-1'>{esc(_nv.get('title', ''))}</div>"
             f"<textarea id='nvVT' class='hidden'>{esc(_nv.get('title', ''))}</textarea>"
             f"<div class='text-xs text-slate-500 whitespace-pre-wrap mb-2'>{esc(_nv.get('desc', ''))}</div>"
             f"<textarea id='nvVD' class='hidden'>{esc(_nv.get('desc', ''))}</textarea>"
             "<div class='flex flex-wrap gap-2'>"
-            + ((f"<a href='/dl/{asset_id}/{os.path.basename(_nv['body_path'])}' download='{esc(_nv.get('filename_body') or _nv.get('filename', ''))}' class='{cbtn} bg-emerald-500 hover:bg-emerald-600 inline-block'>⬇ 본문 삽입용 (16:9)</a>")
-               if _nv.get('body_path') else "")
-            + f"<a href='/dl/{asset_id}/{os.path.basename(_nv.get('path', ''))}' download='{esc(_nv.get('filename_clip') or _nv.get('filename', 'naver-video.mp4'))}' class='{cbtn} bg-emerald-600 hover:bg-emerald-700 inline-block'>⬇ 클립 업로드용 (9:16)</a>"
+            + f"<a href='/dl/{asset_id}/{os.path.basename(_nv.get('path', ''))}' download='{esc(_nv.get('filename', 'naver-video.mp4'))}' class='{cbtn} bg-emerald-600 hover:bg-emerald-700 inline-block'>⬇ 영상 받기 (본문·클립 겸용 9:16)</a>"
             f"<button onclick=\"nvcp('nvVT',this)\" class='{cbtn} bg-indigo-600 hover:bg-indigo-700'>제목 복사</button>"
             f"<button onclick=\"nvcp('nvVD',this)\" class='{cbtn} bg-indigo-600 hover:bg-indigo-700'>설명 복사</button></div>"
             f"<div class='text-[11px] text-slate-400 mt-2'>파일명: {esc(_nv.get('filename', ''))} · 길이 약 {int(_nv.get('duration_sec') or 0)}초</div></div>") if _nv else "")
@@ -5242,6 +5242,61 @@ def admin_set_result_preview(asset_id: str):
         return HTMLResponse("<pre>소유 사용자 없음</pre>", status_code=404)
     html = _result_html(u, asset_id)
     return HTMLResponse(html if html else "<pre>렌더 실패(소유 불일치)</pre>")
+
+
+@app.post("/admin/set/{asset_id}/regen-naver")
+def admin_regen_naver(asset_id: str):
+    """네이버용 영상만 재생성(렌더 결함 교정) — 쇼츠·릴스·글·사진 등 타 산출물 불변.
+    씬·자막 소스는 글 본문 발췌(빌더 서두 자막 게이트 경유). 이전 naver 파일은 폐기."""
+    from app.domain.models import ContentKind as _CK
+    from app.strategies import resolve_strategy
+    from app.services.ingest import _restore_media
+    from app.generators.video import ShortVideoGenerator
+    pieces = db.get_set_pieces(asset_id)
+    short = next((p for p in pieces if p.kind == _CK.SHORT and p.channel.value == "youtube"), None)
+    blog = next((p for p in pieces if p.kind == _CK.BLOG), None)
+    if not (short and blog):
+        return JSONResponse({"ok": False, "error": "쇼츠/블로그 피스 없음"}, status_code=404)
+    tenant = db.get_tenant(short.tenant_id)
+    asset = db.get_asset(asset_id)
+    paths = _restore_media(short.tenant_id, short.payload.get("image_paths") or blog.payload.get("image_paths") or [])
+    if not (tenant and asset and paths):
+        return JSONResponse({"ok": False, "error": f"사전조건: tenant={bool(tenant)} asset={bool(asset)} paths={len(paths)}"}, status_code=409)
+    gen = ShortVideoGenerator()
+    out_dir = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), tenant.id)
+    os.makedirs(out_dir, exist_ok=True)
+    kws = short.payload.get("target_keywords") or []
+    old_nv = dict(short.payload.get("naver_video") or {})
+    vid_imgs = gen._downscale_for_video(paths)
+    try:
+        npath, nmeta = gen._naver_video(tenant, asset, vid_imgs, kws, resolve_strategy(tenant), out_dir)
+    except Exception as e:
+        import traceback
+        return JSONResponse({"ok": False, "error": traceback.format_exc()[-800:]}, status_code=500)
+    finally:
+        for _vp in vid_imgs:
+            if _vp not in paths and _vp.endswith("_vid.jpg") and os.path.exists(_vp):
+                try:
+                    os.remove(_vp)
+                except Exception:
+                    pass
+    if not npath:
+        return JSONResponse({"ok": False, "error": "naver 재생성 실패(로그 참조)", "old_kept": True}, status_code=500)
+    for fp in (old_nv.get("path"), old_nv.get("body_path")):   # 이전 산출물 폐기(블러 패딩 파일 포함)
+        if fp and fp != npath and os.path.exists(fp):
+            try:
+                os.remove(fp)
+            except Exception:
+                pass
+    for p in pieces:                                           # 같은 세트의 SHORT(쇼츠·릴스) payload 동기화
+        if p.kind == _CK.SHORT and (p.payload or {}).get("naver_video"):
+            p.payload["naver_video"] = nmeta
+            db.save_piece(p)
+    if not any(p.kind == _CK.SHORT and (p.payload or {}).get("naver_video") for p in pieces):
+        short.payload["naver_video"] = nmeta
+        db.save_piece(short)
+    return JSONResponse({"ok": True, "naver_video": {k: nmeta.get(k) for k in
+                        ("path", "filename", "title", "duration_sec", "quality", "hashtags")}})
 
 
 @app.post("/admin/set/{asset_id}/backfill-status")
