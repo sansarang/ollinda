@@ -3478,7 +3478,7 @@ def _result_naver_video(pieces, asset_id: str) -> str:
                     "class='w-full max-h-72 rounded-xl bg-black'></video></div>")
         blog = next((p for p in pieces if p.kind == _CKr.BLOG), None)
         vj = (blog.payload.get("video_job") or {}) if blog else {}
-        if vj.get("status") in ("registered", "running", "retrying") or not short:
+        if vj.get("status") in ("registered", "running", "retrying"):   # 실패·부재는 생략(무한 '만드는 중' 방지)
             return ("<div class='mt-3 flex items-center gap-2 text-xs text-slate-400'>"
                     "<span class='inline-block w-3 h-3 border-2 border-slate-300 border-t-indigo-500 rounded-full animate-spin'></span>"
                     "영상 만드는 중이에요 (몇 분 걸려요) — 완성되면 여기에 나타나요</div>")

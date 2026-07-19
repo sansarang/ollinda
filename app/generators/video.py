@@ -590,10 +590,14 @@ class ShortVideoGenerator(Generator):
         # 15초 하한 가드(3-4): D.I.A.+ 동영상 가점 기준 미달이면 본문 발췌 캡션을 늘려 1회 재빌드
         if path and dur and dur < 15 and len(caps) > len(sent) - len(heads):
             _nlog.warning("[naver-video] %s초 < 15 — 캡션 확장 재빌드", dur)
-            sent = ([f"핵심 {i + 1}. {h[:26]}" for i, h in enumerate(heads)] + caps)[:MAX_SCENES + 2]
-            path, note, dur, _cover = self._build_scene_video(
-                vid_imgs, SceneScript(hook=opening, sentences=sent, outro=outro, source="body_excerpt", evidence=body),
+            sent2 = ([f"핵심 {i + 1}. {h[:26]}" for i, h in enumerate(heads)] + caps)[:MAX_SCENES + 2]
+            path2, note2, dur2, _cover2 = self._build_scene_video(
+                vid_imgs, SceneScript(hook=opening, sentences=sent2, outro=outro, source="body_excerpt", evidence=body),
                 kws, tenant, strat, f"{kw0} 정리")
+            if path2 and os.path.exists(path2):
+                path, note, dur, _cover = path2, note2, dur2, _cover2
+            else:                                  # 재빌드 실패 → 1차 성공본 유지(15초 미만이라도 영상은 살린다)
+                _nlog.warning("[naver-video] 확장 재빌드 실패(%s) — 1차 결과(%s초) 유지", note2, dur)
         if not (path and os.path.exists(path)):
             _nlog.warning("[naver-video] 중단: 씬 빌드 실패 — path=%r exists=%s dur=%r note=%s",
                           path, bool(path and os.path.exists(path)), dur, note)
