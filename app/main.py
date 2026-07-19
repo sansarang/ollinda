@@ -121,7 +121,7 @@ _ALLOWED_IMG_CT = {"image/jpeg", "image/png", "image/webp", "image/heic",
                    "image/heif", "image/gif", "image/bmp"}
 
 
-async def _read_image_uploads(photos, limit: int = 10) -> list[tuple[bytes, str]]:
+async def _read_image_uploads(photos, limit: int = 30) -> list[tuple[bytes, str]]:   # 안전 상한 30(사진 제한 해제 — 서버 부하 방지용, UI 비노출)
     """업로드 사진을 형식·크기 검증하며 읽는다. 이미지 아님/빈파일/초대형은 제외(B9)."""
     out: list[tuple[bytes, str]] = []
     for ph in (photos if isinstance(photos, list) else [photos] if photos else []):
@@ -2194,8 +2194,10 @@ def _seo_photo_name(tenant, blog) -> str:
     if m:
         toks = [t for t in _r.findall(r"[가-힣A-Za-z0-9]{2,}", m.group(1)) if t not in ("사진", "모습", "장면")][:2]
         subject = "-".join(toks)
-    parts = [p for p in (region, ind, subject) if p]
-    name = _r.sub(r"[^가-힣A-Za-z0-9\-]", "", "-".join(parts))
+    _toks = [x for p in (region, ind, subject) if p for x in p.split("-") if x]
+    _toks = list(dict.fromkeys(_toks))
+    _toks = [t for t in _toks if not any(t != o and t in o for o in _toks)]   # 부분 포함 dedupe(2-2)
+    name = _r.sub(r"[^가-힣A-Za-z0-9\-]", "", "-".join(_toks))
     return name or "photo"
 
 
@@ -3304,6 +3306,69 @@ def my_asset_pieces(request: Request, asset_id: str):
     return JSONResponse({"n": len(pieces) if pieces else 0})
 
 
+@app.post("/me/set/{asset_id}/photos")
+async def my_set_add_photos(request: Request, asset_id: str, photos: list[UploadFile] = File(...)):
+    """(사진 제한 해제 4-1) 기존 세트에 사진 추가 — 새 세트가 아니라 같은 세트에 누적.
+    추가분도 vision 분석(배치) 경유 → 슬롯 재배치(마커만, 글 텍스트 불변) + 캡션·파일명 자동 +
+    영상 3종 재생성 예약. 정직성: 새 사진 캡션은 vision 확정 기반만(날조 0)."""
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    pieces = _owned_pieces(u, asset_id)
+    if not pieces:
+        return HTMLResponse(_subscriber_page("접근 불가", "<p>내 콘텐츠가 아니에요.</p>"))
+    tenant = db.get_tenant(pieces[0].tenant_id)
+    blog = next((p for p in pieces if p.kind.value == "blog"), None)
+    cur = max((p.payload.get("image_paths") or [] for p in pieces), key=len)
+    files = await _read_image_uploads(photos, limit=max(0, 30 - len(cur)))
+    if not (tenant and blog and files):
+        return RedirectResponse(f"/kit/{asset_id}/naver?err=추가할 사진이 없어요(세트당 최대 30장)", status_code=303)
+    new_paths = [storage.save_upload(d, fn or "photo.jpg", tenant.id) for d, fn in files]
+    try:
+        from app.media import photo_boost
+        photo_boost.enhance_all(new_paths, tenant.industry, {"artist": tenant.name})
+        for _p in new_paths:
+            storage.mirror_to_r2(_p)
+    except Exception:
+        pass
+    # vision 분석(새 사진만, 번호는 기존에 이어붙임 — gen_source 사실 채널 갱신)
+    try:
+        from app import vision as _vz
+        import re as _re4
+        ana = _vz.analyze_all(new_paths, tenant.industry) or ""
+        ana = _re4.sub(r"\[사진(\d+)\]", lambda m: f"[사진{int(m.group(1)) + len(cur)}]", ana)
+    except Exception:
+        ana = ""
+    all_paths = cur + new_paths
+    from app.generators.text_claude import SLOT_RECOMMENDED, _ensure_photo_markers
+    for p in pieces:
+        if p.payload.get("image_paths") is not None or p.kind.value in ("blog", "caption"):
+            p.payload["image_paths"] = all_paths
+        if p.kind.value == "blog":
+            if ana:
+                p.payload["gen_source"] = ((p.payload.get("gen_source") or "") + "\n" + ana)[:8000]
+            # 슬롯 재배치 — 글 텍스트 불변, [사진N] 마커만 재배치(권장 상단 내)
+            p.payload["body"] = _ensure_photo_markers(p.payload.get("body") or "", min(len(all_paths), SLOT_RECOMMENDED))
+            p.payload["photo_markers"] = [{"marker": f"[사진{i+1}]", "image_index": i, "image_path": pp}
+                                          for i, pp in enumerate(all_paths[:SLOT_RECOMMENDED])]
+        db.save_piece(p)
+    # 영상 3종 재생성: 기존 SHORT 폐기 → 즉시 백그라운드 재생성(자막 게이트 경유)
+    from app.domain.models import ContentKind as _CK4
+    for p in pieces:
+        if p.kind == _CK4.SHORT:
+            db.delete_piece(p.id, p.tenant_id)
+    try:
+        from app.services.ingest import _set_video_job, _spawn_video_bundle
+        _set_video_job(asset_id, "registered", retried=False)
+        asset = db.get_asset(asset_id)
+        if asset:
+            _spawn_video_bundle(tenant, asset, all_paths, blog.payload.get("brief") or {})
+    except Exception:
+        import logging
+        logging.exception("[add-photos] 영상 재생성 예약 실패 asset=%s", asset_id)
+    return RedirectResponse(f"/kit/{asset_id}/naver?ok=사진 {len(new_paths)}장 추가 — 슬롯 재배치·영상 재생성 중", status_code=303)
+
+
 @app.post("/me/set/{asset_id}/delete")
 def my_set_delete(request: Request, asset_id: str):
     """콘텐츠 세트 삭제(이력 관리) — 본인 것만."""
@@ -3869,27 +3934,34 @@ def _naver_publish_confirm_box(tenant, blog, sec: str, cbtn: str, ok: str = "", 
                 f"{esc(pub.get('published_url') or '')} ↗</a>"
                 f"<p class='text-xs text-slate-400 mt-2'>발행 시각: {esc((pub.get('published_at') or '')[:16].replace('T', ' '))} · 이 글의 순위를 추적 중이에요.</p></div>")
     inp = "flex-1 border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
-    auto = ""
+    # (자동화 2-3a) URL 붙여넣기 기본 제거 — RSS 자동 감지(2시간 크론)가 기본, 버튼은 즉시 1회 조회.
+    # 매칭 실패 시에만 URL 입력 폴백(nvFb)을 노출한다.
     if getattr(tenant, "blog_id", ""):
-        auto = ("<div class='flex items-center gap-2 mb-3'>"
-                f"<button type=button onclick='nvChk(this)' class='{cbtn} bg-emerald-600 hover:bg-emerald-700'>블로그에서 자동 확인 (RSS)</button>"
+        auto = ("<div class='flex items-center gap-2 mb-2'>"
+                f"<button type=button onclick='nvChk(this)' class='{cbtn} bg-emerald-600 hover:bg-emerald-700'>발행 확인</button>"
                 "<span id='nvChkMsg' class='text-xs text-slate-400'></span></div>"
+                "<p class='text-xs text-slate-400 mb-1'>안 눌러도 2시간 내 자동 감지돼요 — 발행 후 순위 추적이 자동 시작됩니다.</p>"
                 "<script>async function nvChk(btn){var m=document.getElementById('nvChkMsg');m.textContent='확인 중…';btn.disabled=true;"
                 "try{var r=await fetch('/api/blog/check-published',{method:'POST'});var d=await r.json();"
                 "if(d.error){m.textContent=d.error;btn.disabled=false;return;}"
                 "if(d.synced){m.textContent='✅ 새 글 '+d.synced+'건 추적 시작!';setTimeout(function(){location.reload();},900);}"
-                "else{m.textContent='아직 RSS에 안 잡혔어요 — 몇 분 뒤 자동으로 추적돼요. 급하면 아래에 주소를 붙여넣어도 돼요.';btn.disabled=false;}"
-                "}catch(e){m.textContent='확인 실패';btn.disabled=false;}}</script>")
-    else:
-        auto = ("<p class='text-xs text-amber-600 mb-3'><a href='/me?tab=report#blog' class='font-bold underline'>내 블로그를 연결</a>하면 "
-                "발행 여부를 자동으로 확인해 드려요.</p>")
+                "else{m.textContent='아직 RSS에 안 잡혔어요 — 2시간 내 자동 감지돼요.';btn.disabled=false;"
+                "var fb=document.getElementById('nvFb');if(fb)fb.classList.remove('hidden');}"
+                "}catch(e){m.textContent='확인 실패';btn.disabled=false;var fb=document.getElementById('nvFb');if(fb)fb.classList.remove('hidden');}}</script>")
+        fallback = (f"<form method=post action='/me/blog/published' id='nvFb' class='hidden flex gap-2 mt-2'>"
+                    f"<input type=hidden name=piece_id value='{blog.id}'>"
+                    f"<input name=url placeholder='자동 매칭이 안 되면 발행한 글 주소를 붙여넣어 주세요' class='{inp}'>"
+                    f"<button class='{cbtn} bg-indigo-600 hover:bg-indigo-700 whitespace-nowrap'>등록</button></form>")
+        return (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>발행 완료하셨나요? <span class='text-emerald-600'>(순위 추적 자동 시작)</span></div>"
+                + banner + auto + fallback + "</div>")
     return (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>발행 완료하셨나요? <span class='text-emerald-600'>(순위 추적 시작)</span></div>"
-            + banner + auto
+            + banner
+            + "<p class='text-xs text-amber-600 mb-3'><a href='/me?tab=report#blog' class='font-bold underline'>내 블로그를 연결</a>하면 "
+            "발행 여부를 자동으로 확인해 드려요. 연결 전에는 아래에 발행 주소를 남겨주세요.</p>"
             + f"<form method=post action='/me/blog/published' class='flex gap-2'>"
             f"<input type=hidden name=piece_id value='{blog.id}'>"
             f"<input name=url placeholder='발행한 글 주소 붙여넣기 (https://blog.naver.com/...)' class='{inp}'>"
-            f"<button class='{cbtn} bg-indigo-600 hover:bg-indigo-700 whitespace-nowrap'>발행함 ✓</button></form>"
-            "<p class='text-xs text-slate-400 mt-2'>발행을 기록하면 이 글의 키워드 순위를 발행 전후로 비교해 드려요.</p></div>")
+            f"<button class='{cbtn} bg-indigo-600 hover:bg-indigo-700 whitespace-nowrap'>발행함 ✓</button></form></div>")
 
 
 @app.get("/kit/{asset_id}/naver", response_class=HTMLResponse)
@@ -3905,11 +3977,22 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
     blog = next((p for p in pieces if p.kind.value == "blog"), None)
     if not blog:
         return HTMLResponse(_subscriber_page("네이버 블로그", "<p>블로그 글이 없어요.</p>"))
-    imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
+    # (정합 2-1) 사진 정본 = 피스 중 '가장 많은' image_paths(부분 기록 피스에 밀리지 않게)
+    _lists = [p.payload.get("image_paths") or [] for p in pieces]
+    imgs = max(_lists, key=len) if _lists else []
+    if len({len(x) for x in _lists if x}) > 1:
+        import logging as _lg2
+        _lg2.getLogger("shopcast.kit").warning("[kit] 사진 수 불일치 asset=%s lists=%s → 최대 목록 채택",
+                                               asset_id, sorted({len(x) for x in _lists if x}))
     tenant = db.get_tenant(pieces[0].tenant_id)
     sname = tenant.name if tenant else "내 가게"
     title = blog.payload.get("title", "")
     body_marked = _re.sub(r"\[사진(\d+)\]", r"\n\n[📷 사진\1 위치]\n\n", blog.payload.get("body", "")).strip()
+    _slot_refs = {int(n) for n in _re.findall(r"\[사진(\d+)\]", blog.payload.get("body", ""))}
+    if _slot_refs and max(_slot_refs) > len(imgs):     # (정합 2-1) 슬롯 참조 > 사진 수 감지(상시)
+        import logging as _lg3
+        _lg3.getLogger("shopcast.kit").warning("[kit] 슬롯 참조(%d) > 사진 수(%d) asset=%s",
+                                               max(_slot_refs), len(imgs), asset_id)
     photos = [im for im in imgs if im]                          # /dl이 R2로 서빙
     vid = next((p for p in pieces if p.kind.value == "short" and p.payload.get("video_path")), None)
     vurl = f"/dl/{asset_id}/{os.path.basename(vid.payload['video_path'])}" if vid else ""  # 블로그 본문 삽입용
@@ -3957,14 +4040,17 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
            f"<a href='/kit/{asset_id}/pack/{blog.id}' class='text-xs font-bold text-indigo-600'>⬇ 전체 ZIP 받기</a></div>"
            f"<div class='grid grid-cols-3 sm:grid-cols-4 gap-3'>{photo_cells}</div>"
            "<p class='text-xs text-slate-400 mt-2'>사진은 이 파일명 그대로, 캡션은 사진 아래 붙여넣으면 검색에 더 잘 잡혀요.</p>"
+           f"<form method=post action='/me/set/{asset_id}/photos' enctype='multipart/form-data' class='flex items-center gap-2 mt-2'>"
+           "<input type=file name=photos accept='image/*' multiple required class='text-xs flex-1'>"
+           f"<button class='{cbtn} bg-slate-700 hover:bg-slate-800 whitespace-nowrap'>사진 추가</button></form>"
+           "<p class='text-[11px] text-slate-400 mt-1'>과정 사진(물세척·재단 등)을 더 올리면 AI가 슬롯·캡션·영상을 다시 맞춰드려요 — 글 내용은 그대로예요.</p>"
            + _caption_box(tenant, blog, len(photos)) + "</div>" if photos else "")
-        # 4. 동영상 본문 삽입 (D.I.A.+ 가점) — #1
-        + (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>4. 동영상도 본문에 넣기 <span class='text-emerald-600'>(상위노출 유리)</span></div>"
-           "<p class='text-xs text-slate-500 mb-3'>네이버는 <b>15초+ 동영상이 들어간 글에 가점(D.I.A.+)</b>을 줍니다. 아래 영상을 받아 본문 중간(예: 첫 소제목 아래)에 넣어보세요.</p>"
-           f"<a href='{vurl}' download class='{cbtn} bg-indigo-600 hover:bg-indigo-700 inline-block'>⬇ 동영상 받기</a></div>" if vurl else "")
-        # 네이버용 정보형 영상(블로그 첨부·클립 겸용) — 없으면 블록 생략(V3)
-        + ((f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>네이버용 영상 <span class='text-emerald-600'>(블로그 첨부 · 클립 겸용)</span></div>"
-            "<p class='text-xs text-slate-500 mb-3'>글 안에 이 영상을 넣으면 검색 노출에 도움돼요. 같은 영상을 네이버 클립에도 올리면 지면이 하나 더 생겨요.</p>"
+        # 네이버용 영상(통합 블록 2-4) — 구 '동영상도 본문에' 블록 흡수, 쇼츠·릴스는 채널 카드 전용
+        + ((f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>4. 네이버용 영상 <span class='text-emerald-600'>(블로그 첨부 · 클립 겸용)</span></div>"
+            "<p class='text-xs text-slate-500 mb-3'>이 영상을 <b>본문 첫 소제목 아래</b>에 넣으세요 — 15초+ 영상은 검색 가점(D.I.A.+). "
+            "같은 영상을 네이버 클립에도 올리면 지면이 하나 더 생겨요.</p>"
+            f"<video src='/dl/{asset_id}/{os.path.basename(_nv.get('path', ''))}' controls preload='none' "
+            "class='w-full max-h-80 rounded-xl bg-black mb-3'></video>"
             f"<div class='text-sm font-bold text-slate-800 mb-1'>{esc(_nv.get('title', ''))}</div>"
             f"<textarea id='nvVT' class='hidden'>{esc(_nv.get('title', ''))}</textarea>"
             f"<div class='text-xs text-slate-500 whitespace-pre-wrap mb-2'>{esc(_nv.get('desc', ''))}</div>"
@@ -3975,20 +4061,17 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
             f"<button onclick=\"nvcp('nvVD',this)\" class='{cbtn} bg-indigo-600 hover:bg-indigo-700'>설명 복사</button></div>"
             f"<div class='text-[11px] text-slate-400 mt-2'>파일명: {esc(_nv.get('filename', ''))} · 길이 약 {int(_nv.get('duration_sec') or 0)}초</div></div>") if _nv else "")
         # 5. 발행 후 마무리 — 사진 6장 권장(#3) + 서치어드바이저 색인(#3)
-        + (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>{'5' if vurl else '4'}. 발행 후 — 상위노출 마무리</div>"
+        + (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>{'5' if _nv else '4'}. 발행 후 — 상위노출 마무리</div>"
            "<ul class='text-xs text-slate-600 space-y-1.5 mb-3 list-none'>"
-           + (f"<li>사진은 <b>6장 이상</b>이면 더 유리해요 (지금 {len(photos)}장). 다음엔 더 올려보세요.</li>"
-              if len(photos) < 6 else "<li>사진 6장+ ✓ 좋아요.</li>")
+           + (f"<li>사진은 <b>6~15장 구간</b>이 무난해요 (지금 {len(photos)}장) — 더 올리셔도 AI가 알아서 골라 배치해요.</li>"
+              if len(photos) < 6 else f"<li>사진 {len(photos)}장 ✓ — 본문 슬롯은 AI가 최적 배치했고, 나머지도 아래 그리드·ZIP에 전부 있어요.</li>")
            + "<li>직접 찍은 동영상까지 넣으면 D.I.A.+ 가점.</li>"
            # (색인 버튼 제거) 서치어드바이저는 blog.naver.com 소유확인 불가 → 수동 색인 요청 접수 불가.
            # 실구현된 fresh_index 크론(30분 집중 확인) 사실만 안내한다.
            + "<li>발행 직후 <b>24시간은 저희가 30분마다 색인을 자동 확인</b>해요 — 확인되면 리포트에 '네이버가 글을 받았어요'로 표시돼요.</li></ul></div>")
         # 🗺 네이버 장소 컴포넌트 가이드(블로그템플릿 PHASE 3) — 고정정보 블록 위치
         + _naver_component_guide(tenant, blog, sec)
-        # 내부링크 제안(상위노출 PHASE 4) — 같은 주제 발행글 서로 링크(주제 응집도 = C-Rank 신호)
-        + _internal_link_box(blog, sec)
-        # 앵글 변형(상위노출 PHASE 4) — 같은 소재로 다른 스마트블록 진입
-        + _angle_variant_box(blog, sec, cbtn)
+        # (자동화 2-3) 내부링크는 생성 단계에서 본문에 자동 포함, 앵글 다중진입은 자동 큐가 수행 — 수동 섹션 제거
         # 6. 발행 확인(블로그등록 PHASE 2) — 자동(RSS 매칭) + 수동(URL 붙여넣기) 병행
         + _naver_publish_confirm_box(tenant, blog, sec, cbtn, ok, err)
         # 토스트

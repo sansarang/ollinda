@@ -72,15 +72,29 @@ def analyze(image_path: str, industry_name: str = "", context: str | None = None
         return ""
 
 
-def analyze_all(image_paths: list[str], industry_name: str = "", max_imgs: int = 6,
+def analyze_all(image_paths: list[str], industry_name: str = "", max_imgs: int = 30,
                 context: str | None = None) -> str:
-    """여러 사진을 '한 번의 호출'로 전부 분석 — 사진마다 뭐가 담겼는지 + 이어지는 이야기.
-    사진을 여러 장 줘도 1장만 반영되던 문제 해결(비전 강화). 실패/무키 시 ""."""
+    """여러 사진 분석 — 사진 제한 해제(안전 상한 30). 6장 초과는 청크(6장)로 나눠 배치 호출하고
+    [사진N] 번호를 전체 기준으로 이어붙임(Gemini 무료 rate limit 대응: 청크 간 짧은 대기)."""
     paths = [p for p in (image_paths or []) if p and os.path.exists(p)][:max_imgs]
     if not (configured() and paths):
         return ""
     if len(paths) == 1:
         return analyze(paths[0], industry_name, context)
+    if len(paths) > 6:                                   # 배치 처리(비용·타임아웃·rate limit 관리)
+        import re as _r
+        import time as _t
+        out = []
+        for ci in range(0, len(paths), 6):
+            chunk = paths[ci:ci + 6]
+            part = analyze_all(chunk, industry_name, max_imgs=6,
+                               context=(context if ci + 6 >= len(paths) else None))  # 해석·[전체]는 마지막 청크만
+            part = _r.sub(r"\[사진(\d+)\]", lambda m: f"[사진{int(m.group(1)) + ci}]", part or "")
+            if part:
+                out.append(part)
+            if ci + 6 < len(paths):
+                _t.sleep(2)
+        return "\n".join(out).strip()
     try:
         imgs64 = []
         for i, p in enumerate(paths):

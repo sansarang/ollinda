@@ -364,7 +364,8 @@ class ShortVideoGenerator(Generator):
 
     def generate(self, tenant: Tenant, asset: Asset,
                  images: list[str] | None = None) -> ContentPiece:
-        imgs = [p for p in (images or [asset.path]) if p and os.path.exists(p)][:8]
+        imgs_all = [p for p in (images or [asset.path]) if p and os.path.exists(p)]
+        imgs = imgs_all[:8]        # 씬 소스만 상한(씬 6개 + 여유) — payload에는 전체 기록(사진 제한 해제)
         vid_imgs = self._downscale_for_video(imgs)   # 대용량 원본(5712×4284) → zoompan 타임아웃 방지(백그라운드 스레드)
         prof = resolve_industry(tenant.industry)
         strat = resolve_strategy(tenant)
@@ -509,7 +510,7 @@ class ShortVideoGenerator(Generator):
                                    "instagram": seo.save_share_line("instagram")},   # 설명란 삽입용(PHASE 5)
                 "biz_type": strat.key, "target_keywords": kws,
                 "video_path": video_path, "image_path": imgs[0] if imgs else asset.path,
-                "image_paths": imgs, "duration_sec": dur_sec, "cover_path": cover_path,
+                "image_paths": imgs_all, "duration_sec": dur_sec, "cover_path": cover_path,
                 "video_variants": variants,    # {square, feed45} 다중 화면비
                 "naver_video": naver_meta,     # 네이버용 정보형 영상(블로그 첨부·클립) — 없으면 {}
                 "llm_route": _llm_route,       # 캡션·훅 라우팅(폴백 여부 — 원가 추적)
@@ -579,8 +580,9 @@ class ShortVideoGenerator(Generator):
         # SEO 파일명으로 out_dir 확정 복사(이미지 SEO와 동일 규칙)
         ind0 = ((getattr(tenant, "industry", "") or "").replace("/", ",").split(",")[0] or "").strip()
         core = " ".join(kw_nat.replace(region_short, "").split()) or ind0
-        _parts = list(dict.fromkeys(                      # 중복 토큰 제거('썬팅-썬팅' 방지)
-            [x for p in (region_short, ind0, core) for x in p.split() if x] )) + ["영상"]
+        _toks = list(dict.fromkeys([x for p in (region_short, ind0, core) for x in p.split() if x]))
+        # 부분 포함 dedupe(2-2): '썬팅'⊂'썬팅업체'처럼 앞 토큰이 다른 토큰에 포함되면 제거
+        _parts = [t for t in _toks if not any(t != o and t in o for o in _toks)] + ["영상"]
         fname = _r.sub(r"[^가-힣A-Za-z0-9\-]", "", "-".join(_parts)) + ".mp4"
         final = os.path.join(out_dir, f"naver_{uuid.uuid4().hex}.mp4")
         try:

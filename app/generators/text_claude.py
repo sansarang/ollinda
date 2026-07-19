@@ -116,7 +116,7 @@ class CaptionGenerator(Generator):
         return ContentPiece(
             id=str(uuid.uuid4()), tenant_id=tenant.id, asset_id=asset.id,
             channel=Channel.INSTAGRAM, kind=self.kind,
-            payload={"text": text, "image_path": imgs[0], "image_paths": imgs[:10],
+            payload={"text": text, "image_path": imgs[0], "image_paths": imgs,
                      "target_keywords": kws, "llm_route": _cap_route},
             status=ContentStatus.DRAFT)
 
@@ -131,6 +131,7 @@ class BlogDraftGenerator(Generator):
     def generate(self, tenant: Tenant, asset: Asset,
                  images: list[str] | None = None) -> ContentPiece:
         imgs = images or [asset.path]
+        imgs = _select_slot_photos(imgs, asset.note or "")   # 슬롯 선별(권장 초과분은 뒤로 — 그리드·ZIP 전용)
         prof = resolve_industry(tenant.industry)
         strat = resolve_strategy(tenant)
         kws = seo.target_keywords(prof.name, tenant.region, asset.note,
@@ -187,7 +188,7 @@ class BlogDraftGenerator(Generator):
                "소제목(##)으로 만들지 마라(1글 1키워드 원칙).\n" if kplan.get("longtail") else "")
             + f"[1글 1키워드] 이 글의 소제목(##)은 오직 '{kw0}'의 검색 의도만 다룬다. "
             "다른 추적 키워드를 소제목으로 세우지 마라.\n"
-            + f"사진 {len(imgs)}장 → 본문 문단 사이에 [사진1]..[사진{len(imgs)}]를 순서대로 한 번씩(한 줄 단독) 배치.\n\n"
+            + f"사진 {min(len(imgs), SLOT_RECOMMENDED)}장 → 본문 문단 사이에 [사진1]..[사진{min(len(imgs), SLOT_RECOMMENDED)}]를 순서대로 한 번씩(한 줄 단독) 배치.\n\n"
             "아래 형식 그대로(대괄호 머리표 유지) 출력:\n"
             f"[제목후보]\n(3줄. 각 줄 '{kw0}'를 맨 앞에 + 서로 다른 각도(후기형/정보형/혜택형), 22~35자 롱테일, 숫자·혜택으로 클릭 유도)\n"
             "[메타설명]\n(150자 내외, 클릭 유도)\n"
@@ -207,7 +208,7 @@ class BlogDraftGenerator(Generator):
         parsed = [k.strip().lstrip("#") for k in (d.get("키워드", "")).replace("\n", ",").split(",") if k.strip()]
         # 파싱된 키워드 + 타겟 키워드 병합(중복 제거)
         tags = list(dict.fromkeys(parsed + kws))[:10]
-        body = _ensure_photo_markers(d.get("본문") or raw, len(imgs))
+        body = _ensure_photo_markers(d.get("본문") or raw, min(len(imgs), SLOT_RECOMMENDED))
         # 셀러: 본문 끝에 구매 블록 보강(누락 대비)
         if strat.closing in ("buy", "both") and buy and buy not in body:
             body = body.rstrip() + "\n\n" + buy
@@ -218,6 +219,23 @@ class BlogDraftGenerator(Generator):
             from app.services import blogtpl
             fixed_block = blogtpl.fixed_info_block(tenant)
             body = body.rstrip() + "\n\n" + fixed_block
+        # (자동화 2-3b) 내부링크 자동 삽입 — 같은 주제 축의 '발행 확인된' 내 글 1~2개를 본문 끝
+        # 문단으로 포함(주제 응집도 = C-Rank 신호). 기존 발행 글 없는 가게는 문단 생략(날조 금지).
+        try:
+            from app import db as _dbl
+            _kw_toks = {w for w in seo._kw_shorten(kw0).split() if len(w) >= 2}
+            _rel = []
+            for _pub in _dbl.list_blog_publishes(tenant.id, limit=15):
+                _t, _u = (_pub.get("post_title") or "").strip(), (_pub.get("published_url") or "").strip()
+                if _t and _u and any(w in _t for w in _kw_toks):
+                    _rel.append((_t, _u))
+                if len(_rel) >= 2:
+                    break
+            if _rel:
+                body = body.rstrip() + "\n\n## 함께 보면 좋은 글\n" + "\n".join(
+                    f"- {t} : {u}" for t, u in _rel)
+        except Exception:
+            pass
         # ③ FAQ 섹션 누락 대비 최소 보강(스마트블록·체류 신호)
         if "자주 묻는 질문" not in body and "자주묻는" not in body:
             body = body.rstrip() + (
@@ -240,7 +258,7 @@ class BlogDraftGenerator(Generator):
             except Exception:
                 request_check = ""
         markers = [{"marker": f"[사진{i+1}]", "image_index": i, "image_path": p}
-                   for i, p in enumerate(imgs)]
+                   for i, p in enumerate(imgs[:SLOT_RECOMMENDED])]
         return ContentPiece(
             id=str(uuid.uuid4()), tenant_id=tenant.id, asset_id=asset.id,
             channel=Channel.NAVER_BLOG, kind=self.kind,
@@ -273,6 +291,29 @@ def _last_finish() -> str:
         return llm.last_finish_reason
     except Exception:
         return ""
+
+
+SLOT_RECOMMENDED = 15   # 본문 슬롯 권장 상단 — 근거: 공식 D.I.A.+는 멀티미디어 가점만 공표(수치 미공표),
+                        # 상위글 본문 실측은 크롤링 금지로 불가 → 하한 6(기존 D.I.A.+ 운영 근거) ~ 상단 15
+                        # (로딩·이탈 리스크 보수값). 초과분은 슬롯에서 제외하고 키트 그리드·ZIP에 전량 포함.
+
+
+def _select_slot_photos(imgs: list, analysis: str, cap: int = SLOT_RECOMMENDED) -> list:
+    """(사진 제한 해제 1-3) 슬롯 초과분 자동 선별 — 유저에게 선택 요구 없음.
+    선별 기준: ① vision 분석에 과정·전후·구체 피사체 묘사([사진N] 라인에 과정 키워드)가 있는 사진 우선
+              ② 그 외는 업로드 순서 보존(사장님이 정한 순서 존중)
+    반환: 선별본이 앞으로 오도록 재정렬된 전체 목록(마커 [사진1..cap]=선별, 나머지는 그리드·ZIP 전용)."""
+    import re as _r
+    if len(imgs) <= cap:
+        return list(imgs)
+    KEY = _r.compile(r"세척|재단|성형|시공|부착|제거|검수|전후|완성|마감|코팅|건조")
+    scored = []
+    for i, p in enumerate(imgs):
+        m = _r.search(rf"\[사진{i + 1}\]\s*([^\n]+)", analysis or "")
+        has_process = bool(m and KEY.search(m.group(1)))
+        scored.append((0 if has_process else 1, i, p))    # 과정 묘사 우선, 동순위는 순서 보존
+    ordered = [p for _, _, p in sorted(scored)]
+    return ordered[:cap] + [p for p in imgs if p not in ordered[:cap]]
 
 
 def _kw_natural_directive(kw0: str, region: str) -> str:
