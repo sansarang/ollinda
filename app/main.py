@@ -3329,7 +3329,11 @@ def my_asset_pieces(request: Request, asset_id: str):
     if not u:
         return JSONResponse({"n": 0})
     pieces = _owned_pieces(u, asset_id)
-    return JSONResponse({"n": len(pieces) if pieces else 0})
+    # 상태 서명 — 피스 수가 안 변해도(채널 재생성·상태 전이) 변화를 폴링이 감지하게(5채널 완전성 3-2)
+    cs = next((p.payload.get("channel_status") for p in (pieces or [])
+               if p.kind.value == "blog" and p.payload.get("channel_status")), {}) or {}
+    sig = f"{len(pieces or [])}|" + ",".join(f"{k}:{(v or {}).get('status')}" for k, v in sorted(cs.items()))
+    return JSONResponse({"n": len(pieces) if pieces else 0, "sig": sig})
 
 
 @app.post("/me/set/{asset_id}/photos")
@@ -3581,6 +3585,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
     naver_btn = (f"<a href='/kit/{asset_id}/naver' target='_blank' class='block text-center py-3 rounded-xl text-white text-sm font-extrabold "
                  "shadow-md hover:brightness-110 active:scale-[.99] transition' style='background:#03c75a'>네이버 블로그에 올리기 →</a>")
     cards = ""
+    rendered_ch = set()          # 5채널 완전성 — 실제 카드가 그려진 채널(정합 감시·placeholder 판단)
     for p in pieces:
         k, pl = p.kind.value, p.payload
         has_video = bool(pl.get("video_path"))
@@ -3634,8 +3639,17 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                      + f"<div class='flex gap-2'>{pack_btn(p.id, False)}<button type=button onclick=\"cp('cb{sid}',this)\" class='px-3.5 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold rounded-xl transition'>글 복사</button></div></div></div>")
         elif k == "x_post":
             xt = pl.get("text", "")
-            xvid = (f"<div class='relative mt-2'><video src='{vurl}' controls autoplay muted loop playsinline preload='metadata' poster='{first_img}' class='w-full rounded-xl bg-black' style='max-height:360px'></video>"
-                    "<button type=button onclick='omUnmute(this)' class='om-unmute absolute top-3 left-1/2 -translate-x-1/2 z-10 bg-black/80 text-white text-xs font-extrabold px-3.5 py-2 rounded-full shadow-lg'>🔇 탭하여 소리 켜기</button></div>" if vurl else "")
+            # X는 9:16 세로 업로드 공식 지원(1080×1920, Immersive Media Viewer 풀스크린 재생)
+            # → 세로 소스를 세로 프레임으로 표시(좌우 레터박스 제거). 영상 없으면 사진 폴백(비율 유지).
+            if vurl:
+                xvid = (f"<div class='relative mx-auto mt-2 bg-black rounded-xl overflow-hidden' style='max-width:300px;aspect-ratio:9/16'>"
+                        f"<video src='{vurl}' controls autoplay muted loop playsinline preload='metadata' poster='{first_img}' "
+                        "class='w-full h-full' style='object-fit:cover'></video>"
+                        "<button type=button onclick='omUnmute(this)' class='om-unmute absolute top-3 left-1/2 -translate-x-1/2 z-10 bg-black/80 text-white text-xs font-extrabold px-3.5 py-2 rounded-full shadow-lg'>🔇 탭하여 소리 켜기</button></div>")
+            elif first_img:
+                xvid = f"<img src='{first_img}' class='w-full rounded-xl mt-2 border border-slate-100' style='max-height:360px;object-fit:cover'>"
+            else:
+                xvid = ""
             block = (_hd("𝕏 X", pl) + f"<div class='{wrap} p-4'>"
                      "<div class='flex items-center gap-2 mb-2'>" + _av()
                      + f"<div><div class='font-bold text-sm leading-tight'>{esc(sname)}</div><div class='text-slate-400 text-xs'>@{handle} · now</div></div><div class='ml-auto text-lg font-bold'>𝕏</div></div>"
@@ -3708,6 +3722,42 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
         if block:
             grp = ("video" if k == "short" else "sell" if k == "marketplace" else "text")
             cards += f"<div class='break-inside-avoid mb-6 om-card' data-ch='{grp}'>" + block + "</div>"
+            rendered_ch.add({"caption": "insta", "blog": "naver", "x_post": "x"}.get(
+                k, ("shorts" if p.channel.value == "youtube" else "reels") if k == "short" else k))
+    # ── 5채널 완전성: 누락 채널 상태 카드 + 정합 감시(8/10 사진 버그와 같은 패턴) ──
+    import logging
+    _cs_all = next((p.payload.get("channel_status") for p in pieces
+                    if p.kind.value == "blog" and p.payload.get("channel_status")), {}) or {}
+    _CH_LABEL = {"naver": "네이버 블로그", "shorts": "유튜브 쇼츠", "reels": "인스타 릴스",
+                 "insta": "인스타그램", "x": "𝕏 X"}
+    for _ch, _lab in _CH_LABEL.items():
+        if _ch in rendered_ch:
+            continue
+        _st = (_cs_all.get(_ch) or {})
+        _s = _st.get("status")
+        if _s == "done":                                   # 상태는 done인데 카드 없음 = 정합 붕괴
+            logging.getLogger("shopcast.kit").warning(
+                "[정합] channel_status=done인데 렌더 블록 없음 asset=%s ch=%s", asset_id, _ch)
+            continue
+        if not _s:                                         # 상태 기록 이전 구세트 — 하위호환(placeholder 생략)
+            continue
+        if _s in ("generating", "registered"):
+            _inner = ("<div class='flex items-center gap-2 text-sm text-slate-500'>"
+                      "<span class='inline-block w-4 h-4 border-2 border-slate-300 border-t-indigo-500 rounded-full animate-spin'></span>"
+                      "만드는 중이에요 (몇 분 걸려요) — 완성되면 자동으로 나타나요</div>")
+        elif int(_st.get("retries") or 0) >= 2:
+            _inner = ("<div class='text-sm text-slate-500'>만들지 못했어요 — 아래 사유를 확인해 주세요</div>"
+                      f"<div class='text-xs text-slate-400 mt-1'>{esc((_st.get('error') or '')[:120])}</div>")
+        else:
+            _inner = ("<div class='flex items-center gap-2 text-sm text-amber-700'>"
+                      "<span class='inline-block w-4 h-4 border-2 border-amber-300 border-t-amber-600 rounded-full animate-spin'></span>"
+                      "만들다 문제가 생겼어요 — 다시 만드는 중이에요</div>")
+        cards += (f"<div class='break-inside-avoid mb-6 om-card' data-ch='text'>{_hd(_lab)}"
+                  f"<div class='{wrap} p-5'>{_inner}</div></div>")
+    for _ch, _st in _cs_all.items():                       # 역방향 정합: 렌더됐는데 상태가 failed
+        if _ch in rendered_ch and (_st or {}).get("status") == "failed" and _ch != "naver":
+            logging.getLogger("shopcast.kit").warning(
+                "[정합] 렌더 블록은 있는데 channel_status=failed asset=%s ch=%s", asset_id, _ch)
     js = ("<script>"
           "function omCopy(text){if(navigator.clipboard&&navigator.clipboard.writeText){return navigator.clipboard.writeText(text);}"
           "return new Promise(function(res,rej){var ta=document.createElement('textarea');ta.value=text;ta.setAttribute('readonly','');ta.style.position='fixed';ta.style.top='0';ta.style.opacity='0';document.body.appendChild(ta);ta.focus();ta.select();ta.setSelectionRange(0,text.length);var ok=false;try{ok=document.execCommand('copy');}catch(e){}document.body.removeChild(ta);ok?res():rej();});}"
@@ -3760,13 +3810,21 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
     except Exception:
         _recent = False
     _vid_poll = ""
-    if _recent and not any(p.kind.value == "short" for p in pieces):
-        _vid_poll = ("<div class='bg-amber-50 border border-amber-100 text-amber-700 rounded-2xl p-3.5 mb-5 text-sm flex items-center gap-2'>"
-                     "<div class='w-4 h-4 border-2 border-amber-300 border-t-amber-600 rounded-full animate-spin flex-shrink-0'></div>"
-                     "유튜브 쇼츠·인스타 릴스 <b>영상 생성 중…</b> 완성되면 자동으로 나타나요 (이 화면 유지)</div>"
-                     f"<script>(function(){{var base={len(pieces)},n=0,aid='{asset_id}';"
+    _cs_poll = next((p.payload.get("channel_status") for p in pieces
+                     if p.kind.value == "blog" and p.payload.get("channel_status")), {}) or {}
+    _pending_ch = any((v or {}).get("status") in ("generating", "registered", "failed") and int((v or {}).get("retries") or 0) < 2
+                      for v in _cs_poll.values())
+    if _recent and (_pending_ch or not any(p.kind.value == "short" for p in pieces)):
+        _banner = ""
+        if not any(p.kind.value == "short" for p in pieces):     # 배너는 영상 부재 시만(텍스트 재시도엔 카드가 상태 표시)
+            _banner = ("<div class='bg-amber-50 border border-amber-100 text-amber-700 rounded-2xl p-3.5 mb-5 text-sm flex items-center gap-2'>"
+                       "<div class='w-4 h-4 border-2 border-amber-300 border-t-amber-600 rounded-full animate-spin flex-shrink-0'></div>"
+                       "유튜브 쇼츠·인스타 릴스 <b>영상 생성 중…</b> 완성되면 자동으로 나타나요 (이 화면 유지)</div>")
+        _vid_poll = (_banner
+                     + f"<script>(function(){{var base=null,n=0,aid='{asset_id}';"
                      "var iv=setInterval(async function(){n++;if(n>50){clearInterval(iv);return;}"
-                     "try{var d=await (await fetch('/me/asset/'+aid+'/pieces')).json();if(d.n>base){clearInterval(iv);location.reload();}}catch(_){}"
+                     "try{var d=await (await fetch('/me/asset/'+aid+'/pieces')).json();"
+                     "if(base===null){base=d.sig;return;}if(d.sig!==base){clearInterval(iv);location.reload();}}catch(_){}"
                      "},3000);})();</script>")
     # 🎯 성과 추적 링크/QR — 콘텐츠에 넣으면 유입 집계(리포트와 연결)
     track_box = ""
@@ -5170,6 +5228,71 @@ def _referenced_media() -> set:
     return refs
 
 
+@app.get("/admin/set/{asset_id}/result", response_class=HTMLResponse)
+def admin_set_result_preview(asset_id: str):
+    """진단(읽기 전용) — 소유자 관점의 결과 화면 실렌더(5채널 카드 실측용). 수정 없음."""
+    with db._conn() as c:
+        row = c.execute("SELECT tenant_id FROM content_pieces WHERE asset_id=? LIMIT 1", (asset_id,)).fetchone()
+    if not row:
+        return HTMLResponse("<pre>세트 없음</pre>", status_code=404)
+    with db._conn() as c:
+        ur = c.execute("SELECT id FROM users WHERE tenant_id=?", (row["tenant_id"],)).fetchone()
+    u = db.get_user(ur["id"]) if ur else None
+    if not u:
+        return HTMLResponse("<pre>소유 사용자 없음</pre>", status_code=404)
+    html = _result_html(u, asset_id)
+    return HTMLResponse(html if html else "<pre>렌더 실패(소유 불일치)</pre>")
+
+
+@app.post("/admin/set/{asset_id}/backfill-status")
+def admin_backfill_status(asset_id: str):
+    """구세트(상태 기록 이전) channel_status 백필 — 실재 피스·파일 검사 결과만 기록(추정 금지)."""
+    from app.domain.models import ContentKind as _CK
+    from app.services.ingest import _set_channel_status
+    pieces = db.get_set_pieces(asset_id)
+    if not any(p.kind == _CK.BLOG for p in pieces):
+        return JSONResponse({"ok": False, "error": "블로그 피스 없음"}, status_code=404)
+    def _has(kind, ch=None):
+        return any(p.kind == kind and (ch is None or p.channel.value == ch) for p in pieces)
+    short = next((p for p in pieces if p.kind == _CK.SHORT and (p.payload or {}).get("naver_video")), None)
+    nv_ok = bool(short and ((short.payload.get("naver_video") or {}).get("path")))
+    cs = {"insta": {"status": "done" if _has(_CK.CAPTION) else "failed", "error": "" if _has(_CK.CAPTION) else "산출물 없음"},
+          "x": {"status": "done" if _has(_CK.X_POST) else "failed", "error": "" if _has(_CK.X_POST) else "산출물 없음"},
+          "shorts": {"status": "done" if _has(_CK.SHORT, "youtube") else "failed"},
+          "reels": {"status": "done" if _has(_CK.SHORT, "instagram") else "failed"},
+          "naver": {"status": "done" if nv_ok else "failed"}}
+    _set_channel_status(asset_id, cs)
+    return JSONResponse({"ok": True, "channel_status": cs})
+
+
+@app.post("/admin/set/{asset_id}/regen-channel")
+def admin_regen_channel(asset_id: str, kind: str = ""):
+    """누락·실패 텍스트 채널(caption/x_post) 단건 재생성 — 표준 경로 재사용(전 게이트 경유).
+    글·기존 정상 피스 불변. 이미 피스가 있으면 거부(임의 재생성 금지)."""
+    from app.domain.models import ContentKind as _CK
+    _map = {"caption": _CK.CAPTION, "x_post": _CK.X_POST}
+    ck = _map.get(kind)
+    if not ck:
+        return JSONResponse({"ok": False, "error": "kind는 caption|x_post"}, status_code=400)
+    pieces = db.get_set_pieces(asset_id)
+    blog = next((p for p in pieces if p.kind == _CK.BLOG), None)
+    if not blog:
+        return JSONResponse({"ok": False, "error": "블로그 피스 없음"}, status_code=404)
+    if any(p.kind == ck for p in pieces):
+        return JSONResponse({"ok": False, "error": "이미 존재 — 임의 재생성 금지"}, status_code=409)
+    from app.services.ingest import _regen_text_piece, _set_channel_status, KIND_TO_CHANNEL
+    tenant = db.get_tenant(blog.tenant_id)
+    asset = db.get_asset(asset_id)
+    if not (tenant and asset):
+        return JSONResponse({"ok": False, "error": "tenant/asset 소실"}, status_code=404)
+    ok = _regen_text_piece(tenant, asset, ck, blog)
+    ch = KIND_TO_CHANNEL[ck]
+    _set_channel_status(asset_id, {ch: {"status": "done" if ok else "failed"}})
+    made = next((p for p in db.get_set_pieces(asset_id) if p.kind == ck), None)
+    return JSONResponse({"ok": ok, "channel": ch,
+                         "text": (made.payload.get("text") if made else None)})
+
+
 @app.get("/admin/set/{asset_id}/pieces.json")
 def admin_set_pieces_json(asset_id: str):
     """진단(읽기 전용) — 세트 피스들의 영상 관련 payload 요약(naver 2종·해시태그·자막·경로 존재 여부)."""
@@ -5189,6 +5312,7 @@ def admin_set_pieces_json(asset_id: str):
             "naver_exists": {"clip": bool(nv.get("path")) and os.path.exists(nv.get("path") or ""),
                              "body": bool(nv.get("body_path")) and os.path.exists(nv.get("body_path") or "")} if nv else None,
             "video_job": (pl.get("video_job") or None) if p.kind and "BLOG" in str(p.kind) else None,
+            "channel_status": (pl.get("channel_status") or None) if p.kind and "BLOG" in str(p.kind) else None,
         })
     return {"asset_id": asset_id, "pieces": out}
 

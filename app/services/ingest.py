@@ -141,6 +141,15 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
         db.save_piece(p)
     # 🎬 영상(SHORT)+릴스+캐러셀 = 백그라운드에서 생성(요청 막지 않음, /kit·폴링으로 표시)
     _set_video_job(asset.id, "registered")             # 잡 상태 기록(영상 증발 재발 방지) — 조용한 실종 금지
+    # 5채널 완전성: 동기(텍스트) 채널 성공/실패 + 비동기 채널 generating 기록 — '시도조차 안 함' 금지
+    from app.services.generate import LAST_ERRORS as _LE
+    _cs = {"naver": {"status": "generating"}, "shorts": {"status": "generating"}, "reels": {"status": "generating"}}
+    for _k, _ch in KIND_TO_CHANNEL.items():
+        if any(p.kind == _k for p in pieces):
+            _cs[_ch] = {"status": "done"}
+        else:
+            _cs[_ch] = {"status": "failed", "error": _LE.get(str(_k), "생성 실패(로그 참조)")}
+    _set_channel_status(asset.id, _cs)
     _spawn_video_bundle(tenant, asset, paths, brief_public)
     # 🔗 내부링크 제안(상위노출 PHASE 4) — 같은 주제 축의 발행 확인된 내 글(주제 응집도 = C-Rank 신호)
     try:
@@ -247,7 +256,10 @@ def video_watchdog() -> None:
                 if not blog:
                     continue
                 vj = blog.payload.get("video_job") or {}
-                if vj.get("status") in ("done", "failed") or vj.get("retried"):
+                _rc = int(vj.get("retry_count") or (1 if vj.get("retried") else 0))
+                if vj.get("status") == "done" or _rc >= 2:
+                    continue
+                if vj.get("status") == "failed" and _rc >= 2:
                     continue
                 ref = (vj.get("ts") or row.get("created_at") or "")[:19]
                 try:
@@ -266,13 +278,116 @@ def video_watchdog() -> None:
                 if _llm.route("caption")[0] == "anthropic" and not _llm.ping():
                     log.info("[video-watchdog] 크레딧 없음 — 재시도 보류 asset=%s", row["asset_id"])
                     continue
-                _set_video_job(row["asset_id"], "retrying", retried=True)   # 1회 제한 선기록(폭주 방지)
+                _set_video_job(row["asset_id"], "retrying", retried=True)   # 상한 선기록(폭주 방지)
+                _bump_retry(row["asset_id"])
                 log.info("[video-watchdog] 죽은 영상 잡 재시도 asset=%s t=%s", row["asset_id"], row["tenant_id"])
                 _spawn_video_bundle(tenant, asset, paths, blog.payload.get("brief") or {})
             except Exception:
                 log.exception("[video-watchdog] 처리 실패 asset=%s", row.get("asset_id"))
     except Exception:
         log.exception("[video-watchdog] 스캔 실패")
+    _text_channel_watchdog(log)
+
+
+def _bump_retry(asset_id: str) -> None:
+    try:
+        blog = next((p for p in db.get_set_pieces(asset_id) if p.kind == ContentKind.BLOG), None)
+        if blog:
+            vj = dict(blog.payload.get("video_job") or {})
+            vj["retry_count"] = int(vj.get("retry_count") or (1 if vj.get("retried") else 0)) + 1
+            blog.payload["video_job"] = vj
+            db.save_piece(blog)
+    except Exception:
+        pass
+
+
+def _text_channel_watchdog(log) -> None:
+    """(5채널 완전성) 캡션/X 피스가 누락·실패인 세트를 자동 재생성 — 최대 2회, 사유 기록.
+    글·기존 정상 피스 불변. 크레딧 없으면 보류(헛 재시도로 상한 소진 금지)."""
+    from datetime import datetime, timedelta
+    try:
+        from app import llm as _llm
+        _pinged = None                                   # 크레딧 핑은 스캔당 최대 1회
+        for row in db.recent_blog_piece_rows(hours=24, limit=50):
+            try:
+                pieces = db.get_set_pieces(row["asset_id"])
+                blog = next((p for p in pieces if p.kind == ContentKind.BLOG), None)
+                if not blog:
+                    continue
+                cs = dict(blog.payload.get("channel_status") or {})
+                for kind, ch in KIND_TO_CHANNEL.items():
+                    have = any(p.kind == kind for p in pieces)
+                    st = dict(cs.get(ch) or {})
+                    if have and st.get("status") != "failed":
+                        continue
+                    retries = int(st.get("retries") or 0)
+                    if have is False and not st:
+                        st = {"status": "failed", "error": "생성 누락(상태 기록 이전 구건)"}
+                    if st.get("status") != "failed" or retries >= 2:
+                        continue
+                    if _pinged is None:
+                        _pinged = _llm.ping()            # 텍스트 생성은 Anthropic 경로
+                    if not _pinged:
+                        log.info("[text-watchdog] 크레딧 없음 — 보류 asset=%s", row["asset_id"])
+                        return
+                    tenant = db.get_tenant(row["tenant_id"])
+                    asset = db.get_asset(row["asset_id"])
+                    if not (tenant and asset):
+                        continue
+                    log.info("[text-watchdog] %s 재생성 asset=%s (retries=%d)", ch, row["asset_id"], retries)
+                    from app.services.generate import LAST_ERRORS as _LE2
+                    ok = _regen_text_piece(tenant, asset, kind, blog)
+                    _set_channel_status(row["asset_id"], {ch: (
+                        {"status": "done", "retries": retries + 1} if ok else
+                        {"status": "failed", "retries": retries + 1,
+                         "error": _LE2.get(str(kind), "재생성 실패")})})
+            except Exception:
+                log.exception("[text-watchdog] 처리 실패 asset=%s", row.get("asset_id"))
+    except Exception:
+        log.exception("[text-watchdog] 스캔 실패")
+
+
+CHANNELS = ("naver", "shorts", "reels", "insta", "x")   # 5채널 완전성 기준(전 채널 보장)
+KIND_TO_CHANNEL = {ContentKind.CAPTION: "insta", ContentKind.X_POST: "x"}   # 텍스트 채널(동기 생성)
+
+
+def _set_channel_status(asset_id: str, updates: dict) -> None:
+    """세트의 채널별 생성 상태를 블로그 피스 payload.channel_status에 기록(merge).
+    updates = {"x": {"status": "failed", "error": "..."}, ...} — '시도조차 안 함'이 침묵하는 구조 금지."""
+    try:
+        from datetime import datetime
+        blog = next((p for p in db.get_set_pieces(asset_id) if p.kind == ContentKind.BLOG), None)
+        if not blog:
+            return
+        cs = dict(blog.payload.get("channel_status") or {})
+        for ch, info in updates.items():
+            cur = dict(cs.get(ch) or {})
+            cur.update(info)
+            cur["ts"] = datetime.utcnow().isoformat()
+            cs[ch] = cur
+        blog.payload["channel_status"] = cs
+        db.save_piece(blog)
+    except Exception:
+        import logging
+        logging.exception("[ingest] channel_status 기록 실패 asset=%s", asset_id)
+
+
+def _regen_text_piece(tenant: Tenant, asset, kind: ContentKind, blog) -> bool:
+    """누락·실패한 텍스트 채널(캡션/X) 단건 재생성 — 표준 generate 경로 재사용(전 게이트 경유).
+    글·다른 피스 불변. 성공 시 저장+True."""
+    paths = blog.payload.get("image_paths") or [asset.path]
+    made = generate_for(tenant, asset, [kind], images=paths)
+    if not made:
+        return False
+    p = made[0]
+    p.payload.setdefault("image_path", paths[0])
+    p.payload.setdefault("biz_type", getattr(tenant, "biz_type", "local") or "local")
+    p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value, p.payload, source=asset.note)
+    p.payload["reach"] = reach.estimate(p.channel.value, p.kind.value, p.payload)
+    p.payload["brief"] = blog.payload.get("brief") or {}
+    p.payload["experts"] = ["🎯 전략가", "✍️ 카피라이터"]
+    db.save_piece(p)
+    return True
 
 
 def _set_video_job(asset_id: str, status: str, error: str = "", retried: bool | None = None) -> None:
@@ -310,6 +425,8 @@ def _spawn_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: d
                 import logging
                 logging.exception("[ingest] 비동기 영상 번들 실패 tenant=%s", tenant.id)
                 _set_video_job(asset.id, "failed", error=repr(e))
+                _set_channel_status(asset.id, {ch: {"status": "failed", "error": repr(e)[:150]}
+                                               for ch in ("shorts", "reels", "naver")})
     threading.Thread(target=_run, daemon=True).start()
 
 
@@ -327,10 +444,17 @@ def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: di
                   and p.channel == Channel.YOUTUBE and p.payload.get("video_path")), None)
     if not short:
         from app.services.generate import LAST_ERRORS
-        _set_video_job(asset.id, "failed",
-                       error=LAST_ERRORS.get("ContentKind.SHORT", "영상 미생성(로그 참조)"))
+        _err = LAST_ERRORS.get("ContentKind.SHORT", "영상 미생성(로그 참조)")
+        _set_video_job(asset.id, "failed", error=_err)
+        _set_channel_status(asset.id, {"shorts": {"status": "failed", "error": _err},
+                                       "reels": {"status": "failed", "error": _err},
+                                       "naver": {"status": "failed", "error": _err}})
         return
     _set_video_job(asset.id, "done")
+    _set_channel_status(asset.id, {
+        "shorts": {"status": "done"},
+        "naver": ({"status": "done"} if (short.payload.get("naver_video") or {}).get("path")
+                  else {"status": "failed", "error": "네이버 영상 미생성(로그 참조)"})})
     saved = db.get_set_pieces(asset.id)
     caption = next((p for p in saved if p.kind == ContentKind.CAPTION), None)
     reel = ContentPiece(
@@ -347,6 +471,7 @@ def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: di
     reel.payload["ranking_audit"] = seo.quality_audit(reel.channel.value, reel.kind.value, reel.payload, source=asset.note)
     reel.payload["reach"] = reach.estimate(reel.channel.value, reel.kind.value, reel.payload)
     db.save_piece(reel)
+    _set_channel_status(asset.id, {"reels": {"status": "done"}})
     # 𝕏 X에도 같은 숏폼 영상 첨부(글 + 영상)
     xp = next((p for p in saved if p.kind == ContentKind.X_POST), None)
     if xp:
