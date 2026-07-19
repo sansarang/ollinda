@@ -139,18 +139,6 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
             ex.append("🔍 SEO편집장")
         p.payload["experts"] = ex
         db.save_piece(p)
-    # 🎬 영상(SHORT)+릴스+캐러셀 = 백그라운드에서 생성(요청 막지 않음, /kit·폴링으로 표시)
-    _set_video_job(asset.id, "registered")             # 잡 상태 기록(영상 증발 재발 방지) — 조용한 실종 금지
-    # 5채널 완전성: 동기(텍스트) 채널 성공/실패 + 비동기 채널 generating 기록 — '시도조차 안 함' 금지
-    from app.services.generate import LAST_ERRORS as _LE
-    _cs = {"naver": {"status": "generating"}, "shorts": {"status": "generating"}, "reels": {"status": "generating"}}
-    for _k, _ch in KIND_TO_CHANNEL.items():
-        if any(p.kind == _k for p in pieces):
-            _cs[_ch] = {"status": "done"}
-        else:
-            _cs[_ch] = {"status": "failed", "error": _LE.get(str(_k), "생성 실패(로그 참조)")}
-    _set_channel_status(asset.id, _cs)
-    _spawn_video_bundle(tenant, asset, paths, brief_public)
     # 🔗 내부링크 제안(상위노출 PHASE 4) — 같은 주제 축의 발행 확인된 내 글(주제 응집도 = C-Rank 신호)
     try:
         blog_piece0 = next((p for p in pieces if p.kind == ContentKind.BLOG), None)
@@ -174,6 +162,18 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
                 db.save_piece(blog_piece)
     except Exception:
         pass
+    # 🎬 영상 잡 등록·채널 상태 기록·스폰 — 반드시 블로그 payload 재저장(내부링크·플레이스) 뒤에.
+    # 앞에 두면 재저장이 메모리의 옛 blog 객체로 DB의 video_job/channel_status를 덮어씀(V1 실측 결함).
+    _set_video_job(asset.id, "registered")             # 잡 상태 기록(영상 증발 재발 방지) — 조용한 실종 금지
+    from app.services.generate import LAST_ERRORS as _LE
+    _cs = {"naver": {"status": "generating"}, "shorts": {"status": "generating"}, "reels": {"status": "generating"}}
+    for _k, _ch in KIND_TO_CHANNEL.items():
+        if any(p.kind == _k for p in pieces):
+            _cs[_ch] = {"status": "done"}
+        else:
+            _cs[_ch] = {"status": "failed", "error": _LE.get(str(_k), "생성 실패(로그 참조)")}
+    _set_channel_status(asset.id, _cs)
+    _spawn_video_bundle(tenant, asset, paths, brief_public)
     _autopilot(tenant, pieces)
     return pieces
 
