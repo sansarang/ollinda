@@ -5170,6 +5170,29 @@ def _referenced_media() -> set:
     return refs
 
 
+@app.get("/admin/set/{asset_id}/pieces.json")
+def admin_set_pieces_json(asset_id: str):
+    """진단(읽기 전용) — 세트 피스들의 영상 관련 payload 요약(naver 2종·해시태그·자막·경로 존재 여부)."""
+    out = []
+    for p in db.get_set_pieces(asset_id):
+        pl = p.payload or {}
+        nv = pl.get("naver_video") or {}
+        out.append({
+            "kind": str(p.kind), "id": p.id[:8],
+            "video_path": pl.get("video_path"),
+            "video_exists": bool(pl.get("video_path")) and os.path.exists(pl.get("video_path") or ""),
+            "duration_sec": pl.get("duration_sec"),
+            "subtitles_n": len(pl.get("subtitles") or []),
+            "naver_video": {k: nv.get(k) for k in
+                            ("path", "body_path", "title", "filename", "filename_body", "filename_clip",
+                             "hashtags", "duration_sec")} if nv else None,
+            "naver_exists": {"clip": bool(nv.get("path")) and os.path.exists(nv.get("path") or ""),
+                             "body": bool(nv.get("body_path")) and os.path.exists(nv.get("body_path") or "")} if nv else None,
+            "video_job": (pl.get("video_job") or None) if p.kind and "BLOG" in str(p.kind) else None,
+        })
+    return {"asset_id": asset_id, "pieces": out}
+
+
 @app.api_route("/admin/disk", methods=["GET", "POST"])
 def admin_disk(prune: str = ""):
     """디스크 진단 — 확장자별 사용량 + DB 미참조(고아) 미디어 집계.
