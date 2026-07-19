@@ -595,7 +595,8 @@ class ShortVideoGenerator(Generator):
                 vid_imgs, SceneScript(hook=opening, sentences=sent, outro=outro, source="body_excerpt", evidence=body),
                 kws, tenant, strat, f"{kw0} 정리")
         if not (path and os.path.exists(path)):
-            _nlog.warning("[naver-video] 중단: 씬 빌드 실패 — note=%s", note)
+            _nlog.warning("[naver-video] 중단: 씬 빌드 실패 — path=%r exists=%s dur=%r note=%s",
+                          path, bool(path and os.path.exists(path)), dur, note)
             return None, {}
         # SEO 파일명으로 out_dir 확정 복사(이미지 SEO와 동일 규칙)
         ind0 = ((getattr(tenant, "industry", "") or "").replace("/", ",").split(",")[0] or "").strip()
