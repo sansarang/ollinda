@@ -386,6 +386,11 @@ def _regen_text_piece(tenant: Tenant, asset, kind: ContentKind, blog) -> bool:
     p.payload["reach"] = reach.estimate(p.channel.value, p.kind.value, p.payload)
     p.payload["brief"] = blog.payload.get("brief") or {}
     p.payload["experts"] = ["🎯 전략가", "✍️ 카피라이터"]
+    if kind == ContentKind.X_POST:                     # 번들과 동일 설계 — 세트에 쇼츠가 있으면 X에도 영상 첨부
+        short = next((q for q in db.get_set_pieces(asset.id)
+                      if q.kind == ContentKind.SHORT and (q.payload or {}).get("video_path")), None)
+        if short:
+            p.payload["video_path"] = short.payload.get("video_path")
     db.save_piece(p)
     return True
 
