@@ -793,8 +793,9 @@ class ShortVideoGenerator(Generator):
                 try:
                     shutil.copy(final, safe)
                     final = safe
-                except Exception:
-                    pass
+                except Exception as ce:
+                    import logging
+                    logging.warning("[video] 안전복사 실패(작업폴더 경로 유지 → 정리로 소실 위험): %r", ce)
             # 6) 커버(썸네일) = 훅 카드
             cover = os.path.join(out_dir, f"cover_{uuid.uuid4().hex}.png")
             try:
@@ -1222,12 +1223,13 @@ class ShortVideoGenerator(Generator):
         if r.returncode == 0 and os.path.exists(out):
             return out
         import logging   # ffmpeg 실패 원인 로깅(현재 소실되던 stderr, PHASE 12)
-        logging.warning("[video] mux 실패 rc=%s: %s", r.returncode, r.stderr.decode("utf-8", "ignore")[-200:])
+        logging.warning("[video] mux 실패 rc=%s: %s", r.returncode, r.stderr.decode("utf-8", "ignore")[-500:])
         # mux 실패 → 무음이라도 out_dir에 확정 저장(작업폴더 경로 반환 금지: rmtree로 삭제돼 재생 404)
         try:
             shutil.copy(video, out)
             return out
-        except Exception:
+        except Exception as ce:
+            logging.warning("[video] mux 폴백 copy 실패: %r", ce)
             return video
 
     # ───────────────────── 레거시 폴백 ─────────────────────

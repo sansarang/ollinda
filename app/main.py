@@ -6225,6 +6225,9 @@ def admin_regen_video(asset_id: str, sync: str = ""):
                         "subtitles": pl.get("subtitles"), "llm_route": pl.get("llm_route"),
                         "naver_video": {k: nv.get(k) for k in ("path", "title", "filename", "duration_sec")},
                         "naver_scene_texts": nv.get("scene_texts")}
+            import shutil as _sh
+            _du = _sh.disk_usage(_os.environ.get("SHOPCAST_STORAGE", "storage"))
+            _out["disk_mb"] = {"free": round(_du.free / 1e6), "used": round(_du.used / 1e6), "total": round(_du.total / 1e6)}
             return HTMLResponse(f"<pre>{esc(_json.dumps(_out, ensure_ascii=False, indent=1))}</pre>")
         except Exception:
             return HTMLResponse(f"<pre>동기 재생성 실패:\n{esc(traceback.format_exc()[-1800:])}</pre>")
