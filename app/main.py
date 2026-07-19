@@ -5142,6 +5142,75 @@ def admin_recent_users(n: int = 15):
     return {"count": len(out), "users": out}
 
 
+def _referenced_media() -> set:
+    """DB의 모든 피스 payload + tenant 프로필이 참조하는 로컬 파일 경로 집합(실경로 정규화)."""
+    import json
+    refs = set()
+
+    def _add(v):
+        if isinstance(v, str) and v.strip().startswith(("/", "storage")):
+            refs.add(os.path.realpath(v.strip()))
+
+    with db._conn() as c:
+        rows = c.execute("SELECT payload FROM content_pieces").fetchall()
+    for r in rows:
+        try:
+            pl = json.loads(r["payload"] or "{}")
+        except Exception:
+            continue
+        stack = [pl]
+        while stack:
+            cur = stack.pop()
+            if isinstance(cur, dict):
+                stack.extend(cur.values())
+            elif isinstance(cur, list):
+                stack.extend(cur)
+            else:
+                _add(cur)
+    return refs
+
+
+@app.api_route("/admin/disk", methods=["GET", "POST"])
+def admin_disk(prune: str = ""):
+    """디스크 진단 — 확장자별 사용량 + DB 미참조(고아) 미디어 집계.
+    prune=1이면 고아 영상·커버·임시파일만 삭제(사진·DB·참조 파일 불변 — R2 무관하게 안전)."""
+    import shutil as _sh
+    from collections import defaultdict
+    from app.storage import STORAGE_DIR
+    refs = _referenced_media()
+    by_ext = defaultdict(lambda: [0, 0])
+    orphans, orphan_bytes = [], 0
+    for root, _d, fs in os.walk(STORAGE_DIR):
+        for fn in fs:
+            fp = os.path.join(root, fn)
+            try:
+                sz = os.path.getsize(fp)
+            except Exception:
+                continue
+            ext = fn.rsplit(".", 1)[-1].lower()[:6] if "." in fn else "?"
+            by_ext[ext][0] += 1
+            by_ext[ext][1] += sz
+            # 고아 후보: 생성 산출물류만(mp4/png/wav/ass) — 원본 사진(jpg 등)은 건드리지 않음
+            if ext in ("mp4", "png", "wav", "ass") and os.path.realpath(fp) not in refs:
+                orphans.append(fp)
+                orphan_bytes += sz
+    freed = 0
+    if prune == "1":
+        for fp in orphans:
+            try:
+                sz = os.path.getsize(fp)
+                os.remove(fp)
+                freed += sz
+            except Exception:
+                pass
+    du = _sh.disk_usage(STORAGE_DIR)
+    return {"disk_mb": {"free": round(du.free / 1e6), "used": round(du.used / 1e6)},
+            "by_ext_mb": {k: [v[0], round(v[1] / 1e6, 1)] for k, v in
+                          sorted(by_ext.items(), key=lambda kv: -kv[1][1])},
+            "referenced": len(refs), "orphans": len(orphans),
+            "orphan_mb": round(orphan_bytes / 1e6, 1), "freed_mb": round(freed / 1e6, 1)}
+
+
 @app.api_route("/admin/cleanup", methods=["GET", "POST"])
 def admin_cleanup():
     """디스크 확보 — 사장님(OWNER) 소유 tenant만 남기고 데모·테스트 저장폴더+DB 전부 삭제 + 사장님 오래된 영상 정리."""
@@ -6194,6 +6263,15 @@ def admin_regen_video(asset_id: str, sync: str = ""):
     blog = None
     for p in db.get_set_pieces(asset_id):
         if p.kind == _CK.SHORT:
+            pl = p.payload or {}
+            nv = pl.get("naver_video") or {}
+            for fp in ([pl.get("video_path"), pl.get("cover_path"), nv.get("path"), nv.get("body_path")]
+                       + list(pl.get("carousel_paths") or [])):   # 이전 산출물 정리 — 고아 mp4 누적으로 디스크 풀(실측) 재발 방지
+                if fp and os.path.exists(fp):
+                    try:
+                        os.remove(fp)
+                    except Exception:
+                        pass
             db.delete_piece(p.id, p.tenant_id)
             n += 1
         if p.kind == _CK.BLOG:
