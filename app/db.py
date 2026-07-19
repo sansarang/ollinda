@@ -1694,6 +1694,18 @@ def get_set_pieces(asset_id: str) -> list[ContentPiece]:
     return [_row_to_piece(r) for r in rows]
 
 
+def fmt_kst(ts: str | None, date_only: bool = False) -> str:
+    """표시 전용 KST 변환 — DB 저장은 UTC 유지(저장 변경 금지). ISO UTC 문자열 → 'YYYY-MM-DD HH:MM'(KST).
+    파싱 실패 시 원문 앞부분 반환(화면이 깨지지 않게)."""
+    from datetime import datetime as _dt, timedelta as _td
+    raw = (ts or "").strip()
+    try:
+        k = _dt.fromisoformat(raw[:19]) + _td(hours=9)
+        return k.strftime("%Y-%m-%d") if date_only else k.strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return raw[:10] if date_only else raw[:16].replace("T", " ")
+
+
 def list_sets(statuses: Optional[list[str]] = None, limit: int = 100,
               tenant_id: Optional[str] = None) -> list[dict]:
     """검수 큐를 '세트(asset_id)' 단위로 묶어 최신순 반환. tenant_id로 특정 가게만."""
@@ -1711,7 +1723,7 @@ def list_sets(statuses: Optional[list[str]] = None, limit: int = 100,
     with _conn() as c:
         rows = c.execute(q, args).fetchall()
     return [{"asset_id": r["asset_id"], "tenant_id": r["tenant_id"], "tenant": r["tname"] or "",
-             "created": (r["created"] or "")[:16].replace("T", " "), "n": r["n"]} for r in rows]
+             "created": fmt_kst(r["created"]), "n": r["n"]} for r in rows]
 
 
 def get_piece(pid: str) -> Optional[ContentPiece]:

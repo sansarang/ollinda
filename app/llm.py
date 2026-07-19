@@ -65,14 +65,20 @@ USAGE = {"gemini": {"n": 0, "in": 0, "out": 0}, "anthropic": {"n": 0}}
 LAST_ROUTE: dict = {}   # {task: {"provider","model","fallback","error"}} — payload 기록용(원가 추적)
 
 
+HAIKU = "claude-haiku-4-5-20251001"
+# 작업별 기본 라우팅(env LLM_<TASK>로 오버라이드 가능) — spoken(자막 구어 변환)은
+# '빼기만·더하기 금지' 제약 준수 작업이라 Claude Haiku 지정(A/B 실측 Claude 우위 유형, 문장 수 적어 비용 미미).
+TASK_DEFAULTS = {"spoken": ("anthropic", HAIKU)}
+
+
 def route(task: str) -> tuple[str, str]:
-    """작업 유형 → (provider, model). 미설정이면 ('anthropic', 기본 모델)."""
+    """작업 유형 → (provider, model). env → 작업별 기본값 → ('anthropic', 기본 모델)."""
     v = (os.environ.get(f"LLM_{task.upper()}") or "").strip()
     if ":" in v:
         p, m = v.split(":", 1)
         if p.strip().lower() in ("gemini", "anthropic") and m.strip():
             return p.strip().lower(), m.strip()
-    return "anthropic", MODEL
+    return TASK_DEFAULTS.get(task, ("anthropic", MODEL))
 
 
 def _gemini_generate(parts: list, model: str, max_tokens: int) -> str:
@@ -130,7 +136,27 @@ def call_task(task: str, prompt: str, max_tokens: int = 1200,
         LAST_ROUTE[task] = info
     # Anthropic 경로(기본/폴백)
     USAGE["anthropic"]["n"] += 1
-    am = default_model or MODEL
+    am = default_model or (model if provider == "anthropic" else MODEL)
+    if provider == "anthropic" and not info.get("fallback"):
+        try:
+            out = call(prompt, am, max_tokens) if not images else None
+            if out is not None:
+                LAST_ROUTE[task] = info
+                return out
+        except Exception as e:
+            log.warning("[llm] anthropic %s 실패: %s", task, repr(e)[:120])
+            info["error"] = repr(e)[:150]
+            if os.environ.get("GEMINI_API_KEY"):      # 역방향 폴백: anthropic → gemini
+                try:
+                    out = _gemini_generate([{"text": prompt}], "gemini-flash-latest", max_tokens)
+                    info["fallback"] = True
+                    info["fallback_to"] = "gemini"
+                    LAST_ROUTE[task] = info
+                    log.warning("[llm] anthropic %s → gemini 폴백", task)
+                    return out
+                except Exception as e2:
+                    log.warning("[llm] gemini 역폴백도 실패: %s", repr(e2)[:120])
+            raise
     if images:
         if not os.environ.get("ANTHROPIC_API_KEY"):
             raise RuntimeError("anthropic 키 없음(비전 폴백 불가)")

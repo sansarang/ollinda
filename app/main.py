@@ -1431,9 +1431,10 @@ def _daily_action(t) -> dict:
     # 마지막 콘텐츠 이후 경과일
     days = 0
     try:
-        last = (sets[0].get("created") or "")[:10]
+        last = (sets[0].get("created") or "")[:10]      # list_sets created = KST 표시 문자열
         d0 = datetime.date.fromisoformat(last)
-        days = (datetime.date.today() - d0).days
+        from app.services.mass import kst_today as _kt
+        days = (_kt() - d0).days
     except Exception:
         pass
     if days >= 3:
@@ -2405,7 +2406,7 @@ def _blog_connect_card(t, fw: str) -> str:
                     f"<a href='{esc(p.get('published_url') or '')}' target=_blank rel=noopener class='text-sm text-slate-700 font-medium truncate'>"
                     f"{esc(p.get('post_title') or (p.get('published_url') or '')[:50])}</a>"
                     f"<span class='flex items-center gap-1.5'>{_chip}{race_btn}{btn}</span></div>"
-                    f"<div class='text-xs text-slate-400'>{esc((p.get('published_at') or '')[:10])} · "
+                    f"<div class='text-xs text-slate-400'>{esc(db.fmt_kst(p.get('published_at'), date_only=True))} · "
                     f"{'RSS자동' if p.get('matched_by') == 'rss' else '직접확인'}</div>"
                     # 근거 카드(trust PHASE 3-3) — 큐 연결 없는 글(외부 발행 등)은 자동 생략
                     + (_trust_card_html(_pc) if _pc else "")
@@ -2945,7 +2946,7 @@ def api_race(piece_id: str, request: Request):
             hh = max(4, int(40 * (31 - min(v, 31)) / 30))
             cells += (f"<div class='flex flex-col items-center gap-0.5'>"
                       f"<div class='w-2.5 rounded-t {'bg-indigo-400' if h['rank'] else 'bg-slate-200'}' style='height:{hh}px'></div>"
-                      f"<span class='text-[9px] text-slate-400'>{esc(h['at'][5:])}</span></div>")
+                      f"<span class='text-[9px] text-slate-400'>{esc(db.fmt_kst(h['at'], date_only=True)[5:])}</span></div>")
         bars = f"<div class='flex items-end gap-1.5 mt-2 overflow-x-auto'>{cells}</div>"
     html = (f"<div class='bg-white border border-slate-200 rounded-2xl p-4 mt-2'>"
             f"<div class='text-sm font-extrabold text-slate-800 mb-2.5'>'{esc(d['kw'])}' 순위 추적 — {d['days']}일차</div>"
@@ -4041,7 +4042,7 @@ def _naver_publish_confirm_box(tenant, blog, sec: str, cbtn: str, ok: str = "", 
                 + banner
                 + f"<a href='{esc(pub.get('published_url') or '')}' target=_blank rel=noopener class='text-sm font-bold text-emerald-600 break-all'>"
                 f"{esc(pub.get('published_url') or '')} ↗</a>"
-                f"<p class='text-xs text-slate-400 mt-2'>발행 시각: {esc((pub.get('published_at') or '')[:16].replace('T', ' '))} · 이 글의 순위를 추적 중이에요.</p></div>")
+                f"<p class='text-xs text-slate-400 mt-2'>발행 시각: {esc(db.fmt_kst(pub.get('published_at')))} · 이 글의 순위를 추적 중이에요.</p></div>")
     inp = "flex-1 border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
     # (자동화 2-3a) URL 붙여넣기 기본 제거 — RSS 자동 감지(2시간 크론)가 기본, 버튼은 즉시 1회 조회.
     # 매칭 실패 시에만 URL 입력 폴백(nvFb)을 노출한다.

@@ -43,6 +43,7 @@ RENDER_SEM = _threading.BoundedSemaphore(int(os.environ.get("SHOPCAST_RENDER_CON
 W, H, FPS = 1080, 1920, 30
 XFADE = 0.25             # 씬 전환 크로스페이드(초) — 검은 플래시 제거(영상강화 PHASE 4)
 MAX_SCENES = 6           # 씬(=문장) 최대 — TTS 호출/길이 제어
+_WRAP_GLUE = {"안", "못", "왜", "다", "더", "꼭", "잘", "첫", "새", "이", "그", "저"}   # 다음 어절과 분리 금지 선행어
 MAX_AI_FILL = 2          # 사진 부족 시 AI 이미지 생성 최대 장수(비용 제어)
 MIN_SCENE, MAX_SCENE = 2.2, 9.0   # 씬 길이 클램프(초) — 음성이 잘리지 않게 상한 넉넉히
 PER_IMAGE_SECONDS = 3
@@ -198,7 +199,7 @@ def _to_spoken(sentences: list, source: str) -> list:
               "- 입력과 같은 개수의 줄로, 순서 그대로, 번호·라벨·따옴표 없이 한 줄씩만 출력.\n\n"
               + "\n".join(f"{i + 1}. {s}" for i, s in enumerate(sentences)))
     try:
-        raw = _llm.call_task("caption", prompt, max_tokens=600)
+        raw = _llm.call_task("spoken", prompt, max_tokens=600)   # 기본 Claude Haiku(제약 준수형) → 실패 시 Gemini 역폴백
     except Exception as e:
         log.warning("[spoken] 변환 호출 실패 — 발췌 원문 유지: %r", repr(e)[:100])
         return sentences
@@ -395,7 +396,9 @@ def _build_ass(scenes, kws, theme_key, out) -> str:
         line_w = 0.0
         for wi, w in enumerate(words):
             ww = _cw(w)
-            if line_w > 0 and line_w + 0.55 + ww > LINE_BUDGET:   # 단어 단위 줄바꿈(띄어쓰기 보존)
+            # 단음절 선행어('안 해요'·'못 가요' 류)는 다음 어절과 한 줄 보장 — 의미 단위 분리 방지
+            _glue = (_cw(words[wi + 1]) + 0.55) if (w in _WRAP_GLUE and wi + 1 < len(words)) else 0.0
+            if line_w > 0 and line_w + 0.55 + ww + _glue > LINE_BUDGET:   # 어절 단위 줄바꿈(띄어쓰기 보존)
                 body = body.rstrip() + "\\N"
                 line_w = 0.0
             cs = (measured[wi] if measured
@@ -1156,9 +1159,11 @@ class ShortVideoGenerator(Generator):
         out = []
         for para in (text or "").split("\n"):
             cur = ""
-            for w in para.split(" "):
+            _ws = [x for x in para.split(" ") if x]
+            for _i, w in enumerate(_ws):
                 cand = (cur + " " + w) if cur else w
-                if d.textlength(cand, font=font) <= maxw:
+                _nxt = (" " + _ws[_i + 1]) if (w in _WRAP_GLUE and _i + 1 < len(_ws)) else ""
+                if d.textlength(cand + _nxt, font=font) <= maxw or (not cur and not _nxt):
                     cur = cand
                     continue
                 if cur:
