@@ -156,6 +156,69 @@ def _pil_font(size: int, weight: str = "Bold"):
         return ImageFont.load_default()
 
 
+# ── 글말→영상말 변환(자막 구어화) ─────────────────────────────
+# 발췌(사실) → 변환(압축·어미만) → 사실 보존 검사 → 기존 자막 게이트 → 렌더.
+# 변환은 '빼기'만 가능: 새 명사·수치가 나타나면 그 문장은 차단하고 발췌 원문을 유지한다.
+_SPOKEN_FUNC = {"오늘", "지금", "바로", "이렇게", "정말", "함께", "그리고", "그래서", "그럼",
+                "이제", "먼저", "여기", "저희", "이번", "한번", "해서", "까지", "부터", "왜냐",
+                "어떻게", "무엇", "얼마나", "합니다", "했습니다", "됩니다", "있습니다", "인데요",
+                "하는", "하면", "해요", "돼요", "이에요", "예요", "인가요", "일까요", "할까요"}
+
+
+def _fact_guard(line: str, source: str) -> str:
+    """변환 출력의 명사·수치가 발췌 원문(source)에 전부 근거하는지 — 새 정보 등장 시 사유 반환.
+    어미 변형('중요할까'→'중요할까요')은 어간 프리픽스 매칭으로 허용."""
+    import re as _rg
+    for num in _rg.findall(r"\d+", line):
+        if num not in source:
+            return f"수치 날조({num})"
+    for tok in _rg.findall(r"[가-힣]{2,}", line):
+        if tok in _SPOKEN_FUNC:
+            continue
+        if any(tok[:n] in source for n in range(len(tok), 1, -1)):   # 어간 프리픽스(2자+)
+            continue
+        return f"근거 없는 표현({tok})"
+    return ""
+
+
+def _to_spoken(sentences: list, source: str) -> list:
+    """발췌 문장들을 짧은 구어체 영상 문장으로 변환(Gemini 경로 — 저지능 작업).
+    사실 추가 금지 — 문장 단위로 사실 보존 검사, 실패 문장은 발췌 원문 유지(날조 재유입 차단).
+    LLM 실패 시 전체 원문 유지 — 영상 생성 흐름을 막지 않는다."""
+    import logging as _lg
+    log = _lg.getLogger("shopcast.video")
+    if not sentences:
+        return sentences
+    from app import llm as _llm
+    prompt = ("아래는 블로그 본문에서 발췌한 문장들이다. 각 문장을 짧은 영상 자막용 구어체로 바꿔라.\n"
+              "규칙:\n"
+              "- 같은 사실만 담아라. 새 정보·수치·명사 추가 절대 금지 — 압축과 어미 변환만 허용.\n"
+              "- 한 문장당 22자 내외(최대 28자), 자연스러운 입말(~요/~죠/~입니다 짧게).\n"
+              "- 질문형이 어울리면 질문형으로(예: '신차 첫 썬팅, 왜 중요할까요?').\n"
+              "- 입력과 같은 개수의 줄로, 순서 그대로, 번호·라벨·따옴표 없이 한 줄씩만 출력.\n\n"
+              + "\n".join(f"{i + 1}. {s}" for i, s in enumerate(sentences)))
+    try:
+        raw = _llm.call_task("caption", prompt, max_tokens=600)
+    except Exception as e:
+        log.warning("[spoken] 변환 호출 실패 — 발췌 원문 유지: %r", repr(e)[:100])
+        return sentences
+    import re as _rg
+    lines = [_rg.sub(r"^\s*\d+[.)]\s*", "", ln).strip().strip('"“”')
+             for ln in (raw or "").splitlines() if ln.strip()]
+    if len(lines) != len(sentences):
+        log.warning("[spoken] 줄 수 불일치(%d→%d) — 발췌 원문 유지", len(sentences), len(lines))
+        return sentences
+    out = []
+    for orig, conv in zip(sentences, lines):
+        bad = _fact_guard(conv, source) if conv else "빈 출력"
+        if bad or len(conv) > 35:
+            log.warning("[spoken] 문장 차단(%s) — 원문 유지: %r", bad or "길이 초과", conv[:40])
+            out.append(orig)
+        else:
+            out.append(conv)
+    return out
+
+
 # 화질 기준(R3) — 코드에 고정: 짧은 변 1080 이상 + 비트레이트 하한. 본체 블러·재스케일 금지.
 MIN_SHORT_SIDE = 1080
 MIN_BITRATE = 1_500_000     # 1.5Mbps — 실측 정상 산출물(쇼츠 2.5M·클립 3.3M) 대비 보수 하한
@@ -605,17 +668,24 @@ class ShortVideoGenerator(Generator):
         # 사진 캡션 = 본문 문단 첫 문장 발췌(사진 수만큼)
         paras = [p.strip() for p in body.split("\n") if len(p.strip()) >= 20
                  and not p.strip().startswith(("#", "|", "[", "!"))]
+        region_short = seo._kw_shorten(getattr(tenant, "region", "") or "")
+        _nm_flat = (tenant.name or "").replace(" ", "")
         caps = []
         for p in paras:
             s = _r.split(r"(?<=[.!?])\s", p)[0].strip()      # 문장부호 기준(중간 절단 방지)
+            # 소개 문단(가게명+서술형) 제외 — 마무리 씬(가게명·지역)이 그 역할, 통째 자막화 금지
+            if _nm_flat and _nm_flat in s.replace(" ", "") and s.endswith("입니다."):
+                continue
             if 10 <= len(s) <= 60:
                 caps.append(s)
             if len(caps) >= max(1, len(vid_imgs) - 1):
                 break
         opening = f"{kw_nat}, 궁금하셨죠?"                      # 질문형 오프닝(타깃 키워드 포함, 2~3초)
-        sent = [f"핵심 {i + 1}. {h[:26]}" for i, h in enumerate(heads)] + caps
+        # 구조 라벨('핵심 N.') 없이 내용만 — 씬 순서가 목차 역할. 발췌 → 구어화 → 사실 보존 검사.
+        sent = [h[:30] for h in heads] + caps
         sent = sent[:6]                                          # 30~60초 목표(씬당 ~5초)
-        region_short = seo._kw_shorten(getattr(tenant, "region", "") or "")
+        _fact_src = "\n".join([body, tenant.name or "", region_short, kw_nat])   # 근거 = 본문+확정 프로필
+        sent = _to_spoken(sent, _fact_src)
         outro = f"{tenant.name} · {region_short}\n자세한 내용은 본문에"
         path, note, dur, _cover = self._build_scene_video(
             vid_imgs, SceneScript(hook=opening, sentences=sent, outro=outro, source="body_excerpt", evidence=body),
@@ -623,7 +693,7 @@ class ShortVideoGenerator(Generator):
         # 15초 하한 가드(3-4): D.I.A.+ 동영상 가점 기준 미달이면 본문 발췌 캡션을 늘려 1회 재빌드
         if path and dur and dur < 15 and len(caps) > len(sent) - len(heads):
             _nlog.warning("[naver-video] %s초 < 15 — 캡션 확장 재빌드", dur)
-            sent2 = ([f"핵심 {i + 1}. {h[:26]}" for i, h in enumerate(heads)] + caps)[:MAX_SCENES + 2]
+            sent2 = _to_spoken(([h[:30] for h in heads] + caps)[:MAX_SCENES + 2], _fact_src)
             path2, note2, dur2, _cover2 = self._build_scene_video(
                 vid_imgs, SceneScript(hook=opening, sentences=sent2, outro=outro, source="body_excerpt", evidence=body),
                 kws, tenant, strat, f"{kw0} 정리")
