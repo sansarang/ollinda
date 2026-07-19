@@ -93,7 +93,12 @@ _RIVAL_JAB = __import__("re").compile(
     r"(비싸게|바가지|덤터기|호구 ?잡|딴 데|다른 (업체|가게|집)|타 ?업체|(남들|다들)[^.]{0,12}(비싼|비싸))")
 
 
-def _subtitle_gate(script: "SceneScript", source: str = "") -> str:
+# 상호 접미 사전 — 자막 속 '가게명처럼 보이는' 연속 한글어 추출용(업체명 정합 게이트 4-1)
+_SHOP_SUFFIX = __import__("re").compile(
+    r"([가-힣A-Za-z0-9]{2,}(?:상사|모터스|스토어|공업사|카센터|디테일링|스튜디오|랩핑|썬팅|테크|샵))")
+
+
+def _subtitle_gate(script: "SceneScript", source: str = "", biz_name: str = "") -> str:
     """자막 게이트(렌더 직전) — 위반 사유 반환(통과 시 '').
     검사: 내부 텍스트 시그니처 / 명령형 어미 / 근거 없는 따옴표 인용(source 대조) /
     경쟁·가격 저격 톤 / (번호 라벨은 사전 스트립 후에도 남으면 실패)."""
@@ -111,6 +116,14 @@ def _subtitle_gate(script: "SceneScript", source: str = "") -> str:
                 return f"번호·구조 라벨 노출: '{line[:40]}'"
             if _RIVAL_JAB.search(line):
                 return f"경쟁·가격 저격 톤: '{line[:40]}'"
+            # 업체명 정합(4-1): 자막에 상호형 명칭이 등장하면 프로필 실값과 일치해야 통과
+            # ('루마모터스' 유형 오기가 영상·TTS로 재발하는 열린 문 봉쇄 — TTS 대본=자막 동일 소스라 1곳으로 충분)
+            if biz_name:
+                _bn = biz_name.replace(" ", "")
+                for cand in _SHOP_SUFFIX.findall(line):      # 공백 없는 연속어만(단어 경계 존중 — 오탐 방지)
+                    _c = cand.replace(" ", "")
+                    if _c not in _bn and _bn not in _c:
+                        return f"업체명 불일치: '{cand}' ≠ 프로필 '{biz_name}'"
             # 근거 없는 따옴표 인용(창작 발화) — 인용 내용의 구별 토큰이 입력(경험담·본문)에 없으면 실패
             for q in _r.findall(r"[\"“]([^\"”]{6,60})[\"”]", line):
                 toks = [w for w in _r.findall(r"[가-힣A-Za-z0-9]{3,}", q)][:8]
@@ -445,14 +458,14 @@ class ShortVideoGenerator(Generator):
         hook = _strip_labels(hook)
         sent = [_strip_labels(s) for s in sent if _strip_labels(s)]
         script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm", evidence=_evidence)
-        _gate_bad = _subtitle_gate(script, _evidence) if sent else "자막 소스 없음(스크립트 파싱 실패)"
+        _gate_bad = _subtitle_gate(script, _evidence, tenant.name) if sent else "자막 소스 없음(스크립트 파싱 실패)"
         if _gate_bad:                                  # 자막 게이트 — 오염/부재 시 1회 재생성 후 재검
             raw = _llm.call_task("caption", prompt, 1500, default_model=self.model)
             d = _parse_sections(raw, ["제목", "길이", "플랫폼", "훅후보", "훅", "내레이션", "장면"])
             sent = [_strip_labels(s) for s in _viewer_sentences(d)[:MAX_SCENES] if _strip_labels(s)]
             narration = d.get("내레이션", narration)
             script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm", evidence=_evidence)
-            _gate_bad = _subtitle_gate(script, _evidence) if sent else "자막 소스 없음(재생성 후에도)"
+            _gate_bad = _subtitle_gate(script, _evidence, tenant.name) if sent else "자막 소스 없음(재생성 후에도)"
         if _gate_bad:
             video_path, note, dur_sec, cover_path = None, f"자막 게이트 차단: {_gate_bad}", 0, None
             _scene_note, _scene_ok = note, False
@@ -574,6 +587,13 @@ class ShortVideoGenerator(Generator):
         path, note, dur, _cover = self._build_scene_video(
             vid_imgs, SceneScript(hook=opening, sentences=sent, outro=outro, source="body_excerpt", evidence=body),
             kws, tenant, strat, f"{kw0} 정리")
+        # 15초 하한 가드(3-4): D.I.A.+ 동영상 가점 기준 미달이면 본문 발췌 캡션을 늘려 1회 재빌드
+        if path and dur and dur < 15 and len(caps) > len(sent) - len(heads):
+            _nlog.warning("[naver-video] %s초 < 15 — 캡션 확장 재빌드", dur)
+            sent = ([f"핵심 {i + 1}. {h[:26]}" for i, h in enumerate(heads)] + caps)[:MAX_SCENES + 2]
+            path, note, dur, _cover = self._build_scene_video(
+                vid_imgs, SceneScript(hook=opening, sentences=sent, outro=outro, source="body_excerpt", evidence=body),
+                kws, tenant, strat, f"{kw0} 정리")
         if not (path and os.path.exists(path)):
             _nlog.warning("[naver-video] 중단: 씬 빌드 실패 — note=%s", note)
             return None, {}
@@ -597,14 +617,37 @@ class ShortVideoGenerator(Generator):
         desc = (f"{kw_nat} 관련 내용을 영상으로 정리했어요.\n"
                 f"{tenant.name} · {region_short}\n"
                 "자세한 과정과 안내는 블로그 본문에 있어요.")
+        # 본문 삽입용 16:9(스마트에디터 가로 플레이어 가독) — 같은 씬·자막 소스 리레이아웃(재생성 아님)
+        wide = os.path.join(out_dir, f"naver_wide_{uuid.uuid4().hex}.mp4")
+        _wide_ok = _run_ff(["ffmpeg", "-y", "-i", final,
+                            "-vf", "split[o][b];[b]scale=1920:1080,boxblur=24:6[bg];"
+                                   "[o]scale=-2:1080[fg];[bg][fg]overlay=(W-w)/2:0",
+                            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                            "-c:a", "aac", "-movflags", "+faststart", wide], 300, "naver-wide")
         try:
             from app import storage as _st
             _st.mirror_to_r2(final)                    # 로컬 정리 후에도 키트·다운로드 유지(R2 폴백)
+            if _wide_ok and os.path.exists(wide):
+                _st.mirror_to_r2(wide)
         except Exception:
             pass
         _nlog.warning("[naver-video] 성공 path=%s dur=%s size=%s", final, dur,
                        os.path.getsize(final) if os.path.exists(final) else 0)
+        # 클립용 해시태그(3-2): 키워드·지역·업종 기반 3~5개, 중복 제거·도배 금지
+        _tag_seed = [kw_nat.replace(" ", ""), (region_short + " " + ind0).replace(" ", ""),
+                     ind0, (region_short.split()[0] if region_short.split() else "") + ind0]
+        hashtags = []
+        for t_ in _tag_seed:
+            t_ = _r.sub(r"[^가-힣A-Za-z0-9]", "", t_)
+            if t_ and len(t_) >= 2 and f"#{t_}" not in hashtags:
+                hashtags.append(f"#{t_}")
+        hashtags = hashtags[:5]
+        desc = desc + "\n" + " ".join(hashtags)       # 설명 복사에 포함(클립 업로드용)
         meta = {"path": final, "title": vtitle, "desc": desc, "filename": fname,
+                "body_path": (wide if _wide_ok and os.path.exists(wide) else ""),
+                "filename_body": fname.replace("-영상.mp4", "-영상-본문용.mp4"),
+                "filename_clip": fname.replace("-영상.mp4", "-영상-클립용.mp4"),
+                "hashtags": hashtags,
                 "duration_sec": dur, "opening": opening, "scene_texts": [opening] + sent + [outro]}
         return final, meta
 
@@ -637,7 +680,7 @@ class ShortVideoGenerator(Generator):
         렌더 직전 자막 게이트를 한 번 더 강제. 성공 시 (path,note,dur,cover)."""
         if not isinstance(script, SceneScript):
             return None, "자막 소스 계약 위반(SceneScript 아님)", 0, None
-        _bad = _subtitle_gate(script, script.evidence)
+        _bad = _subtitle_gate(script, script.evidence, getattr(tenant, "name", "") or "")
         if _bad:
             return None, f"자막 게이트 차단: {_bad}", 0, None
         hook, sentences, outro_cta = script.hook, list(script.sentences), script.outro
