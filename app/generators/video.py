@@ -191,7 +191,9 @@ _SPOKEN_FUNC = {"오늘", "지금", "바로", "이렇게", "정말", "함께", "
                 "하는", "하면", "해요", "돼요", "이에요", "예요", "인가요", "일까요", "할까요",
                 # 어미·부정 활용(사실성 무관 — '않습니다'→'않아요' 오탐 방지, Haiku 실전 관측)
                 "않아요", "않죠", "않고", "않게", "않는", "않을까요", "했어요", "됐어요", "있어요",
-                "해드려요", "드려요", "볼까요", "주세요", "하세요", "이라서", "라서", "이라", "이랑", "하고"}
+                "해드려요", "드려요", "볼까요", "주세요", "하세요", "이라서", "라서", "이라", "이랑", "하고",
+                "더했어요", "했는데", "했으니", "하니까", "되니까", "보니까", "말씀드릴게요", "말씀드립니다",
+                "봤어요", "봐야", "보세요", "골라야", "고르기", "그대로"}
 
 
 def _cut_word(s: str, n: int) -> str:
@@ -221,7 +223,7 @@ def _fact_guard(line: str, source: str) -> str:
     for num in _rg.findall(r"\d+", line):
         if num not in source:
             return f"수치 날조({num})"
-    for tok in _rg.findall(r"[가-힣]{2,}", line):
+    for tok in _rg.findall(r"[가-힣]{3,}", line):   # 2자 토큰은 조사 결합('차라' 등) 오탐이 커 명사 검사 제외(수치 검사는 별도)
         if tok in _SPOKEN_FUNC:
             continue
         if any(tok[:n] in source for n in range(len(tok), 1, -1)):   # 어간 프리픽스(2자+)
@@ -322,6 +324,7 @@ def _script_from_body(body: str, n: int, kw_nat: str, source: str) -> list | Non
             "- 어미는 씬마다 변화(명사 종결·질문·청유 혼용, '~입니다' 연속 금지). 과장·보장 표현 금지.\n"
             "- 본문에 있는 사실만. 새 정보·수치·명사 추가 절대 금지.\n"
             "- 각 씬에서 가장 중요한 숫자·차종·핵심명사 어절 하나만 {중괄호}로 감싸라(씬당 최대 1개, 원문 어절 그대로).\n"
+            "- 출력은 자막 줄만. 머리말·설명·'대본입니다' 류 문장 절대 출력 금지.\n"
             f"- 타깃 키워드: {kw_nat}\n\n[본문]\n" + body[:3500])
     feedback = ""
     for attempt in (1, 2):
@@ -332,7 +335,9 @@ def _script_from_body(body: str, n: int, kw_nat: str, source: str) -> list | Non
             return None
         import re as _r
         lines = [_r.sub(r"^\s*\d+[.)]\s*", "", ln).strip().strip('"“”')
-                 for ln in (raw or "").splitlines() if ln.strip()][:n]
+                 for ln in (raw or "").splitlines() if ln.strip()]
+        lines = [ln for ln in lines
+                 if not _r.search(r"(대본|자막 씬|씬 \d|아래는|다음은|다음과 같|출력)", ln)][:n]   # 머리말 제거
         if len(lines) < max(3, n - 1):
             feedback = f"\n\n[재작성] 씬 수가 {len(lines)}개였다 — 정확히 {n}줄로 다시."
             continue
