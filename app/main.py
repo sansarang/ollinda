@@ -2207,7 +2207,7 @@ def _seo_photo_name(tenant, blog) -> str:
 # 필드 라벨·분석 프리앰블·마크다운이 섞인 원문 전달 금지 — 아래 파서가 스트립, 스트립 후 공백이면
 # 단건 재분석 폴백(기존 4-2a)이 그대로 이어받는다.
 _CAP_LABEL = None    # 지연 컴파일 — vision 필드 라벨/프리앰블 패턴
-_CAP_DOC = ("등록증", "계약서", "신분증", "면허증", "증명서", "서류")   # 개인정보 위험 서류 키워드
+_CAP_DOC = ("등록증", "계약서", "신분증", "면허증", "증명서", "서류", "기록부", "문서")   # 개인정보 위험 서류 키워드
 
 
 def _clean_caption_desc(raw: str) -> str:
@@ -2223,6 +2223,8 @@ def _clean_caption_desc(raw: str) -> str:
     s = _r.sub(r"^[:：\-\s]+", "", s).strip()
     if _r.search(r"(관점에서 분석|분석한 결과|분석입니다|분석하겠|다음과 같)", s):
         return ""                                                     # 프리앰블 문장 — 묘사 아님
+    if not _r.search(r"[가-힣]{2,}", s):
+        return ""                                                     # 내용어 없는 라인('(5/20).' 류 카운터) — 묘사 아님
     return s.rstrip(".")[:60]
 
 
