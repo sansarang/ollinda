@@ -928,6 +928,8 @@ class ShortVideoGenerator(Generator):
             video_path, note, dur_sec, cover_path = None, f"자막 게이트 차단: {_gate_bad}", 0, None
             _scene_note, _scene_ok = note, False
         else:
+            sent = _seam_dedup(hook, list(sent), outro_cta)   # 최종 이음매 중복 제거(강등·재생성 후 재보증)
+            script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm", evidence=_evidence)
             if _gen_src and sent:                     # 씬 내용 ↔ 사진 vision 태그 매칭(서류 씬=서류 사진 등)
                 vid_imgs = _match_photos(list(sent), vid_imgs, _gen_src)
                 __import__("logging").getLogger("shopcast.video").warning(
