@@ -5437,9 +5437,9 @@ def admin_backfill_status(asset_id: str):
 
 
 @app.post("/admin/set/{asset_id}/regen-channel")
-def admin_regen_channel(asset_id: str, kind: str = ""):
-    """누락·실패 텍스트 채널(caption/x_post) 단건 재생성 — 표준 경로 재사용(전 게이트 경유).
-    글·기존 정상 피스 불변. 이미 피스가 있으면 거부(임의 재생성 금지)."""
+def admin_regen_channel(asset_id: str, kind: str = "", force: str = ""):
+    """누락·실패 텍스트 채널(caption/x_post/blog) 단건 재생성 — 표준 경로 재사용(전 게이트 경유).
+    글·기존 정상 피스 불변. 이미 피스가 있으면 거부(임의 재생성 금지) — force=1은 사용자 지시 재생성 전용(기존 피스 교체)."""
     from app.domain.models import ContentKind as _CK
     _map = {"caption": _CK.CAPTION, "x_post": _CK.X_POST, "blog": _CK.BLOG}
     ck = _map.get(kind)
@@ -5448,15 +5448,27 @@ def admin_regen_channel(asset_id: str, kind: str = ""):
     pieces = db.get_set_pieces(asset_id)
     if not pieces:
         return JSONResponse({"ok": False, "error": "세트 없음"}, status_code=404)
-    if any(p.kind == ck for p in pieces):
-        return JSONResponse({"ok": False, "error": "이미 존재 — 임의 재생성 금지"}, status_code=409)
-    ref = next((p for p in pieces if p.kind == _CK.BLOG), pieces[0])   # 참조: blog 우선, 없으면(=blog 소급) 첫 피스
+    _old_piece = next((p for p in pieces if p.kind == ck), None)
+    if _old_piece and force != "1":
+        return JSONResponse({"ok": False, "error": "이미 존재 — 임의 재생성 금지(force=1은 사용자 지시 전용)"}, status_code=409)
+    _keep = {}                                          # blog 교체 시 상태 필드 보존(channel_status·video_job은 blog에 저장)
+    if _old_piece:
+        if ck == _CK.BLOG:
+            _keep = {k: _old_piece.payload.get(k) for k in ("channel_status", "video_job") if _old_piece.payload.get(k)}
+        db.delete_piece(_old_piece.id, _old_piece.tenant_id)
+        pieces = db.get_set_pieces(asset_id)
+    ref = next((p for p in pieces if p.kind == _CK.BLOG), pieces[0] if pieces else _old_piece)   # 참조: blog 우선
     from app.services.ingest import _regen_text_piece, _set_channel_status, KIND_TO_CHANNEL
     tenant = db.get_tenant(ref.tenant_id)
     asset = db.get_asset(asset_id)
     if not (tenant and asset):
         return JSONResponse({"ok": False, "error": "tenant/asset 소실"}, status_code=404)
     ok = _regen_text_piece(tenant, asset, ck, ref)
+    if ok and _keep:                                    # 보존한 상태 필드를 새 blog에 이식
+        newb = next((p for p in db.get_set_pieces(asset_id) if p.kind == _CK.BLOG), None)
+        if newb:
+            newb.payload.update(_keep)
+            db.save_piece(newb)
     ch = KIND_TO_CHANNEL.get(ck, "naver")
     _set_channel_status(asset_id, {ch: {"status": "done" if ok else "failed"}})
     made = next((p for p in db.get_set_pieces(asset_id) if p.kind == ck), None)
