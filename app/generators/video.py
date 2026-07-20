@@ -388,6 +388,7 @@ def _script_from_body(body: str, n: int, kw_nat: str, source: str) -> list | Non
         import re as _r
         lines = [_r.sub(r"^\s*\d+[.)]\s*", "", ln).strip().strip('"“”')
                  for ln in (raw or "").splitlines() if ln.strip()]
+        lines = [_r.sub(r"\}+", "}", _r.sub(r"\{+", "{", ln)) for ln in lines]   # 중복 중괄호 정규화({{·}})
         lines = [ln for ln in lines
                  if not _r.search(r"(대본|자막 씬|씬 \d|아래는|다음은|다음과 같|출력)", ln)][:n]   # 머리말 제거
         if len(lines) < max(3, n - 1):
@@ -956,10 +957,10 @@ class ShortVideoGenerator(Generator):
             _nlog.warning("[naver-video] 대본 생성 실패 — 씬별 발췌 폴백")
             sent = ([_cut_word(h, 30) for h in heads] + caps)[:6]
             sent = _to_spoken(sent, _fact_src)
-        else:
-            # 사진-자막 재배정: 대본 확정 후 씬 내용에 맞는 사진 매칭(서류 씬엔 서류 사진)
-            _gen_src = pl.get("gen_source") or ""
-            vid_imgs = _match_photos(sent, vid_imgs, _gen_src)
+            sent = _dedup_lines(sent)                 # 폴백도 서사 정제 — 내용없는 예고('단점부터 말씀드릴게요')·중복 제거
+        # 사진-자막 재배정: 씬 내용에 맞는 사진 매칭(대본·폴백 공통 — 서류 씬엔 서류 사진)
+        _gen_src = pl.get("gen_source") or ""
+        vid_imgs = _match_photos(sent, vid_imgs, _gen_src)
         # 클로징 다양화 — 고정 템플릿 대신 글 CTA '사실' 기반 선택(본문에 근거 있는 패턴만, 없으면 현행 유지)
         if any(k in body for k in ("성능점검", "서류", "점검기록부")):
             _cta_line = "서류까지 본문에서 확인하세요"          # 매물형 — 본문이 서류 확인을 다룰 때만
