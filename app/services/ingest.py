@@ -35,7 +35,7 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
     except Exception:
         pass
     # 텍스트는 즉시(빠름), 영상(SHORT)+릴스+캐러셀은 비동기 → 요청이 타임아웃 없이 바로 끝남
-    kinds = kinds or [ContentKind.CAPTION, ContentKind.BLOG, ContentKind.X_POST]
+    kinds = kinds or list(CORE_KINDS)
     # 사업형태 전략에 따라 생성 순서 정렬 (셀러=영상 우선, 소상공인=블로그 우선)
     strat = resolve_strategy(tenant)
     # 셀러 → 판매 플랫폼 콘텐츠(상품명·상세페이지·태그) 추가 생성
@@ -110,6 +110,16 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
         pass
     brief_public = {k: v for k, v in brief.items() if not k.startswith("_")}
     pieces = generate_for(tenant, asset, kinds, images=paths)   # ✍️ 카피라이터·🎬 영상감독
+    # 블로그(=상태 저장소)가 실패하면 channel_status·video_job·워치독 전부 실명 → 즉시 1회 재시도(단일점 봉합)
+    if ContentKind.BLOG in kinds and not any(p.kind == ContentKind.BLOG for p in pieces):
+        import logging as _lg2
+        from app.services.generate import LAST_ERRORS as _LEb
+        _lg2.getLogger("shopcast.ingest").error(
+            "[ingest] BLOG 생성 실패 — 즉시 재시도 1회 (사유: %s)", _LEb.get(str(ContentKind.BLOG), "?"))
+        retry = generate_for(tenant, asset, [ContentKind.BLOG], images=paths)
+        pieces.extend(retry)
+        if not retry and pieces:                       # 재시도도 실패 → 첫 피스에 사유 각인(워치독이 읽음)
+            pieces[0].payload["_missing_blog"] = _LEb.get(str(ContentKind.BLOG), "생성 실패(로그 참조)")
     _exp = (intake.get("experience") or "").strip()[:200]       # 사장님 경험담 — 결과 하이라이트용(A2)
     for p in pieces:
         p.payload.setdefault("image_path", paths[0])
@@ -302,19 +312,70 @@ def _bump_retry(asset_id: str) -> None:
 
 
 def _text_channel_watchdog(log) -> None:
-    """(5채널 완전성) 캡션/X 피스가 누락·실패인 세트를 자동 재생성 — 최대 2회, 사유 기록.
+    """(5채널 완전성) 캡션/X/블로그 피스가 누락·실패인 세트를 자동 재생성 — 최대 2회, 사유 기록.
+    asset 기반 스캔: 블로그 자체가 실패한 세트(상태 저장소 부재 — 완전 침묵 사각)도 잡는다.
     글·기존 정상 피스 불변. 크레딧 없으면 보류(헛 재시도로 상한 소진 금지)."""
     from datetime import datetime, timedelta
     try:
         from app import llm as _llm
         _pinged = None                                   # 크레딧 핑은 스캔당 최대 1회
-        for row in db.recent_blog_piece_rows(hours=24, limit=50):
+        for row in db.recent_asset_rows(hours=24, limit=50):
             try:
                 pieces = db.get_set_pieces(row["asset_id"])
+                if not pieces:
+                    continue
                 blog = next((p for p in pieces if p.kind == ContentKind.BLOG), None)
                 if not blog:
+                    # 블로그 부재 세트 — 재시도 카운트는 첫 피스 payload(_blog_retries)에
+                    ref = pieces[0]
+                    _rn = int(ref.payload.get("_blog_retries") or 0)
+                    if _rn >= 2:
+                        continue
+                    if _pinged is None:
+                        _pinged = _llm.ping()
+                    if not _pinged:
+                        log.info("[text-watchdog] 크레딧 없음 — BLOG 보류 asset=%s", row["asset_id"])
+                        return
+                    tenant = db.get_tenant(row["tenant_id"])
+                    asset = db.get_asset(row["asset_id"])
+                    if not (tenant and asset):
+                        continue
+                    log.warning("[text-watchdog] BLOG 부재 세트 재생성 asset=%s (retries=%d)",
+                                row["asset_id"], _rn)
+                    ref.payload["_blog_retries"] = _rn + 1
+                    db.save_piece(ref)
+                    if _regen_text_piece(tenant, asset, ContentKind.BLOG, ref):
+                        # 성공 → 실재 기반 상태 구성(naver 영상은 아직 없으니 failed로 두면 다음 감시가…
+                        # 영상은 regen-naver 경로 대상) + 나머지 채널 백필
+                        _cs2 = {}
+                        for _k2, _c2 in KIND_TO_CHANNEL.items():
+                            _cs2[_c2] = {"status": "done" if any(p.kind == _k2 for p in pieces) else "failed",
+                                         "error": "" if any(p.kind == _k2 for p in pieces) else "생성 누락"}
+                        _has_short = any(p.kind == ContentKind.SHORT for p in pieces)
+                        _nv_ok = any((p.payload or {}).get("naver_video", {}).get("path") for p in pieces
+                                     if p.kind == ContentKind.SHORT)
+                        _cs2["shorts"] = {"status": "done" if _has_short else "failed"}
+                        _cs2["reels"] = {"status": "done" if _has_short else "failed"}
+                        _cs2["naver"] = ({"status": "done"} if _nv_ok else
+                                         {"status": "failed", "error": "네이버 영상 미생성(블로그 소급 후 재생성 필요)"})
+                        _set_channel_status(row["asset_id"], _cs2)
                     continue
                 cs = dict(blog.payload.get("channel_status") or {})
+                # 등록 누락 감시: 5키 미만이면 경고 + 실재 기반 보충(부분 소실·구건 백필)
+                if cs and len(cs) < len(CHANNELS):
+                    log.warning("[text-watchdog] channel_status %d/5키 — 실재 기반 보충 asset=%s",
+                                len(cs), row["asset_id"])
+                    _has_s = any(p.kind == ContentKind.SHORT for p in pieces)
+                    _nv = any((p.payload or {}).get("naver_video", {}).get("path") for p in pieces
+                              if p.kind == ContentKind.SHORT)
+                    _fill = {"insta": any(p.kind == ContentKind.CAPTION for p in pieces),
+                             "x": any(p.kind == ContentKind.X_POST for p in pieces),
+                             "shorts": _has_s, "reels": _has_s, "naver": _nv}
+                    _set_channel_status(row["asset_id"], {
+                        ch2: {"status": "done" if ok2 else "failed"}
+                        for ch2, ok2 in _fill.items() if ch2 not in cs})
+                    cs = dict((next((p.payload.get("channel_status") for p in db.get_set_pieces(row["asset_id"])
+                                     if p.kind == ContentKind.BLOG), None)) or cs)
                 for kind, ch in KIND_TO_CHANNEL.items():
                     have = any(p.kind == kind for p in pieces)
                     st = dict(cs.get(ch) or {})
@@ -348,6 +409,9 @@ def _text_channel_watchdog(log) -> None:
 
 
 CHANNELS = ("naver", "shorts", "reels", "insta", "x")   # 5채널 완전성 기준(전 채널 보장)
+# 동기 생성 채널의 단일 정의 — 업종·biz_type 무관 전 세트 공통(분기별로 달라질 수 없음).
+# biz_type은 글 구조·CTA·앵글에만 영향. SHORT(쇼츠·릴스·네이버 영상)는 비동기 번들, MARKETPLACE는 셀러 부가.
+CORE_KINDS = (ContentKind.CAPTION, ContentKind.BLOG, ContentKind.X_POST)
 KIND_TO_CHANNEL = {ContentKind.CAPTION: "insta", ContentKind.X_POST: "x"}   # 텍스트 채널(동기 생성)
 
 
@@ -372,10 +436,12 @@ def _set_channel_status(asset_id: str, updates: dict) -> None:
         logging.exception("[ingest] channel_status 기록 실패 asset=%s", asset_id)
 
 
-def _regen_text_piece(tenant: Tenant, asset, kind: ContentKind, blog) -> bool:
-    """누락·실패한 텍스트 채널(캡션/X) 단건 재생성 — 표준 generate 경로 재사용(전 게이트 경유).
-    글·다른 피스 불변. 성공 시 저장+True."""
-    paths = blog.payload.get("image_paths") or [asset.path]
+def _regen_text_piece(tenant: Tenant, asset, kind: ContentKind, ref) -> bool:
+    """누락·실패한 텍스트 채널(캡션/X/블로그) 단건 재생성 — 표준 generate 경로 재사용(전 게이트 경유).
+    ref = 같은 세트의 아무 기존 피스(사진·brief 참조용). 다른 피스 불변. 성공 시 저장+True."""
+    paths = _restore_media(tenant.id, (ref.payload.get("image_paths") or [asset.path]))
+    if not paths:
+        return False
     made = generate_for(tenant, asset, [kind], images=paths)
     if not made:
         return False
@@ -384,8 +450,15 @@ def _regen_text_piece(tenant: Tenant, asset, kind: ContentKind, blog) -> bool:
     p.payload.setdefault("biz_type", getattr(tenant, "biz_type", "local") or "local")
     p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value, p.payload, source=asset.note)
     p.payload["reach"] = reach.estimate(p.channel.value, p.kind.value, p.payload)
-    p.payload["brief"] = blog.payload.get("brief") or {}
+    p.payload["brief"] = ref.payload.get("brief") or {}
     p.payload["experts"] = ["🎯 전략가", "✍️ 카피라이터"]
+    if kind == ContentKind.BLOG:                       # 블로그 전용 부가(표준 ingest 루프와 동일 취지)
+        try:
+            p.payload["geo_audit"] = seo.geo_audit(
+                "blog", p.payload, name=tenant.name, industry=tenant.industry,
+                region=tenant.region or "", biz_type=getattr(tenant, "biz_type", "local") or "local")
+        except Exception:
+            pass
     if kind == ContentKind.X_POST:                     # 번들과 동일 설계 — 세트에 쇼츠가 있으면 X에도 영상 첨부
         short = next((q for q in db.get_set_pieces(asset.id)
                       if q.kind == ContentKind.SHORT and (q.payload or {}).get("video_path")), None)

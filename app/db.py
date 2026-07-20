@@ -801,6 +801,22 @@ def mark_publish_indexed(piece_id: str) -> None:
         pass
 
 
+def recent_asset_rows(hours: int = 24, limit: int = 50) -> list[dict]:
+    """(5채널 워치독) 최근 N시간 내 피스가 하나라도 있는 세트(asset) — kind 무관.
+    블로그 실패 세트(상태 저장소 부재)도 감시망에 들어오게(blog 기반 스캔의 사각 제거)."""
+    from datetime import datetime, timedelta
+    cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+    try:
+        with _conn() as c:
+            rows = c.execute(
+                "SELECT asset_id, tenant_id, MAX(created_at) AS created_at FROM content_pieces "
+                "WHERE created_at >= ? GROUP BY asset_id ORDER BY created_at DESC LIMIT ?",
+                (cutoff, limit)).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.OperationalError:
+        return []
+
+
 def recent_blog_piece_rows(hours: int = 24, limit: int = 50) -> list[dict]:
     """(영상 워치독) 최근 N시간 내 생성된 블로그 피스 행 — 죽은 영상 잡 감지 스캔용."""
     from datetime import datetime, timedelta

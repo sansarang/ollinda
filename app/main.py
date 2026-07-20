@@ -1517,9 +1517,10 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 f"<div class='text-2xl'>{emoji}</div><div class='font-bold text-sm mt-1'>{label}</div>"
                 f"<div class='text-[11px] text-slate-400 mt-0.5'>{desc}</div></div></label>")
     biz_toggle = ("<div class='mt-1'><div class='text-xs font-semibold text-slate-500 mb-1'>사업형태 *</div>"
-                  "<div class='grid grid-cols-2 gap-2'>"
+                  "<div class='grid grid-cols-3 gap-2'>"
                   + _bopt("local", _ic("store", "w-6 h-6 mx-auto text-indigo-600"), "동네 매장", "방문·예약 유도 · 지도/연락처")
                   + _bopt("seller", _ic("package", "w-6 h-6 mx-auto text-indigo-600"), "온라인 셀러", "구매링크·상품 키워드")
+                  + _bopt("hybrid", "🔁", "둘 다", "방문+온라인 판매 병행")
                   + "</div></div>")
     search_box = (
         "<div class='bg-indigo-50 rounded-xl p-3 mb-3'>"
@@ -5326,27 +5327,28 @@ def admin_regen_channel(asset_id: str, kind: str = ""):
     """누락·실패 텍스트 채널(caption/x_post) 단건 재생성 — 표준 경로 재사용(전 게이트 경유).
     글·기존 정상 피스 불변. 이미 피스가 있으면 거부(임의 재생성 금지)."""
     from app.domain.models import ContentKind as _CK
-    _map = {"caption": _CK.CAPTION, "x_post": _CK.X_POST}
+    _map = {"caption": _CK.CAPTION, "x_post": _CK.X_POST, "blog": _CK.BLOG}
     ck = _map.get(kind)
     if not ck:
-        return JSONResponse({"ok": False, "error": "kind는 caption|x_post"}, status_code=400)
+        return JSONResponse({"ok": False, "error": "kind는 caption|x_post|blog"}, status_code=400)
     pieces = db.get_set_pieces(asset_id)
-    blog = next((p for p in pieces if p.kind == _CK.BLOG), None)
-    if not blog:
-        return JSONResponse({"ok": False, "error": "블로그 피스 없음"}, status_code=404)
+    if not pieces:
+        return JSONResponse({"ok": False, "error": "세트 없음"}, status_code=404)
     if any(p.kind == ck for p in pieces):
         return JSONResponse({"ok": False, "error": "이미 존재 — 임의 재생성 금지"}, status_code=409)
+    ref = next((p for p in pieces if p.kind == _CK.BLOG), pieces[0])   # 참조: blog 우선, 없으면(=blog 소급) 첫 피스
     from app.services.ingest import _regen_text_piece, _set_channel_status, KIND_TO_CHANNEL
-    tenant = db.get_tenant(blog.tenant_id)
+    tenant = db.get_tenant(ref.tenant_id)
     asset = db.get_asset(asset_id)
     if not (tenant and asset):
         return JSONResponse({"ok": False, "error": "tenant/asset 소실"}, status_code=404)
-    ok = _regen_text_piece(tenant, asset, ck, blog)
-    ch = KIND_TO_CHANNEL[ck]
+    ok = _regen_text_piece(tenant, asset, ck, ref)
+    ch = KIND_TO_CHANNEL.get(ck, "naver")
     _set_channel_status(asset_id, {ch: {"status": "done" if ok else "failed"}})
     made = next((p for p in db.get_set_pieces(asset_id) if p.kind == ck), None)
     return JSONResponse({"ok": ok, "channel": ch,
-                         "text": (made.payload.get("text") if made else None)})
+                         "text": (made.payload.get("text") or (made.payload.get("title", "") + "\n" +
+                                  (made.payload.get("body") or "")[:400]) if made else None)})
 
 
 @app.get("/admin/set/{asset_id}/pieces.json")
