@@ -115,6 +115,13 @@ def _num_claim_check(text: str, source: str) -> str:
         num = m.group(1).replace(",", "")
         if num and num not in (source or "").replace(",", ""):
             return f"근거 없는 수치({m.group(0).strip()})"
+    # 비교 프레임의 미근거 고유명사(경쟁 모델·타 제품) 차단 — 'XX중고/XX시세/XX보다/XX 말고' 날조.
+    # 도달형 표현어는 대부분 2자·조사결합이라 무해, '캐스퍼중고가격' 류 경쟁 모델 날조만 겨냥.
+    src_flat = (source or "").replace(" ", "")
+    for m in _r.finditer(r"([가-힣A-Za-z]{2,}?)(중고가격|중고시세|중고차|중고|시세)", text or ""):
+        ent = m.group(1)
+        if ent not in ("신차", "이", "그", "저", "요즘", "동급", "무사고", "이런", "저런", "우리", "저희") and ent not in src_flat:
+            return f"근거 없는 비교 대상({m.group(0)})"
     return ""
 
 
