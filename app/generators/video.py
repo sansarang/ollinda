@@ -271,6 +271,118 @@ def _to_spoken(sentences: list, source: str) -> list:
     return out
 
 
+# ── 대본 단위 자막 생성(씬별 발췌 → 한 편의 이야기) ──────────────
+# 씬마다 독립 발췌하면 문장은 통과해도 이어 붙이면 서사가 끊긴다(예고 후 미이행·중복·순서 점프).
+# 본문 전문 + 씬 수를 넣어 1콜로 대본 전체를 쓰고, 대본 게이트(중복·예고-이행)와
+# 사실 게이트(전체 본문 대조)를 통과해야 채택. 실패 시 기존 발췌 방식 폴백(영상 흐름 불차단).
+_FORESHADOW = None   # 예고형 문장 패턴(지연 컴파일)
+
+
+def _norm_line(s: str) -> set:
+    import re as _r
+    return set(_r.findall(r"[가-힣A-Za-z0-9]{2,}", (s or "").replace("{", "").replace("}", "")))
+
+
+def _script_gate(lines: list) -> str:
+    """대본 게이트 — 위반 사유 반환(통과 시 ''). ① 씬 간 유사 문장 중복(자카드>0.6)
+    ② 예고('단점부터/솔직히 말씀드릴게요' 류) 뒤 씬이 실제 내용(구체 서술)인지."""
+    import re as _r
+    global _FORESHADOW
+    if _FORESHADOW is None:
+        _FORESHADOW = _r.compile(r"(말씀드릴게요|말씀드립니다|공개합니다|알려드릴게요|보여드릴게요|짚어볼게요)[.!?]?$")
+    toks = [_norm_line(s) for s in lines]
+    for i in range(len(lines)):
+        for j in range(i + 1, len(lines)):
+            if toks[i] and toks[j]:
+                jac = len(toks[i] & toks[j]) / len(toks[i] | toks[j])
+                if jac > 0.6:
+                    return f"씬 중복(유사 {jac:.1f}): '{lines[i][:20]}'≈'{lines[j][:20]}'"
+    for i, s in enumerate(lines):
+        plain = s.replace("{", "").replace("}", "").strip()
+        if _FORESHADOW.search(plain) and len(plain) <= 20:      # 내용 없는 예고형
+            nxt = (lines[i + 1] if i + 1 < len(lines) else "").replace("{", "").replace("}", "")
+            if not nxt or (_FORESHADOW.search(nxt.strip()) and len(nxt.strip()) <= 20):
+                return f"예고 후 미이행: '{plain[:24]}' 다음 씬에 내용 없음"
+            if len(_norm_line(nxt)) < 2:
+                return f"예고 후 미이행: '{plain[:24]}'"
+    return ""
+
+
+def _script_from_body(body: str, n: int, kw_nat: str, source: str) -> list | None:
+    """본문 전문 → 씬 N개 대본(1콜, Haiku 경로). 구조: 핵심(본문 순서 유지) → 단점·정직 고지 → (클로징은 템플릿).
+    대본 게이트·사실 게이트 실패 시 사유 피드백 재생성 1회 → 재실패 None(호출부 폴백)."""
+    import logging as _lg
+    log = _lg.getLogger("shopcast.video")
+    from app import llm as _llm
+    base = ("아래 블로그 본문을 근거로, 세로 영상 자막 대본을 써라. 전체가 하나의 이야기가 되게.\n"
+            f"- 자막 씬 {n}개, 한 줄씩 출력(번호·라벨 없이). 각 22자 내외(최대 28자).\n"
+            "- 구조: 핵심 내용(본문 등장 순서 유지) → 뒤쪽에 단점·한계 등 정직한 고지 1개.\n"
+            "- 예고를 했으면('단점부터 볼게요' 등) 바로 다음 씬이 그 내용이어야 한다. 예고만 하고 안 보여주기 금지.\n"
+            "- 동일·유사 문장 반복 금지. 씬당 하나의 메시지, 핵심 숫자·단어를 문장 앞에.\n"
+            "- 어미는 씬마다 변화(명사 종결·질문·청유 혼용, '~입니다' 연속 금지). 과장·보장 표현 금지.\n"
+            "- 본문에 있는 사실만. 새 정보·수치·명사 추가 절대 금지.\n"
+            "- 각 씬에서 가장 중요한 숫자·차종·핵심명사 어절 하나만 {중괄호}로 감싸라(씬당 최대 1개, 원문 어절 그대로).\n"
+            f"- 타깃 키워드: {kw_nat}\n\n[본문]\n" + body[:3500])
+    feedback = ""
+    for attempt in (1, 2):
+        try:
+            raw = _llm.call_task("spoken", base + feedback, max_tokens=800)
+        except Exception as e:
+            log.warning("[script] 대본 생성 호출 실패: %r", repr(e)[:100])
+            return None
+        import re as _r
+        lines = [_r.sub(r"^\s*\d+[.)]\s*", "", ln).strip().strip('"“”')
+                 for ln in (raw or "").splitlines() if ln.strip()][:n]
+        if len(lines) < max(3, n - 1):
+            feedback = f"\n\n[재작성] 씬 수가 {len(lines)}개였다 — 정확히 {n}줄로 다시."
+            continue
+        bad = next((f"{i + 1}번 씬 {_fact_guard(l, source)}" for i, l in enumerate(lines)
+                    if _fact_guard(l, source)), "") or _script_gate(lines)
+        if not bad:
+            _over = [l for l in lines if len(l.replace("{", "").replace("}", "")) > 35]
+            if _over:
+                bad = f"길이 초과: '{_over[0][:30]}…'"
+        if not bad:
+            return lines
+        log.warning("[script] 대본 게이트 차단(%d/2): %s", attempt, bad)
+        feedback = f"\n\n[재작성 — 직전 대본이 검증에서 차단됨: {bad}] 위반을 고쳐 전체를 다시 써라."
+    return None
+
+
+def _match_photos(lines: list, imgs: list, gen_source: str) -> list:
+    """대본 확정 후 씬 내용 ↔ 사진 매칭 — gen_source의 [사진N] 묘사 토큰 겹침 점수(서류 씬엔 서류 사진).
+    매칭 근거 없으면 원래 순서 유지. 반환 = 씬 순서대로 정렬된 이미지 목록(길이 동일)."""
+    import re as _r
+    descs = {}
+    for m in _r.finditer(r"\[사진(\d+)\]\s*([^\n]+)", gen_source or ""):
+        i = int(m.group(1)) - 1
+        if 0 <= i < len(imgs):
+            descs[i] = _norm_line(m.group(2))
+    if not descs:
+        return imgs
+    used, order = set(), []
+    for ln in lines:
+        lt = _norm_line(ln)
+        best, best_s = None, 0.0
+        for i, dt in descs.items():
+            if i in used or not dt:
+                continue
+            s = len(lt & dt) / max(1, len(lt | dt))
+            if s > best_s:
+                best, best_s = i, s
+        if best is not None and best_s >= 0.08:
+            order.append(best)
+            used.add(best)
+        else:
+            order.append(None)
+    remain = [i for i in range(len(imgs)) if i not in used]
+    final = []
+    for o in order:
+        final.append(imgs[o] if o is not None else imgs[remain.pop(0)] if remain else imgs[0])
+    final += [imgs[i] for i in remain]
+    return final
+
+
 # 화질 기준(R3) — 코드에 고정: 짧은 변 1080 이상 + 비트레이트 하한. 본체 블러·재스케일 금지.
 MIN_SHORT_SIDE = 1080
 MIN_BITRATE = 1_500_000     # 1.5Mbps — 실측 정상 산출물(쇼츠 2.5M·클립 3.3M) 대비 보수 하한
@@ -757,10 +869,20 @@ class ShortVideoGenerator(Generator):
                 break
         opening = f"{kw_nat}, 궁금하셨죠?"                      # 질문형 오프닝(타깃 키워드 포함, 2~3초)
         # 구조 라벨('핵심 N.') 없이 내용만 — 씬 순서가 목차 역할. 발췌 → 구어화 → 사실 보존 검사.
-        sent = [_cut_word(h, 30) for h in heads] + caps
-        sent = sent[:6]                                          # 30~60초 목표(씬당 ~5초)
         _fact_src = "\n".join([body, tenant.name or "", region_short, kw_nat])   # 근거 = 본문+확정 프로필
-        sent = _to_spoken(sent, _fact_src)
+        # 대본 단위 생성(구조 전환) — 본문 전문+씬 수 1콜, 대본 게이트(중복·예고-이행)+사실 게이트 경유.
+        # 실패 시 기존 씬별 발췌+구어화 폴백(영상 흐름 불차단).
+        _n_scenes = min(6, max(3, len(vid_imgs)))
+        sent = _script_from_body(body, _n_scenes, kw_nat, _fact_src)
+        _script_mode = bool(sent)
+        if not sent:
+            _nlog.warning("[naver-video] 대본 생성 실패 — 씬별 발췌 폴백")
+            sent = ([_cut_word(h, 30) for h in heads] + caps)[:6]
+            sent = _to_spoken(sent, _fact_src)
+        else:
+            # 사진-자막 재배정: 대본 확정 후 씬 내용에 맞는 사진 매칭(서류 씬엔 서류 사진)
+            _gen_src = pl.get("gen_source") or ""
+            vid_imgs = _match_photos(sent, vid_imgs, _gen_src)
         # 클로징 다양화 — 고정 템플릿 대신 글 CTA '사실' 기반 선택(본문에 근거 있는 패턴만, 없으면 현행 유지)
         if any(k in body for k in ("성능점검", "서류", "점검기록부")):
             _cta_line = "서류까지 본문에서 확인하세요"          # 매물형 — 본문이 서류 확인을 다룰 때만
@@ -773,7 +895,7 @@ class ShortVideoGenerator(Generator):
             vid_imgs, SceneScript(hook=opening, sentences=sent, outro=outro, source="body_excerpt", evidence=body),
             kws, tenant, strat, f"{kw0} 정리")
         # 15초 하한 가드(3-4): D.I.A.+ 동영상 가점 기준 미달이면 본문 발췌 캡션을 늘려 1회 재빌드
-        if path and dur and dur < 15 and len(caps) > len(sent) - len(heads):
+        if path and dur and dur < 15 and not _script_mode and len(caps) > len(sent) - len(heads):
             _nlog.warning("[naver-video] %s초 < 15 — 캡션 확장 재빌드", dur)
             sent2 = _to_spoken(([_cut_word(h, 30) for h in heads] + caps)[:MAX_SCENES + 2], _fact_src)
             path2, note2, dur2, _cover2 = self._build_scene_video(
