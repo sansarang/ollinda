@@ -454,7 +454,8 @@ def _script_from_body(body: str, n: int, kw_nat: str, source: str, tone: str = "
                "- 구조: 핵심 내용(본문 등장 순서 유지) → 뒤쪽에 단점·한계 등 정직한 고지 1개.\n"
                "- 어미는 씬마다 변화(명사 종결·질문·청유 혼용, '~입니다' 연속 금지). 과장·보장 표현 금지.\n")
     base = ("아래 블로그 본문을 근거로, 세로 영상 자막 대본을 써라. 전체가 하나의 이야기가 되게.\n"
-            f"- 자막 씬 {n}개, 한 줄씩 출력(번호·라벨 없이). 각 22자 내외(최대 28자) — 한 씬은 3줄 이내로 짧게.\n"
+            f"- 자막 씬 {n}개, 한 줄씩 출력(번호·라벨 없이). 각 씬 12~20자(공백 포함, 절대 24자 초과 금지) — 한 호흡에 읽히게.\n"
+            "- 한 문장이 길면 두 씬으로 쪼개라(내용을 더 많은 짧은 씬에 나눠 담기). 씬 하나에 두 메시지 금지.\n"
             + _struct +
             "- 예고를 했으면('단점부터 볼게요' 등) 바로 다음 씬이 그 내용이어야 한다. 예고만 하고 안 보여주기 금지.\n"
             "- 동일·유사 문장 반복 금지. 씬당 하나의 메시지, 핵심 숫자·단어를 문장 앞에.\n"
@@ -873,7 +874,7 @@ class ShortVideoGenerator(Generator):
         # 실패 시 아래 캡션 내레이션(_viewer_sentences)로 폴백(사실 우선 — 영상은 나온다).
         if _blog_body:
             _kwn = seo._kw_shorten(kws[0]) if kws else prof.name
-            _rsent = _script_from_body(_blog_body, min(6, max(3, len(imgs))), _kwn, _evidence, tone="reach")
+            _rsent = _script_from_body(_blog_body, min(8, max(4, len(imgs))), _kwn, _evidence, tone="reach")
             if _rsent and len(_rsent) >= 3:
                 sent = _rsent
                 __import__("logging").getLogger("shopcast.video").warning("[shorts] 씬 대본(reach) %d씬 채택", len(sent))
