@@ -24,7 +24,7 @@ def call(prompt: str, model: str = MODEL, max_tokens: int = 1200) -> str:
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return _dummy(prompt)
     import anthropic
-    client = anthropic.Anthropic(timeout=60.0)   # 무한 대기 방지(SDK 기본 재시도 유지)
+    client = anthropic.Anthropic(timeout=120.0)  # 무한 대기 방지 — 60초는 Opus 장문에서 ReadTimeout 실측(주안 BLOG 사고)
     _kw = {} if "haiku" in model else {"thinking": {"type": "adaptive"}}   # Haiku는 adaptive thinking 미지원(400)
     resp = client.messages.create(
         model=model, max_tokens=max_tokens,
@@ -162,7 +162,7 @@ def call_task(task: str, prompt: str, max_tokens: int = 1200,
         import anthropic
         content = ([{"type": "image", "source": {"type": "base64", "media_type": mt, "data": b64}}
                     for mt, b64 in images] + [{"type": "text", "text": prompt}])
-        resp = anthropic.Anthropic(timeout=60.0).messages.create(
+        resp = anthropic.Anthropic(timeout=120.0).messages.create(   # 이미지 배치(6장)는 60초로 빠듯 — 실측 상향
             model=am, max_tokens=max_tokens, messages=[{"role": "user", "content": content}])
         return next((b.text for b in resp.content if b.type == "text"), "").strip()
     return call(prompt, am, max_tokens)
