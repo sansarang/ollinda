@@ -4239,7 +4239,7 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
            "<p class='text-xs text-slate-400 mt-2'>사진은 이 파일명 그대로, 캡션은 사진 아래 붙여넣으면 검색에 더 잘 잡혀요.</p>"
            + ("<p class='text-[11px] text-amber-600 mt-1'>📷 일부 사진에 판매 플랫폼 로고·워터마크가 보여요 — 직접 찍은 사진이 검색에 더 유리해요.</p>"
               if "[워터마크]" in ((blog.payload or {}).get("gen_source") or "") else "")
-           f"<form method=post action='/me/set/{asset_id}/photos' enctype='multipart/form-data' class='flex items-center gap-2 mt-2'>"
+           + f"<form method=post action='/me/set/{asset_id}/photos' enctype='multipart/form-data' class='flex items-center gap-2 mt-2'>"
            "<input type=file name=photos accept='image/*' multiple required class='text-xs flex-1'>"
            f"<button class='{cbtn} bg-slate-700 hover:bg-slate-800 whitespace-nowrap'>사진 추가</button></form>"
            "<p class='text-[11px] text-slate-400 mt-1'>과정 사진(물세척·재단 등)을 더 올리면 AI가 슬롯·캡션·영상을 다시 맞춰드려요 — 글 내용은 그대로예요.</p>"
