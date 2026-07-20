@@ -2225,7 +2225,11 @@ def _clean_caption_desc(raw: str) -> str:
         return ""                                                     # 프리앰블 문장 — 묘사 아님
     if not _r.search(r"[가-힣]{2,}", s):
         return ""                                                     # 내용어 없는 라인('(5/20).' 류 카운터) — 묘사 아님
-    return s.rstrip(".")[:60]
+    s = s.rstrip(".")
+    if len(s) > 60:                                                   # 어절 경계 절단('…넓.' 류 잘림 방지)
+        cut = s[:60]
+        s = cut[:cut.rfind(" ")].rstrip(" ,·—-") if " " in cut else cut
+    return s
 
 
 def _caption_gate(text: str) -> str:
