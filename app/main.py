@@ -2203,18 +2203,52 @@ def _seo_photo_name(tenant, blog) -> str:
     return name or "photo"
 
 
+# 캡션 소스 계약(자막 사고와 동일 원칙): 렌더러는 vision 출력의 '묘사 값'만 받는다.
+# 필드 라벨·분석 프리앰블·마크다운이 섞인 원문 전달 금지 — 아래 파서가 스트립, 스트립 후 공백이면
+# 단건 재분석 폴백(기존 4-2a)이 그대로 이어받는다.
+_CAP_LABEL = None    # 지연 컴파일 — vision 필드 라벨/프리앰블 패턴
+_CAP_DOC = ("등록증", "계약서", "신분증", "면허증", "증명서", "서류")   # 개인정보 위험 서류 키워드
+
+
+def _clean_caption_desc(raw: str) -> str:
+    """vision 원문 라인 → 순수 묘사 값. 마크다운 제거 + 필드 라벨 프리픽스 스트립 +
+    프리앰블(분석 안내문) 검출 시 빈 값(→ 재분석 폴백行)."""
+    import re as _r
+    global _CAP_LABEL
+    if _CAP_LABEL is None:
+        _CAP_LABEL = _r.compile(r"^(무엇이 보이는가|보이는 것|해석|분석|촬영 팁|추천 활용|전체)\s*[:：]?\s*")
+    s = _r.sub(r"[*_`#]+", "", raw or "").strip()                    # 마크다운 잔재 제거
+    s = _r.sub(r"^[\d)\-•\s.]+", "", s).strip()
+    s = _CAP_LABEL.sub("", s).strip()
+    s = _r.sub(r"^[:：\-\s]+", "", s).strip()
+    if _r.search(r"(관점에서 분석|분석한 결과|분석입니다|분석하겠|다음과 같)", s):
+        return ""                                                     # 프리앰블 문장 — 묘사 아님
+    return s.rstrip(".")[:60]
+
+
+def _caption_gate(text: str) -> str:
+    """캡션 게이트(렌더 직전) — 내부 라벨·프리앰블·마크다운 잔재 검출 시 차단 사유 반환(자막 게이트 패턴 재사용)."""
+    import re as _r
+    if _r.search(r"[*`#]{2}|보이는가|관점에서 분석|분석한 결과|프롬프트|\[사진\d", text or ""):
+        return "내부 라벨/프리앰블 잔재"
+    return ""
+
+
 def _photo_captions(tenant, blog, n: int) -> list[str]:
-    """(이미지 SEO 5-2) 사진별 붙여넣기 캡션 — vision 분석의 [사진N] 묘사(사실)만 사용 +
-    자연 변형 키워드 1회. 분석 없으면 빈 리스트(날조 캡션 금지)."""
+    """(이미지 SEO 5-2) 사진별 붙여넣기 캡션 — vision 분석의 [사진N] 묘사(사실)만 사용.
+    키워드 자연 변형은 첫·중간·끝 최대 3장에만(도배 방지 — 나머지는 순수 묘사).
+    분석 없으면 빈 리스트(날조 캡션 금지)."""
     import re as _r
     srcnote = (blog.payload or {}).get("gen_source") or ""
     kw = seo._kw_shorten(((blog.payload or {}).get("target_keywords") or [""])[0] or "")
     imgs_ = (blog.payload or {}).get("image_paths") or []
     out = []
     _patched = False
+    kw_slots = {1, max(2, (n + 1) // 2), n} if n >= 3 else {1}       # 키워드 부착 배치: 첫·중간·끝(최대 3장)
     for i in range(1, n + 1):
         m = _r.search(rf"\[사진{i}\]\s*([^\n]+)", srcnote)
-        desc = _r.sub(r"^[\d)*\-•\s]+", "", m.group(1)).strip().rstrip(".")[:60] if m else ""
+        raw_line = m.group(1) if m else ""             # 서류·번호판 검사는 원문 기준(파서가 선두 숫자를 지우므로)
+        desc = _clean_caption_desc(raw_line)
         if len(desc) < 4:
             # (4-2a) 배치 응답 라인 누락·묘사부 공백 → 해당 사진만 단건 재분석 폴백(1회) + gen_source 캐시백.
             # 재실패 시 그 사진 캡션만 생략(빈 껍데기 문장 출력 금지).
@@ -2222,9 +2256,8 @@ def _photo_captions(tenant, blog, n: int) -> list[str]:
                 from app import vision as _vz
                 p_ = imgs_[i - 1] if i - 1 < len(imgs_) else ""
                 one = (_vz.analyze(p_, "") or "").strip() if (p_ and os.path.exists(p_)) else ""
-                first = next((l for l in one.splitlines()
-                              if len(_r.sub(r"^[\d)*\-•\s]+", "", l).strip()) >= 6), "")
-                desc = _r.sub(r"^[\d)*\-•\s]+", "", first).strip().rstrip(".")[:60]
+                first = next((l for l in one.splitlines() if len(_clean_caption_desc(l)) >= 6), "")
+                desc = _clean_caption_desc(first)
                 if len(desc) >= 4:
                     srcnote += f"\n[사진{i}] {desc}"
                     _patched = True
@@ -2233,7 +2266,12 @@ def _photo_captions(tenant, blog, n: int) -> list[str]:
         if len(desc) < 4:
             out.append("")                             # 렌더 가드가 걸러냄 — 빈 문장 미출력
             continue
-        out.append(f"{desc} — {kw} 현장 사진입니다." if kw else f"{desc}.")
+        # 서류 사진 안전장치: 개인정보(성명·주소·차량번호) 서술 금지 — 확인 사실만
+        if (any(k in desc for k in _CAP_DOC)
+                or _r.search(r"\d{2,3}[가-힣]\s?\d{4}", raw_line + " " + desc)):
+            out.append("차량 서류 확인 사진")
+            continue
+        out.append(f"{desc} — {kw} 현장 사진입니다." if (kw and i in kw_slots) else f"{desc}.")
     if _patched:
         try:
             blog.payload["gen_source"] = srcnote[:8000]
@@ -2249,16 +2287,32 @@ def _caption_box(tenant, blog, n: int) -> str:
     if not caps:
         return ""
     import re as _rg
+    import logging as _lg
+
+    def _ok(i, c):
+        if not (c and not _rg.match(r"^\s*[—\-–]", c) and len(c.split("—")[0].strip()) >= 4):
+            return False                                # (4-2b) 빈 묘사 캡션 미출력
+        bad = _caption_gate(c)
+        if bad:                                          # 오염 캡션은 렌더 직전 차단(자막 게이트와 동일 원칙)
+            _lg.getLogger("shopcast.kit").warning("[캡션게이트] 사진%d 차단(%s): %r", i + 1, bad, c[:60])
+            return False
+        return True
+
+    vis = [(i, c) for i, c in enumerate(caps) if _ok(i, c)]
+    if len(vis) < n:                                     # 생략은 침묵 금지 — 정합 경고(사진10 누락 유형)
+        _miss = sorted(set(range(1, n + 1)) - {i + 1 for i, _ in vis})
+        _lg.getLogger("shopcast.kit").warning("[캡션정합] %d/%d건 렌더 — 생략 사진: %s", len(vis), n, _miss)
     rows = "".join(
         f"<div class='flex items-start gap-2 py-1.5 border-b border-slate-100'>"
         f"<span class='text-xs font-bold text-slate-400 flex-shrink-0 mt-0.5'>사진{i + 1}</span>"
         f"<span class='flex-1 text-xs text-slate-600'>{esc(c)}</span>"
         f"<textarea id='cap{i}' class='hidden'>{esc(c)}</textarea>"
         f"<button type=button onclick=\"nvcp('cap{i}',this)\" class='flex-shrink-0 text-[11px] font-bold text-indigo-600'>복사</button></div>"
-        for i, c in enumerate(caps)
-        if c and not _rg.match(r"^\s*[—\-–]", c) and len(c.split("—")[0].strip()) >= 4)   # (4-2b) 빈 묘사 캡션 미출력
+        for i, c in vis)
+    doc_tip = ("<div class='text-[11px] text-amber-600 mt-1.5'>⚠ 서류 사진은 개인정보(성명·주소·차량번호)를 가리고 올리세요.</div>"
+               if any(c == "차량 서류 확인 사진" for _, c in vis) else "")
     return ("<div class='mt-3 bg-slate-50 rounded-xl p-3'>"
-            "<div class='text-xs font-bold text-slate-500 mb-1'>사진 캡션 (사진 아래 붙여넣기)</div>" + rows + "</div>")
+            "<div class='text-xs font-bold text-slate-500 mb-1'>사진 캡션 (사진 아래 붙여넣기)</div>" + rows + doc_tip + "</div>")
 
 
 def _index_label(pub: dict) -> str:
@@ -5244,6 +5298,32 @@ def admin_set_result_preview(asset_id: str):
         return HTMLResponse("<pre>소유 사용자 없음</pre>", status_code=404)
     html = _result_html(u, asset_id)
     return HTMLResponse(html if html else "<pre>렌더 실패(소유 불일치)</pre>")
+
+
+@app.post("/admin/set/{asset_id}/regen-captions")
+def admin_regen_captions(asset_id: str):
+    """사진 캡션 소스만 재생성 — gen_source의 [사진N] 묘사를 vision 재분석으로 교체.
+    글 본문·사진·영상·타 채널 불변. 오염 소스(라벨 유출) 세척용."""
+    import re as _r
+    from app.domain.models import ContentKind as _CK
+    from app.services.ingest import _restore_media
+    from app import vision as _vz
+    blog = next((p for p in db.get_set_pieces(asset_id) if p.kind == _CK.BLOG), None)
+    if not blog:
+        return JSONResponse({"ok": False, "error": "블로그 피스 없음"}, status_code=404)
+    tenant = db.get_tenant(blog.tenant_id)
+    paths = _restore_media(blog.tenant_id, blog.payload.get("image_paths") or [])
+    if not (tenant and paths):
+        return JSONResponse({"ok": False, "error": f"사전조건: paths={len(paths)}"}, status_code=409)
+    fresh = (_vz.analyze_all(paths, tenant.industry) or "").strip()
+    if not _r.search(r"\[사진1\]", fresh):
+        return JSONResponse({"ok": False, "error": "재분석 형식 불량(기존 소스 유지)", "head": fresh[:200]}, status_code=500)
+    src = blog.payload.get("gen_source") or ""
+    src = _r.sub(r"\[사진\d+\][^\n]*\n?", "", src).strip()      # 기존 [사진N] 라인 제거
+    blog.payload["gen_source"] = (fresh + "\n" + src)[:8000]
+    db.save_piece(blog)
+    caps = _photo_captions(tenant, blog, len(paths))
+    return JSONResponse({"ok": True, "n": len(paths), "captions": caps})
 
 
 @app.post("/admin/set/{asset_id}/regen-naver")
