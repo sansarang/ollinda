@@ -5490,6 +5490,7 @@ def admin_set_pieces_json(asset_id: str):
             "video_exists": bool(pl.get("video_path")) and os.path.exists(pl.get("video_path") or ""),
             "duration_sec": pl.get("duration_sec"),
             "subtitles_n": len(pl.get("subtitles") or []),
+            "note": (pl.get("assemble_note") or "")[:200],
             "naver_video": {k: nv.get(k) for k in
                             ("path", "body_path", "title", "filename", "filename_body", "filename_clip",
                              "hashtags", "duration_sec", "quality", "scene_texts")} if nv else None,
