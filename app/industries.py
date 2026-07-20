@@ -531,3 +531,28 @@ def _generate_ai(industry: str, key: str) -> dict | None:
         }
     except Exception:
         return None
+
+
+# ── 영상 자막 스타일 프리셋(조판 리디자인) ─────────────────────────
+# 업종 계열 → 자막 색·강조색·배경 바. video 렌더러가 참조(하드코딩 금지 — 정의는 여기 한 곳).
+# accent = 강조 어절 색(BGR 아님 — RGB, 렌더러가 ASS 색으로 변환), bg_bar = 반투명 띠(밝은 사진 가독).
+SUBTITLE_PRESETS = {
+    "auto":   {"primary": (255, 255, 255), "accent": (255, 214, 0),  "bold": True,  "bg_bar": True},   # 자동차: 화이트+옐로 볼드
+    "soft":   {"primary": (255, 250, 245), "accent": (255, 138, 101), "bold": False, "bg_bar": True},   # 카페·뷰티: 소프트 톤
+    "fresh":  {"primary": (255, 255, 255), "accent": (110, 231, 183), "bold": True,  "bg_bar": True},   # 식당·식품: 그린
+    "basic":  {"primary": (255, 255, 255), "accent": (99, 102, 241),  "bold": True,  "bg_bar": False},  # 기본(현행 톤 유지)
+}
+_PRESET_BY_KEYWORD = [
+    (("자동차", "썬팅", "카센터", "정비", "중고차", "디테일링", "랩핑", "타이어", "모터스"), "auto"),
+    (("카페", "미용", "네일", "뷰티", "피부", "헤어", "속눈썹", "왁싱", "에스테틱"), "soft"),
+    (("식당", "맛집", "고기", "반찬", "베이커리", "빵", "치킨", "분식", "정육"), "fresh"),
+]
+
+
+def subtitle_preset(industry: str) -> dict:
+    """업종 문자열 → 자막 프리셋. 미매칭이면 basic(현행과 동일 동작 — 배포 안전)."""
+    ind = (industry or "").strip()
+    for keys, name in _PRESET_BY_KEYWORD:
+        if any(k in ind for k in keys):
+            return dict(SUBTITLE_PRESETS[name])
+    return dict(SUBTITLE_PRESETS["basic"])

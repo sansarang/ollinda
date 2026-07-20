@@ -125,12 +125,13 @@ def _subtitle_gate(script: "SceneScript", source: str = "", biz_name: str = "",
     경쟁·가격 저격 톤 / 수치 주장 근거 대조(가격·주행거리·연식 — 제목 포함) /
     (번호 라벨은 사전 스트립 후에도 남으면 실패)."""
     import re as _r
-    _nc = _num_claim_check(" ".join([title or ""] + [script.hook] + list(script.sentences)), source)
+    _joined = _r.sub(r"[{}]", "", " ".join([title or ""] + [script.hook] + list(script.sentences)))
+    _nc = _num_claim_check(_joined, source)
     if _nc:
         return _nc
     for t in [script.hook] + list(script.sentences) + [script.outro]:
         for line in (t or "").split("\n"):
-            line = line.strip()
+            line = _r.sub(r"[{}]", "", line).strip()   # 강조 마킹 제거 후 검사(전 항목 동일 적용)
             if not line:
                 continue
             if _SUBTITLE_BAN.search(line):
@@ -202,10 +203,21 @@ def _cut_word(s: str, n: int) -> str:
     return cut[:cut.rfind(" ")].rstrip(" ,·—-") if " " in cut else cut
 
 
+def _parse_emphasis(text: str) -> tuple[str, list]:
+    """자막 강조 마킹 {어절} 파싱 → (마킹 제거 텍스트, 강조 어절 목록[최대 1 — 남발 금지]).
+    마킹은 기존 어절을 감싸는 표시일 뿐 — 텍스트 자체는 사실 게이트를 통과한 그대로."""
+    import re as _r
+    emph = _r.findall(r"\{([^{}]{1,20})\}", text or "")[:1]
+    clean = _r.sub(r"[{}]", "", text or "")
+    return clean, [e.strip() for e in emph if e.strip()]
+
+
 def _fact_guard(line: str, source: str) -> str:
     """변환 출력의 명사·수치가 발췌 원문(source)에 전부 근거하는지 — 새 정보 등장 시 사유 반환.
-    어미 변형('중요할까'→'중요할까요')은 어간 프리픽스 매칭으로 허용."""
+    어미 변형('중요할까'→'중요할까요')은 어간 프리픽스 매칭으로 허용.
+    강조 마킹({})은 제거 후 검사 — 마킹 안 토큰도 동일한 근거 검사를 받는다(주입 통로 차단)."""
     import re as _rg
+    line = _rg.sub(r"[{}]", "", line or "")
     for num in _rg.findall(r"\d+", line):
         if num not in source:
             return f"수치 날조({num})"
@@ -227,11 +239,13 @@ def _to_spoken(sentences: list, source: str) -> list:
     if not sentences:
         return sentences
     from app import llm as _llm
-    prompt = ("아래는 블로그 본문에서 발췌한 문장들이다. 각 문장을 짧은 영상 자막용 구어체로 바꿔라.\n"
+    prompt = ("아래는 블로그 본문에서 발췌한 문장들이다. 각 문장을 '영상 카피'로 바꿔라.\n"
               "규칙:\n"
-              "- 같은 사실만 담아라. 새 정보·수치·명사 추가 절대 금지 — 압축과 어미 변환만 허용.\n"
-              "- 한 문장당 22자 내외(최대 28자), 자연스러운 입말(~요/~죠/~입니다 짧게).\n"
-              "- 질문형이 어울리면 질문형으로(예: '신차 첫 썬팅, 왜 중요할까요?').\n"
+              "- 같은 사실만 담아라. 새 정보·수치·명사 추가 절대 금지 — 압축·재배열·어미 변환만 허용.\n"
+              "- 씬당 하나의 메시지만. 핵심 숫자·단어를 문장 맨 앞으로(예: '830만 원. 신차가 1,327만이던 그 모닝입니다').\n"
+              "- 어미는 씬마다 변화를 줘라: 명사 종결·질문·청유를 섞고 '~입니다' 연속 금지. 과장·보장 표현 금지.\n"
+              "- 한 문장당 22자 내외(최대 28자).\n"
+              "- 각 문장에서 가장 중요한 숫자·차종·핵심명사 어절 하나만 중괄호로 감싸라(예: {830만 원}). 문장당 최대 1개, 없으면 안 감싸도 된다. 중괄호 안 어절은 원문에 있는 그대로만.\n"
               "- 입력과 같은 개수의 줄로, 순서 그대로, 번호·라벨·따옴표 없이 한 줄씩만 출력.\n\n"
               + "\n".join(f"{i + 1}. {s}" for i, s in enumerate(sentences)))
     try:
@@ -248,7 +262,8 @@ def _to_spoken(sentences: list, source: str) -> list:
     out = []
     for orig, conv in zip(sentences, lines):
         bad = _fact_guard(conv, source) if conv else "빈 출력"
-        if bad or len(conv) > 35:
+        _plain = conv.replace("{", "").replace("}", "")
+        if bad or len(_plain) > 35:
             log.warning("[spoken] 문장 차단(%s) — 원문 유지: %r", bad or "길이 초과", conv[:40])
             out.append(orig)
         else:
@@ -384,12 +399,18 @@ def _ts(sec: float) -> str:
     return f"{h}:{m:02d}:{s:05.2f}"
 
 
-def _build_ass(scenes, kws, theme_key, out) -> str:
+def _build_ass(scenes, kws, theme_key, out, preset: dict | None = None) -> str:
     """본문 씬을 단어 단위 카라오케 자막(.ass)으로 — 말하는 단어가 차오르며 강조(프로 시그니처).
     영상강화 PHASE 2: ① 실측 타이밍(ElevenLabs with-timestamps) 있으면 글자수 근사 대신 사용
-    ② 폰트 78 + 외곽선/그림자 강화(모바일 가독) ③ 하단 안전영역 밖(MarginV 380) ④ 키워드 색+굵기 강조."""
-    sung, unsung = "&H00FFFFFF", "&H00B8B8B8"
-    theme = _ass_color(_theme_rgb(theme_key))
+    ② 폰트 78 + 외곽선/그림자 강화(모바일 가독) ③ 하단 안전영역 밖(MarginV 380) ④ 키워드 색+굵기 강조
+    ⑤ 조판 프리셋(industries.subtitle_preset — 업종별 색·강조·반투명 바) + 명시 강조({어절} → 1.3배)."""
+    preset = preset or {}
+    sung = _ass_color(preset.get("primary") or (255, 255, 255))
+    unsung = "&H00B8B8B8"
+    theme = _ass_color(preset.get("accent") or _theme_rgb(theme_key))
+    _bold = "-1" if preset.get("bold", True) else "0"
+    # 반투명 배경 바(밝은 사진 위 가독) — libass BorderStyle=4(줄 배경 박스)
+    _bstyle, _outline = ("4", "10") if preset.get("bg_bar") else ("1", "7")
     kws_low = [k.lower() for k in (kws or []) if k and len(k) >= 2]
     head = (
         "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 0\n"
@@ -398,8 +419,8 @@ def _build_ass(scenes, kws, theme_key, out) -> str:
         "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, "
         "Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
         # 폰트 78·외곽선 7·그림자 4 — 밝은 배경 사진 위에서도 대비 확보(작은 폰 화면 기준)
-        f"Style: Cap,Pretendard,78,{sung},{unsung},&H00101014,&H78000000,-1,0,0,0,100,100,0,0,"
-        "1,7,4,2,80,80,380,1\n\n"
+        f"Style: Cap,Pretendard,78,{sung},{unsung},&H00101014,&H96000000,{_bold},0,0,0,100,100,0,0,"
+        f"{_bstyle},{_outline},4,2,80,80,380,1\n\n"
         "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
 
     def _cw(s):   # 글자 폭 가중치(한글/한자=1, 그 외=0.55) — 줄 길이 계산용
@@ -423,6 +444,7 @@ def _build_ass(scenes, kws, theme_key, out) -> str:
     for sc in scenes:
         start, dur, text = sc[0], sc[1], sc[2]
         word_times = sc[3] if len(sc) > 3 else []
+        emph_words = [e for e in (sc[4] if len(sc) > 4 else []) if e]
         words = [w for w in re.split(r"\s+", (text or "").strip()) if w]
         if not words:
             continue
@@ -441,8 +463,12 @@ def _build_ass(scenes, kws, theme_key, out) -> str:
             cs = (measured[wi] if measured
                   else max(8, int(round(dur * 100 * len(w) / tot))))   # 실측 or 글자수 근사
             wl = w.lower()
+            emph = any(e in w or w in e for e in emph_words)     # 명시 강조({어절}) — 씬당 1개
             hot = any((k in wl) or (wl in k) for k in kws_low) if kws_low else False
-            if hot:   # 키워드는 테마색 + 굵기·크기 강조
+            if emph:  # 강조색 + 1.3배(카피 조판) — 사실 게이트 통과 텍스트 내 마킹만 가능
+                body += ("{\\1c" + theme + "\\b1\\fscx130\\fscy130\\k" + str(cs) + "}" + w
+                         + "{\\1c" + sung + "\\b0\\fscx100\\fscy100} ")
+            elif hot:   # 키워드는 테마색 + 굵기·크기 강조
                 body += ("{\\1c" + theme + "\\b1\\fscx106\\fscy106\\k" + str(cs) + "}" + w
                          + "{\\1c" + sung + "\\b0\\fscx100\\fscy100} ")
             else:
@@ -726,7 +752,14 @@ class ShortVideoGenerator(Generator):
         sent = sent[:6]                                          # 30~60초 목표(씬당 ~5초)
         _fact_src = "\n".join([body, tenant.name or "", region_short, kw_nat])   # 근거 = 본문+확정 프로필
         sent = _to_spoken(sent, _fact_src)
-        outro = f"{tenant.name} · {region_short}\n자세한 내용은 본문에"
+        # 클로징 다양화 — 고정 템플릿 대신 글 CTA '사실' 기반 선택(본문에 근거 있는 패턴만, 없으면 현행 유지)
+        if any(k in body for k in ("성능점검", "서류", "점검기록부")):
+            _cta_line = "서류까지 본문에서 확인하세요"          # 매물형 — 본문이 서류 확인을 다룰 때만
+        elif any(k in body for k in ("예약", "방문", "오시면")):
+            _cta_line = "실차 확인은 예약 한 번이면 됩니다" if "중고" in (tenant.industry or "") else "방문 예약은 본문에서"
+        else:
+            _cta_line = "자세한 내용은 본문에"                  # 공통형(현행)
+        outro = f"{tenant.name} · {region_short}\n{_cta_line}"
         path, note, dur, _cover = self._build_scene_video(
             vid_imgs, SceneScript(hook=opening, sentences=sent, outro=outro, source="body_excerpt", evidence=body),
             kws, tenant, strat, f"{kw0} 정리")
@@ -886,6 +919,7 @@ class ShortVideoGenerator(Generator):
             #    ElevenLabs with-timestamps 실측 단어 타이밍(있으면) → 카라오케 싱크 정확(영상강화 PHASE 2)
             for i, text in enumerate(sentences):
                 img = visuals[i % len(visuals)]
+                text, _emph = _parse_emphasis(text)          # TTS·카드엔 마킹 없는 원문(음성-화면 일치)
                 seg_tts, word_times = tts_lib.synthesize_timed(text, work)
                 td = _probe_dur(seg_tts) if seg_tts else 0
                 # 음성이 있으면 씬 길이 = 음성 길이(+여유). 9초로 자르지 않음 → 긴 문장 나레이션 끊김·자막불일치 방지
@@ -893,7 +927,7 @@ class ShortVideoGenerator(Generator):
                 v = self._scene_video(img, sdur, i, os.path.join(work, f"v{i}.mp4"), tail=XFADE)
                 aw = self._audio_segment(seg_tts, sdur, os.path.join(work, f"a{i}.wav"))
                 if v and aw:
-                    ass_scenes.append((t, sdur, text, word_times))
+                    ass_scenes.append((t, sdur, text, word_times, _emph))
                     vclips.append(v); awavs.append(aw); durs.append(sdur); t += sdur
                 else:
                     dropped += 1
@@ -937,7 +971,9 @@ class ShortVideoGenerator(Generator):
             if not (video_only and full_wav):
                 return None, "concat 실패", 0, None
             # 4) ASS 단어자막 + 진행바 오버레이 — 로고 워터마크 제거(워터마크=노출 감소, PHASE 4)
-            ass = _build_ass(ass_scenes, kws, strat.key, os.path.join(work, "cap.ass"))
+            from app.industries import subtitle_preset as _sp
+            ass = _build_ass(ass_scenes, kws, strat.key, os.path.join(work, "cap.ass"),
+                             preset=_sp(getattr(tenant, "industry", "") or ""))
             fx = self._post_overlay(video_only, ass, total, strat.key)
             # 5) 영상+연속오디오 mux (+BGM: 업종 분위기 선택) — 길이 동일 → 정확히 싱크
             final = self._mux(fx, full_wav, out_dir, mood=bgm_lib.mood_for(tenant.industry))
@@ -1108,7 +1144,7 @@ class ShortVideoGenerator(Generator):
             d = ImageDraw.Draw(im)
             # 훅 텍스트 — 크게, 화면 상단 1/3(첫 프레임부터 한눈에)
             big_lines, fb = None, None
-            for fs in (104, 96, 88, 78, 68):
+            for fs in (120, 108, 98, 88, 76):   # 오프닝 씬 중앙 큰 타이포(조판 리디자인 — 크기 상향)
                 fb = _pil_font(fs, "ExtraBold")
                 ls = self._wrap_lines(d, big, fb, W - 140)
                 if len(ls) <= 2:
