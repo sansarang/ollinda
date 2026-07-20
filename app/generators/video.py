@@ -341,7 +341,7 @@ def _script_gate(lines: list) -> str:
     return ""
 
 
-def _cap_lines(sentences: list, max_lines: int = 3, budget: float = 8.3) -> list:
+def _cap_lines(sentences: list, max_lines: int = 3, budget: float = 9.0) -> list:
     """씬당 3줄 초과 강제 분할(코드 강제) — 긴 문장을 절 경계로 나눠 각 조각이 3줄 이내가 되게.
     분할 조각은 같은 사진을 쓰게 되므로(순서 보존) 사진 정합 유지. 강조 마킹 {} 균형 보존."""
     import re as _r
@@ -374,6 +374,9 @@ def _cap_lines(sentences: list, max_lines: int = 3, budget: float = 8.3) -> list
                 acc = ""
                 for j, w in enumerate(ws):
                     if _w(acc + " " + w) > cap and acc:
+                        # 숫자·단위 경계(830만 | 원)에서 끊지 않기 — 직전 어절이 수/만/억 류면 한 어절 더 포함
+                        if _r.search(r"(\d|만|억|천|년|월|일)$", acc) and j < len(ws):
+                            acc = (acc + " " + w).strip()
                         break
                     acc = (acc + " " + w).strip()
                 out.append(acc.strip(" ,"))
@@ -482,9 +485,10 @@ def _script_from_body(body: str, n: int, kw_nat: str, source: str, tone: str = "
         bad = next((f"{i + 1}번 씬 {_fact_guard(l, source)}" for i, l in enumerate(lines)
                     if _fact_guard(l, source)), "") or _script_gate(lines)
         if not bad:
-            _over = [l for l in lines if len(l.replace("{", "").replace("}", "")) > 46]   # 극단만 재생성(하류 _cap_lines가 3줄 강제)
+            _lim = 30 if tone == "reach" else 46      # reach는 짧은 씬 강제(과분할 방지), info는 하류 캡에 위임
+            _over = [l for l in lines if len(l.replace("{", "").replace("}", "")) > _lim]
             if _over:
-                bad = f"길이 초과: '{_over[0][:30]}…'"
+                bad = f"씬 길이 초과({len(_over)}개, 각 {_lim}자 이내로): '{_over[0][:26]}…'"
         if not bad:
             return lines
         log.warning("[script] 대본 게이트 차단(%d/2): %s", attempt, bad)
