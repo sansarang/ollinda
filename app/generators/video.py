@@ -228,7 +228,8 @@ def _fact_guard(line: str, source: str) -> str:
     # 사실 보존 대상 = 고유명사·수치(차종·필름명·지역·업체명·숫자). '익혀갑니다·불안감이죠'는 서술.
     _PRED = _rg.compile(r"(니다|습니다|세요|해요|어요|아요|였|았|었|겠|드려요|드립니다|이죠|이에요|"
                         r"예요|네요|군요|볼게요|을게요|ㄹ게요|십시오|거예요|되죠|하죠|하고요|"
-                        r"하진|되진|있진|없진|않진|끗하진|랗진|더라|더라고요|거든요|잖아요|는데요)$")
+                        r"하진|되진|있진|없진|않진|끗하진|랗진|더라|더라고요|거든요|잖아요|는데요|"
+                        r"다면|라면|려면|으셔|으세요|으시|시면|가깝다면|싶으셔|고요|드세요|주셔)$")
     src_toks = set(_rg.findall(r"[가-힣]{2,}", source or ""))
     for tok in _rg.findall(r"[가-힣]{3,}", line):   # 2자 토큰은 조사 결합('차라') 오탐이 커 제외(수치는 별도 검사)
         if tok in _SPOKEN_FUNC or _PRED.search(tok):
@@ -317,6 +318,28 @@ def _script_gate(lines: list) -> str:
             if len(_norm_line(nxt)) < 2:
                 return f"예고 후 미이행: '{plain[:24]}'"
     return ""
+
+
+def _dedup_lines(lines: list) -> list:
+    """대본 강등 폴백 — 유사 중복 씬 제거 + 내용 없는 예고형 씬 제거(사실 우선: 영상은 살린다).
+    순서 보존, 첫 등장만 유지."""
+    global _FORESHADOW
+    if _FORESHADOW is None:
+        import re as _r
+        _FORESHADOW = _r.compile(r"(말씀드릴게요|말씀드립니다|공개합니다|알려드릴게요|보여드릴게요|짚어볼게요)[.!?]?$")
+    out, seen = [], []
+    for s in lines:
+        plain = (s or "").replace("{", "").replace("}", "").strip()
+        if not plain:
+            continue
+        t = _norm_line(plain)
+        if any((t and st and len(t & st) / len(t | st) > 0.6) for st in seen):
+            continue                                   # 유사 중복 제거
+        if _FORESHADOW.search(plain) and len(plain) <= 20:
+            continue                                   # 내용 없는 예고형 제거
+        out.append(s)
+        seen.append(t)
+    return out
 
 
 def _script_from_body(body: str, n: int, kw_nat: str, source: str) -> list | None:
@@ -761,6 +784,16 @@ class ShortVideoGenerator(Generator):
             script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm", evidence=_evidence)
             _gate_bad = (_subtitle_gate(script, _evidence, tenant.name, title=title)
                          or _script_gate([hook] + sent)) if sent else "자막 소스 없음(재생성 후에도)"
+        # 강등 폴백(사실 우선 — 대본이 안 나와도 영상은 나온다): 대본(서사) 위반이면 중복·미이행 씬을 제거해 재구성.
+        # 문장 게이트(라벨·인용·업체명·수치) 위반은 강등 불가(오염 자막 방치 금지) → 영상 생략 유지.
+        if _gate_bad and ("중복" in _gate_bad or "미이행" in _gate_bad):
+            _clean = [s for s in _dedup_lines(sent) if _strip_labels(s)]
+            _sc2 = SceneScript(hook=hook, sentences=_clean, outro=outro_cta, source="caption_llm", evidence=_evidence)
+            _sub_bad = _subtitle_gate(_sc2, _evidence, tenant.name, title=title) if _clean else "정제 후 자막 없음"
+            if not _sub_bad and len(_clean) >= 2:
+                _nlogv = __import__("logging").getLogger("shopcast.video")
+                _nlogv.warning("[shorts] 대본 게이트(%s) → 중복·미이행 씬 제거 강등(%d→%d씬)", _gate_bad, len(sent), len(_clean))
+                sent, script, _gate_bad = _clean, _sc2, ""
         if _gate_bad:
             video_path, note, dur_sec, cover_path = None, f"자막 게이트 차단: {_gate_bad}", 0, None
             _scene_note, _scene_ok = note, False
