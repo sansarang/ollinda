@@ -49,6 +49,8 @@ def _pick_title(cands: list[str], kw0: str, body: str = "") -> tuple[str, str]:
             s -= 4; notes.append("가격 약속 근거 없음(-)")
         if re.search(r"추천|후기|방법|비교|가격|정리|총정리|BEST|베스트", c):
             s += 1; notes.append("의도 단어")
+        if re.search(r"^[^,]{2,12},\s", c) or c.count(",") >= 2:   # '추천, 부산 기장…' 쉼표 나열형 — 자연 문장형 우선
+            s -= 3; notes.append("쉼표 나열(-)")
         if s > best_score:
             best, best_score, why = c, s, ", ".join(notes) or "기본"
     return best, f"{why} (점수 {best_score}, 후보 {len(pool)}·게이트 통과 {len(gated)})"

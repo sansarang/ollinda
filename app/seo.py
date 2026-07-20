@@ -49,7 +49,8 @@ def _apply_volume(kws: list[str], limit: int, hints: list[str] | None = None) ->
     return list(dict.fromkeys(keep + extra))[:limit]
 
 
-def product_keywords(note: str = "", brand: str = "", limit: int = 10, industry: str = "") -> list[str]:
+def product_keywords(note: str = "", brand: str = "", limit: int = 10, industry: str = "",
+                     region: str = "") -> list[str]:
     """상품/후기축 키워드 — 온라인 셀러용(지역 대신 상품명+구매의도).
     note의 지시/라벨 라인('['·'-'로 시작: intake 블록·브리프)은 제외 — '사장님 제공 실제' 같은
     라벨이 타겟 키워드로 새어 제목에 박히던 버그 수정. 자유 텍스트 명사가 없으면 업종/브랜드 폴백."""
@@ -65,6 +66,18 @@ def product_keywords(note: str = "", brand: str = "", limit: int = 10, industry:
     heads = [h for h in dict.fromkeys([phrase, short]) if h] or ([brand.strip()] if brand.strip() else [])
     if industry.strip() and industry.strip() not in heads:
         heads.append(industry.strip())                                # 업종(상품명)은 항상 후보에
+    # 체급 보정(셀러·병행): '업종+추천' 류 전국 대형 키워드보다 지역·차종 롱테일을 앞에 —
+    # 신규 블로그(추적 이력 없음)가 이길 수 있는 좁은 판부터(승률 산식엔 체급 로직이 없어 순서로 반영).
+    reg2 = " ".join((region or "").split()[:2])                       # 예: '부산광역시 기장군' → 다중 변형은 지역축이 담당
+    reg2 = _kw_shorten(reg2) if reg2 else ""
+    year = next(iter(re.findall(r"(?:19|20)\d{2}", free_text)), "")
+    model = nouns[0] if nouns else ""
+    if reg2 and industry.strip():
+        kws.append(f"{reg2} {industry.strip()}")                      # 지역+업종: '부산 기장 중고차'
+    if model and year:
+        kws.append(f"{model} {year} 중고")                            # 차종+연식: '모닝 2019 중고'
+    if reg2 and model and model != industry.strip():
+        kws.append(f"{reg2} {model}")                                 # 지역+차종: '부산 기장 모닝'
     for n in heads:
         for it in _PRODUCT_INTENTS:
             kws.append(f"{n} {it}")
@@ -120,9 +133,9 @@ def target_keywords(industry_name: str, region: str, note: str = "", limit: int 
                     axis: str = "local", brand: str = "") -> list[str]:
     """키워드 세트. axis='product'면 상품/후기축(셀러), 'both'면 지역+상품 병합, 기본은 지역축."""
     if axis == "product":
-        return product_keywords(note, brand, limit, industry=industry_name)
+        return product_keywords(note, brand, limit, industry=industry_name, region=region)
     if axis == "both":
-        merged = (product_keywords(note, brand, limit, industry=industry_name)
+        merged = (product_keywords(note, brand, limit, industry=industry_name, region=region)
                   + target_keywords(industry_name, region, note, limit))
         return list(dict.fromkeys(merged))[:limit]
     kws: list[str] = []

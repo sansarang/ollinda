@@ -44,6 +44,8 @@ W, H, FPS = 1080, 1920, 30
 XFADE = 0.25             # 씬 전환 크로스페이드(초) — 검은 플래시 제거(영상강화 PHASE 4)
 MAX_SCENES = 6           # 씬(=문장) 최대 — TTS 호출/길이 제어
 _WRAP_GLUE = {"안", "못", "왜", "다", "더", "꼭", "잘", "첫", "새", "이", "그", "저"}   # 다음 어절과 분리 금지 선행어
+# 앞 어절과 분리 금지 후행어(의존명사·보조용언 계열) — '못 보는 / 건' 류 의미 단위 분리 방지
+_TRAIL_GLUE = {"건", "것", "수", "줄", "때", "데", "점", "중", "뒤", "후", "전", "만", "지", "채", "김에", "대로"}
 MAX_AI_FILL = 2          # 사진 부족 시 AI 이미지 생성 최대 장수(비용 제어)
 MIN_SCENE, MAX_SCENE = 2.2, 9.0   # 씬 길이 클램프(초) — 음성이 잘리지 않게 상한 넉넉히
 PER_IMAGE_SECONDS = 3
@@ -430,8 +432,9 @@ def _build_ass(scenes, kws, theme_key, out) -> str:
         line_w = 0.0
         for wi, w in enumerate(words):
             ww = _cw(w)
-            # 단음절 선행어('안 해요'·'못 가요' 류)는 다음 어절과 한 줄 보장 — 의미 단위 분리 방지
-            _glue = (_cw(words[wi + 1]) + 0.55) if (w in _WRAP_GLUE and wi + 1 < len(words)) else 0.0
+            # 단음절 선행어('안 해요') 또는 다음이 의존명사('보는 건')면 다음 어절과 한 줄 보장
+            _nxt_w = words[wi + 1] if wi + 1 < len(words) else ""
+            _glue = (_cw(_nxt_w) + 0.55) if _nxt_w and (w in _WRAP_GLUE or _nxt_w in _TRAIL_GLUE) else 0.0
             if line_w > 0 and line_w + 0.55 + ww + _glue > LINE_BUDGET:   # 어절 단위 줄바꿈(띄어쓰기 보존)
                 body = body.rstrip() + "\\N"
                 line_w = 0.0
@@ -1196,7 +1199,8 @@ class ShortVideoGenerator(Generator):
             _ws = [x for x in para.split(" ") if x]
             for _i, w in enumerate(_ws):
                 cand = (cur + " " + w) if cur else w
-                _nxt = (" " + _ws[_i + 1]) if (w in _WRAP_GLUE and _i + 1 < len(_ws)) else ""
+                _nw = _ws[_i + 1] if _i + 1 < len(_ws) else ""
+                _nxt = (" " + _nw) if _nw and (w in _WRAP_GLUE or _nw in _TRAIL_GLUE) else ""
                 if d.textlength(cand + _nxt, font=font) <= maxw or (not cur and not _nxt):
                     cur = cand
                     continue

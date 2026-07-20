@@ -51,8 +51,11 @@ def inject(t, piece) -> bool:
     url = tracked_url(t, piece.channel.value, piece.id)
     if not url:
         return False
+    import re as _r
+    _lm = _r.search(r"\[매물 링크\(실제[^\]]*\]\s*(https?://\S+)", piece.payload.get("gen_source") or "")
     raws = [u for u in {(getattr(t, "buy_url", "") or "").strip(),
-                        (getattr(t, "map_url", "") or "").strip()} if u]
+                        (getattr(t, "map_url", "") or "").strip(),
+                        (_lm.group(1) if _lm else "")} if u]        # 세트 매물 링크도 추적 URL 치환(전환 실측)
     changed = False
     for key in ("body", "text", "detail_body"):
         v = piece.payload.get(key)
