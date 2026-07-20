@@ -52,16 +52,30 @@ def inject(t, piece) -> bool:
     if not url:
         return False
     import re as _r
-    _lm = _r.search(r"\[매물 링크\(실제[^\]]*\]\s*(https?://\S+)", piece.payload.get("gen_source") or "")
+    # 세트 매물 링크 — 목적지 보존이 관건: 대표 링크(지도/스토어)가 아니라 '매물 URL로 가는' 전용
+    # 추적 링크를 만들어 치환한다(플레이스행 코드로 바꿔치기하면 손님이 엉뚱한 곳으로 감 — 실측 결함).
+    _lm_src = piece.payload.get("gen_source") or ""
+    if not _lm_src:                                     # 캡션 등 gen_source 없는 피스 → 세트 blog에서 폴백
+        _blog = next((q for q in db.get_set_pieces(piece.asset_id)
+                      if q.kind == ContentKind.BLOG and (q.payload or {}).get("gen_source")), None)
+        _lm_src = (_blog.payload.get("gen_source") if _blog else "") or ""
+    _lm = _r.search(r"\[매물 링크\(실제[^\]]*\]\s*(https?://\S+)", _lm_src)
+    listing_raw = (_lm.group(1) if _lm else "").rstrip(".,)")
+    listing_url = ""
+    if listing_raw:
+        _ll = db.ensure_track_link(t.id, listing_raw, "매물")
+        if _ll:
+            listing_url = f"{_base()}/r/{_ll['code']}?src={piece.channel.value}&content={(piece.id or '')[:8]}"
     raws = [u for u in {(getattr(t, "buy_url", "") or "").strip(),
-                        (getattr(t, "map_url", "") or "").strip(),
-                        (_lm.group(1) if _lm else "")} if u]        # 세트 매물 링크도 추적 URL 치환(전환 실측)
+                        (getattr(t, "map_url", "") or "").strip()} if u]
     changed = False
     for key in ("body", "text", "detail_body"):
         v = piece.payload.get(key)
         if not v:
             continue
         nv = v
+        if listing_raw and listing_url and listing_raw in nv:
+            nv = nv.replace(listing_raw, listing_url)   # 매물 → 매물행 추적 URL(목적지 보존)
         for raw in raws:
             if raw in nv:
                 nv = nv.replace(raw, url)
