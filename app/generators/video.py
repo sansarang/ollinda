@@ -208,7 +208,8 @@ _SPOKEN_FUNC = {"오늘", "지금", "바로", "이렇게", "정말", "함께", "
                 "해드려요", "드려요", "볼까요", "주세요", "하세요", "이라서", "라서", "이라", "이랑", "하고",
                 "더했어요", "했는데", "했으니", "하니까", "되니까", "보니까", "말씀드릴게요", "말씀드립니다",
                 "봤어요", "봐야", "보세요", "골라야", "고르기", "그대로",
-                "번째", "번째로", "첫째", "둘째", "셋째", "먼저", "다음", "이렇게", "저렇게", "무엇을", "어디에"}
+                "번째", "번째로", "첫째", "둘째", "셋째", "먼저", "다음", "이렇게", "저렇게", "무엇을", "어디에",
+                "이번엔", "이번", "그래서", "그러니", "그런데", "오늘은", "이제는", "요즘엔", "이런", "저런", "그런"}
 
 
 def _cut_word(s: str, n: int) -> str:
@@ -457,7 +458,7 @@ def _script_from_body(body: str, n: int, kw_nat: str, source: str, tone: str = "
         bad = next((f"{i + 1}번 씬 {_fact_guard(l, source)}" for i, l in enumerate(lines)
                     if _fact_guard(l, source)), "") or _script_gate(lines)
         if not bad:
-            _over = [l for l in lines if len(l.replace("{", "").replace("}", "")) > 35]
+            _over = [l for l in lines if len(l.replace("{", "").replace("}", "")) > 46]   # 극단만 재생성(하류 _cap_lines가 3줄 강제)
             if _over:
                 bad = f"길이 초과: '{_over[0][:30]}…'"
         if not bad:
