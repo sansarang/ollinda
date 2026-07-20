@@ -864,16 +864,24 @@ class ShortVideoGenerator(Generator):
             script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm", evidence=_evidence)
             _gate_bad = (_subtitle_gate(script, _evidence, tenant.name, title=title)
                          or _script_gate([hook] + sent)) if sent else "자막 소스 없음(재생성 후에도)"
-        # 강등 폴백(사실 우선 — 대본이 안 나와도 영상은 나온다): 대본(서사) 위반이면 중복·미이행 씬을 제거해 재구성.
-        # 문장 게이트(라벨·인용·업체명·수치) 위반은 강등 불가(오염 자막 방치 금지) → 영상 생략 유지.
-        if _gate_bad and ("중복" in _gate_bad or "미이행" in _gate_bad):
-            _clean = _cap_lines([s for s in _dedup_lines(sent) if _strip_labels(s)])
-            _sc2 = SceneScript(hook=hook, sentences=_clean, outro=outro_cta, source="caption_llm", evidence=_evidence)
+        # 강등 폴백(사실 우선 — 영상은 나온다): 소프트 위반(중복·미이행·과장·서식·인용)은 해당 씬만 제거해 재구성.
+        # 하드 위반(수치 날조·업체명 불일치·내부 시그니처)이 남으면 강등 불가(오염 방치 금지) → 영상 생략.
+        if _gate_bad and any(k in _gate_bad for k in ("중복", "미이행", "과장", "서식", "인용")):
+            def _line_hard_bad(_ln):    # 개별 씬의 하드 위반만 True(수치·업체명·시그니처·명령형)
+                _b = _subtitle_gate(SceneScript(hook="", sentences=[_ln], outro="",
+                                                source="caption_llm", evidence=_evidence), _evidence, tenant.name)
+                return bool(_b) and not any(k in _b for k in ("과장", "서식", "인용"))
+            _keep = [s for s in _dedup_lines(sent) if _strip_labels(s) and not _line_hard_bad(s)
+                     and not _subtitle_gate(SceneScript(hook="", sentences=[s], outro="", source="caption_llm", evidence=_evidence), _evidence, tenant.name)]
+            _clean = _cap_lines(_keep)
+            _hk = hook if not _line_hard_bad(hook) and "과장" not in (_subtitle_gate(
+                SceneScript(hook=hook, sentences=["x"], outro="", source="caption_llm", evidence=_evidence), _evidence, tenant.name) or "") else (_clean[0] if _clean else hook)
+            _sc2 = SceneScript(hook=_hk, sentences=_clean, outro=outro_cta, source="caption_llm", evidence=_evidence)
             _sub_bad = _subtitle_gate(_sc2, _evidence, tenant.name, title=title) if _clean else "정제 후 자막 없음"
             if not _sub_bad and len(_clean) >= 2:
                 _nlogv = __import__("logging").getLogger("shopcast.video")
-                _nlogv.warning("[shorts] 대본 게이트(%s) → 중복·미이행 씬 제거 강등(%d→%d씬)", _gate_bad, len(sent), len(_clean))
-                sent, script, _gate_bad = _clean, _sc2, ""
+                _nlogv.warning("[shorts] 게이트(%s) → 위반 씬 제거 강등(%d→%d씬)", _gate_bad, len(sent), len(_clean))
+                hook, sent, script, _gate_bad = _hk, _clean, _sc2, ""
         if _gate_bad:
             video_path, note, dur_sec, cover_path = None, f"자막 게이트 차단: {_gate_bad}", 0, None
             _scene_note, _scene_ok = note, False
