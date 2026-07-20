@@ -417,19 +417,24 @@ def _dedup_lines(lines: list) -> list:
     return out
 
 
-def _script_from_body(body: str, n: int, kw_nat: str, source: str) -> list | None:
-    """본문 전문 → 씬 N개 대본(1콜, Haiku 경로). 구조: 핵심(본문 순서 유지) → 단점·정직 고지 → (클로징은 템플릿).
+def _script_from_body(body: str, n: int, kw_nat: str, source: str, tone: str = "info") -> list | None:
+    """본문 전문 → 씬 N개 대본(1콜, Haiku 경로). tone='info'(네이버 정보형)|'reach'(쇼츠·릴스 도달형).
+    구조: 핵심(본문 순서 유지) → 단점·정직 고지 → (클로징은 템플릿).
     대본 게이트·사실 게이트 실패 시 사유 피드백 재생성 1회 → 재실패 None(호출부 폴백)."""
     import logging as _lg
     log = _lg.getLogger("shopcast.video")
     from app import llm as _llm
+    _struct = ("- 구조: [훅(핵심 숫자·반전을 맨 앞)] → 전개 2~3 → 마무리. 첫 줄은 스크롤 멈추는 강한 훅.\n"
+               "- 톤: 도달형(짧고 리듬감 있는 구어체 허용). 단 과장·보장('짱짱·끝납니다·최고·완벽·무조건') 금지, 경쟁 저격 금지.\n"
+               if tone == "reach" else
+               "- 구조: 핵심 내용(본문 등장 순서 유지) → 뒤쪽에 단점·한계 등 정직한 고지 1개.\n"
+               "- 어미는 씬마다 변화(명사 종결·질문·청유 혼용, '~입니다' 연속 금지). 과장·보장 표현 금지.\n")
     base = ("아래 블로그 본문을 근거로, 세로 영상 자막 대본을 써라. 전체가 하나의 이야기가 되게.\n"
-            f"- 자막 씬 {n}개, 한 줄씩 출력(번호·라벨 없이). 각 22자 내외(최대 28자).\n"
-            "- 구조: 핵심 내용(본문 등장 순서 유지) → 뒤쪽에 단점·한계 등 정직한 고지 1개.\n"
+            f"- 자막 씬 {n}개, 한 줄씩 출력(번호·라벨 없이). 각 22자 내외(최대 28자) — 한 씬은 3줄 이내로 짧게.\n"
+            + _struct +
             "- 예고를 했으면('단점부터 볼게요' 등) 바로 다음 씬이 그 내용이어야 한다. 예고만 하고 안 보여주기 금지.\n"
             "- 동일·유사 문장 반복 금지. 씬당 하나의 메시지, 핵심 숫자·단어를 문장 앞에.\n"
-            "- 어미는 씬마다 변화(명사 종결·질문·청유 혼용, '~입니다' 연속 금지). 과장·보장 표현 금지.\n"
-            "- 본문에 있는 사실만. 새 정보·수치·명사 추가 절대 금지.\n"
+            "- 본문에 있는 사실만. 새 정보·수치·명사 추가 절대 금지. 완결된 문장만(어중간한 조각·조사 시작 금지).\n"
             "- 각 씬에서 가장 중요한 숫자·차종·핵심명사 어절 하나만 {중괄호}로 감싸라(씬당 최대 1개, 원문 어절 그대로).\n"
             "- 출력은 자막 줄만. 머리말·설명·'대본입니다' 류 문장 절대 출력 금지.\n"
             f"- 타깃 키워드: {kw_nat}\n\n[본문]\n" + body[:3500])
@@ -830,14 +835,24 @@ class ShortVideoGenerator(Generator):
 
         _evidence = (asset.note or "")
         _gen_src = ""                                   # 사진-자막 매칭 근거([사진N] vision 묘사)
+        _blog_body = ""
         try:                                            # 본문(있으면)도 인용 근거에 포함
             from app import db as _dbe
             _bp = next((p for p in _dbe.get_set_pieces(asset.id) if p.kind.value == "blog"), None)
             if _bp:
-                _evidence += "\n" + ((_bp.payload or {}).get("body") or "")
+                _blog_body = (_bp.payload or {}).get("body") or ""
+                _evidence += "\n" + _blog_body
                 _gen_src = (_bp.payload or {}).get("gen_source") or ""
         except Exception:
             pass
+        # 씬 크기 대본(도달형) 우선 생성 — 본문 있으면 씬별 짧은 자막을 1콜로(캡션 산문 후분할 대신).
+        # 실패 시 아래 캡션 내레이션(_viewer_sentences)로 폴백(사실 우선 — 영상은 나온다).
+        if _blog_body:
+            _kwn = seo._kw_shorten(kws[0]) if kws else prof.name
+            _rsent = _script_from_body(_blog_body, min(6, max(3, len(imgs))), _kwn, _evidence, tone="reach")
+            if _rsent and len(_rsent) >= 3:
+                sent = _rsent
+                __import__("logging").getLogger("shopcast.video").warning("[shorts] 씬 대본(reach) %d씬 채택", len(sent))
         hook = _strip_labels(hook)
         outro_cta = "\n".join(_strip_labels(l) or l for l in outro_cta.split("\n"))   # 아웃트로 불릿(▶) 세척
         sent = [_strip_labels(s) for s in sent if _strip_labels(s)]
