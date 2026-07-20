@@ -374,9 +374,16 @@ def _cap_lines(sentences: list, max_lines: int = 3, budget: float = 10.0) -> lis
                 rest = " ".join(ws[len(acc.split(" ")):]).strip()
             if rest:
                 out.append(rest.strip(" ,"))
+    # 고립 말미 조각(예: '시운전해 보시고') 병합 — 앞 줄과 합쳐 어중간한 조각 방지(3줄 소폭 초과 허용)
+    merged = []
+    for s in out:
+        if merged and _w(s) < 8 and _w(merged[-1]) + _w(s) <= cap + 8:
+            merged[-1] = (merged[-1].rstrip(" ,") + " " + s).strip()
+        else:
+            merged.append(s)
     # 중괄호 균형 복구(분할로 한쪽만 남으면 제거)
     fixed = []
-    for s in out:
+    for s in merged:
         if s.count("{") != s.count("}"):
             s = s.replace("{", "").replace("}", "")
         fixed.append(s)
@@ -388,12 +395,22 @@ def _seam_dedup(hook: str, sent: list, outro: str) -> list:
     def _sim(a, b):
         ta, tb = _norm_line(a), _norm_line(b)
         return (len(ta & tb) / len(ta | tb)) if (ta and tb) else 0.0
-    s = list(sent)
-    if len(s) >= 2 and _sim(hook, s[0]) > 0.5:
-        s = s[1:]                                       # 훅과 겹치는 첫 씬 제거
-    if len(s) >= 2 and _sim((outro or "").split("\n")[0], s[-1]) > 0.5:
-        s = s[:-1]                                      # 아웃트로와 겹치는 마지막 씬 제거
-    return s
+    def _sim2(a, b):   # 어간 프리픽스 인지 유사도(모닝≈모닝인데)
+        ta, tb = list(_norm_line(a)), list(_norm_line(b))
+        if not (ta and tb):
+            return 0.0
+        inter = sum(1 for x in ta if any(x[:2] == y[:2] and (x in y or y in x or x[:3] == y[:3]) for y in tb))
+        return inter / max(len(ta), len(tb))
+    out, seen = [], []
+    for x in sent:
+        if _sim(hook, x) > 0.5 or _sim2(hook, x) >= 0.6:   # 훅과 겹치는 씬(어간 인지) 전부 제거
+            continue
+        if any(_sim(x, y) > 0.6 or _sim2(x, y) >= 0.7 for y in seen):   # 내부 중복 제거
+            continue
+        out.append(x); seen.append(x)
+    if len(out) >= 2 and _sim((outro or "").split("\n")[0], out[-1]) > 0.5:
+        out = out[:-1]                                  # 아웃트로와 겹치는 마지막 씬 제거
+    return out
 
 
 def _dedup_lines(lines: list) -> list:
