@@ -19,6 +19,25 @@ def configured() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
+def _b64_for_vision(image_path: str) -> tuple[str, str]:
+    """전송용 (media_type, b64) — 긴 변 1568px·JPEG 재인코딩.
+    원본 대용량(스마트폰 4~8MB)은 Anthropic 이미지 제한(5MB/장)에 걸려 폴백 vision이
+    침묵 실패(주안 캡션 재분석 청크 1·2 실증). gemini도 작은 페이로드가 안전·저비용."""
+    try:
+        import io
+        from PIL import Image, ImageOps
+        im = Image.open(image_path)
+        im = ImageOps.exif_transpose(im).convert("RGB")
+        if max(im.size) > 1568:
+            im.thumbnail((1568, 1568))
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=85)
+        return "image/jpeg", base64.standard_b64encode(buf.getvalue()).decode()
+    except Exception:
+        with open(image_path, "rb") as f:
+            return _media_type(image_path), base64.standard_b64encode(f.read()).decode()
+
+
 def _media_type(path: str) -> str:
     p = path.lower()
     if p.endswith(".png"):
@@ -53,8 +72,7 @@ def analyze(image_path: str, industry_name: str = "", context: str | None = None
     if not (configured() and image_path and os.path.exists(image_path)):
         return ""
     try:
-        with open(image_path, "rb") as f:
-            data = base64.standard_b64encode(f.read()).decode()
+        mt, data = _b64_for_vision(image_path)
         prompt = (
             f"이 사진을 한국 소상공인 마케팅 관점에서 분석하라. 업종: {industry_name or '일반'}.\n"
             "다음을 한국어로 간결히(각 1줄):\n"
@@ -67,7 +85,7 @@ def analyze(image_path: str, industry_name: str = "", context: str | None = None
         )
         from app import llm
         return llm.call_task("vision", prompt, 500, default_model=MODEL,
-                             images=[(_media_type(image_path), data)]).strip()
+                             images=[(mt, data)]).strip()
     except Exception:
         return ""
 
@@ -98,8 +116,7 @@ def analyze_all(image_paths: list[str], industry_name: str = "", max_imgs: int =
     try:
         imgs64 = []
         for i, p in enumerate(paths):
-            with open(p, "rb") as f:
-                imgs64.append((_media_type(p), base64.standard_b64encode(f.read()).decode()))
+            imgs64.append(_b64_for_vision(p))
         prompt_all = (
             f"위 사진 {len(paths)}장을 한국 소상공인 마케팅 관점에서 분석하라. 업종: {industry_name or '일반'}.\n"
             "각 사진마다 '[사진N]'으로 구분해서 무엇이 보이는지 구체적으로(피사체·제품·차종·전후 변화·사진 속 글자 그대로).\n"
@@ -121,8 +138,7 @@ def detect_personal_info(image_path: str) -> list[dict]:
     try:
         import json
         import re as _re
-        with open(image_path, "rb") as f:
-            data = base64.standard_b64encode(f.read()).decode()
+        _mt3, data = _b64_for_vision(image_path)
         import anthropic
         client = anthropic.Anthropic()
         prompt = (
@@ -136,7 +152,7 @@ def detect_personal_info(image_path: str) -> list[dict]:
             model=MODEL, max_tokens=700,
             messages=[{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64",
-                 "media_type": _media_type(image_path), "data": data}},
+                 "media_type": _mt3, "data": data}},
                 {"type": "text", "text": prompt},
             ]}])
         txt = next((b.text for b in resp.content if b.type == "text"), "")
