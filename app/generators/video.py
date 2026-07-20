@@ -875,9 +875,11 @@ class ShortVideoGenerator(Generator):
         if _blog_body:
             _kwn = seo._kw_shorten(kws[0]) if kws else prof.name
             _rsent = _script_from_body(_blog_body, min(8, max(4, len(imgs))), _kwn, _evidence, tone="reach")
-            if _rsent and len(_rsent) >= 3:
-                sent = _rsent
-                __import__("logging").getLogger("shopcast.video").warning("[shorts] 씬 대본(reach) %d씬 채택", len(sent))
+            if _rsent and len(_rsent) >= 4:
+                hook = _rsent[0]                      # reach 대본이 훅+씬 전부 소유(캡션 훅과 중복 방지)
+                sent = _rsent[1:]
+                _reach_hook = True
+                __import__("logging").getLogger("shopcast.video").warning("[shorts] 씬 대본(reach) 훅+%d씬 채택", len(sent))
         hook = _strip_labels(hook)
         outro_cta = "\n".join(_strip_labels(l) or l for l in outro_cta.split("\n"))   # 아웃트로 불릿(▶) 세척
         sent = [_strip_labels(s) for s in sent if _strip_labels(s)]
