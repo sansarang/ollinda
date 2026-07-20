@@ -223,10 +223,17 @@ def _fact_guard(line: str, source: str) -> str:
     for num in _rg.findall(r"\d+", line):
         if num not in source:
             return f"수치 날조({num})"
-    for tok in _rg.findall(r"[가-힣]{3,}", line):   # 2자 토큰은 조사 결합('차라' 등) 오탐이 커 명사 검사 제외(수치 검사는 별도)
-        if tok in _SPOKEN_FUNC:
-            continue
-        if any(tok[:n] in source for n in range(len(tok), 1, -1)):   # 어간 프리픽스(2자+)
+    # 서술어(동사·형용사 활용)는 사실이 아니라 표현 — 명사 검사에서 제외(오탐 차단).
+    # 사실 보존 대상 = 고유명사·수치(차종·필름명·지역·업체명·숫자). '익혀갑니다·불안감이죠'는 서술.
+    _PRED = _rg.compile(r"(니다|습니다|세요|해요|어요|아요|였|았|었|겠|드려요|드립니다|"
+                        r"이죠|이에요|예요|네요|군요|볼게요|을게요|ㄹ게요|십시오|거예요|되죠|하죠|하고요)$")
+    src_toks = set(_rg.findall(r"[가-힣]{2,}", source or ""))
+    for tok in _rg.findall(r"[가-힣]{3,}", line):   # 2자 토큰은 조사 결합('차라') 오탐이 커 제외(수치는 별도 검사)
+        if tok in _SPOKEN_FUNC or _PRED.search(tok):
+            continue                                  # 기능어·서술어(활용형)는 통과
+        if any((tok.startswith(s) or s.startswith(tok[:max(2, len(tok) - 2)])) for s in src_toks if len(s) >= 2):
+            continue                                  # 본문과 어간 공유(양방향)
+        if any(tok[:n] in source for n in range(len(tok), 1, -1)):
             continue
         return f"근거 없는 표현({tok})"
     return ""
