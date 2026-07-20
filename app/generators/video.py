@@ -99,11 +99,33 @@ _SHOP_SUFFIX = __import__("re").compile(
     r"([가-힣A-Za-z0-9]{2,}(?:상사|모터스|스토어|공업사|카센터|디테일링|스튜디오|랩핑|썬팅|테크|샵))")
 
 
-def _subtitle_gate(script: "SceneScript", source: str = "", biz_name: str = "") -> str:
+_NUM_CLAIM = None   # 지연 컴파일(아래) — 가격·주행거리·연식 수치 주장 패턴
+
+
+def _num_claim_check(text: str, source: str) -> str:
+    """수치 주장(N만원·N만km·N년식·N원대)의 수치부가 근거(source)에 있어야 — 시세 추정 등
+    '폼에 없는 수치'가 자막·제목에 실리는 것 차단(주안모터스 '신차 1300만 원대' 실증 재발 방지)."""
+    global _NUM_CLAIM
+    import re as _r
+    if _NUM_CLAIM is None:
+        _NUM_CLAIM = _r.compile(r"(\d[\d,.]*)\s*(만\s?원대?|만원대?|만\s?[kK]m|년식|원대)")
+    for m in _NUM_CLAIM.finditer(text or ""):
+        num = m.group(1).replace(",", "")
+        if num and num not in (source or "").replace(",", ""):
+            return f"근거 없는 수치({m.group(0).strip()})"
+    return ""
+
+
+def _subtitle_gate(script: "SceneScript", source: str = "", biz_name: str = "",
+                   title: str = "") -> str:
     """자막 게이트(렌더 직전) — 위반 사유 반환(통과 시 '').
     검사: 내부 텍스트 시그니처 / 명령형 어미 / 근거 없는 따옴표 인용(source 대조) /
-    경쟁·가격 저격 톤 / (번호 라벨은 사전 스트립 후에도 남으면 실패)."""
+    경쟁·가격 저격 톤 / 수치 주장 근거 대조(가격·주행거리·연식 — 제목 포함) /
+    (번호 라벨은 사전 스트립 후에도 남으면 실패)."""
     import re as _r
+    _nc = _num_claim_check(" ".join([title or ""] + [script.hook] + list(script.sentences)), source)
+    if _nc:
+        return _nc
     for t in [script.hook] + list(script.sentences) + [script.outro]:
         for line in (t or "").split("\n"):
             line = line.strip()
@@ -560,14 +582,14 @@ class ShortVideoGenerator(Generator):
         hook = _strip_labels(hook)
         sent = [_strip_labels(s) for s in sent if _strip_labels(s)]
         script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm", evidence=_evidence)
-        _gate_bad = _subtitle_gate(script, _evidence, tenant.name) if sent else "자막 소스 없음(스크립트 파싱 실패)"
+        _gate_bad = _subtitle_gate(script, _evidence, tenant.name, title=title) if sent else "자막 소스 없음(스크립트 파싱 실패)"
         if _gate_bad:                                  # 자막 게이트 — 오염/부재 시 1회 재생성 후 재검
             raw = _llm.call_task("caption", prompt, 1500, default_model=self.model)
             d = _parse_sections(raw, ["제목", "길이", "플랫폼", "훅후보", "훅", "내레이션", "장면"])
             sent = [_strip_labels(s) for s in _viewer_sentences(d)[:MAX_SCENES] if _strip_labels(s)]
             narration = d.get("내레이션", narration)
             script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm", evidence=_evidence)
-            _gate_bad = _subtitle_gate(script, _evidence, tenant.name) if sent else "자막 소스 없음(재생성 후에도)"
+            _gate_bad = _subtitle_gate(script, _evidence, tenant.name, title=title) if sent else "자막 소스 없음(재생성 후에도)"
         if _gate_bad:
             video_path, note, dur_sec, cover_path = None, f"자막 게이트 차단: {_gate_bad}", 0, None
             _scene_note, _scene_ok = note, False
