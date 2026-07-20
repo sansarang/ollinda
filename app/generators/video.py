@@ -613,10 +613,19 @@ class ShortVideoGenerator(Generator):
         script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm", evidence=_evidence)
         _gate_bad = _subtitle_gate(script, _evidence, tenant.name, title=title) if sent else "자막 소스 없음(스크립트 파싱 실패)"
         if _gate_bad:                                  # 자막 게이트 — 오염/부재 시 1회 재생성 후 재검
-            raw = _llm.call_task("caption", prompt, 1500, default_model=self.model)
+            # 차단 사유를 프롬프트에 피드백 — 같은 위반(예: '830만원'→'800만원대' 반올림)이 재현되는 것 방지
+            _retry_prompt = (prompt + f"\n\n[재작성 — 직전 출력이 검증에서 차단됨: {_gate_bad}] "
+                             "숫자·금액은 입력에 있는 값 그대로만 써라(반올림·'~대'·범위 표기 금지). "
+                             "입력에 없는 수치·표현은 절대 만들지 마라.")
+            raw = _llm.call_task("caption", _retry_prompt, 1500, default_model=self.model)
             d = _parse_sections(raw, ["제목", "길이", "플랫폼", "훅후보", "훅", "내레이션", "장면"])
+            scenes_meta = _parse_scenes(d.get("장면", "")) or scenes_meta
+            title = (d.get("제목") or title).strip() or title      # 제목이 차단 원인일 수도 — 함께 재선정
             sent = [_strip_labels(s) for s in _viewer_sentences(d)[:MAX_SCENES] if _strip_labels(s)]
             narration = d.get("내레이션", narration)
+            _hc2 = [h.strip().lstrip("-*·0123456789.) ").strip()
+                    for h in (d.get("훅후보") or d.get("훅") or "").split("\n") if h.strip()]
+            hook = _strip_labels(_pick_hook(_hc2, kws) or hook)
             script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm", evidence=_evidence)
             _gate_bad = _subtitle_gate(script, _evidence, tenant.name, title=title) if sent else "자막 소스 없음(재생성 후에도)"
         if _gate_bad:
