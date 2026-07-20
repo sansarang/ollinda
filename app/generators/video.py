@@ -335,7 +335,7 @@ def _script_gate(lines: list) -> str:
     return ""
 
 
-def _cap_lines(sentences: list, max_lines: int = 3, budget: float = 10.0) -> list:
+def _cap_lines(sentences: list, max_lines: int = 3, budget: float = 8.3) -> list:
     """씬당 3줄 초과 강제 분할(코드 강제) — 긴 문장을 절 경계로 나눠 각 조각이 3줄 이내가 되게.
     분할 조각은 같은 사진을 쓰게 되므로(순서 보존) 사진 정합 유지. 강조 마킹 {} 균형 보존."""
     import re as _r
