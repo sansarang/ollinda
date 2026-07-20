@@ -160,10 +160,17 @@ def _subtitle_gate(script: "SceneScript", source: str = "", biz_name: str = "",
             # ('루마모터스' 유형 오기가 영상·TTS로 재발하는 열린 문 봉쇄 — TTS 대본=자막 동일 소스라 1곳으로 충분)
             if biz_name:
                 _bn = biz_name.replace(" ", "")
+                # 지역+업종 키워드 복합어(예 '부산동구썬팅')는 상호가 아님 → 면제. source에 있으면(키워드·본문) 통과.
+                _srcf = (source or "").replace(" ", "")
                 for cand in _SHOP_SUFFIX.findall(line):      # 공백 없는 연속어만(단어 경계 존중 — 오탐 방지)
                     _c = cand.replace(" ", "")
-                    if _c not in _bn and _bn not in _c:
-                        return f"업체명 불일치: '{cand}' ≠ 프로필 '{biz_name}'"
+                    if _c in _bn or _bn in _c:
+                        continue
+                    if _c in _srcf:                          # 본문·키워드에 있는 지역+업종 복합어 → 상호 아님(면제)
+                        continue
+                    if _r.match(r"^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주|[가-힣]{2,3}(시|군|구|동|읍|면))", _c):
+                        continue                             # 지역명으로 시작 = 상호 아니라 지역 키워드
+                    return f"업체명 불일치: '{cand}' ≠ 프로필 '{biz_name}'"
             # 근거 없는 따옴표 인용(창작 발화) — 인용 내용의 구별 토큰이 입력(경험담·본문)에 없으면 실패
             for q in _r.findall(r"[\"“]([^\"”]{6,60})[\"”]", line):
                 toks = [w for w in _r.findall(r"[가-힣A-Za-z0-9]{3,}", q)][:8]
@@ -250,7 +257,8 @@ def _fact_guard(line: str, source: str) -> str:
         r"진|더라|거든요|잖아요|는데요|는데|지만|으며|면서|니까|어서|아서|해서|다가|"
         r"다면|라면|려면|으셔|으세요|으시|시면|시죠|시다|ㅂ시다|읍시다|갑니다|봅시다|보죠|하시죠|"
         r"까|죠|지|고|서|면|은|는|을|여|해|봐|와|워|줘|대|래|네|군|나|가|데|"
-        r"을까|ㄹ까|던가|든지|거나|든가|을지|ㄹ지|길래|더니|는지)$")
+        r"을까|ㄹ까|던가|든지|거나|든가|을지|ㄹ지|길래|더니|는지|"
+        r"없이|있게|없게|같이|처럼|만큼|토록|도록|채로|대로|듯이|듯)$")
     src_toks = set(_rg.findall(r"[가-힣]{2,}", source or ""))
     for tok in _rg.findall(r"[가-힣]{3,}", line):   # 2자 토큰은 조사 결합('차라') 오탐이 커 제외(수치는 별도 검사)
         if tok in _SPOKEN_FUNC or _PRED.search(tok):
