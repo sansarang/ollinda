@@ -688,6 +688,9 @@ class ShortVideoGenerator(Generator):
             "[훅후보]\n(첫 3초 훅 4안 — 한 줄씩. 검색 유입자가 공감할 문제제기·손실회피형 우선"
             "(예: '여름 앞유리 이거 모르면 손해'). 각 8~16자, 훅 공식(결과/손실회피/호기심갭/숫자) 서로 다르게)\n"
             "[내레이션]\n(한 문장씩 줄바꿈. 각 문장이 한 장면이 됨. 5~6문장, 구어체, 마지막은 CTA)\n"
+            "[대본 규칙 — 한 편의 이야기] ① 첫 문장(훅)에 핵심 숫자·반전을 앞세워라. "
+            "② 예고를 했으면('단점부터 볼게요' 등) 바로 다음 문장이 그 내용이어야 한다 — 예고만 하고 안 보여주기 금지. "
+            "③ 같은·비슷한 문장 반복 금지(각 문장은 새 정보). ④ 전개는 입력 사실의 자연스러운 순서로.\n"
             "[장면]\n1) 0-3초 | 비주얼: .. | 자막: .. | 내레이션: ..\n2) .."
         )
         from app import llm as _llm
@@ -727,22 +730,25 @@ class ShortVideoGenerator(Generator):
         outro_cta += "\n🔖 저장해두고 필요할 때 보세요"       # 저장 유도(정보성 포맷 = 저장 신호, PHASE 5)
 
         _evidence = (asset.note or "")
+        _gen_src = ""                                   # 사진-자막 매칭 근거([사진N] vision 묘사)
         try:                                            # 본문(있으면)도 인용 근거에 포함
             from app import db as _dbe
             _bp = next((p for p in _dbe.get_set_pieces(asset.id) if p.kind.value == "blog"), None)
             if _bp:
                 _evidence += "\n" + ((_bp.payload or {}).get("body") or "")
+                _gen_src = (_bp.payload or {}).get("gen_source") or ""
         except Exception:
             pass
         hook = _strip_labels(hook)
         sent = [_strip_labels(s) for s in sent if _strip_labels(s)]
         script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm", evidence=_evidence)
-        _gate_bad = _subtitle_gate(script, _evidence, tenant.name, title=title) if sent else "자막 소스 없음(스크립트 파싱 실패)"
-        if _gate_bad:                                  # 자막 게이트 — 오염/부재 시 1회 재생성 후 재검
+        _gate_bad = (_subtitle_gate(script, _evidence, tenant.name, title=title)
+                     or _script_gate([hook] + sent)) if sent else "자막 소스 없음(스크립트 파싱 실패)"
+        if _gate_bad:                                  # 자막+대본 게이트 — 오염/서사붕괴 시 1회 재생성 후 재검
             # 차단 사유를 프롬프트에 피드백 — 같은 위반(예: '830만원'→'800만원대' 반올림)이 재현되는 것 방지
             _retry_prompt = (prompt + f"\n\n[재작성 — 직전 출력이 검증에서 차단됨: {_gate_bad}] "
-                             "숫자·금액은 입력에 있는 값 그대로만 써라(반올림·'~대'·범위 표기 금지). "
-                             "입력에 없는 수치·표현은 절대 만들지 마라.")
+                             "위반을 고쳐 전체를 다시 써라. 숫자·금액은 입력에 있는 값 그대로만(반올림·'~대'·범위 금지), "
+                             "예고한 내용은 다음 문장에서 반드시 보여주고, 문장 반복 없이.")
             raw = _llm.call_task("caption", _retry_prompt, 1500, default_model=self.model)
             d = _parse_sections(raw, ["제목", "길이", "플랫폼", "훅후보", "훅", "내레이션", "장면"])
             scenes_meta = _parse_scenes(d.get("장면", "")) or scenes_meta
@@ -753,11 +759,14 @@ class ShortVideoGenerator(Generator):
                     for h in (d.get("훅후보") or d.get("훅") or "").split("\n") if h.strip()]
             hook = _strip_labels(_pick_hook(_hc2, kws) or hook)
             script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm", evidence=_evidence)
-            _gate_bad = _subtitle_gate(script, _evidence, tenant.name, title=title) if sent else "자막 소스 없음(재생성 후에도)"
+            _gate_bad = (_subtitle_gate(script, _evidence, tenant.name, title=title)
+                         or _script_gate([hook] + sent)) if sent else "자막 소스 없음(재생성 후에도)"
         if _gate_bad:
             video_path, note, dur_sec, cover_path = None, f"자막 게이트 차단: {_gate_bad}", 0, None
             _scene_note, _scene_ok = note, False
         else:
+            if _gen_src and sent:                     # 씬 내용 ↔ 사진 vision 태그 매칭(서류 씬=서류 사진 등)
+                vid_imgs = _match_photos(list(sent), vid_imgs, _gen_src)
             video_path, note, dur_sec, cover_path = self._build_scene_video(
                 vid_imgs, script, kws, tenant, strat, title)
             _scene_note = note                                # 씬 경로 결과/오류(진단용)
