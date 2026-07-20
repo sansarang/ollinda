@@ -84,8 +84,9 @@ _SUBTITLE_BAN = __import__("re").compile(
 def _strip_labels(t: str) -> str:
     """원문자·번호·구조 라벨 스트립(①②③, 1., STEP N, '결과 먼저:' 류) — 시청자 자막에 노출 금지."""
     import re as _r
-    t = _r.sub(r"^[①②③④⑤⑥⑦⑧⑨⑩\s]*", "", (t or "").strip())
-    t = _r.sub(r"^(\d+[.)]|STEP ?\d+[:.]?|훅 ?\d[:.]?)\s*", "", t, flags=_r.I)
+    t = (t or "").strip()
+    t = _r.sub(r"^[①②③④⑤⑥⑦⑧⑨⑩▶►▸◆◇●■□★☆※≡»›\-–—•·\s]+", "", t)   # 선두 불릿·특수마커(글 리스트 서식 유출 차단)
+    t = _r.sub(r"^(\d+[.)]|STEP ?\d+[:.]?|훅 ?\d[:.]?)\s*", "", t, flags=_r.I)   # '1.'·'1)'만(2019년식은 보존)
     t = _r.sub(r"^\d*\s*안?\s*\([^)]{2,12}\)\s*[:：]?\s*", "", t)   # '2안(손실회피):' 류 후보 라벨
     t = _r.sub(r"^(결과 먼저|문제 제기|호기심 갭|손실 회피)\s*[:：]\s*", "", t)
     return t.strip()
@@ -147,6 +148,12 @@ def _subtitle_gate(script: "SceneScript", source: str = "", biz_name: str = "",
                 return f"명령형 어미: '{line[:40]}'"
             if _r.search(r"^[①②③④⑤⑥⑦⑧⑨⑩]|^\d+[.)]\s|^STEP ?\d", line, _r.I):
                 return f"번호·구조 라벨 노출: '{line[:40]}'"
+            if _r.search(r"[▶►▸◆◇●■□★☆※≡»›]|[｜|]{2,}|[�]", line):   # 글 리스트 서식·불릿·깨진 특수문자 유출
+                return f"서식 마커 노출: '{line[:40]}'"
+            # 과장·단정 어투(구어체 확장) — 본문 근거 없는 '짱짱·끝납니다·최고·완벽' 류 차단(보장 표현 금지 연장)
+            _exag = _r.search(r"(짱짱|끝장|끝내줍|최고예요|최고입니다|완벽[해합]|무조건|대박|압도적|초특급|끝납니다)", line)
+            if _exag and _exag.group(1).replace("예요", "").replace("입니다", "")[:2] not in (source or ""):
+                return f"과장·단정 표현: '{_exag.group(0)}'"
             if _RIVAL_JAB.search(line):
                 return f"경쟁·가격 저격 톤: '{line[:40]}'"
             # 업체명 정합(4-1): 자막에 상호형 명칭이 등장하면 프로필 실값과 일치해야 통과
@@ -325,6 +332,54 @@ def _script_gate(lines: list) -> str:
             if len(_norm_line(nxt)) < 2:
                 return f"예고 후 미이행: '{plain[:24]}'"
     return ""
+
+
+def _cap_lines(sentences: list, max_lines: int = 3, budget: float = 10.0) -> list:
+    """씬당 3줄 초과 강제 분할(코드 강제) — 긴 문장을 절 경계로 나눠 각 조각이 3줄 이내가 되게.
+    분할 조각은 같은 사진을 쓰게 되므로(순서 보존) 사진 정합 유지. 강조 마킹 {} 균형 보존."""
+    import re as _r
+    cap = max_lines * budget                          # 3줄 ≈ 가중치 30
+    def _w(s):
+        s = s.replace("{", "").replace("}", "")
+        return sum(1.0 if ("가" <= c <= "힣" or "一" <= c <= "鿿") else 0.55 for c in s)
+    out = []
+    for s in sentences:
+        s = (s or "").strip()
+        if not s:
+            continue
+        if _w(s) <= cap:
+            out.append(s)
+            continue
+        # 절 경계 분할(쉼표·강한 연결어미) 후 cap 이하로 재그룹
+        parts = _r.split(r"(?<=[,，、])\s+|(?<=지만)\s+|(?<=는데)\s+|(?<=으며)\s+|(?<=니까)\s+|(?<=어서)\s+|(?<=해서)\s+|(?<=면서)\s+", s)
+        cur = ""
+        for p in [x.strip() for x in parts if x.strip()]:
+            if cur and _w(cur + " " + p) > cap:
+                out.append(cur.strip(" ,"))
+                cur = p
+            else:
+                cur = (cur + " " + p).strip() if cur else p
+        if cur.strip():
+            # 여전히 초과하면 어절 경계로 하드 분할
+            rest = cur.strip()
+            while _w(rest) > cap:
+                ws = rest.split(" ")
+                acc = ""
+                for j, w in enumerate(ws):
+                    if _w(acc + " " + w) > cap and acc:
+                        break
+                    acc = (acc + " " + w).strip()
+                out.append(acc.strip(" ,"))
+                rest = " ".join(ws[len(acc.split(" ")):]).strip()
+            if rest:
+                out.append(rest.strip(" ,"))
+    # 중괄호 균형 복구(분할로 한쪽만 남으면 제거)
+    fixed = []
+    for s in out:
+        if s.count("{") != s.count("}"):
+            s = s.replace("{", "").replace("}", "")
+        fixed.append(s)
+    return fixed
 
 
 def _seam_dedup(hook: str, sent: list, outro: str) -> list:
@@ -744,7 +799,7 @@ class ShortVideoGenerator(Generator):
         scenes_meta = _parse_scenes(d.get("장면", ""))
         title = d.get("제목") or "shorts"          # (근본수정) note 폴백 제거
         # 첫 3초 훅(영상강화 PHASE 1) — 3~5안 중 손실회피·숫자·적정길이 점수로 최강 1개 선택
-        hook_cands = [h.strip().lstrip("-*·0123456789.) ").strip()
+        hook_cands = [_strip_labels(h)
                       for h in (d.get("훅후보") or d.get("훅") or "").split("\n") if h.strip()]
         hook = (_pick_hook(hook_cands, kws)
                 or (scenes_meta[0]["on_screen_text"] if scenes_meta else title[:18])).strip()
@@ -784,8 +839,10 @@ class ShortVideoGenerator(Generator):
         except Exception:
             pass
         hook = _strip_labels(hook)
+        outro_cta = "\n".join(_strip_labels(l) or l for l in outro_cta.split("\n"))   # 아웃트로 불릿(▶) 세척
         sent = [_strip_labels(s) for s in sent if _strip_labels(s)]
         sent = _seam_dedup(hook, sent, outro_cta)      # 훅·아웃트로 이음매 중복 제거
+        sent = _cap_lines(sent)                        # 씬당 3줄 초과 강제 분할(코드 강제)
         script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm", evidence=_evidence)
         _gate_bad = (_subtitle_gate(script, _evidence, tenant.name, title=title)
                      or _script_gate([hook] + sent)) if sent else "자막 소스 없음(스크립트 파싱 실패)"
@@ -798,18 +855,19 @@ class ShortVideoGenerator(Generator):
             d = _parse_sections(raw, ["제목", "길이", "플랫폼", "훅후보", "훅", "내레이션", "장면"])
             scenes_meta = _parse_scenes(d.get("장면", "")) or scenes_meta
             title = (d.get("제목") or title).strip() or title      # 제목이 차단 원인일 수도 — 함께 재선정
-            sent = [_strip_labels(s) for s in _viewer_sentences(d)[:MAX_SCENES] if _strip_labels(s)]
-            narration = d.get("내레이션", narration)
-            _hc2 = [h.strip().lstrip("-*·0123456789.) ").strip()
+            _hc2 = [_strip_labels(h)
                     for h in (d.get("훅후보") or d.get("훅") or "").split("\n") if h.strip()]
             hook = _strip_labels(_pick_hook(_hc2, kws) or hook)
+            sent = [_strip_labels(s) for s in _viewer_sentences(d)[:MAX_SCENES] if _strip_labels(s)]
+            sent = _cap_lines(_seam_dedup(hook, sent, outro_cta))   # 재생성분도 이음매·3줄 캡 동일 적용
+            narration = d.get("내레이션", narration)
             script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm", evidence=_evidence)
             _gate_bad = (_subtitle_gate(script, _evidence, tenant.name, title=title)
                          or _script_gate([hook] + sent)) if sent else "자막 소스 없음(재생성 후에도)"
         # 강등 폴백(사실 우선 — 대본이 안 나와도 영상은 나온다): 대본(서사) 위반이면 중복·미이행 씬을 제거해 재구성.
         # 문장 게이트(라벨·인용·업체명·수치) 위반은 강등 불가(오염 자막 방치 금지) → 영상 생략 유지.
         if _gate_bad and ("중복" in _gate_bad or "미이행" in _gate_bad):
-            _clean = [s for s in _dedup_lines(sent) if _strip_labels(s)]
+            _clean = _cap_lines([s for s in _dedup_lines(sent) if _strip_labels(s)])
             _sc2 = SceneScript(hook=hook, sentences=_clean, outro=outro_cta, source="caption_llm", evidence=_evidence)
             _sub_bad = _subtitle_gate(_sc2, _evidence, tenant.name, title=title) if _clean else "정제 후 자막 없음"
             if not _sub_bad and len(_clean) >= 2:
@@ -822,6 +880,8 @@ class ShortVideoGenerator(Generator):
         else:
             if _gen_src and sent:                     # 씬 내용 ↔ 사진 vision 태그 매칭(서류 씬=서류 사진 등)
                 vid_imgs = _match_photos(list(sent), vid_imgs, _gen_src)
+                __import__("logging").getLogger("shopcast.video").warning(
+                    "[shorts] 사진 재배정 %d씬↔%d장", len(sent), len(vid_imgs))
             video_path, note, dur_sec, cover_path = self._build_scene_video(
                 vid_imgs, script, kws, tenant, strat, title)
             _scene_note = note                                # 씬 경로 결과/오류(진단용)
@@ -958,9 +1018,6 @@ class ShortVideoGenerator(Generator):
             sent = ([_cut_word(h, 30) for h in heads] + caps)[:6]
             sent = _to_spoken(sent, _fact_src)
             sent = _dedup_lines(sent)                 # 폴백도 서사 정제 — 내용없는 예고('단점부터 말씀드릴게요')·중복 제거
-        # 사진-자막 재배정: 씬 내용에 맞는 사진 매칭(대본·폴백 공통 — 서류 씬엔 서류 사진)
-        _gen_src = pl.get("gen_source") or ""
-        vid_imgs = _match_photos(sent, vid_imgs, _gen_src)
         # 클로징 다양화 — 고정 템플릿 대신 글 CTA '사실' 기반 선택(본문에 근거 있는 패턴만, 없으면 현행 유지)
         if any(k in body for k in ("성능점검", "서류", "점검기록부")):
             _cta_line = "서류까지 본문에서 확인하세요"          # 매물형 — 본문이 서류 확인을 다룰 때만
@@ -969,6 +1026,11 @@ class ShortVideoGenerator(Generator):
         else:
             _cta_line = "자세한 내용은 본문에"                  # 공통형(현행)
         outro = f"{tenant.name} · {region_short}\n{_cta_line}"
+        sent = _cap_lines([_strip_labels(s) for s in sent])   # 서식 세척 + 3줄 초과 강제 분할(캡 후 최종 sent로 1회만 매칭)
+        _gen_src2 = pl.get("gen_source") or ""
+        if _gen_src2 and sent:
+            vid_imgs = _match_photos(list(sent), vid_imgs, _gen_src2)   # 씬↔사진 vision 매칭(원본 vid_imgs 순서 기준)
+            _nlog.warning("[naver-video] 사진 재배정 %d씬↔%d장", len(sent), len(vid_imgs))
         path, note, dur, _cover = self._build_scene_video(
             vid_imgs, SceneScript(hook=opening, sentences=sent, outro=outro, source="body_excerpt", evidence=body),
             kws, tenant, strat, f"{kw0} 정리")
