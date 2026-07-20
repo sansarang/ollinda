@@ -5372,7 +5372,8 @@ def admin_set_pieces_json(asset_id: str):
             "video_job": (pl.get("video_job") or None) if p.kind and "BLOG" in str(p.kind) else None,
             "channel_status": (pl.get("channel_status") or None) if p.kind and "BLOG" in str(p.kind) else None,
         })
-    return {"asset_id": asset_id, "pieces": out}
+    _a = db.get_asset(asset_id)
+    return {"asset_id": asset_id, "asset_note": (getattr(_a, "note", "") or "")[:2000], "pieces": out}
 
 
 @app.api_route("/admin/disk", methods=["GET", "POST"])

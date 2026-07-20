@@ -169,6 +169,15 @@ _SPOKEN_FUNC = {"오늘", "지금", "바로", "이렇게", "정말", "함께", "
                 "해드려요", "드려요", "볼까요", "주세요", "하세요", "이라서", "라서", "이라", "이랑", "하고"}
 
 
+def _cut_word(s: str, n: int) -> str:
+    """어절 경계 절단 — '…실차 확인이 답입' 같은 어절 중간 잘림 방지(초과 시 마지막 완전 어절까지)."""
+    s = (s or "").strip()
+    if len(s) <= n:
+        return s
+    cut = s[:n]
+    return cut[:cut.rfind(" ")].rstrip(" ,·—-") if " " in cut else cut
+
+
 def _fact_guard(line: str, source: str) -> str:
     """변환 출력의 명사·수치가 발췌 원문(source)에 전부 근거하는지 — 새 정보 등장 시 사유 반환.
     어미 변형('중요할까'→'중요할까요')은 어간 프리픽스 매칭으로 허용."""
@@ -688,7 +697,7 @@ class ShortVideoGenerator(Generator):
                 break
         opening = f"{kw_nat}, 궁금하셨죠?"                      # 질문형 오프닝(타깃 키워드 포함, 2~3초)
         # 구조 라벨('핵심 N.') 없이 내용만 — 씬 순서가 목차 역할. 발췌 → 구어화 → 사실 보존 검사.
-        sent = [h[:30] for h in heads] + caps
+        sent = [_cut_word(h, 30) for h in heads] + caps
         sent = sent[:6]                                          # 30~60초 목표(씬당 ~5초)
         _fact_src = "\n".join([body, tenant.name or "", region_short, kw_nat])   # 근거 = 본문+확정 프로필
         sent = _to_spoken(sent, _fact_src)
@@ -699,7 +708,7 @@ class ShortVideoGenerator(Generator):
         # 15초 하한 가드(3-4): D.I.A.+ 동영상 가점 기준 미달이면 본문 발췌 캡션을 늘려 1회 재빌드
         if path and dur and dur < 15 and len(caps) > len(sent) - len(heads):
             _nlog.warning("[naver-video] %s초 < 15 — 캡션 확장 재빌드", dur)
-            sent2 = _to_spoken(([h[:30] for h in heads] + caps)[:MAX_SCENES + 2], _fact_src)
+            sent2 = _to_spoken(([_cut_word(h, 30) for h in heads] + caps)[:MAX_SCENES + 2], _fact_src)
             path2, note2, dur2, _cover2 = self._build_scene_video(
                 vid_imgs, SceneScript(hook=opening, sentences=sent2, outro=outro, source="body_excerpt", evidence=body),
                 kws, tenant, strat, f"{kw0} 정리")
