@@ -320,6 +320,19 @@ def _script_gate(lines: list) -> str:
     return ""
 
 
+def _seam_dedup(hook: str, sent: list, outro: str) -> list:
+    """훅 카드↔첫 씬, 마지막 씬↔아웃트로 카드의 이음매 중복 제거(같은 말 연속 재생 방지)."""
+    def _sim(a, b):
+        ta, tb = _norm_line(a), _norm_line(b)
+        return (len(ta & tb) / len(ta | tb)) if (ta and tb) else 0.0
+    s = list(sent)
+    if len(s) >= 2 and _sim(hook, s[0]) > 0.5:
+        s = s[1:]                                       # 훅과 겹치는 첫 씬 제거
+    if len(s) >= 2 and _sim((outro or "").split("\n")[0], s[-1]) > 0.5:
+        s = s[:-1]                                      # 아웃트로와 겹치는 마지막 씬 제거
+    return s
+
+
 def _dedup_lines(lines: list) -> list:
     """대본 강등 폴백 — 유사 중복 씬 제거 + 내용 없는 예고형 씬 제거(사실 우선: 영상은 살린다).
     순서 보존, 첫 등장만 유지."""
@@ -764,6 +777,7 @@ class ShortVideoGenerator(Generator):
             pass
         hook = _strip_labels(hook)
         sent = [_strip_labels(s) for s in sent if _strip_labels(s)]
+        sent = _seam_dedup(hook, sent, outro_cta)      # 훅·아웃트로 이음매 중복 제거
         script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm", evidence=_evidence)
         _gate_bad = (_subtitle_gate(script, _evidence, tenant.name, title=title)
                      or _script_gate([hook] + sent)) if sent else "자막 소스 없음(스크립트 파싱 실패)"
