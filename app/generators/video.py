@@ -1464,6 +1464,11 @@ class ShortVideoGenerator(Generator):
             if final and os.path.exists(final):
                 _ws = os.path.join(out_dir, f"short_{uuid.uuid4().hex}.mp4")
                 if _web_safe_encode(final, _ws) and os.path.exists(_ws):
+                    if out_dir in final:               # 정규화 전 조립본이 out_dir에 있으면 즉시 삭제(디스크 배증 방지)
+                        try:
+                            os.remove(final)
+                        except Exception:
+                            pass
                     final = _ws
                 elif work in final:                    # 재인코딩 실패 → 최소한 작업폴더 밖으로 복사(소실 방지)
                     try:
