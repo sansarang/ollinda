@@ -77,6 +77,9 @@ def init_db() -> None:
             except sqlite3.OperationalError:
                 pass
         c.execute("CREATE TABLE IF NOT EXISTS demo_usage(ip TEXT PRIMARY KEY, count INTEGER, last TEXT)")
+        # 업종 상위 글 패턴 캐시(셀러 패턴 학습 — 7일) : 키워드별 구조 신호 JSON
+        c.execute("CREATE TABLE IF NOT EXISTS kw_pattern_cache("
+                  "keyword TEXT PRIMARY KEY, data TEXT, created_at TEXT)")
         c.execute("CREATE TABLE IF NOT EXISTS place_news("
                   "id TEXT PRIMARY KEY, tenant_id TEXT, text TEXT, created_at TEXT)")
         c.execute("CREATE TABLE IF NOT EXISTS links("
@@ -799,6 +802,35 @@ def mark_publish_indexed(piece_id: str) -> None:
                       "(indexed_at IS NULL OR indexed_at='')", (_now(), piece_id))
     except sqlite3.OperationalError:
         pass
+
+
+def get_kw_pattern(keyword: str, max_age_days: int = 7) -> Optional[dict]:
+    """키워드 상위 패턴 캐시 조회(7일 유효). 없거나 만료면 None."""
+    import json as _j
+    from datetime import datetime as _dt, timedelta as _td
+    try:
+        with _conn() as c:
+            r = c.execute("SELECT data, created_at FROM kw_pattern_cache WHERE keyword=?",
+                          ((keyword or "").strip(),)).fetchone()
+        if not r:
+            return None
+        if _dt.utcnow() - _dt.fromisoformat((r["created_at"] or "")[:19]) > _td(days=max_age_days):
+            return None
+        return _j.loads(r["data"] or "{}")
+    except Exception:
+        return None
+
+
+def save_kw_pattern(keyword: str, data: dict) -> None:
+    import json as _j
+    from datetime import datetime as _dt
+    try:
+        with _conn() as c:
+            c.execute("INSERT OR REPLACE INTO kw_pattern_cache(keyword, data, created_at) VALUES(?,?,?)",
+                      ((keyword or "").strip(), _j.dumps(data, ensure_ascii=False), _dt.utcnow().isoformat()))
+    except Exception:
+        import logging
+        logging.getLogger("shopcast.db").exception("[db] kw_pattern 저장 실패")
 
 
 def recent_asset_rows(hours: int = 24, limit: int = 50) -> list[dict]:

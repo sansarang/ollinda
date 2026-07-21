@@ -86,6 +86,26 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
     from app.generators.editor import polish
     brief = build_brief(tenant, asset)
     asset.note = asset.note + brief_to_directive(brief)
+    # 🔎 업종 상위 패턴 학습(셀러형만 — 이번 범위) : 검색 API 상위 제목·요약의 '구조 경향'만 참고 주입.
+    # 기존 프롬프트 불변 — 별도 블록으로 뒤에 붙임. payload에 사용 여부 기록(효과 비교용).
+    _pattern_used = None
+    try:
+        _bt = (getattr(tenant, "biz_type", "local") or "local")
+        if _bt in ("seller", "hybrid") and "중고차" in ((tenant.industry or "") + (asset.note or "")):
+            from app.services import kwpattern as _kwp
+            _tk = (getattr(asset, "target_kw", "") or "").strip() or (
+                seo.target_keywords(tenant.industry, tenant.region, asset.note,
+                                    axis=resolve_strategy(tenant).keyword_axis, brand=tenant.brand_name) or [""])[0]
+            _pat = _kwp.analyze(_tk)
+            if _pat:
+                _blk = _kwp.directive_block(_pat)
+                if _blk:
+                    asset.note = asset.note + "\n" + _blk
+                    _pattern_used = {"keyword": _tk, "cached": _pat.get("_cached", False),
+                                     "title_types": _pat.get("title_types"), "intro": _pat.get("intro")}
+    except Exception:
+        import logging as _lg3
+        _lg3.getLogger("shopcast.kwpattern").exception("[kwpattern] 주입 실패(무시)")
     # 📈 성과 학습 루프 — 지난 콘텐츠로 순위가 오른 키워드를 다음 생성에 강화 반영(쓸수록 똑똑해짐)
     try:
         learn = db.improving_keywords(tenant.id)
@@ -128,6 +148,8 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
             p.payload["owner_story"] = _exp                     # '내 말이 글이 됐네' 실감 재료
         p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value, p.payload, source=asset.note)
         if p.kind == ContentKind.BLOG:
+            if _pattern_used:
+                p.payload["pattern_learning"] = _pattern_used   # 패턴 사용 여부·신호(효과 비교용 P4)
             from app import llm as _llm
             if _llm.LAST_ROUTE.get("vision"):
                 p.payload["vision_route"] = dict(_llm.LAST_ROUTE["vision"])   # 폴백 기록(원가 추적)                          # GEO(AI검색 준비) 점수 — 블로그만(B2)

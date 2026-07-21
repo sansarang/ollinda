@@ -5477,6 +5477,16 @@ def admin_regen_channel(asset_id: str, kind: str = "", force: str = ""):
                                   (made.payload.get("body") or "")[:400]) if made else None)})
 
 
+@app.get("/admin/kwpattern")
+def admin_kwpattern(kw: str = "", nocache: str = ""):
+    """진단 — 셀러 상위 글 패턴 분석 결과 + 주입 블록 미리보기(검증용)."""
+    from app.services import kwpattern as _kwp
+    pat = _kwp.analyze(kw.strip(), use_cache=(nocache != "1"))
+    if not pat:
+        return JSONResponse({"ok": False, "error": "분석 불가(무키/결과 0/키워드 없음)"}, status_code=404)
+    return JSONResponse({"ok": True, "pattern": pat, "block": _kwp.directive_block(pat)})
+
+
 @app.get("/admin/set/{asset_id}/pieces.json")
 def admin_set_pieces_json(asset_id: str):
     """진단(읽기 전용) — 세트 피스들의 영상 관련 payload 요약(naver 2종·해시태그·자막·경로 존재 여부)."""
