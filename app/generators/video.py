@@ -1163,9 +1163,15 @@ class ShortVideoGenerator(Generator):
             sent = _rs[1:]
         else:
             _nlog.warning("[naver-video] 대본 생성 실패 — 씬별 발췌 폴백")
-            # 폴백 훅: 키워드 원형 조립 대신 업종 기반 질문(셀러·병행은 지역 제외)
-            _hk_kw = _kw_shorten_nolocal(kw_nat, _reg) if _biz in ("seller", "hybrid") else kw_nat
+            # 폴백 훅: 키워드 원형 조립 회피. 셀러·병행=지역 제외, 매장 전용=지역 유지하되 말미 업종어(업체·전문점) 제거(원형 회피).
+            import re as _rh
+            if _biz in ("seller", "hybrid"):
+                _hk_kw = _kw_shorten_nolocal(kw_nat, _reg)
+            else:
+                _hk_kw = _rh.sub(r"\s*(업체|전문점|전문|추천|가격|후기)\s*$", "", kw_nat).strip()
             opening = f"{_hk_kw}, 궁금하셨죠?" if _hk_kw else "지금 확인해 보세요"
+            if _hook_gate(opening, kw_nat, _biz, _reg):        # 폴백 훅도 게이트 — 위반이면 업종만
+                opening = f"{(getattr(tenant,'industry','') or '').split(',')[0].strip() or '지금'}, 궁금하셨죠?"
             sent = ([_cut_word(h, 30) for h in heads] + caps)[:6]
             sent = _to_spoken(sent, _fact_src)
             sent = _dedup_lines(sent)                 # 폴백도 서사 정제 — 내용없는 예고('단점부터 말씀드릴게요')·중복 제거
