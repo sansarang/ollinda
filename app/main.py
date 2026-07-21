@@ -2182,6 +2182,21 @@ def my_blog_published(request: Request, piece_id: str = Form(""), url: str = For
         return RedirectResponse(back + "?err=" + _q(f"등록된 블로그(blog.naver.com/{t.blog_id})의 글 주소가 아니에요"),
                                 status_code=303)
     _confirm_blog_publish(t, piece, url, "manual")
+    # 순위 추적 연계(태그 후보 등록) — 추적 볼륨 한도 내에서만(초과 시 스킵). 태그 상위 2~3개 중 검색형만.
+    try:
+        _existing = set(db.tracked_keywords(t.id, limit=20))
+        _cap = 10                                          # 추적 볼륨 한도(기존 tracked_keywords 기본)
+        if len(_existing) < _cap:
+            import re as _rt
+            _tags = _blog_tags(t, piece)
+            # 검색형 태그만(지역+업종 결합 4자+, 순수 조사·너무 일반 제외) 상위 2~3
+            _cands = [tg for tg in _tags if len(tg) >= 4 and _rt.search(r"(중고차|썬팅|카페|미용|네일|모닝|아반떼)", tg)][:3]
+            for tg in _cands:
+                if tg not in _existing and len(_existing) < _cap:
+                    db.save_rank_snapshot(t.id, tg, None)  # null 랭크=등록만(다음 순위 크론이 확인)
+                    _existing.add(tg)
+    except Exception:
+        pass
     return RedirectResponse(back + "?ok=" + _q("발행 기록 완료! 이 글의 순위 추적이 시작돼요"), status_code=303)
 
 
@@ -2238,6 +2253,87 @@ def _caption_gate(text: str) -> str:
     if _r.search(r"[*`#]{2}|보이는가|관점에서 분석|분석한 결과|프롬프트|\[사진\d", text or ""):
         return "내부 라벨/프리앰블 잔재"
     return ""
+
+
+def _blog_tags(tenant, blog) -> list[str]:
+    """(네이버 블로그 태그 자동 생성 — LLM 0, 코드 조합) 폼 실값·본문 근거 소스로 10~15개.
+    소스 우선순위: 키워드 토큰 조합 → 매물·시공 속성(차종·연식·필름명) → 업종 일반태그 → 지역태그.
+    규칙: 최대 15개, 부분중복 dedupe(파일명 로직 재사용), 금칙어 필터, 근거 없는 태그 금지(폼·본문 대조)."""
+    import re as _r
+    pl = blog.payload or {}
+    kws = pl.get("target_keywords") or []
+    body = pl.get("body") or ""
+    gen = pl.get("gen_source") or ""
+    note = (gen + "\n" + body)                              # 근거 = 폼 입력(gen_source) + 본문
+    region = seo._kw_shorten(getattr(tenant, "region", "") or "")
+    ind = ((getattr(tenant, "industry", "") or "").replace("/", ",").split(",")[0] or "").strip()
+
+    def _sq(s):                                             # 태그 정규화(붙여쓰기 관행 — 공백 제거, 특수문자 제거)
+        return _r.sub(r"[^가-힣A-Za-z0-9]", "", (s or ""))
+
+    cand: list[str] = []
+
+    # a. 타깃 키워드 토큰 분해·조합
+    kw0 = (kws[0] if kws else "").strip()
+    kw_short = seo._kw_shorten(kw0)                        # 광역시·특별시 구어화
+    def _drop_admin(t):                                    # 태그 토큰의 행정접미 제거(부산광역시→부산, 기장군→기장)
+        return _r.sub(r"(특별시|광역시|특별자치시|특별자치도|자치도|시|군|구|도)$", "", t) or t
+    kw_toks = [_drop_admin(t) for t in _r.findall(r"[가-힣A-Za-z0-9]{2,}", kw_short)]
+    kw_toks = [t for t in kw_toks if len(t) >= 2]
+    if kw_short:
+        cand.append(_sq(kw_short))                         # 부산동구썬팅업체(광역시 제거)
+        cand.append(_sq("".join(kw_toks)))                 # 부산동구썬팅업체(행정접미 제거형)
+    if len(kw_toks) >= 2:
+        cand.append(_sq(kw_toks[-2] + kw_toks[-1]))        # 뒤 2토큰 결합(썬팅업체)
+        cand.append(_sq(kw_toks[0] + kw_toks[-1]))         # 지역+핵심(부산썬팅업체)
+    cand += [_sq(t) for t in kw_toks if len(t) >= 2]
+
+    # b. 매물·시공 속성(폼 실값·본문 근거만) — 차종·연식·필름명
+    year = next(iter(_r.findall(r"(20\d{2}|19\d{2})", note)), "")
+    models = [w for w in _r.findall(r"[가-힣]{2,}", note)
+              if w in ("모닝", "아반떼", "그랜저", "쏘나타", "스파크", "레이", "K3", "K5", "코나", "티볼리", "포터", "봉고", "캐스퍼", "경차", "SUV")]
+    for md in dict.fromkeys(models[:2]):
+        cand.append(_sq(md))
+        if year:
+            cand.append(_sq(year + md))                    # 2019모닝
+        cand.append(_sq(md + "중고") if ind and "중고" in ind else _sq(md))
+    # 필름·시공 속성(썬팅 등) — 본문·폼에 있는 고유 제품명만
+    for prod in _r.findall(r"(루마버텍스\s?\d{3,4}|신차패키지|유리막코팅|생활보호PPF|PPF|썬팅지|버텍스)", note):
+        cand.append(_sq(prod))
+
+    # c. 업종 일반태그 2~3개(업종 프로필 기반)
+    _IND_GEN = {"중고차": ["중고차", "중고차추천", "실매물"], "썬팅": ["썬팅", "자동차썬팅", "신차썬팅"],
+                "카페": ["카페", "동네카페"], "미용": ["미용실", "헤어"], "네일": ["네일", "네일아트"]}
+    _ind_short = ind                                       # 지역 태그용 짧은 업종어(중고차·썬팅)
+    for key, tags in _IND_GEN.items():
+        if key in ind or key in note:
+            cand += [_sq(t) for t in tags]
+            _ind_short = key
+            break
+
+    # d. 지역태그 1~2개 — 셀러·병행도 태그는 지역 포함(태그=유입면, 훅 규칙 무관)
+    def _strip_admin(t):                                   # 행정구역 접미 제거(단, 결과 2자 미만이면 원형 유지)
+        s = _r.sub(r"(특별시|광역시|특별자치시|특별자치도|자치도|시|군|구|도)$", "", t)
+        return s if len(s) >= 2 else t
+    _regparts = region.split()
+    reg_wide = _strip_admin(_regparts[0]) if _regparts else ""
+    reg_dong = next((t for t in _regparts if _r.search(r"(시|군|구)$", t)), "")
+    reg_dong = _strip_admin(reg_dong) if reg_dong else ""
+    if reg_wide and _ind_short:
+        cand.append(_sq(reg_wide + _ind_short))           # 부산중고차 / 부산썬팅
+    if reg_dong and _ind_short and reg_dong != reg_wide:
+        cand.append(_sq(reg_dong + _ind_short))           # 기장중고차 / 동구썬팅
+
+    # 근거: 모든 후보는 소스 추출값(키워드 토큰·본문 차종/연식/제품명 화이트리스트·프로필 지역/업종)으로만
+    # 구성되므로 날조가 원천적으로 불가(무사고 등 미기재 신뢰어는 애초에 추가 안 함).
+    # 길이 + 금칙어(표시광고법) + 부분중복 dedupe(파일명 로직 재사용)만 적용.
+    _ok = [t.strip() for t in cand if 2 <= len(t.strip()) <= 20]
+    _ok = [t for t in _ok if not seo.hard_block_hits(t) and t not in seo.RISKY_EXPRESSIONS]
+    seen = list(dict.fromkeys(_ok))                       # 정확 중복 제거(_sq로 공백차이도 흡수)
+    # 근사 부분중복만 제거(길이차 1 이하 = '중고차들'⊂'중고차판매' 류) — 복합+구성요소(부산기장중고차/중고차판매)는
+    # 태그 관행상 서로 다른 유입면이므로 둘 다 유지(파일명 dedupe보다 완화). 순서=소스 우선순위.
+    deduped = [t for t in seen if not any(t != o and t in o and len(o) - len(t) <= 1 for o in seen)]
+    return deduped[:15]
 
 
 def _photo_captions(tenant, blog, n: int) -> list[str]:
@@ -4231,6 +4327,15 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
         f"<div class='bg-slate-50 rounded-xl p-4 text-sm text-slate-700 whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto mb-3'>{esc(body_marked)}</div>"
         f"<textarea id='nvB' class='hidden'>{esc(body_marked)}</textarea>"
         f"<button onclick=\"nvcp('nvB',this)\" class='{cbtn} bg-emerald-500 hover:bg-emerald-600 w-full'>전체 본문 복사</button></div>"
+        # 블로그 태그(쉼표 구분, 원클릭 복사) — 클립 해시태그(# 5개)와 형식·용도 구분
+        + ((lambda _tags: (
+            f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>태그 "
+            "<span class='text-emerald-600'>(복사해서 태그란에 붙여넣기)</span></div>"
+            f"<div class='bg-slate-50 rounded-xl p-3 text-sm text-slate-700 leading-relaxed mb-2'>{esc(', '.join(_tags))}</div>"
+            f"<textarea id='nvTags' class='hidden'>{esc(', '.join(_tags))}</textarea>"
+            f"<button onclick=\"nvcp('nvTags',this)\" class='{cbtn} bg-emerald-500 hover:bg-emerald-600 w-full'>태그 복사</button>"
+            "<p class='text-[11px] text-slate-400 mt-1.5'>발행 화면 맨 아래 태그란에 붙여넣으세요 — 태그로도 손님이 들어와요.</p></div>"
+        ) if _tags else "")(_blog_tags(tenant, blog)))
         # 사진
         + (f"<div class='{sec}'><div class='flex items-center justify-between mb-3'>"
            "<div class='text-xs font-bold text-slate-400'>3. 사진 <span class='text-slate-500'>(순서대로)</span></div>"
