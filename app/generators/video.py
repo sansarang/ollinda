@@ -620,6 +620,42 @@ MIN_SHORT_SIDE = 1080
 MIN_BITRATE = 1_500_000     # 1.5Mbps — 실측 정상 산출물(쇼츠 2.5M·클립 3.3M) 대비 보수 하한
 
 
+def _web_safe_encode(src: str, out: str) -> bool:
+    """웹·네이버 트랜스코더 호환 재인코딩 — yuvj420p(풀레인지)→yuv420p(리미티드) 변환이 핵심.
+    High/L4.0·짝수 해상도·30fps·faststart·AAC 44100 고정. 실패 시 False(호출부가 원본 유지)."""
+    cmd = ["ffmpeg", "-y", "-i", src,
+           "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2:in_range=full:out_range=tv,format=yuv420p",
+           "-c:v", "libx264", "-profile:v", "high", "-level", "4.0", "-pix_fmt", "yuv420p",
+           "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
+           "-preset", "veryfast", "-crf", "20", "-r", "30",
+           "-c:a", "aac", "-ar", "44100", "-b:a", "128k", "-movflags", "+faststart", out]
+    return _run_ff(cmd, 300, "web-safe")
+
+
+def _compat_check(path: str) -> tuple[bool, dict]:
+    """웹 재생 호환 검사 — pix_fmt=yuv420p, 코덱 h264+aac, faststart, 짝수 해상도. (합격, 스펙)."""
+    import json as _j
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                            "stream=codec_type,codec_name,pix_fmt,width,height", "-of", "json", path],
+                           capture_output=True, timeout=30)
+        d = _j.loads(r.stdout.decode("utf-8", "ignore") or "{}")
+        vs = next((s for s in d.get("streams", []) if s.get("codec_type") == "video"), {})
+        aus = next((s for s in d.get("streams", []) if s.get("codec_type") == "audio"), {})
+        pix = vs.get("pix_fmt", ""); w = int(vs.get("width") or 0); h = int(vs.get("height") or 0)
+        # faststart: moov가 파일 앞쪽(mdat 이전)
+        head = open(path, "rb").read(1_000_000)
+        _mv, _md = head.find(b"moov"), head.find(b"mdat")
+        faststart = (0 <= _mv) and (_md < 0 or _mv < _md)
+        spec = {"pix_fmt": pix, "vcodec": vs.get("codec_name"), "acodec": aus.get("codec_name"),
+                "faststart": faststart, "even": (w % 2 == 0 and h % 2 == 0)}
+        ok = (pix == "yuv420p" and vs.get("codec_name") == "h264"
+              and (not aus or aus.get("codec_name") == "aac") and faststart and spec["even"])
+        return ok, spec
+    except Exception:
+        return True, {}                                    # 검사 불가 시 통과(발행 흐름 유지)
+
+
 def _probe_quality(path: str) -> tuple[bool, dict]:
     """렌더 산출물 화질 자동 검사 — (합격 여부, {width,height,bitrate}). 프로브 실패는 통과(발행 흐름 유지)."""
     try:
@@ -1222,6 +1258,19 @@ class ShortVideoGenerator(Generator):
         # 화질 게이트(R3): 9:16 원본 그대로 제공 — 블러 패딩·리스케일 파일 생성 금지.
         # 기준 미달(1080 미만 또는 저비트레이트)이면 재빌드 1회 — 저품질이 조용히 발행되는 구조 금지.
         _q_ok, _spec = _probe_quality(final)
+        _cp_ok, _cp_spec = _compat_check(final)        # 웹 재생 호환(pix_fmt·faststart·코덱·짝수)
+        if not _cp_ok:                                 # 비호환 → 웹 안전 재인코딩 즉시 교정(재빌드 불필요)
+            _fix = os.path.join(out_dir, f"naver_{uuid.uuid4().hex}.mp4")
+            if _web_safe_encode(final, _fix) and os.path.exists(_fix):
+                _nlog.warning("[naver-video] 비호환 %s → 웹 안전 재인코딩", _cp_spec)
+                try:
+                    os.remove(final)
+                except Exception:
+                    pass
+                final = _fix
+                _cp_ok, _cp_spec = _compat_check(final)
+            if not _cp_ok:
+                _nlog.warning("[naver-video] 재인코딩 후에도 비호환 %s(발행은 유지)", _cp_spec)
         if not _q_ok:
             _nlog.warning("[naver-video] 화질 미달 %s — 재빌드 1회", _spec)
             path2, note2, dur2, _c2 = self._build_scene_video(
@@ -1405,15 +1454,18 @@ class ShortVideoGenerator(Generator):
             fx = self._post_overlay(video_only, ass, total, strat.key)
             # 5) 영상+연속오디오 mux (+BGM: 업종 분위기 선택) — 길이 동일 → 정확히 싱크
             final = self._mux(fx, full_wav, out_dir, mood=bgm_lib.mood_for(tenant.industry))
-            # 안전장치: 최종본이 작업폴더 안이면 out_dir로 복사(rmtree 삭제 방지 → 재생 404 원천 차단)
-            if final and (work in final):
-                safe = os.path.join(out_dir, f"short_{uuid.uuid4().hex}.mp4")
-                try:
-                    shutil.copy(final, safe)
-                    final = safe
-                except Exception as ce:
-                    import logging
-                    logging.warning("[video] 안전복사 실패(작업폴더 경로 유지 → 정리로 소실 위험): %r", ce)
+            # 웹·네이버 호환 재인코딩(3채널 공통 단일 빌더) — yuvj420p→yuv420p 등 안전 프로파일 강제.
+            # 실패해도 원본 유지(발행 흐름 불차단). 산출은 항상 out_dir(작업폴더 밖 — rmtree 404 방지).
+            if final and os.path.exists(final):
+                _ws = os.path.join(out_dir, f"short_{uuid.uuid4().hex}.mp4")
+                if _web_safe_encode(final, _ws) and os.path.exists(_ws):
+                    final = _ws
+                elif work in final:                    # 재인코딩 실패 → 최소한 작업폴더 밖으로 복사(소실 방지)
+                    try:
+                        shutil.copy(final, _ws); final = _ws
+                    except Exception as ce:
+                        import logging
+                        logging.warning("[video] 안전복사 실패: %r", ce)
             # 6) 커버(썸네일) = 훅 카드
             cover = os.path.join(out_dir, f"cover_{uuid.uuid4().hex}.png")
             try:
