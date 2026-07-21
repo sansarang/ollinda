@@ -452,7 +452,39 @@ def _dedup_lines(lines: list) -> list:
     return out
 
 
-def _script_from_body(body: str, n: int, kw_nat: str, source: str, tone: str = "info") -> list | None:
+def _kw_shorten_nolocal(kw: str, region: str) -> str:
+    """폴백 훅용 — 키워드에서 지역 토큰(시·군·구·동 이름)을 제거(셀러·병행)."""
+    import re as _r
+    toks = [t for t in (kw or "").split() if t]
+    reg_toks = set(_r.findall(r"[가-힣]{2,}", region or ""))
+    out = [t for t in toks if t not in reg_toks and not _r.search(r"(시|군|구|동|읍|면)$", t)]
+    return " ".join(out).strip() or (toks[-1] if toks else "")
+
+
+def _hook_gate(hook: str, keyword: str, biz_type: str, region: str) -> str:
+    """오프닝 훅 게이트 — 위반 사유(통과 시 ''). ① 타깃 키워드 원형 통째 삽입 금지(비문·도배)
+    ② 셀러·병행 가게는 훅에 지역명 금지(전국 탁송 손님 초장에 거르기 방지). 매장 전용은 지역 허용."""
+    import re as _r
+    h = _r.sub(r"[{}]", "", hook or "").strip()
+    kw = (keyword or "").strip()
+    if kw and kw.replace(" ", "") in h.replace(" ", ""):     # 키워드 원형 통째 → 차단
+        return f"키워드 원형 삽입('{kw}')"
+    if (biz_type or "local") in ("seller", "hybrid"):
+        _regcores = set()
+        for tok in _r.findall(r"[가-힣]{2,}", region or ""):
+            core = _r.sub(r"(특별시|광역시|특별자치시|특별자치도|자치도|시|군|구|읍|면|동|도)$", "", tok)
+            if len(core) >= 2:
+                _regcores.add(core)
+            if len(tok) >= 2:
+                _regcores.add(tok)
+        for core in _regcores:
+            if core in h:                                    # 셀러·병행 훅에 지역명(어간) → 차단
+                return f"셀러·병행 훅 지역명 노출('{core}')"
+    return ""
+
+
+def _script_from_body(body: str, n: int, kw_nat: str, source: str, tone: str = "info",
+                      biz_type: str = "local", region: str = "") -> list | None:
     """본문 전문 → 씬 N개 대본(1콜, Haiku 경로). tone='info'(네이버 정보형)|'reach'(쇼츠·릴스 도달형).
     구조: 핵심(본문 순서 유지) → 단점·정직 고지 → (클로징은 템플릿).
     대본 게이트·사실 게이트 실패 시 사유 피드백 재생성 1회 → 재실패 None(호출부 폴백)."""
@@ -464,6 +496,13 @@ def _script_from_body(body: str, n: int, kw_nat: str, source: str, tone: str = "
                if tone == "reach" else
                "- 구조: 핵심 내용(본문 등장 순서 유지) → 뒤쪽에 단점·한계 등 정직한 고지 1개.\n"
                "- 어미는 씬마다 변화(명사 종결·질문·청유 혼용, '~입니다' 연속 금지). 과장·보장 표현 금지.\n")
+    _allow_region = (biz_type or "local") not in ("seller", "hybrid")   # 매장 전용만 지역 허용
+    _hook_rule = (
+        "- 첫 줄(훅)은 검색자의 실제 궁금증으로 새로 써라. 소재는 "
+        + ("지역·방문(예 '○○에서 썬팅, 어디에 맡길까요?')" if _allow_region
+           else "매물·불안·가격·상태(예 '9만km 모닝, 830만 원이면 어떤 상태일까요?' / '무사고, 그 말 그대로 믿으세요?')") + ".\n"
+        + ("" if _allow_region else "- 훅과 모든 자막에 지역명(시·군·구·동 이름)을 넣지 마라 — 전국 손님이 대상이다.\n")
+        + "- 타깃 키워드를 통째로 훅에 넣지 마라(비문·도배). 질문·반전으로 자연스럽게.\n")
     base = ("아래 블로그 본문을 근거로, 세로 영상 자막 대본을 써라. 전체가 하나의 이야기가 되게.\n"
             f"- 자막 씬 {n}개, 한 줄씩 출력(번호·라벨 없이). 각 씬 12~20자(공백 포함, 절대 24자 초과 금지) — 한 호흡에 읽히게.\n"
             "- 한 문장이 길면 두 씬으로 쪼개라(내용을 더 많은 짧은 씬에 나눠 담기). 씬 하나에 두 메시지 금지.\n"
@@ -473,7 +512,8 @@ def _script_from_body(body: str, n: int, kw_nat: str, source: str, tone: str = "
             "- 본문에 있는 사실만. 새 정보·수치·명사 추가 절대 금지. 완결된 문장만(어중간한 조각·조사 시작 금지).\n"
             "- 각 씬에서 가장 중요한 숫자·차종·핵심명사 어절 하나만 {중괄호}로 감싸라(씬당 최대 1개, 원문 어절 그대로).\n"
             "- 출력은 자막 줄만. 머리말·설명·'대본입니다' 류 문장 절대 출력 금지.\n"
-            f"- 타깃 키워드: {kw_nat}\n\n[본문]\n" + body[:3500])
+            + _hook_rule +
+            f"- 타깃 키워드(참고용 — 훅·자막에 이 문구를 통째로 넣지 말고, 검색자의 실제 궁금증을 네 말로): {kw_nat}\n\n[본문]\n" + body[:3500])
     feedback = ""
     for attempt in (1, 2):
         try:
@@ -492,6 +532,10 @@ def _script_from_body(body: str, n: int, kw_nat: str, source: str, tone: str = "
             continue
         bad = next((f"{i + 1}번 씬 {_fact_guard(l, source)}" for i, l in enumerate(lines)
                     if _fact_guard(l, source)), "") or _script_gate(lines)
+        if not bad and lines:                          # 첫 줄=훅 게이트(키워드 원형·셀러/병행 지역명)
+            _hb = _hook_gate(lines[0], kw_nat, biz_type, region)
+            if _hb:
+                bad = f"훅 {_hb}"
         if not bad:
             _lim = 30 if tone == "reach" else 46      # reach는 짧은 씬 강제(과분할 방지), info는 하류 캡에 위임
             _over = [l for l in lines if len(l.replace("{", "").replace("}", "")) > _lim]
@@ -916,7 +960,9 @@ class ShortVideoGenerator(Generator):
         # 실패 시 아래 캡션 내레이션(_viewer_sentences)로 폴백(사실 우선 — 영상은 나온다).
         if _blog_body:
             _kwn = seo._kw_shorten(kws[0]) if kws else prof.name
-            _rsent = _script_from_body(_blog_body, min(8, max(4, len(imgs))), _kwn, _evidence, tone="reach")
+            _rsent = _script_from_body(_blog_body, min(8, max(4, len(imgs))), _kwn, _evidence, tone="reach",
+                                       biz_type=(getattr(tenant, "biz_type", "local") or "local"),
+                                       region=(getattr(tenant, "region", "") or ""))
             if _rsent and len(_rsent) >= 4:
                 hook = _rsent[0]                      # reach 대본이 훅+씬 전부 소유(캡션 훅과 중복 방지)
                 sent = _rsent[1:]
@@ -928,8 +974,11 @@ class ShortVideoGenerator(Generator):
         sent = _seam_dedup(hook, sent, outro_cta)      # 훅·아웃트로 이음매 중복 제거
         sent = _cap_lines(sent)                        # 씬당 3줄 초과 강제 분할(코드 강제)
         script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm", evidence=_evidence)
+        _kw0 = (kws[0] if kws else "")
+        _bizt = (getattr(tenant, "biz_type", "local") or "local")
+        _regt = getattr(tenant, "region", "") or ""
         _gate_bad = (_subtitle_gate(script, _evidence, tenant.name, title=title)
-                     or _script_gate([hook] + sent)) if sent else "자막 소스 없음(스크립트 파싱 실패)"
+                     or _script_gate([hook] + sent) or _hook_gate(hook, _kw0, _bizt, _regt)) if sent else "자막 소스 없음(스크립트 파싱 실패)"
         if _gate_bad:                                  # 자막+대본 게이트 — 오염/서사붕괴 시 1회 재생성 후 재검
             # 차단 사유를 프롬프트에 피드백 — 같은 위반(예: '830만원'→'800만원대' 반올림)이 재현되는 것 방지
             _retry_prompt = (prompt + f"\n\n[재작성 — 직전 출력이 검증에서 차단됨: {_gate_bad}] "
@@ -947,10 +996,10 @@ class ShortVideoGenerator(Generator):
             narration = d.get("내레이션", narration)
             script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm", evidence=_evidence)
             _gate_bad = (_subtitle_gate(script, _evidence, tenant.name, title=title)
-                         or _script_gate([hook] + sent)) if sent else "자막 소스 없음(재생성 후에도)"
+                         or _script_gate([hook] + sent) or _hook_gate(hook, _kw0, _bizt, _regt)) if sent else "자막 소스 없음(재생성 후에도)"
         # 강등 폴백(사실 우선 — 영상은 나온다): 소프트 위반(중복·미이행·과장·서식·인용)은 해당 씬만 제거해 재구성.
         # 하드 위반(수치 날조·업체명 불일치·내부 시그니처)이 남으면 강등 불가(오염 방치 금지) → 영상 생략.
-        if _gate_bad and any(k in _gate_bad for k in ("중복", "미이행", "과장", "서식", "인용")):
+        if _gate_bad and any(k in _gate_bad for k in ("중복", "미이행", "과장", "서식", "인용", "훅")):
             def _line_hard_bad(_ln):    # 개별 씬의 하드 위반만 True(수치·업체명·시그니처·명령형)
                 _b = _subtitle_gate(SceneScript(hook="", sentences=[_ln], outro="",
                                                 source="caption_llm", evidence=_evidence), _evidence, tenant.name)
@@ -1097,16 +1146,23 @@ class ShortVideoGenerator(Generator):
                 caps.append(s)
             if len(caps) >= max(1, len(vid_imgs) - 1):
                 break
-        opening = f"{kw_nat}, 궁금하셨죠?"                      # 질문형 오프닝(타깃 키워드 포함, 2~3초)
         # 구조 라벨('핵심 N.') 없이 내용만 — 씬 순서가 목차 역할. 발췌 → 구어화 → 사실 보존 검사.
         _fact_src = "\n".join([body, tenant.name or "", region_short, kw_nat])   # 근거 = 본문+확정 프로필
-        # 대본 단위 생성(구조 전환) — 본문 전문+씬 수 1콜, 대본 게이트(중복·예고-이행)+사실 게이트 경유.
+        _biz = (getattr(tenant, "biz_type", "local") or "local")
+        _reg = getattr(tenant, "region", "") or ""
+        # 대본 단위 생성(구조 전환) — 대본 첫 줄이 훅(고정 템플릿 폐기), 훅 게이트(키워드 원형·지역) 경유.
         # 실패 시 기존 씬별 발췌+구어화 폴백(영상 흐름 불차단).
-        _n_scenes = min(6, max(3, len(vid_imgs)))
-        sent = _script_from_body(body, _n_scenes, kw_nat, _fact_src)
-        _script_mode = bool(sent)
-        if not sent:
+        _n_scenes = min(7, max(4, len(vid_imgs)))
+        _rs = _script_from_body(body, _n_scenes, kw_nat, _fact_src, tone="info", biz_type=_biz, region=_reg)
+        _script_mode = bool(_rs and len(_rs) >= 4)
+        if _script_mode:
+            opening = _rs[0]                           # 대본이 쓴 훅(검색자 궁금증) — 고정 조립 폐기
+            sent = _rs[1:]
+        else:
             _nlog.warning("[naver-video] 대본 생성 실패 — 씬별 발췌 폴백")
+            # 폴백 훅: 키워드 원형 조립 대신 업종 기반 질문(셀러·병행은 지역 제외)
+            _hk_kw = _kw_shorten_nolocal(kw_nat, _reg) if _biz in ("seller", "hybrid") else kw_nat
+            opening = f"{_hk_kw}, 궁금하셨죠?" if _hk_kw else "지금 확인해 보세요"
             sent = ([_cut_word(h, 30) for h in heads] + caps)[:6]
             sent = _to_spoken(sent, _fact_src)
             sent = _dedup_lines(sent)                 # 폴백도 서사 정제 — 내용없는 예고('단점부터 말씀드릴게요')·중복 제거
