@@ -504,32 +504,62 @@ def _script_from_body(body: str, n: int, kw_nat: str, source: str, tone: str = "
     return None
 
 
-def _match_photos(lines: list, imgs: list, gen_source: str) -> list:
-    """대본 확정 후 씬 내용 ↔ 사진 매칭 — gen_source의 [사진N] 묘사 토큰 겹침 점수(서류 씬엔 서류 사진).
-    매칭 근거 없으면 원래 순서 유지. 반환 = 씬 순서대로 정렬된 이미지 목록(길이 동일)."""
+# 씬 자막 유형 → 우선 매칭할 사진 묘사 키워드(vision 태그 우선순위 보정 — 정밀화 2-3)
+_SCENE_PHOTO_HINT = [
+    (("검수", "점검", "시동", "하체", "엔진", "누유", "냉각수", "성능점검"),
+     ("엔진", "엔진룸", "보닛", "계기판", "하체", "하부", "언더", "리프트", "누유", "오일")),
+    (("서류", "기록부", "성능기록", "보험이력", "등록증", "점검표", "명세"),
+     ("서류", "기록부", "문서", "등록증", "점검표", "명세", "종이")),
+    (("가격", "만원", "연식", "주행거리", "매물", "실매물", "스펙", "출고"),
+     ("전면", "정면", "측면", "외관", "전측면", "대각", "전경", "차량")),
+    (("실내", "시트", "옵션", "네비", "핸들", "대시"),
+     ("실내", "시트", "대시", "센터", "핸들", "운전석", "내부")),
+]
+
+
+def _hint_bonus(scene_text: str, desc_text: str) -> float:
+    """씬 자막 유형과 사진 묘사가 같은 계열이면 가점(검수 자막↔엔진룸 사진 등)."""
+    st, dt = scene_text or "", desc_text or ""
+    for keys, photo_kw in _SCENE_PHOTO_HINT:
+        if any(k in st for k in keys) and any(pk in dt for pk in photo_kw):
+            return 0.5
+    return 0.0
+
+
+def _match_photos(lines: list, imgs: list, gen_source: str, log_tag: str = "") -> list:
+    """대본 확정 후 씬 내용 ↔ 사진 매칭 — gen_source의 [사진N] 묘사 토큰 겹침 + 유형 힌트 가점(2-3).
+    검수 자막→엔진룸/계기판, 서류 자막→문서, 가격·스펙→전면/측면 우선. 근거 없으면 원 순서.
+    매칭 스코어 로그 기록(검증용)."""
     import re as _r
-    descs = {}
+    import logging as _lg
+    descs, raws = {}, {}
     for m in _r.finditer(r"\[사진(\d+)\]\s*([^\n]+)", gen_source or ""):
         i = int(m.group(1)) - 1
         if 0 <= i < len(imgs):
             descs[i] = _norm_line(m.group(2))
+            raws[i] = m.group(2)
     if not descs:
         return imgs
-    used, order = set(), []
+    used, order, _scores = set(), [], []
     for ln in lines:
         lt = _norm_line(ln)
         best, best_s = None, 0.0
         for i, dt in descs.items():
             if i in used or not dt:
                 continue
-            s = len(lt & dt) / max(1, len(lt | dt))
+            s = len(lt & dt) / max(1, len(lt | dt)) + _hint_bonus(ln, raws.get(i, ""))
             if s > best_s:
                 best, best_s = i, s
         if best is not None and best_s >= 0.08:
             order.append(best)
             used.add(best)
+            _scores.append((ln[:16], best + 1, round(best_s, 2)))
         else:
             order.append(None)
+            _scores.append((ln[:16], None, 0.0))
+    if log_tag:
+        _lg.getLogger("shopcast.video").warning("[%s] 씬-사진 매칭: %s", log_tag,
+            " / ".join(f"'{t}'→#{p}({s})" if p else f"'{t}'→순차" for t, p, s in _scores))
     remain = [i for i in range(len(imgs)) if i not in used]
     final = []
     for o in order:
@@ -943,9 +973,7 @@ class ShortVideoGenerator(Generator):
             sent = _seam_dedup(hook, list(sent), outro_cta)   # 최종 이음매 중복 제거(강등·재생성 후 재보증)
             script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm", evidence=_evidence)
             if _gen_src and sent:                     # 씬 내용 ↔ 사진 vision 태그 매칭(서류 씬=서류 사진 등)
-                vid_imgs = _match_photos(list(sent), vid_imgs, _gen_src)
-                __import__("logging").getLogger("shopcast.video").warning(
-                    "[shorts] 사진 재배정 %d씬↔%d장", len(sent), len(vid_imgs))
+                vid_imgs = _match_photos(list(sent), vid_imgs, _gen_src, "shorts")
             video_path, note, dur_sec, cover_path = self._build_scene_video(
                 vid_imgs, script, kws, tenant, strat, title)
             _scene_note = note                                # 씬 경로 결과/오류(진단용)
@@ -1093,7 +1121,7 @@ class ShortVideoGenerator(Generator):
         sent = _cap_lines([_strip_labels(s) for s in sent])   # 서식 세척 + 3줄 초과 강제 분할(캡 후 최종 sent로 1회만 매칭)
         _gen_src2 = pl.get("gen_source") or ""
         if _gen_src2 and sent:
-            vid_imgs = _match_photos(list(sent), vid_imgs, _gen_src2)   # 씬↔사진 vision 매칭(원본 vid_imgs 순서 기준)
+            vid_imgs = _match_photos(list(sent), vid_imgs, _gen_src2, "naver-video")   # 씬↔사진 매칭(유형 힌트+로그)
             _nlog.warning("[naver-video] 사진 재배정 %d씬↔%d장", len(sent), len(vid_imgs))
         path, note, dur, _cover = self._build_scene_video(
             vid_imgs, SceneScript(hook=opening, sentences=sent, outro=outro, source="body_excerpt", evidence=body),
