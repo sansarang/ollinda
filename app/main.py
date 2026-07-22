@@ -642,9 +642,10 @@ def demo_zip(asset_id: str, request: Request):
         return HTMLResponse(status_code=404)
     imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
     _slug = _set_slug(pieces)
+    _nv = _set_naver_video(pieces)
     entries = []
     for p in pieces:
-        entries += _piece_pack_entries(p, imgs, prefix=f"{_ch_folder(p)}/", slug=_slug)
+        entries += _piece_pack_entries(p, imgs, prefix=f"{_ch_folder(p)}/", slug=_slug, nv=_nv)
     out_dir = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), pieces[0].tenant_id)
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, f"demo_{asset_id[:8]}.zip")
@@ -3722,10 +3723,18 @@ def _result_naver_video(pieces, asset_id: str) -> str:
         nv = (short.payload.get("naver_video") or {}) if short else {}
         src_p = nv.get("path") or ""
         if src_p:
+            _dl = f"/dl/{asset_id}/{os.path.basename(src_p)}"
+            _fn = esc(nv.get("filename") or "naver-video.mp4")
+            _dur = int(nv.get("duration_sec") or 0)
             return (f"<div class='mt-3'><div class='text-xs font-bold text-slate-400 mb-1'>네이버용 영상 (본문 첨부·클립 겸용 · 9:16)</div>"
                     f"<div class='mx-auto bg-black rounded-xl overflow-hidden' style='max-width:280px;aspect-ratio:9/16'>"
-                    f"<video src='/dl/{asset_id}/{os.path.basename(src_p)}' controls preload='none' "
-                    "class='w-full h-full' style='object-fit:contain'></video></div></div>")
+                    f"<video src='{_dl}' controls preload='none' "
+                    "class='w-full h-full' style='object-fit:contain'></video></div>"
+                    f"<a href='{_dl}' download='{_fn}' class='mt-2 flex items-center justify-center gap-1 px-4 py-2.5 "
+                    f"bg-emerald-500 hover:bg-emerald-600 active:scale-[.98] text-white text-sm font-bold rounded-xl transition'>"
+                    f"⬇ 영상 받기 (본문·클립 겸용 9:16)</a>"
+                    + (f"<div class='text-[11px] text-slate-400 text-center mt-1'>파일명: {_fn} · 약 {_dur}초</div>" if _dur else "")
+                    + "</div>")
         blog = next((p for p in pieces if p.kind == _CKr.BLOG), None)
         vj = (blog.payload.get("video_job") or {}) if blog else {}
         if vj.get("status") in ("registered", "running", "retrying"):   # 실패·부재는 생략(무한 '만드는 중' 방지)
@@ -3886,7 +3895,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                      + f"<textarea id='cb{sid}' data-body=\"{esc(body_part)}\" class='hidden'>{esc(blog_copy)}</textarea>"
                      + _result_naver_video(pieces, asset_id)
                      + f"<div class='mt-4 space-y-2'>{naver_btn}"
-                     + f"<div class='flex gap-2'>{pack_btn(p.id, False)}<button type=button onclick=\"cp('cb{sid}',this)\" class='px-3.5 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold rounded-xl transition'>글 복사</button></div></div></div>")
+                     + f"<div class='flex gap-2'>{pack_btn(p.id, bool(_set_naver_video(pieces)))}<button type=button onclick=\"cp('cb{sid}',this)\" class='px-3.5 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold rounded-xl transition'>글 복사</button></div></div></div>")
         elif k == "x_post":
             xt = pl.get("text", "")
             # X는 9:16 세로 업로드 공식 지원(1080×1920, Immersive Media Viewer 풀스크린 재생)
@@ -4478,9 +4487,10 @@ def _ch_folder(piece) -> str:
     return CHKO.get(piece.kind.value, piece.kind.value)
 
 
-def _piece_pack_entries(piece, imgs, prefix="", slug=""):
+def _piece_pack_entries(piece, imgs, prefix="", slug="", nv=None):
     """채널 하나의 (zip경로, 소스) 목록 — 글.txt + 사진 + 영상 한 묶음.
-    이미지 파일명 슬러그는 세트 확정 슬러그(slug) 단일 소스 사용 — 미전달 시에만 자기 target_keywords 폴백."""
+    이미지 파일명 슬러그는 세트 확정 슬러그(slug) 단일 소스 사용 — 미전달 시에만 자기 target_keywords 폴백.
+    nv={path,filename}: 네이버용 영상(본문 첨부·클립 겸용 9:16) — 블로그 채널 키트에 함께 담김."""
     import re as _re2
     k, pl = piece.kind.value, piece.payload
     # 이미지 SEO — 파일명에 세트 확정 키워드(네이버·구글 이미지검색이 파일명을 읽음). 폴더/태그와 동일 소스.
@@ -4497,6 +4507,9 @@ def _piece_pack_entries(piece, imgs, prefix="", slug=""):
         add("네이버블로그_글.txt", ("text", txt))
         for i, im in enumerate(imgs, 1):
             add(f"{_kwbase}_{i}{os.path.splitext(im)[1] or '.jpg'}", im)
+        _nvp = (nv or {}).get("path") or ""            # 네이버용 영상(본문 첨부·클립 겸용 9:16) 포함
+        if _nvp:
+            add(f"{_kwbase}_네이버영상.mp4", _nvp)
     elif k == "caption":
         add("인스타_캡션.txt", ("text", pl.get("text", "")))
         for i, im in enumerate(imgs, 1):
@@ -4534,6 +4547,15 @@ def _set_slug(pieces) -> str:
     except Exception:
         t = None
     return _canonical_slug(t, blogp) if t else ""
+
+
+def _set_naver_video(pieces) -> dict:
+    """세트의 네이버용 영상 메타({path,filename}) — short 피스에 저장됨. 없으면 {}."""
+    for p in (pieces or []):
+        nv = (getattr(p, "payload", None) or {}).get("naver_video") or {}
+        if nv.get("path"):
+            return nv
+    return {}
 
 
 def _fetch_local_or_r2(path: str):
@@ -4595,7 +4617,7 @@ def kit_pack(request: Request, asset_id: str, pid: str):
     if not piece:
         return HTMLResponse(status_code=404)
     imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
-    data = _zip_bytes(_piece_pack_entries(piece, imgs, slug=_set_slug(pieces)))
+    data = _zip_bytes(_piece_pack_entries(piece, imgs, slug=_set_slug(pieces), nv=_set_naver_video(pieces)))
     return _zip_response(data, f"{_safe_title(pieces)}_{_ch_folder(piece)}.zip")
 
 
@@ -4608,9 +4630,10 @@ def kit_pack_all(request: Request, asset_id: str):
         return HTMLResponse(status_code=404)
     imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
     _slug = _set_slug(pieces)
+    _nv = _set_naver_video(pieces)
     entries = []
     for p in pieces:
-        entries += _piece_pack_entries(p, imgs, prefix=f"{_ch_folder(p)}/", slug=_slug)
+        entries += _piece_pack_entries(p, imgs, prefix=f"{_ch_folder(p)}/", slug=_slug, nv=_nv)
     data = _zip_bytes(entries)
     return _zip_response(data, f"{_safe_title(pieces)}_5채널전체.zip")
 
