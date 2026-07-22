@@ -5582,6 +5582,32 @@ def admin_regen_channel(asset_id: str, kind: str = "", force: str = ""):
                                   (made.payload.get("body") or "")[:400]) if made else None)})
 
 
+@app.post("/admin/queue-clean-region")
+def admin_queue_clean_region(tid: str = ""):
+    """구재고 정리 — 셀러·병행 tenant의 pending 큐 중 기초지역(구·군) 타깃을 삭제(미소비만).
+    이미 발행된 글·generating/done 항목은 불변. 삭제 후 refill이 보정 키워드로 재적재."""
+    tid = tid.strip()
+    t = db.get_tenant(tid)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    from app.services import autoqueue as _aq
+    removed = []
+    for r in db.writing_queue_rows(tid, status="pending", limit=200):
+        if _aq._seller_kw_blocked(t, r.get("target_keyword") or ""):
+            removed.append({"id": r["id"], "kw": r.get("target_keyword")})
+    if removed:
+        with db._conn() as c:
+            c.execute("DELETE FROM writing_queue WHERE id IN (%s)" % ",".join("?" * len(removed)),
+                      tuple(x["id"] for x in removed))
+    # 보정 규칙으로 재적재
+    added = {}
+    try:
+        added = _aq.refill(t)
+    except Exception as e:
+        added = {"refill_error": repr(e)[:120]}
+    return JSONResponse({"ok": True, "removed": removed, "refilled": added})
+
+
 @app.get("/admin/queue-audit")
 def admin_queue_audit(tid: str = ""):
     """진단 — tenant writing_queue 전수(생성시각·상태·타깃) + 발행 글 타깃. D1 이분법 대조용."""

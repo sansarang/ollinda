@@ -27,6 +27,33 @@ def _bad_kw(kw: str) -> bool:
     return ("," in (kw or "")) or ("/" in (kw or ""))
 
 
+def _basic_region_tokens(region: str) -> list:
+    """기초지역(구·군·읍·면) 어간 — 예 '부산광역시 기장군' → ['기장']. 광역시(부산)는 제외 안 함."""
+    import re as _r
+    out = []
+    for tok in (region or "").split():
+        if _r.search(r"(군|구|읍|면)$", tok):
+            core = _r.sub(r"(특별자치시|특별자치도|자치도|군|구|읍|면)$", "", tok)
+            if len(core) >= 2:
+                out.append(core)
+    return out
+
+
+def _seller_kw_blocked(t, kw: str) -> bool:
+    """셀러·병행 글 타깃 하드 규칙 — 기초지역(구·군) 포함 키워드는 큐(글 타깃)에서 제외.
+    (플레이스·순위 추적 키워드에는 유지 — 이 함수는 writing_queue 적재에만 적용.)
+    광역시(부산)는 허용 — 셀러도 광역 단위 유입은 유효."""
+    if (getattr(t, "biz_type", "local") or "local") not in ("seller", "hybrid"):
+        return False
+    kwf = (kw or "").replace(" ", "")
+    return any(core in kwf for core in _basic_region_tokens(getattr(t, "region", "") or ""))
+
+
+def _skip_kw(t, kw: str) -> bool:
+    """큐 적재 스킵 판정 — 오염 데이터 or 셀러·병행 기초지역."""
+    return _bad_kw(kw) or _seller_kw_blocked(t, kw)
+
+
 def _reason(text: str, **meta) -> str:
     """reason 필드(내부 로그) 구조화 — 근거 카드가 파싱할 JSON. text에 기존 사람용 로그 유지."""
     import json
@@ -48,7 +75,7 @@ def refill(t, plan: str = "free") -> dict:
             if not piece:
                 continue
             kw = (((piece.payload or {}).get("target_keywords") or [""])[0] or "").strip()
-            if not kw or _bad_kw(kw):
+            if not kw or _skip_kw(t, kw):
                 continue
             hist = [h for h in db.rank_history(t.id, kw, kind="post") if h.get("rank")]
             if not hist or not (hist[-1]["rank"] and hist[-1]["rank"] <= 10):
@@ -73,7 +100,7 @@ def refill(t, plan: str = "free") -> dict:
     # P1 — 정체 키워드 앵글 재도전(기존 처방 로직 출력 그대로)
     try:
         for s in ranktrack.stagnant_keywords(t.id, limit=2):
-            if _bad_kw(s["keyword"]):
+            if _skip_kw(t, s["keyword"]):
                 continue
             if db.enqueue_writing(t.id, "P1", s["keyword"], s["retry_angle"],
                                   _reason(f"정체(스냅샷 {s['first']}→{s['last']}) — {s['prev_label']} 대신 {s['retry_label']} 재도전",
@@ -86,13 +113,13 @@ def refill(t, plan: str = "free") -> dict:
     # P2 — 미노출(놓치는) 키워드 선점(기존 진단 재사용, 매장/셀러 분기)
     try:
         from app.services import diagnose
-        if (getattr(t, "biz_type", "local") or "local") == "seller":
+        if (getattr(t, "biz_type", "local") or "local") in ("seller", "hybrid"):   # 병행도 상품 진단(지역 진단 배제)
             r = diagnose.diagnose_product_rank(t.industry, getattr(t, "brand_name", "") or t.name,
                                                getattr(t, "brand_name", "") or "")
         else:
             r = diagnose.diagnose_rank(t.industry, t.region, t.name)
         if not r.get("estimated"):
-            miss = sorted((s for s in (r.get("missing") or []) if not _bad_kw(s["keyword"])),
+            miss = sorted((s for s in (r.get("missing") or []) if not _skip_kw(t, s["keyword"])),
                           key=lambda s: -(s.get("volume") or 0))
             for s in miss[:REFILL_P2_MAX]:
                 if db.enqueue_writing(t.id, "P2", s["keyword"], "review",
@@ -105,7 +132,7 @@ def refill(t, plan: str = "free") -> dict:
     # P3 — 잘 되는 키워드 굳히기(+근소 격차 가점: '○○만 넘으면 N-1위' → 프롬프트 반영 재료)
     try:
         for d in ranktrack.rank_deltas(t.id, limit=4):
-            if d.get("dir") not in ("up", "enter") or not d.get("last") or _bad_kw(d["keyword"]):
+            if d.get("dir") not in ("up", "enter") or not d.get("last") or _skip_kw(t, d["keyword"]):
                 continue
             reason = f"상승 굳히기({d.get('first') or '미노출'}→{d['last']}위, {d.get('kind')})"
             _gap = False
@@ -138,7 +165,7 @@ def refill(t, plan: str = "free") -> dict:
                     batches = db.list_keyword_batches(t.id, limit=1)
             for b in batches:
                 for it in b["items"]:
-                    if it.get("top10") and (it.get("status") or "candidate") == "candidate":
+                    if it.get("top10") and (it.get("status") or "candidate") == "candidate" and not _skip_kw(t, it["keyword"]):
                         if db.enqueue_writing(t.id, "P4", it["keyword"], "review",
                                               _reason(f"키워드 풀 최고 승률 {it.get('win')}%(예상·내부용) 미사용분",
                                                       win=it.get("win"), vol=it.get("volume"))):
