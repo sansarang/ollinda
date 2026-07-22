@@ -5591,6 +5591,20 @@ def admin_inventory_save(tid: str = "", model: str = "", year: str = "", car_cla
     return JSONResponse({"ok": True, "context": db.recent_inventory_context(tid.strip(), limit=6)})
 
 
+@app.post("/admin/relink-publish")
+def admin_relink_publish(old_piece: str = "", new_piece: str = ""):
+    """발행 기록 재연결 — 재생성으로 piece_id가 바뀐 발행 글의 추적 복구(라이브 글 불변)."""
+    op, np = old_piece.strip(), new_piece.strip()
+    if not (op and np):
+        return JSONResponse({"ok": False, "error": "old_piece·new_piece 필요"}, status_code=400)
+    try:
+        with db._conn() as c:
+            cur = c.execute("UPDATE blog_publishes SET piece_id=? WHERE piece_id=?", (np, op))
+        return JSONResponse({"ok": True, "relinked": cur.rowcount})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": repr(e)[:120]}, status_code=500)
+
+
 @app.get("/admin/smartblock")
 def admin_smartblock(seed: str = "중고차", region: str = ""):
     """진단 — 스마트블록 세부주제 근사(연관어+검색량+의도유형→앵글). V2 검증."""
