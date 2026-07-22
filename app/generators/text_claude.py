@@ -148,6 +148,15 @@ class BlogDraftGenerator(Generator):
             kw0 = tkw
             kws = list(dict.fromkeys([tkw] + kws))[:10]
             kplan["longtail"] = []      # 1글 1키워드(자동 글감 큐): 타깃 외 키워드 소제목 헤딩화 금지
+        # ★ 타깃 키워드 단일 관문(경로 무관) — 기초지역 배제·차종 서열·검색량. 셀러·병행 우회 원천 차단(3번째 재발 근본책).
+        _biz_g = (getattr(tenant, "biz_type", "local") or "local")
+        if _biz_g in ("seller", "hybrid"):
+            _gk = seo.select_target_keyword([kw0] + list(kws), _biz_g, tenant.region or "",
+                                            prof.name, tenant_id=tenant.id)
+            if _gk:
+                kw0 = _gk
+                kws = list(dict.fromkeys([_gk] + [k for k in kws
+                          if not seo.is_basic_region_kw(k, tenant.region or "", _biz_g)]))[:10]
         if strat.closing == "buy":
             closing = ("[마무리] 글 끝은 '구매 유도'로. 상세페이지/스토어로 자연스럽게 연결하고 찜·후기를 권하라."
                        + (f" 구매 안내 문구: {buy}" if buy else ""))

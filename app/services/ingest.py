@@ -167,6 +167,7 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
     for p in pieces:
         p.payload.setdefault("image_path", paths[0])
         p.payload.setdefault("biz_type", getattr(tenant, "biz_type", "local") or "local")
+        p.payload.setdefault("region", getattr(tenant, "region", "") or "")
         if _exp and p.kind in (ContentKind.BLOG, ContentKind.CAPTION, ContentKind.X_POST):
             p.payload["owner_story"] = _exp                     # '내 말이 글이 됐네' 실감 재료
         p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value, p.payload, source=asset.note)
@@ -493,6 +494,7 @@ def _regen_text_piece(tenant: Tenant, asset, kind: ContentKind, ref) -> bool:
     p = made[0]
     p.payload.setdefault("image_path", paths[0])
     p.payload.setdefault("biz_type", getattr(tenant, "biz_type", "local") or "local")
+    p.payload.setdefault("region", getattr(tenant, "region", "") or "")
     p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value, p.payload, source=asset.note)
     p.payload["reach"] = reach.estimate(p.channel.value, p.kind.value, p.payload)
     p.payload["brief"] = ref.payload.get("brief") or {}
@@ -558,6 +560,7 @@ def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: di
     for p in shorts:
         p.payload.setdefault("image_path", paths[0])
         p.payload.setdefault("biz_type", getattr(tenant, "biz_type", "local") or "local")
+        p.payload.setdefault("region", getattr(tenant, "region", "") or "")
         p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value, p.payload, source=asset.note)
         p.payload["reach"] = reach.estimate(p.channel.value, p.kind.value, p.payload)
         p.payload["brief"] = brief_public

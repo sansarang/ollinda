@@ -115,6 +115,105 @@ def posting_cadence_tip(days_since_last: int | None, weekly_target: int = 3) -> 
     return f"좋아요! 이 페이스(주 {weekly_target}회)를 유지하면 같은 주제 전문성이 쌓여 상위노출에 유리해져요."
 
 
+# ── 타깃 키워드 단일 관문(경로 무관) — 오토큐·직접생성 모두 여기를 통과 ──────────
+# 3번째 재발(기장군)의 뿌리 = 같은 규칙이 두 경로에 따로 살던 구조. 규칙을 여기 집결.
+import re as _re_g
+
+
+def basic_region_cores(region: str) -> list:
+    """기초지역(구·군·읍·면) 어간 — '부산광역시 기장군' → ['기장']. 광역시(부산)는 제외 안 함."""
+    out = []
+    for tok in (region or "").split():
+        if _re_g.search(r"(군|구|읍|면)$", tok):
+            core = _re_g.sub(r"(특별자치시|특별자치도|자치도|군|구|읍|면)$", "", tok)
+            if len(core) >= 2:
+                out.append(core)
+    return out
+
+
+def is_basic_region_kw(kw: str, region: str, biz_type: str) -> bool:
+    """셀러·병행 글 타깃 하드 배제 판정 — 기초지역(구·군) 포함이면 True. (광역시 허용.)"""
+    if (biz_type or "local") not in ("seller", "hybrid"):
+        return False
+    kwf = (kw or "").replace(" ", "")
+    return any(core in kwf for core in basic_region_cores(region))
+
+
+_CAR_MODELS = ("모닝", "레이", "스파크", "캐스퍼", "아반떼", "쏘나타", "그랜저", "K3", "K5", "K7", "K8",
+               "코나", "티볼리", "셀토스", "투싼", "쏘렌토", "싼타페", "카니발", "스포티지", "포터", "봉고",
+               "제네시스", "G80", "GV70", "GV80", "말리부", "트랙스", "베뉴", "팰리세이드", "스타리아")
+_CAR_CLASSES = ("경차", "소형", "준중형", "중형", "준대형", "대형", "SUV", "승합", "화물", "수입")
+
+
+def _kw_rank_tier(kw: str, models: list, classes: list, wide: str, ind0: str) -> int:
+    """매물 속성 서열 — 낮을수록 우선. 0:[차종+연식/중고] 1:[차급+중고] 2:[광역+차종] 3:[광역+업종] 4:기타.
+    차종·차급은 저장 컨텍스트 + 화이트리스트 양쪽으로 인식(컨텍스트 없어도 '그랜저 중고' 인식)."""
+    k = (kw or "").replace(" ", "")
+    _mset = set(m.replace(" ", "") for m in models if m) | set(_CAR_MODELS)
+    _cset = set(classes) | set(_CAR_CLASSES)
+    has_model = any(m and m in k for m in _mset)
+    has_year = bool(_re_g.search(r"(19|20)\d{2}", k))
+    has_class = any(c and c in k for c in _cset)
+    has_wide = bool(wide and wide in k)
+    if has_model and (has_year or "중고" in k):
+        return 0
+    if has_class and "중고" in k:
+        return 1
+    if has_wide and has_model:
+        return 2
+    if has_wide and ind0 and ind0 in k:
+        return 3
+    return 4
+
+
+def select_target_keyword(candidates: list, biz_type: str = "local", region: str = "",
+                          industry: str = "", tenant_id: str = "", verify_volume: bool = True) -> str:
+    """★ 타깃 키워드 최종 선택 단일 관문(오토큐·직접생성 공통).
+    ① 기초지역(구·군) 하드 배제(셀러·병행) ② 매물 속성 서열 정렬 ③ 검색량 검증(월 100회+, 실패 시 스킵).
+    후보 전부 탈락하면 광역+업종 폴백. 매장(local)은 지역 규칙 미적용(원 후보 유지)."""
+    cands = [" ".join((c or "").split()) for c in (candidates or []) if c and c.strip()]
+    cands = list(dict.fromkeys(cands))
+    biz = (biz_type or "local")
+    ind0 = ((industry or "").replace("/", ",").split(",")[0] or "").strip()
+    if biz not in ("seller", "hybrid"):
+        return cands[0] if cands else (f"{_kw_shorten(region)} {ind0}".strip() if ind0 else "")
+    # 기초지역 배제
+    cands = [c for c in cands if not is_basic_region_kw(c, region, biz)]
+    # 매물 속성(차종·차급) — 컨텍스트 기반 서열
+    models, classes = [], []
+    if tenant_id:
+        try:
+            from app import db as _db
+            for ctx in _db.recent_inventory_context(tenant_id, limit=6):
+                if ctx.get("model"):
+                    models.append(ctx["model"])
+                if ctx.get("car_class"):
+                    classes.append(ctx["car_class"])
+        except Exception:
+            pass
+    wide = next((_re_g.sub(r"(특별시|광역시|특별자치시|특별자치도|자치도|도)$", "", tk)
+                 for tk in (region or "").split()
+                 if _re_g.search(r"(특별시|광역시|특별자치시|특별자치도|도)$", tk)), "")
+    cands.sort(key=lambda c: _kw_rank_tier(c, models, classes, wide, ind0))
+    # 검색량 검증 — 서열 순으로 첫 통과
+    fallback = f"{wide} {ind0} 추천".strip() if wide else (f"{ind0} 추천" if ind0 else "")
+    if verify_volume:
+        try:
+            from app.services import searchad as _sa
+            if _sa.configured() and cands:
+                vols = {}
+                for vv in _sa.keyword_volumes(cands[:8], limit=80):
+                    vols[(vv.get("keyword") or "").replace(" ", "")] = vv.get("total", 0)
+                for c in cands:
+                    v = vols.get(c.replace(" ", ""))
+                    if v is None or v >= 100:          # 무측정은 통과(임의 숫자 금지), 측정은 100회+
+                        return c
+                return fallback or (cands[0] if cands else "")
+        except Exception:
+            pass
+    return cands[0] if cands else fallback
+
+
 def keyword_plan(industry_name: str, region: str, note: str = "", axis: str = "local", brand: str = "") -> dict:
     """대표키워드 1개(제목) + 롱테일 2~3개(본문 소제목) + 실검색량 여부('추정') — 성장 PHASE 5.
     지역+업종+의도 3요소 조합, 실검색량 500~5,000 롱테일 우선(searchad 주경로, 무키 시 규칙 폴백=추정)."""
@@ -687,6 +786,13 @@ def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> d
         if (payload.get("gen_finish") or "") == "max_tokens":
             warnings.append("생성이 토큰 한도로 절단됨(stop_reason=max_tokens) — 본문 미완결")
             score -= 15
+        # ★ 제목 기초지역 이중 안전망(3번째 재발 방지): 셀러·병행 제목에 기초지역(구·군) 어간 → 게이트 실패
+        _bizq = (payload.get("biz_type") or "").strip()
+        _regq = (payload.get("region") or "")
+        if _bizq in ("seller", "hybrid") and is_basic_region_kw(title, _regq, _bizq):
+            _bad_reg = next((c for c in basic_region_cores(_regq) if c in title.replace(" ", "")), "")
+            warnings.append(f"제목에 기초지역('{_bad_reg}') — 셀러·병행 글 타깃 부적합(차종·광역 롱테일로 재생성)")
+            score -= 30
         # 업체명 정합(재검증 STEP 1-2a): 본문 업체명 ≠ 프로필 업체명 → 게이트 실패(-30)
         _bname = (payload.get("business_name") or "").strip()
         if _bname:

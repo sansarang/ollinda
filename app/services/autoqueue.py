@@ -40,13 +40,9 @@ def _basic_region_tokens(region: str) -> list:
 
 
 def _seller_kw_blocked(t, kw: str) -> bool:
-    """셀러·병행 글 타깃 하드 규칙 — 기초지역(구·군) 포함 키워드는 큐(글 타깃)에서 제외.
-    (플레이스·순위 추적 키워드에는 유지 — 이 함수는 writing_queue 적재에만 적용.)
-    광역시(부산)는 허용 — 셀러도 광역 단위 유입은 유효."""
-    if (getattr(t, "biz_type", "local") or "local") not in ("seller", "hybrid"):
-        return False
-    kwf = (kw or "").replace(" ", "")
-    return any(core in kwf for core in _basic_region_tokens(getattr(t, "region", "") or ""))
+    """셀러·병행 글 타깃 하드 규칙 — seo 단일 관문에 위임(같은 규칙 두 곳 사는 구조 제거)."""
+    from app import seo as _seo
+    return _seo.is_basic_region_kw(kw, getattr(t, "region", "") or "", getattr(t, "biz_type", "local") or "local")
 
 
 def _skip_kw(t, kw: str) -> bool:
