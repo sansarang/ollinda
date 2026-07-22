@@ -5606,7 +5606,10 @@ def admin_queue_clean_region(tid: str = ""):
     removed = []
     for r in db.writing_queue_rows(tid, status="pending", limit=200):
         kw = r.get("target_keyword") or ""
-        if _aq._seller_kw_blocked(t, kw) or _foreign_region(kw):
+        _ind0 = ((t.industry or "").replace("/", ",").split(",")[0] or "").strip().replace(" ", "")
+        _bare_generic = ((getattr(t, "biz_type", "local") or "local") in ("seller", "hybrid")
+                         and kw.replace(" ", "") == _ind0)   # '중고차' 단독(지역·차종 없음) = 전국 대형, 글 타깃 부적합
+        if _aq._seller_kw_blocked(t, kw) or _foreign_region(kw) or _bare_generic:
             removed.append({"id": r["id"], "kw": kw})
     if removed:
         with db._conn() as c:
