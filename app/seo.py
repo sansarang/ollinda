@@ -197,13 +197,12 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
                  if _re_g.search(r"(특별시|광역시|특별자치시|특별자치도|도)$", tk)), "")
     pm = (primary_model or "").strip()
     if pm:
-        # 이번 업로드 매물 모델을 최우선 — 후보에 없으면 롱테일 보강
-        for extra in (f"{pm} 중고", f"{pm} 중고차"):
-            if extra not in cands:
-                cands.append(extra)
+        # 이번 업로드 매물 모델 = 반드시 타깃(허위·미끼 방지). 검색량 무관 즉시 확정(다른 차종으로 새는 것 원천 차단).
+        pmf = pm.replace(" ", "")
+        _pm_cand = next((c for c in cands if pmf in c.replace(" ", "")), "")
+        return _pm_cand or f"{pm} 중고"
     def _tier(c):
-        base = _kw_rank_tier(c, models, classes, wide, ind0)
-        return -1 if (pm and pm.replace(" ", "") in c.replace(" ", "")) else base
+        return _kw_rank_tier(c, models, classes, wide, ind0)
     cands.sort(key=_tier)
     # 검색량 검증 — 서열 순으로 첫 통과
     fallback = f"{wide} {ind0} 추천".strip() if wide else (f"{ind0} 추천" if ind0 else "")
