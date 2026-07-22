@@ -3726,15 +3726,27 @@ def _result_naver_video(pieces, asset_id: str) -> str:
             _dl = f"/dl/{asset_id}/{os.path.basename(src_p)}"
             _fn = esc(nv.get("filename") or "naver-video.mp4")
             _dur = int(nv.get("duration_sec") or 0)
+            # 파일 재생 가능 여부(로컬 또는 R2) — 소실 시 죽은 버튼 대신 네이버 페이지(다시 만들기)로 유도
+            _ok = os.path.exists(src_p)
+            if not _ok:
+                try:
+                    from app import storage as _st
+                    _ok = bool(_st.r2_media_url(short.tenant_id, os.path.basename(src_p)))
+                except Exception:
+                    _ok = False
+            _action = (
+                f"<a href='{_dl}' download='{_fn}' class='mt-2 flex items-center justify-center gap-1 px-4 py-2.5 "
+                f"bg-emerald-500 hover:bg-emerald-600 active:scale-[.98] text-white text-sm font-bold rounded-xl transition'>"
+                f"⬇ 영상 받기 (본문·클립 겸용 9:16)</a>"
+                + (f"<div class='text-[11px] text-slate-400 text-center mt-1'>파일명: {_fn} · 약 {_dur}초</div>" if _dur else "")
+            ) if _ok else (
+                f"<a href='/kit/{asset_id}/naver' class='mt-2 flex items-center justify-center gap-1 px-4 py-2.5 "
+                f"bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold rounded-xl transition'>🎬 네이버 영상 받기·다시 만들기</a>")
+            _player = (f"<div class='mx-auto bg-black rounded-xl overflow-hidden' style='max-width:280px;aspect-ratio:9/16'>"
+                       f"<video src='{_dl}' controls preload='none' class='w-full h-full' style='object-fit:contain'></video></div>"
+                       if _ok else "")
             return (f"<div class='mt-3'><div class='text-xs font-bold text-slate-400 mb-1'>네이버용 영상 (본문 첨부·클립 겸용 · 9:16)</div>"
-                    f"<div class='mx-auto bg-black rounded-xl overflow-hidden' style='max-width:280px;aspect-ratio:9/16'>"
-                    f"<video src='{_dl}' controls preload='none' "
-                    "class='w-full h-full' style='object-fit:contain'></video></div>"
-                    f"<a href='{_dl}' download='{_fn}' class='mt-2 flex items-center justify-center gap-1 px-4 py-2.5 "
-                    f"bg-emerald-500 hover:bg-emerald-600 active:scale-[.98] text-white text-sm font-bold rounded-xl transition'>"
-                    f"⬇ 영상 받기 (본문·클립 겸용 9:16)</a>"
-                    + (f"<div class='text-[11px] text-slate-400 text-center mt-1'>파일명: {_fn} · 약 {_dur}초</div>" if _dur else "")
-                    + "</div>")
+                    + _player + _action + "</div>")
         blog = next((p for p in pieces if p.kind == _CKr.BLOG), None)
         vj = (blog.payload.get("video_job") or {}) if blog else {}
         if vj.get("status") in ("registered", "running", "retrying"):   # 실패·부재는 생략(무한 '만드는 중' 방지)
@@ -4363,17 +4375,18 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
     photos = [im for im in imgs if im]                          # /dl이 R2로 서빙
     vid = next((p for p in pieces if p.kind.value == "short" and p.payload.get("video_path")), None)
     vurl = f"/dl/{asset_id}/{os.path.basename(vid.payload['video_path'])}" if vid else ""  # 블로그 본문 삽입용
-    _nv = (vid.payload.get("naver_video") or {}) if vid else {}          # 네이버용 정보형 영상(있으면)
+    _nv = _set_naver_video(pieces)          # 네이버용 영상 메타 — video_path 유무 무관, 모든 피스에서 조회
     def _media_exists(p_):
         """로컬 또는 R2 미러 존재 — 컨테이너 교체로 로컬만 사라진 경우 오탐 방지(근본수정 [결함2])."""
         if p_ and os.path.exists(p_):
             return True
         try:
             from app import storage as _st
-            return bool(p_ and _st.r2_media_url(vid.tenant_id, os.path.basename(p_)))
+            return bool(p_ and _st.r2_media_url(pieces[0].tenant_id, os.path.basename(p_)))
         except Exception:
             return False
-    _nv = _nv if (_nv.get("path") and _media_exists(_nv["path"])) else {}
+    # 메타가 있으면 섹션은 항상 노출 — 파일이 로컬·R2 모두 없을 때만(구버전·정리됨) '다시 만들기'로 전환.
+    _nv_playable = bool(_nv.get("path") and _media_exists(_nv["path"]))
     _fn_base = _seo_photo_name(tenant, blog)               # 이미지 SEO(5-1): 지역-업종-피사체
     photo_cells = "".join(
         f"<div class='relative'><img src='/dl/{asset_id}/{os.path.basename(im)}' class='w-full aspect-square object-cover rounded-xl border border-slate-200'>"
@@ -4382,6 +4395,26 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
         for i, im in enumerate(photos))
     sec = "bg-white rounded-2xl border border-slate-200 shadow-sm p-5 mb-5"
     cbtn = "px-4 py-2.5 rounded-xl text-white text-sm font-bold transition active:scale-[.98]"
+    # 네이버 영상 미디어/액션 — 재생 가능하면 미리보기+받기, 파일 소실이면 '다시 만들기'(재발 없이 항상 받을 길 제공)
+    if _nv_playable:
+        _nvsrc = f"/dl/{asset_id}/{os.path.basename(_nv.get('path', ''))}"
+        _nv_media_html = (
+            f"<div class='mx-auto bg-black rounded-xl overflow-hidden mb-3' style='max-width:320px;aspect-ratio:9/16'>"
+            f"<video src='{_nvsrc}' controls preload='none' class='w-full h-full' style='object-fit:contain'></video></div>"
+            f"<div class='text-sm font-bold text-slate-800 mb-1'>{esc(_nv.get('title', ''))}</div>"
+            f"<textarea id='nvVT' class='hidden'>{esc(_nv.get('title', ''))}</textarea>"
+            f"<div class='text-xs text-slate-500 whitespace-pre-wrap mb-2'>{esc(_nv.get('desc', ''))}</div>"
+            f"<textarea id='nvVD' class='hidden'>{esc(_nv.get('desc', ''))}</textarea>"
+            "<div class='flex flex-wrap gap-2'>"
+            f"<a href='{_nvsrc}' download='{esc(_nv.get('filename', 'naver-video.mp4'))}' class='{cbtn} bg-emerald-600 hover:bg-emerald-700 inline-block'>⬇ 영상 받기 (본문·클립 겸용 9:16)</a>"
+            f"<button onclick=\"nvcp('nvVT',this)\" class='{cbtn} bg-indigo-600 hover:bg-indigo-700'>제목 복사</button>"
+            f"<button onclick=\"nvcp('nvVD',this)\" class='{cbtn} bg-indigo-600 hover:bg-indigo-700'>설명 복사</button></div>"
+            f"<div class='text-[11px] text-slate-400 mt-2'>파일명: {esc(_nv.get('filename', ''))} · 길이 약 {int(_nv.get('duration_sec') or 0)}초</div>")
+    else:
+        _nv_media_html = (
+            "<p class='text-xs text-amber-600 mb-3'>영상 파일이 정리돼 지금은 받을 수 없어요 — 아래 버튼으로 다시 만들면 바로 받을 수 있어요 (1~2분).</p>"
+            f"<form method=post action='/kit/{asset_id}/regen-naver'>"
+            f"<button class='{cbtn} bg-emerald-600 hover:bg-emerald-700'>🎬 네이버 영상 다시 만들기</button></form>")
     body = (
         "<a href='javascript:history.back()' class='inline-block text-sm text-slate-500 font-bold mb-2'>← 결과로</a>"
         f"<div class='text-sm text-indigo-500 font-bold'>{esc(sname)}</div>"
@@ -4427,18 +4460,7 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
         + ((f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>4. 네이버용 영상 <span class='text-emerald-600'>(블로그 첨부 · 클립 겸용)</span></div>"
             "<p class='text-xs text-slate-500 mb-3'>이 영상을 <b>본문 첫 소제목 아래</b>에 넣으세요 — 15초+ 영상은 검색 가점(D.I.A.+). "
             "같은 영상을 네이버 클립에도 올리면 지면이 하나 더 생겨요.</p>"
-            f"<div class='mx-auto bg-black rounded-xl overflow-hidden mb-3' style='max-width:320px;aspect-ratio:9/16'>"
-            f"<video src='/dl/{asset_id}/{os.path.basename(_nv.get('path', ''))}' controls preload='none' "
-            "class='w-full h-full' style='object-fit:contain'></video></div>"
-            f"<div class='text-sm font-bold text-slate-800 mb-1'>{esc(_nv.get('title', ''))}</div>"
-            f"<textarea id='nvVT' class='hidden'>{esc(_nv.get('title', ''))}</textarea>"
-            f"<div class='text-xs text-slate-500 whitespace-pre-wrap mb-2'>{esc(_nv.get('desc', ''))}</div>"
-            f"<textarea id='nvVD' class='hidden'>{esc(_nv.get('desc', ''))}</textarea>"
-            "<div class='flex flex-wrap gap-2'>"
-            + f"<a href='/dl/{asset_id}/{os.path.basename(_nv.get('path', ''))}' download='{esc(_nv.get('filename', 'naver-video.mp4'))}' class='{cbtn} bg-emerald-600 hover:bg-emerald-700 inline-block'>⬇ 영상 받기 (본문·클립 겸용 9:16)</a>"
-            f"<button onclick=\"nvcp('nvVT',this)\" class='{cbtn} bg-indigo-600 hover:bg-indigo-700'>제목 복사</button>"
-            f"<button onclick=\"nvcp('nvVD',this)\" class='{cbtn} bg-indigo-600 hover:bg-indigo-700'>설명 복사</button></div>"
-            f"<div class='text-[11px] text-slate-400 mt-2'>파일명: {esc(_nv.get('filename', ''))} · 길이 약 {int(_nv.get('duration_sec') or 0)}초</div></div>") if _nv else "")
+            + _nv_media_html + "</div>") if _nv else "")
         # 5. 발행 후 마무리 — 사진 6장 권장(#3) + 서치어드바이저 색인(#3)
         + (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>{'5' if _nv else '4'}. 발행 후 — 상위노출 마무리</div>"
            "<ul class='text-xs text-slate-600 space-y-1.5 mb-3 list-none'>"
@@ -4459,6 +4481,26 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
         "var o=btn.textContent;btn.textContent='✅ 복사됨';var tt=document.getElementById('nvToast');tt.style.opacity='1';"
         "setTimeout(function(){btn.textContent=o;tt.style.opacity='0';},1600);}</script>")
     return HTMLResponse(_subscriber_page("네이버 블로그", body))
+
+
+@app.post("/kit/{asset_id}/regen-naver")
+def kit_regen_naver(request: Request, asset_id: str):
+    """(사용자용) 네이버용 영상 다시 만들기 — 파일이 정리돼 받을 수 없을 때 소유자가 직접 복구.
+    admin_regen_naver 로직 재사용(글·사진·쇼츠 불변). 완료 후 네이버 페이지로 복귀."""
+    u = auth.current_user(request)
+    pieces = _owned_pieces(u, asset_id) if u else None
+    if not pieces:
+        return HTMLResponse(status_code=404)
+    ok = False
+    try:
+        import json as _j
+        resp = admin_regen_naver(asset_id)          # 동기 재생성(1~2분) — 글·사진 산출물 불변
+        ok = bool(_j.loads(bytes(resp.body or b"{}")).get("ok"))
+    except Exception:
+        ok = False
+    msg = ("ok=네이버 영상을 다시 만들었어요 — 아래에서 받으세요"
+           if ok else "err=영상 다시 만들기에 실패했어요 — 잠시 후 다시 시도해 주세요")
+    return RedirectResponse(f"/kit/{asset_id}/naver?{msg}", status_code=303)
 
 
 @app.get("/dl/{asset_id}/{fname}")
