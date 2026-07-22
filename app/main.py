@@ -5582,6 +5582,32 @@ def admin_regen_channel(asset_id: str, kind: str = "", force: str = ""):
                                   (made.payload.get("body") or "")[:400]) if made else None)})
 
 
+@app.get("/admin/queue-audit")
+def admin_queue_audit(tid: str = ""):
+    """진단 — tenant writing_queue 전수(생성시각·상태·타깃) + 발행 글 타깃. D1 이분법 대조용."""
+    tid = tid.strip()
+    if not tid:
+        return JSONResponse({"error": "tid 필요"}, status_code=400)
+    rows = db.writing_queue_rows(tid, limit=100)
+    out = [{"id": r.get("id"), "source": r.get("source_type"), "keyword": r.get("target_keyword"),
+            "status": r.get("status"), "created_at": r.get("created_at"), "reason": (r.get("reason") or "")[:80]}
+           for r in rows]
+    # 발행 확인된 글의 타깃 키워드
+    pubs = []
+    try:
+        with db._conn() as c:
+            prs = c.execute("SELECT piece_id, post_title, published_at FROM blog_publishes WHERE tenant_id=? "
+                            "ORDER BY published_at DESC LIMIT 10", (tid,)).fetchall()
+        for pr in prs:
+            pc = db.get_piece(pr["piece_id"])
+            kw = ((pc.payload.get("target_keywords") or [""])[0] if pc else "") or ""
+            pubs.append({"piece": pr["piece_id"][:8], "title": (pr["post_title"] or "")[:40],
+                         "target_kw": kw, "published_at": pr["published_at"]})
+    except Exception:
+        pass
+    return JSONResponse({"tenant": tid, "queue_count": len(out), "queue": out, "published": pubs})
+
+
 @app.get("/admin/kwpattern")
 def admin_kwpattern(kw: str = "", nocache: str = ""):
     """진단 — 셀러 상위 글 패턴 분석 결과 + 주입 블록 미리보기(검증용)."""
