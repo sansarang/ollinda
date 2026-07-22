@@ -3518,6 +3518,23 @@ async def my_citation_upload(request: Request):
     return RedirectResponse(f"/me?ok=AI 브리핑 인용수 {cc}회를 기록했어요 — 리포트에 반영됩니다", status_code=303)
 
 
+@app.get("/admin/geo-topics")
+def admin_geo_topics(industry: str = "", biz: str = "local", region: str = "", desc: str = ""):
+    """(진단) 업종 스키마 유래 트랙 B 질문형 주제 도출 + 키워드 관문 통과 결과 — 사진 불필요.
+    V1의 '4업종 주제 도출·업종 어휘 하드코딩 0' 검증용."""
+    from app.services import geo_track as _geo, indschema as _isc
+    sch = _isc.get_schema(industry, biz)
+    topics = _geo.info_topics(industry, biz, sch, region=region, desc=desc)
+    out = []
+    for tp in topics:
+        kw = _geo.select_info_keyword([tp["topic"]], region, industry, verify_volume=True)
+        out.append({"topic": tp["topic"], "angle": tp["angle"], "gated_keyword": kw})
+    return JSONResponse({"ok": bool(topics), "industry": industry, "biz_type": biz,
+                         "schema_axes": [a.get("axis") for a in (sch.get("attribute_axes") or [])],
+                         "content_angles": sch.get("content_angles"),
+                         "honesty_hooks": sch.get("honesty_hooks"), "topics": out})
+
+
 @app.get("/admin/geo-gen")
 def admin_geo_gen(tid: str = "", topic: str = "", nocache: str = ""):
     """(진단) 트랙 B 정보성 글 1건 생성 + GEO 게이트(G1~G5) 통과표 — V1/V5 검증용.
