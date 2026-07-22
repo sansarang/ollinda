@@ -5692,7 +5692,7 @@ def admin_queue_audit(tid: str = ""):
         for pr in prs:
             pc = db.get_piece(pr["piece_id"])
             kw = ((pc.payload.get("target_keywords") or [""])[0] if pc else "") or ""
-            pubs.append({"piece": pr["piece_id"][:8], "title": (pr["post_title"] or "")[:40],
+            pubs.append({"piece": pr["piece_id"], "title": (pr["post_title"] or "")[:40],
                          "target_kw": kw, "published_at": pr["published_at"]})
     except Exception:
         pass
