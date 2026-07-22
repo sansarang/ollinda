@@ -206,7 +206,7 @@ def refill(t, plan: str = "free") -> dict:
                     vols[(vv.get("keyword") or "").replace(" ", "")] = vv.get("total", 0)
             _placed = 0
             for kw in cands:
-                if _placed >= 2:
+                if _placed >= 3:            # 셀러 롱테일은 차기 글감 3개까지(검색량 합격분)
                     break
                 v = vols.get(kw.replace(" ", ""))
                 # 검색량 실측: 월 100회 미만이면 스킵(저볼륨 판 이중 차단). 폴백('광역+업종')은 무측정도 허용(큐 안 비게).
