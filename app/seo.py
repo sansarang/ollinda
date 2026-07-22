@@ -72,10 +72,20 @@ def product_keywords(note: str = "", brand: str = "", limit: int = 10, industry:
     reg2 = _kw_shorten(reg2) if reg2 else ""
     year = next(iter(re.findall(r"(?:19|20)\d{2}", free_text)), "")
     model = nouns[0] if nouns else ""
+    # 트레이드 접미(중고·추천 등)는 업종 스키마 search_grammar 리터럴에서 파생(차량 하드코딩 0)
+    _suf = ""
+    try:
+        from app.services import indschema as _isc
+        _lits = []
+        for _g in (_isc.get_schema(industry, "seller").get("search_grammar") or []):
+            _lits += re.findall(r"[가-힣]{2,}", re.sub(r"\{[^}]*\}", " ", _g))
+        _suf = next((w for w in _lits if w not in ("추천",)), _lits[0] if _lits else "")
+    except Exception:
+        pass
     if reg2 and industry.strip():
         kws.append(f"{reg2} {industry.strip()}")                      # 지역+업종: '부산 기장 중고차'
     if model and year:
-        kws.append(f"{model} {year} 중고")                            # 차종+연식: '모닝 2019 중고'
+        kws.append(f"{model} {year} {_suf}".strip())                  # 속성+연식+트레이드어: '모닝 2019 중고'
     if reg2 and model and model != industry.strip():
         kws.append(f"{reg2} {model}")                                 # 지역+차종: '부산 기장 모닝'
     for n in heads:
@@ -139,18 +149,12 @@ def is_basic_region_kw(kw: str, region: str, biz_type: str) -> bool:
     return any(core in kwf for core in basic_region_cores(region))
 
 
-_CAR_MODELS = ("모닝", "레이", "스파크", "캐스퍼", "아반떼", "쏘나타", "그랜저", "K3", "K5", "K7", "K8",
-               "코나", "티볼리", "셀토스", "투싼", "쏘렌토", "싼타페", "카니발", "스포티지", "포터", "봉고",
-               "제네시스", "G80", "GV70", "GV80", "말리부", "트랙스", "베뉴", "팰리세이드", "스타리아")
-_CAR_CLASSES = ("경차", "소형", "준중형", "중형", "준대형", "대형", "SUV", "승합", "화물", "수입")
-
-
 def _kw_rank_tier(kw: str, models: list, classes: list, wide: str, ind0: str) -> int:
-    """매물 속성 서열 — 낮을수록 우선. 0:[차종+연식/중고] 1:[차급+중고] 2:[광역+차종] 3:[광역+업종] 4:기타.
-    차종·차급은 저장 컨텍스트 + 화이트리스트 양쪽으로 인식(컨텍스트 없어도 '그랜저 중고' 인식)."""
+    """매물 속성 서열 — 낮을수록 우선. 0:[속성+연식/거래어] 1:[분류+거래어] 2:[광역+속성] 3:[광역+업종] 4:기타.
+    속성·분류는 세트 컨텍스트 + 업종 스키마 attribute_axes에서 공급(차량 하드코딩 제거·전 업종)."""
     k = (kw or "").replace(" ", "")
-    _mset = set(m.replace(" ", "") for m in models if m) | set(_CAR_MODELS)
-    _cset = set(classes) | set(_CAR_CLASSES)
+    _mset = set(m.replace(" ", "") for m in models if m)
+    _cset = set(c.replace(" ", "") for c in classes if c)
     has_model = any(m and m in k for m in _mset)
     has_year = bool(_re_g.search(r"(19|20)\d{2}", k))
     has_class = any(c and c in k for c in _cset)
@@ -180,7 +184,7 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
         return cands[0] if cands else (f"{_kw_shorten(region)} {ind0}".strip() if ind0 else "")
     # 기초지역 배제
     cands = [c for c in cands if not is_basic_region_kw(c, region, biz)]
-    # 매물 속성(차종·차급) — 컨텍스트 기반 서열
+    # 매물 속성(핵심 속성·분류) — 세트 컨텍스트 + 업종 스키마 attribute_axes에서 공급(전 업종)
     models, classes = [], []
     if tenant_id:
         try:
@@ -192,6 +196,16 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
                     classes.append(ctx["car_class"])
         except Exception:
             pass
+    try:
+        from app.services import indschema as _isc
+        _sch = _isc.get_schema(industry, biz)
+        _axes = _sch.get("attribute_axes") or []
+        for _t in (_axes[0].get("tokens") if _axes else []) or []:   # 1축=핵심 속성(차종·메뉴·향)
+            models.append(_t)
+        for _ax in _axes[1:]:                                        # 이후 축=분류(차급·용량 등)
+            classes += [t for t in (_ax.get("tokens") or [])]
+    except Exception:
+        pass
     wide = next((_re_g.sub(r"(특별시|광역시|특별자치시|특별자치도|자치도|도)$", "", tk)
                  for tk in (region or "").split()
                  if _re_g.search(r"(특별시|광역시|특별자치시|특별자치도|도)$", tk)), "")

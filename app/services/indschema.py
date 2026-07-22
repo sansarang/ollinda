@@ -153,3 +153,70 @@ def attribute_tokens(schema: dict) -> list:
     for ax in (schema.get("attribute_axes") or []):
         out += [t for t in (ax.get("tokens") or []) if t]
     return list(dict.fromkeys(out))
+
+
+# 전 업종 공통 거래·상태 접미(업종 어휘 아님 — 지역·업종 순수태그 보호용)
+_TRADE_SUFFIX = ("추천", "후기", "리뷰", "가격", "비용", "견적", "업체", "전문",
+                 "매장", "판매", "실매물", "인기", "베스트", "순위", "best")
+
+
+def _norm_tag(s: str) -> str:
+    return re.sub(r"[^가-힣a-z0-9]", "", (s or "").lower())
+
+
+def tag_consistency_gate(tags, schema, context_values, body_text, region="",
+                         general_tags=None):
+    """★ 태그 정합 게이트 — 전 업종 단일 규칙(업종별 분기 0).
+
+    규칙(유일): 태그의 '속성 토큰'은 현재 세트의 컨텍스트(매물/시공/상품 실값)에 있어야 한다.
+      - 컨텍스트가 있으면 그것이 권위 — 본문 비교언급만으로는 태그화 불가(레이·타메뉴 누수 차단).
+      - 컨텍스트가 비었으면(신규 셀러·매장) 본문 실등장이 근거.
+    속성 토큰 판별은 스키마 attribute_axes(알려진 속성) + '지역·일반태그·거래접미가 아닌 잔여 코어'로만.
+    지역·업종 일반태그는 통과(오탐 0). 반환: (kept, dropped[(tag, reason)])."""
+    attr_vocab = [_norm_tag(t) for t in attribute_tokens(schema) if t]
+    ctx = {_norm_tag(v) for v in (context_values or []) if v and _norm_tag(v)}
+    body_n = _norm_tag(body_text)
+    gens = {_norm_tag(g) for g in (general_tags or schema.get("general_tags") or []) if _norm_tag(g)}
+    # 문법 리터럴(중고·추천 등 구조어) — 스키마 search_grammar의 플레이스홀더 제거 후 남는 단어
+    struct = set(_TRADE_SUFFIX)
+    for g in (schema.get("search_grammar") or []):
+        for w in re.findall(r"[가-힣]{2,}", re.sub(r"\{[^}]*\}", " ", g)):
+            struct.add(_norm_tag(w))
+    reg_stems = set()
+    for tk in (region or "").split():
+        reg_stems.add(_norm_tag(tk))
+        st = re.sub(r"(특별시|광역시|특별자치시|특별자치도|자치도|시|군|구|읍|면|동|도)$", "", tk)
+        if len(st) >= 2:
+            reg_stems.add(_norm_tag(st))
+
+    def _grounded(tok):   # 컨텍스트(권위) 우선 — 없을 때만 본문이 근거(비교언급 누수 차단)
+        return tok in ctx or (not ctx and tok in body_n)
+
+    kept, dropped = [], []
+    for t in tags:
+        tn = _norm_tag(t)
+        if not tn:
+            continue
+        if tn in gens:                       # 순수 일반태그(정확 일치) — 무조건 통과(오탐 0)
+            kept.append(t)
+            continue
+        # (A) 알려진 속성 토큰(스키마 attribute_axes)이 태그에 있으면 각 토큰이 세트 컨텍스트 근거여야
+        hit = [a for a in attr_vocab if a and a in tn]
+        bad = [a for a in hit if not _grounded(a)]
+        if bad:
+            dropped.append((t, "attr:" + ",".join(bad)))
+            continue
+        # (B) 잔여 코어 = 태그 − (근거된 속성토큰·지역·일반태그·구조어·숫자). 남으면 개방형 속성 → 근거 필요
+        res = tn
+        for a in hit:
+            res = res.replace(a, "")
+        for w in sorted(gens | struct | reg_stems, key=len, reverse=True):
+            res = res.replace(w, "")
+        res = re.sub(r"\d+", "", res)
+        if len(res) < 2 or _grounded(res):
+            kept.append(t)
+        else:
+            dropped.append((t, "core:" + res))
+    if dropped:
+        _log.info("[tag-gate] 제거 %d건: %s", len(dropped), dropped[:8])
+    return kept, dropped

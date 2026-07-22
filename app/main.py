@@ -2187,10 +2187,21 @@ def my_blog_published(request: Request, piece_id: str = Form(""), url: str = For
         _existing = set(db.tracked_keywords(t.id, limit=20))
         _cap = 10                                          # 추적 볼륨 한도(기존 tracked_keywords 기본)
         if len(_existing) < _cap:
-            import re as _rt
+            import re
+            from app.services import indschema as _isc2
             _tags = _blog_tags(t, piece)
-            # 검색형 태그만(지역+업종 결합 4자+, 순수 조사·너무 일반 제외) 상위 2~3
-            _cands = [tg for tg in _tags if len(tg) >= 4 and _rt.search(r"(중고차|썬팅|카페|미용|네일|모닝|아반떼)", tg)][:3]
+            # 검색형 태그만(업종 일반태그·속성 토큰·지역 결합 4자+) 상위 2~3 — 스키마 기반(하드코딩 0)
+            _schT = _isc2.get_schema(getattr(t, "industry", ""), getattr(t, "biz_type", "local") or "local")
+            _mk = set()
+            for _x in (_schT.get("general_tags") or []) + _isc2.attribute_tokens(_schT):
+                _n = re.sub(r"[^가-힣A-Za-z0-9]", "", _x or "")
+                if len(_n) >= 2:
+                    _mk.add(_n)
+            for _tk in (getattr(t, "region", "") or "").split():
+                _s = re.sub(r"(특별시|광역시|특별자치시|특별자치도|자치도|시|군|구|도)$", "", _tk)
+                if len(_s) >= 2:
+                    _mk.add(_s)
+            _cands = [tg for tg in _tags if len(tg) >= 4 and any(m in tg for m in _mk)][:3]
             for tg in _cands:
                 if tg not in _existing and len(_existing) < _cap:
                     db.save_rank_snapshot(t.id, tg, None)  # null 랭크=등록만(다음 순위 크론이 확인)
@@ -2288,28 +2299,27 @@ def _blog_tags(tenant, blog) -> list[str]:
         cand.append(_sq(kw_toks[0] + kw_toks[-1]))         # 지역+핵심(부산썬팅업체)
     cand += [_sq(t) for t in kw_toks if len(t) >= 2]
 
-    # b. 매물·시공 속성(폼 실값·본문 근거만) — 차종·연식·필름명
+    # b. 매물/상품 속성(폼 실값·본문 근거만) — 업종 스키마 attribute_axes 토큰으로 인식(차량 하드코딩 0).
+    #    정합은 반환 직전 tag_consistency_gate가 세트 컨텍스트 기준으로 최종 필터(비교언급 누수 차단).
+    from app.services import indschema as _isc
+    _bt3 = (getattr(tenant, "biz_type", "local") or "local")
+    _sch3 = _isc.get_schema(getattr(tenant, "industry", ""), _bt3)
+    _attr_vocab = _isc.attribute_tokens(_sch3)
     year = next(iter(_r.findall(r"(20\d{2}|19\d{2})", note)), "")
-    models = [w for w in _r.findall(r"[가-힣]{2,}", note)
-              if w in ("모닝", "아반떼", "그랜저", "쏘나타", "스파크", "레이", "K3", "K5", "코나", "티볼리", "포터", "봉고", "캐스퍼", "경차", "SUV")]
+    models = [w for w in _attr_vocab if w and w in note]
     for md in dict.fromkeys(models[:2]):
         cand.append(_sq(md))
         if year:
-            cand.append(_sq(year + md))                    # 2019모닝
+            cand.append(_sq(year + md))                    # 2019모닝 / 연식+속성
         cand.append(_sq(md + "중고") if ind and "중고" in ind else _sq(md))
-    # 필름·시공 속성(썬팅 등) — 본문·폼에 있는 고유 제품명만
-    for prod in _r.findall(r"(루마버텍스\s?\d{3,4}|신차패키지|유리막코팅|생활보호PPF|PPF|썬팅지|버텍스)", note):
-        cand.append(_sq(prod))
 
-    # c. 업종 일반태그 2~3개(업종 프로필 기반)
-    _IND_GEN = {"중고차": ["중고차", "중고차추천", "실매물"], "썬팅": ["썬팅", "자동차썬팅", "신차썬팅"],
-                "카페": ["카페", "동네카페"], "미용": ["미용실", "헤어"], "네일": ["네일", "네일아트"]}
-    _ind_short = ind                                       # 지역 태그용 짧은 업종어(중고차·썬팅)
-    for key, tags in _IND_GEN.items():
-        if key in ind or key in note:
-            cand += [_sq(t) for t in tags]
-            _ind_short = key
-            break
+    # c. 업종 일반태그 2~3개(스키마 general_tags) + 지역태그용 짧은 업종어
+    _ind_short = ind
+    for t in (_sch3.get("general_tags") or []):
+        cand.append(_sq(t))
+    _gt0 = (_sch3.get("general_tags") or [])
+    if _gt0:
+        _ind_short = _gt0[0]                               # 지역+업종 태그의 업종어(중고차·썬팅·카페)
 
     # d. 지역태그 1~2개 — 셀러·병행도 태그는 지역 포함(태그=유입면, 훅 규칙 무관)
     def _strip_admin(t):                                   # 행정구역 접미 제거(단, 결과 2자 미만이면 원형 유지)
@@ -2333,7 +2343,20 @@ def _blog_tags(tenant, blog) -> list[str]:
     # 근사 부분중복만 제거(길이차 1 이하 = '중고차들'⊂'중고차판매' 류) — 복합+구성요소(부산기장중고차/중고차판매)는
     # 태그 관행상 서로 다른 유입면이므로 둘 다 유지(파일명 dedupe보다 완화). 순서=소스 우선순위.
     deduped = [t for t in seen if not any(t != o and t in o and len(o) - len(t) <= 1 for o in seen)]
-    return deduped[:15]
+    # ── 태그 정합 게이트(전 업종 단일 규칙) — 속성 토큰은 세트 컨텍스트(매물/상품 실값)∪본문 근거만.
+    #    현재 매물과 무관한 타차종·타메뉴·타향 태그 제거(레이 3번 재발 차단). 추가만, 기존 로직 불변.
+    _ctx_vals = []
+    try:
+        for _c in db.recent_inventory_context(getattr(tenant, "id", "") or "", limit=6):
+            _ctx_vals += [_c.get("model", ""), _c.get("car_class", ""), _c.get("year", "")]
+    except Exception:
+        pass
+    for _kw in kws:                                        # 타깃 키워드의 속성 토큰도 세트 컨텍스트(관문 확정 매물)
+        _ctx_vals += [a for a in _attr_vocab if a and a in _kw]
+    _kept, _dropped = _isc.tag_consistency_gate(
+        deduped[:15], _sch3, _ctx_vals, note,
+        region=getattr(tenant, "region", "") or "", general_tags=_sch3.get("general_tags"))
+    return _kept
 
 
 def _photo_captions(tenant, blog, n: int) -> list[str]:
@@ -2341,9 +2364,14 @@ def _photo_captions(tenant, blog, n: int) -> list[str]:
     키워드 자연 변형은 첫·중간·끝 최대 3장에만(도배 방지 — 나머지는 순수 묘사).
     분석 없으면 빈 리스트(날조 캡션 금지)."""
     import re as _r
+    from app.services import indschema as _isc
     srcnote = (blog.payload or {}).get("gen_source") or ""
     kw = seo._kw_shorten(((blog.payload or {}).get("target_keywords") or [""])[0] or "")
     imgs_ = (blog.payload or {}).get("image_paths") or []
+    # 개인정보·서류 위험어 = 업종 스키마 privacy_patterns ∪ 범용 서류어(전 업종 자동)
+    _priv = _isc.get_schema(getattr(tenant, "industry", ""),
+                            getattr(tenant, "biz_type", "local") or "local").get("privacy_patterns") or []
+    _doc_risk = tuple(dict.fromkeys(list(_priv) + list(_CAP_DOC)))
     out = []
     _patched = False
     kw_slots = {1, max(2, (n + 1) // 2), n} if n >= 3 else {1}       # 키워드 부착 배치: 첫·중간·끝(최대 3장)
@@ -2368,10 +2396,10 @@ def _photo_captions(tenant, blog, n: int) -> list[str]:
         if len(desc) < 4:
             out.append("")                             # 렌더 가드가 걸러냄 — 빈 문장 미출력
             continue
-        # 서류 사진 안전장치: 개인정보(성명·주소·차량번호) 서술 금지 — 확인 사실만
-        if (any(k in desc for k in _CAP_DOC)
+        # 서류·개인정보 사진 안전장치: 민감정보(성명·주소·번호) 서술 금지 — 확인 사실만(전 업종 스키마 기반)
+        if (any(k in desc for k in _doc_risk)
                 or _r.search(r"\d{2,3}[가-힣]\s?\d{4}", raw_line + " " + desc)):
-            out.append("차량 서류 확인 사진")
+            out.append("서류·확인 사진")
             continue
         out.append(f"{desc} — {kw} 현장 사진입니다." if (kw and i in kw_slots) else f"{desc}.")
     if _patched:
