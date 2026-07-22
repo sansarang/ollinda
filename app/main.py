@@ -5591,6 +5591,16 @@ def admin_inventory_save(tid: str = "", model: str = "", year: str = "", car_cla
     return JSONResponse({"ok": True, "context": db.recent_inventory_context(tid.strip(), limit=6)})
 
 
+@app.get("/admin/smartblock")
+def admin_smartblock(seed: str = "중고차", region: str = ""):
+    """진단 — 스마트블록 세부주제 근사(연관어+검색량+의도유형→앵글). V2 검증."""
+    from app.services import smartblock as _sb
+    seeds = [s for s in (seed, f"{region} {seed}".strip()) if s.strip()]
+    subs = _sb.subtopics(seeds, min_volume=100, limit=12)
+    return JSONResponse({"seeds": seeds, "count": len(subs),
+                         "subtopics": [{**s, "angle": _sb.angle_for(s["keyword"])} for s in subs]})
+
+
 @app.get("/admin/inventory")
 def admin_inventory(tid: str = ""):
     """진단 — tenant 매물 컨텍스트 + 셀러 롱테일 후보(검색량 포함)."""
