@@ -113,9 +113,14 @@ def refill(t, plan: str = "free") -> dict:
     # P2 — 미노출(놓치는) 키워드 선점(기존 진단 재사용, 매장/셀러 분기)
     try:
         from app.services import diagnose
-        if (getattr(t, "biz_type", "local") or "local") in ("seller", "hybrid"):   # 병행도 상품 진단(지역 진단 배제)
-            r = diagnose.diagnose_product_rank(t.industry, getattr(t, "brand_name", "") or t.name,
-                                               getattr(t, "brand_name", "") or "")
+        import re as _re2
+        _biz = (getattr(t, "biz_type", "local") or "local")
+        if _biz in ("seller", "hybrid"):
+            # 병행·셀러: 지역 진단을 쓰되 기초지역(구·군) 제거한 '광역시'만 전달 → '부산 중고차' 수준(기장 배제).
+            # 상품 진단(diagnose_product_rank)은 엉뚱한 지역/일반어를 뽑아 부적합.
+            _wide = " ".join(tk for tk in (t.region or "").split()
+                             if not _re2.search(r"(군|구|읍|면)$", tk))
+            r = diagnose.diagnose_rank(t.industry, _wide, t.name)
         else:
             r = diagnose.diagnose_rank(t.industry, t.region, t.name)
         if not r.get("estimated"):
