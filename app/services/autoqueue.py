@@ -272,6 +272,26 @@ def refill(t, plan: str = "free") -> dict:
                         break
     except Exception:
         _log.exception("[autoqueue] P4 적재 실패 t=%s", t.id)
+    # 트랙 B — 정보성 글(GEO/AI 브리핑 인용): 주간 상한 내에서 스키마 유래 질문형 주제 적재.
+    #   source_type=R1(P4보다 뒤) → 매물·시공 글(P1~P4)이 항상 먼저 소비됨(트랙 A 우선순위 불변).
+    try:
+        from app.services import geo_track as _geo, indschema as _isc
+        if db.info_track_count_since(t.id, days=7) < _geo.WEEKLY_INFO_CAP:
+            _bizB = getattr(t, "biz_type", "local") or "local"
+            _schB = _isc.get_schema(t.industry, _bizB)
+            for tp in _geo.info_topics(t.industry, _bizB, _schB, region=t.region or "",
+                                       desc=(getattr(t, "topic_axis", "") or "")):
+                kwB = _geo.select_info_keyword([tp["topic"]], t.region or "", t.industry, tenant_id=t.id)
+                if not kwB or _bad_kw(kwB):        # 정보형은 비지역 → 기초지역 배제만(select_info_keyword 내부) 적용
+                    continue
+                if db.enqueue_writing(t.id, _geo.INFO_SOURCE, kwB, tp["angle"],
+                                      _reason("트랙 B 정보성(AI 브리핑 인용 최적화) — 스키마 유래 질문형 주제"),
+                                      content_type="info"):
+                    added["B"] = added.get("B", 0) + 1
+                    _log.info("[autoqueue] 적재 B(트랙B/info) t=%s kw=%r angle=%s", t.id, kwB, tp["angle"])
+                    break                             # 리필 1회당 1건(누적은 주간 상한이 제어)
+    except Exception:
+        _log.exception("[autoqueue] 트랙 B(info) 적재 실패 t=%s", t.id)
     return added
 
 
@@ -386,9 +406,11 @@ def consume(t, files: list | None = None, plan: str = "free") -> dict:
             analysis = vision.analyze_all(paths, t.industry) if paths else ""
             if analysis:
                 note += f"\n[사진 분석] {analysis[:1500]}"
+            _ctype = (q.get("content_type") or "sell")   # sell=트랙A / info=트랙B(GEO)
             asset = db.create_asset(t.id, AssetType.IMAGE, paths[0], note)
             asset.target_kw = kw
             asset.angle = q["angle"] if q["angle"] in ("review", "howto", "price") else "review"
+            asset.content_type = _ctype
             pieces = generate_for(t, asset, [ContentKind.BLOG], images=paths)
             if not pieces:
                 raise RuntimeError("no pieces")
@@ -410,6 +432,25 @@ def consume(t, files: list | None = None, plan: str = "free") -> dict:
                     gate = mass.industry_gate(prof, p.payload, getattr(t, "biz_type", "local") or "local")
                 except Exception:
                     pass
+            # 트랙 B(info) 전용 GEO 구조 게이트(G1~G5) — 트랙 A 미적용(추가만).
+            #   불통과 시 1회 재생성, 재불통과 시 보류(save_piece 미호출 = 발행 안 됨). 날조 통과 금지.
+            if _ctype == "info":
+                from app.services import geo_track as _geo
+                ggate = _geo.geo_gate(p.payload)
+                if not ggate["passed"]:
+                    _log.info("[autoqueue] 트랙B GEO 1차 미달 t=%s kw=%r fails=%s", t.id, kw, ggate["fails"])
+                    try:
+                        revise_piece(p, _geo.regen_instruction(ggate["fails"]))
+                    except Exception:
+                        _log.exception("[autoqueue] 트랙B 재생성 실패 t=%s", t.id)
+                    ggate = _geo.geo_gate(p.payload)
+                p.payload["geo_gate"] = ggate
+                if not ggate["passed"]:
+                    db.mark_writing(q["id"], "skipped",
+                                    reason_append="GEO 구조 게이트 재불통과: " + ",".join(ggate["fails"])[:120])
+                    _log.warning("[autoqueue] 트랙B GEO 재불통과 → 보류(미발행) t=%s kw=%r fails=%s",
+                                 t.id, kw, ggate["fails"])
+                    return {"ok": False, "geo_gate_failed": True, "keyword": kw, "fails": ggate["fails"]}
             try:
                 from app.services import tracklinks
                 tracklinks.inject(t, p)

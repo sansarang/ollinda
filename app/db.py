@@ -683,6 +683,46 @@ def record_perf_event(tenant_id: str, keyword: str, rank: int) -> None:
         pass
 
 
+def save_blog_citation(tenant_id: str, piece_id: str, keyword: str, count: "int | None") -> bool:
+    """PHASE 4 — AI 브리핑 인용수 저장(캡처 판독 결과). 같은 (piece/keyword)는 최신값 갱신.
+    count None(판독 실패)이면 저장 안 함(날조·0채움 금지). 저장 성공 시 True."""
+    if count is None:
+        return False
+    kw = " ".join((keyword or "").split())
+    try:
+        with _conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS blog_citations("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, piece_id TEXT, "
+                      "keyword TEXT, citation_count INTEGER, at TEXT)")
+            # 3층 성과 예약 컬럼(피드백 로직은 범위 밖 — 자리만)
+            try:
+                c.execute("ALTER TABLE performance_events ADD COLUMN citation_count INTEGER")
+            except Exception:
+                pass
+            key = piece_id or kw
+            ex = c.execute("SELECT id FROM blog_citations WHERE tenant_id=? AND COALESCE(piece_id,'')=? AND keyword=?",
+                           (tenant_id, piece_id or "", kw)).fetchone()
+            if ex:
+                c.execute("UPDATE blog_citations SET citation_count=?, at=? WHERE id=?", (int(count), _now(), ex["id"]))
+            else:
+                c.execute("INSERT INTO blog_citations(tenant_id, piece_id, keyword, citation_count, at) "
+                          "VALUES(?,?,?,?,?)", (tenant_id, piece_id or "", kw, int(count), _now()))
+        return True
+    except Exception:
+        return False
+
+
+def blog_citations(tenant_id: str, limit: int = 30) -> list[dict]:
+    """가게 인용수 기록(최신순) — 리포트 [글별 인용수]용."""
+    try:
+        with _conn() as c:
+            rows = c.execute("SELECT piece_id, keyword, citation_count, at FROM blog_citations "
+                             "WHERE tenant_id=? ORDER BY at DESC LIMIT ?", (tenant_id, limit)).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
 def schedule_report(tenant_id: str, keyword: str, baseline_rank, due_at: str, channel: str = "email") -> None:
     """7일 순위 리포트 예약 — 발행 시 baseline 기록, due_at에 발송(성장 PHASE 2)."""
     try:
@@ -1408,8 +1448,9 @@ def daily_click_series(tenant_id: str, days: int = 7) -> list[dict]:
 
 # ── 자동 글감 큐(auto P1~P4) — AI가 판단한 다음 글감. 유저 버튼 없이 엔진이 소비 ──
 def enqueue_writing(tenant_id: str, source_type: str, keyword: str, angle: str = "review",
-                    reason: str = "") -> bool:
-    """큐 적재 — dedupe_key(tenant|keyword|source) UNIQUE로 중복 차단. 적재됐으면 True."""
+                    reason: str = "", content_type: str = "sell") -> bool:
+    """큐 적재 — dedupe_key(tenant|keyword|source) UNIQUE로 중복 차단. 적재됐으면 True.
+    content_type: sell=트랙 A(매물·시공) / info=트랙 B(정보성·GEO 브리핑 인용)."""
     keyword = " ".join((keyword or "").split())
     if not keyword:
         return False
@@ -1420,13 +1461,33 @@ def enqueue_writing(tenant_id: str, source_type: str, keyword: str, angle: str =
                       "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, source_type TEXT, "
                       "target_keyword TEXT, angle TEXT, reason TEXT, status TEXT DEFAULT 'pending', "
                       "dedupe_key TEXT UNIQUE, piece_id TEXT, attempts INTEGER DEFAULT 0, created_at TEXT)")
+            try:
+                c.execute("ALTER TABLE writing_queue ADD COLUMN content_type TEXT DEFAULT 'sell'")
+            except Exception:
+                pass                                  # 이미 존재
             cur = c.execute("INSERT OR IGNORE INTO writing_queue"
-                            "(tenant_id, source_type, target_keyword, angle, reason, status, dedupe_key, created_at) "
-                            "VALUES(?,?,?,?,?,?,?,?)",
-                            (tenant_id, source_type, keyword, angle, reason[:300], "pending", dk, _now()))
+                            "(tenant_id, source_type, target_keyword, angle, reason, status, dedupe_key, created_at, content_type) "
+                            "VALUES(?,?,?,?,?,?,?,?,?)",
+                            (tenant_id, source_type, keyword, angle, reason[:300], "pending", dk, _now(), content_type))
             return cur.rowcount > 0
     except Exception:
         return False
+
+
+def info_track_count_since(tenant_id: str, days: int = 7) -> int:
+    """최근 days일 트랙 B(정보성) 큐 적재/생성 건수 — 주간 상한(비율 유지) 판정용."""
+    try:
+        import datetime as _dt
+        since = (_dt.datetime.utcnow() - _dt.timedelta(days=days)).isoformat()
+        with _conn() as c:
+            try:
+                r = c.execute("SELECT COUNT(*) FROM writing_queue WHERE tenant_id=? AND content_type='info' "
+                              "AND created_at >= ?", (tenant_id, since)).fetchone()
+            except Exception:
+                return 0                              # 컬럼 미존재(구DB) → 0
+        return int(r[0]) if r else 0
+    except Exception:
+        return 0
 
 
 def claim_writing(tenant_id: str) -> Optional[dict]:

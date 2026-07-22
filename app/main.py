@@ -3459,6 +3459,11 @@ def my_rank(request: Request):
             kws.append(k)
     # blog_id 연결 시: 블로그검색 결과에서 내 블로그 '정확 식별'(상호매칭 오탐 없음, 블로그등록 PHASE 3)
     bid = getattr(t, "blog_id", "") or ""
+    _cites = {}                                     # PHASE 4: 키워드별 AI 브리핑 인용수(캡처 판독 저장분)
+    for _c in db.blog_citations(t.id, limit=50):
+        _ck = (_c.get("keyword") or "").strip()
+        if _ck and _ck not in _cites:
+            _cites[_ck] = _c.get("citation_count")
     items = []
     for k in kws[:5]:
         det = place.rank_detail(k, t.name)
@@ -3466,7 +3471,8 @@ def my_rank(request: Request):
         prev = db.get_prev_rank(t.id, k)            # 오늘 이전 순위(변화 계산)
         db.save_rank_snapshot(t.id, k, cur)         # 오늘 순위 기록
         item = {"kw": k, "rank": cur, "prev": prev,
-                "rival": det["rival"], "leader": det["leader"]}
+                "rival": det["rival"], "leader": det["leader"],
+                "citation": _cites.get(k)}          # 순위/클릭과 함께 인용수 표시(없으면 null)
         if bid:
             from app.services import blogrank
             br = blogrank.blog_rank(k, bid)
@@ -3477,6 +3483,94 @@ def my_rank(request: Request):
         items.append(item)
     return JSONResponse({"items": items, "configured": place.configured(),
                          "blog_connected": bool(bid)})
+
+
+@app.post("/me/citation-upload")
+async def my_citation_upload(request: Request):
+    """PHASE 4 — 크리에이터 어드바이저 통계 캡처 업로드 → AI 브리핑 인용수 판독·저장(vision).
+    API 미제공 지표라 캡처 판독으로 편입. 판독 실패(숫자 안 보임)면 저장 안 함(날조 금지)."""
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login?next=/me", status_code=303)
+    t = _ensure_user_tenant(u)
+    form = await request.form()
+    ph = form.get("capture")
+    if ph is None or not getattr(ph, "filename", ""):
+        return RedirectResponse("/me?err=캡처 이미지를 선택해 주세요", status_code=303)
+    from app.services import geo_track as _geo
+    path = storage.save_upload(await ph.read(), ph.filename, t.id)
+    res = _geo.read_citation_capture(path)
+    cc = res.get("citation_count")
+    if cc is None:
+        return RedirectResponse("/me?err=캡처에서 인용수를 읽지 못했어요 — 'AI 브리핑 인용수'가 보이는 화면으로 다시 시도해 주세요", status_code=303)
+    # 캡처에서 읽은 키워드(있으면)로 내 블로그 글 매칭 → piece_id 연결(없으면 키워드만 저장)
+    kw = res.get("keyword") or ""
+    pid = ""
+    if kw:
+        for s in db.list_sets(tenant_id=t.id, limit=30):
+            for p in db.get_set_pieces(s["asset_id"]):
+                if p.kind.value == "blog" and kw[:8] and kw[:8] in (p.payload.get("title") or ""):
+                    pid = p.id
+                    break
+            if pid:
+                break
+    db.save_blog_citation(t.id, pid, kw or "(캡처)", cc)
+    return RedirectResponse(f"/me?ok=AI 브리핑 인용수 {cc}회를 기록했어요 — 리포트에 반영됩니다", status_code=303)
+
+
+@app.get("/admin/geo-gen")
+def admin_geo_gen(tid: str = "", topic: str = "", nocache: str = ""):
+    """(진단) 트랙 B 정보성 글 1건 생성 + GEO 게이트(G1~G5) 통과표 — V1/V5 검증용.
+    topic 미지정 시 스키마에서 주제 1개 도출. 실제 발행 아님(읽기 진단)."""
+    t = db.get_tenant(tid)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    from app.services import geo_track as _geo, indschema as _isc, generate as _gen
+    from app.domain.models import AssetType as _AT, ContentKind as _CK
+    biz = getattr(t, "biz_type", "local") or "local"
+    sch = _isc.get_schema(t.industry, biz)
+    if not topic:
+        tps = _geo.info_topics(t.industry, biz, sch, region=t.region or "", desc=(getattr(t, "topic_axis", "") or ""))
+        if not tps:
+            return JSONResponse({"ok": False, "error": "주제 도출 실패(LLM/스키마)"}, status_code=500)
+        topic, angle = tps[0]["topic"], tps[0]["angle"]
+    else:
+        angle = "howto"
+    kw = _geo.select_info_keyword([topic], t.region or "", t.industry, tenant_id=t.id) or topic
+    try:
+        from app.services.autoqueue import photo_pool as _pp
+        paths = _pp(t)[:4]
+    except Exception:
+        paths = []
+    if not paths:
+        return JSONResponse({"ok": False, "error": "사진 풀 없음(가게에 사진 필요)"}, status_code=409)
+    note = f"[자동 글감·트랙B] {topic}"
+    try:
+        analysis = vision.analyze_all(paths, t.industry)
+        if analysis:
+            note += f"\n[사진 분석] {analysis[:1200]}"
+    except Exception:
+        pass
+    asset = db.create_asset(t.id, _AT.IMAGE, paths[0], note)
+    asset.target_kw = kw
+    asset.angle = angle
+    asset.content_type = "info"
+    pieces = _gen.generate_for(t, asset, [_CK.BLOG], images=paths)
+    if not pieces:
+        return JSONResponse({"ok": False, "error": "생성 실패"}, status_code=500)
+    p = pieces[0]
+    gate = _geo.geo_gate(p.payload)
+    if not gate["passed"]:
+        try:
+            from app.services.revise import revise_piece as _rev
+            _rev(p, _geo.regen_instruction(gate["fails"]))
+            gate = _geo.geo_gate(p.payload)
+        except Exception:
+            pass
+    return JSONResponse({"ok": True, "tenant": t.name, "industry": t.industry, "biz_type": biz,
+                         "topic": topic, "keyword": kw, "angle": angle,
+                         "title": p.payload.get("title"), "body": p.payload.get("body"),
+                         "geo_gate": gate, "content_type": p.payload.get("content_type")})
 
 
 def _kfont(size: int):

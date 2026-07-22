@@ -148,9 +148,12 @@ class BlogDraftGenerator(Generator):
             kw0 = tkw
             kws = list(dict.fromkeys([tkw] + kws))[:10]
             kplan["longtail"] = []      # 1글 1키워드(자동 글감 큐): 타깃 외 키워드 소제목 헤딩화 금지
+        # 글 유형(트랙): sell=트랙 A(매물·시공, 불변) / info=트랙 B(정보성·GEO, 신설)
+        _ctype = (getattr(asset, "content_type", "sell") or "sell")
         # ★ 타깃 키워드 단일 관문(경로 무관) — 기초지역 배제·차종 서열·검색량. 셀러·병행 우회 원천 차단(3번째 재발 근본책).
+        #    트랙 B(info)는 비지역 질문형 키워드 → 상업 관문(지역 결합·매물 서열) 미적용(트랙 B 관문은 큐에서 이미 통과).
         _biz_g = (getattr(tenant, "biz_type", "local") or "local")
-        if _biz_g in ("seller", "hybrid"):
+        if _ctype != "info" and _biz_g in ("seller", "hybrid"):
             _pm = ""
             try:
                 from app import db as _dbctx
@@ -217,7 +220,14 @@ class BlogDraftGenerator(Generator):
             "[이미지배치]\n(- 각 사진을 어디에 왜)\n"
             "[키워드]\n(쉼표로 5~8개, 타겟 키워드 우선)"
         )
-        raw = _call_llm(prompt, self.model, 5000)
+        if _ctype == "info":
+            # 트랙 B — 정보성 글(GEO 구조 강제). 트랙 A 프롬프트를 대체(훅-후답 구조 미사용).
+            from app.services import geo_track as _geo
+            _trust = _geo._author_trust(tenant, asset.note or "")
+            prompt = _geo.info_prompt(tenant, prof.name, tenant.region or "", kw0,
+                                      getattr(asset, "angle", "howto") or "howto",
+                                      asset.note or "", min(len(imgs), SLOT_RECOMMENDED), trust=_trust)
+        raw = _call_llm(prompt, self.model, 5500 if _ctype == "info" else 5000)
         d = _parse_sections(raw, ["제목후보", "제목", "메타설명", "본문", "이미지배치", "키워드"])
         # ① 제목 3안 → 상위노출 최적 1개 자동 선택 ([제목]으로 준 경우도 흡수)
         title_cands = [t.strip().lstrip("-*·0123456789.) ").strip()
@@ -229,8 +239,8 @@ class BlogDraftGenerator(Generator):
         # 파싱된 키워드 + 타겟 키워드 병합(중복 제거)
         tags = list(dict.fromkeys(parsed + kws))[:10]
         body = _ensure_photo_markers(d.get("본문") or raw, min(len(imgs), SLOT_RECOMMENDED))
-        # 셀러: 본문 끝에 구매 블록 보강(누락 대비)
-        if strat.closing in ("buy", "both") and buy and buy not in body:
+        # 셀러: 본문 끝에 구매 블록 보강(누락 대비) — 트랙 B 정보성 글은 상업 블록 제외(정보 순수성)
+        if _ctype != "info" and strat.closing in ("buy", "both") and buy and buy not in body:
             body = body.rstrip() + "\n\n" + buy
         # 매장(local/hybrid): 글 끝에 고정정보 블록 자동 삽입(블로그템플릿 PHASE 2)
         # 지도는 텍스트 URL 대신 [여기 네이버 지도 넣기] 마커 — 발행 화면에서 장소 컴포넌트 가이드(PHASE 3)
@@ -292,6 +302,8 @@ class BlogDraftGenerator(Generator):
                      "biz_type": strat.key, "closing": strat.closing, "buy_block": buy,
                      "angle": getattr(asset, "angle", "") or "",
                      "target_kw": tkw,
+                     "content_type": _ctype,               # sell=트랙A / info=트랙B(GEO)
+                     "citation_count": None,                # 3층 성과: AI 브리핑 인용수(캡처 판독으로 채움 — 자리 예약)
                      "business_name": tenant.name,      # 게이트 업체명 정합 검사용(재검증 STEP 1-2a)
                      "brand_name": getattr(tenant, "brand_name", "") or "",
                      "gen_finish": _last_finish(),      # stop_reason 기록(절단 검증 V1)
