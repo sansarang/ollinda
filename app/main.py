@@ -5582,6 +5582,31 @@ def admin_regen_channel(asset_id: str, kind: str = "", force: str = ""):
                                   (made.payload.get("body") or "")[:400]) if made else None)})
 
 
+@app.post("/admin/inventory-save")
+def admin_inventory_save(tid: str = "", model: str = "", year: str = "", car_class: str = ""):
+    """진단/백필 — 매물 컨텍스트 수동 저장(기존 발행 매물 소급). 오토큐 롱테일 재료."""
+    if not tid.strip():
+        return JSONResponse({"ok": False, "error": "tid 필요"}, status_code=400)
+    db.save_inventory_context(tid.strip(), model.strip(), year.strip(), car_class.strip())
+    return JSONResponse({"ok": True, "context": db.recent_inventory_context(tid.strip(), limit=6)})
+
+
+@app.get("/admin/inventory")
+def admin_inventory(tid: str = ""):
+    """진단 — tenant 매물 컨텍스트 + 셀러 롱테일 후보(검색량 포함)."""
+    from app.services import autoqueue as _aq, searchad as _sa
+    t = db.get_tenant(tid.strip())
+    if not t:
+        return JSONResponse({"error": "tenant 없음"}, status_code=404)
+    cands = _aq._seller_longtail_candidates(t)
+    vols = {}
+    if _sa.configured() and cands:
+        for vv in _sa.keyword_volumes(cands[:8], limit=80):
+            vols[(vv.get("keyword") or "").replace(" ", "")] = vv.get("total", 0)
+    return JSONResponse({"context": db.recent_inventory_context(tid.strip(), limit=6),
+                         "candidates": [{"kw": c, "volume": vols.get(c.replace(" ", ""))} for c in cands]})
+
+
 @app.post("/admin/queue-clean-region")
 def admin_queue_clean_region(tid: str = ""):
     """구재고 정리 — 셀러·병행 tenant의 pending 큐 중 기초지역(구·군) 타깃을 삭제(미소비만).

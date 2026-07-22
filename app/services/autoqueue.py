@@ -54,6 +54,42 @@ def _skip_kw(t, kw: str) -> bool:
     return _bad_kw(kw) or _seller_kw_blocked(t, kw)
 
 
+MIN_QUEUE_VOLUME = 100    # 큐 적재 최소 월검색량 — 기장(월20) 류 저볼륨 판 재발 방지(이중 차단)
+
+
+def _seller_longtail_candidates(t) -> list:
+    """매물 컨텍스트(차종·연식·차급) → 셀러 롱테일 후보(우선순위 순).
+    1순위 [차종+중고/연식], 2순위 [차급+중고], 3순위 [광역+차종/차급], 최후 [광역+업종](폴백).
+    검색량 검증은 호출부에서. 컨텍스트 없으면 폴백만."""
+    import re as _r
+    ind0 = ((t.industry or "").replace("/", ",").split(",")[0] or "중고차").strip()
+    wide = next((_r.sub(r"(특별시|광역시|특별자치시|특별자치도|자치도|도)$", "", tk)
+                 for tk in (t.region or "").split()
+                 if _r.search(r"(특별시|광역시|특별자치시|특별자치도|도)$", tk)), "")
+    ctxs = db.recent_inventory_context(t.id, limit=6)
+    p1, p2, p3 = [], [], []
+    for c in ctxs:
+        md, yr, cl = c.get("model", ""), c.get("year", ""), c.get("car_class", "")
+        if md:
+            p1 += [f"{md} 중고", f"{md} 중고차"]
+            if yr:
+                p1 += [f"{yr} {md} 중고", f"{yr}년식 {md}"]
+            if wide:
+                p3.append(f"{wide} {md} 중고")
+        if cl:
+            p2 += [f"{cl} 중고", f"{cl} 중고차 추천"]
+            if wide:
+                p3.append(f"{wide} {cl} 중고")
+    fallback = [f"{wide} {ind0} 추천"] if wide else [f"{ind0} 추천"]
+    # 우선순위·중복 제거
+    seen, out = set(), []
+    for kw in p1 + p2 + p3 + fallback:
+        k = " ".join(kw.split())
+        if k and k not in seen:
+            seen.add(k); out.append(k)
+    return out
+
+
 def _reason(text: str, **meta) -> str:
     """reason 필드(내부 로그) 구조화 — 근거 카드가 파싱할 JSON. text에 기존 사람용 로그 유지."""
     import json
@@ -157,6 +193,34 @@ def refill(t, plan: str = "free") -> dict:
             break                                     # 굳히기는 1건이면 충분
     except Exception:
         _log.exception("[autoqueue] P3 적재 실패 t=%s", t.id)
+    # P4a — 셀러·병행: 매물 컨텍스트 롱테일 우선(차종·연식·차급) + 검색량 검증(월 100회+). 큐 비었을 때.
+    try:
+        if ((getattr(t, "biz_type", "local") or "local") in ("seller", "hybrid")
+                and not db.writing_queue_rows(t.id, status="pending", limit=1)):
+            cands = [c for c in _seller_longtail_candidates(t) if not _skip_kw(t, c)]
+            from app.services import searchad as _sa
+            _measured = _sa.configured()
+            vols = {}
+            if _measured and cands:
+                for vv in _sa.keyword_volumes(cands[:8], limit=80):
+                    vols[(vv.get("keyword") or "").replace(" ", "")] = vv.get("total", 0)
+            _placed = 0
+            for kw in cands:
+                if _placed >= 2:
+                    break
+                v = vols.get(kw.replace(" ", ""))
+                # 검색량 실측: 월 100회 미만이면 스킵(저볼륨 판 이중 차단). 폴백('광역+업종')은 무측정도 허용(큐 안 비게).
+                _is_fallback = kw.endswith("추천") and any(w in kw for w in (t.industry or "중고차").split())
+                if _measured and v is not None and v < MIN_QUEUE_VOLUME and not _is_fallback:
+                    continue
+                if db.enqueue_writing(t.id, "P4", kw, "review",
+                                      _reason(f"매물 롱테일{' (월 %d회 실측)' % v if v else ''} 선점",
+                                              vol=v)):
+                    added["P4"] += 1
+                    _placed += 1
+                    _log.info("[autoqueue] 적재 P4a(롱테일) t=%s kw=%r vol=%s", t.id, kw, v)
+    except Exception:
+        _log.exception("[autoqueue] P4a(롱테일) 적재 실패 t=%s", t.id)
     # P4 — 키워드 풀의 미사용 최고 승률(폴백 — 큐가 비지 않게)
     try:
         if not db.writing_queue_rows(t.id, status="pending", limit=1):

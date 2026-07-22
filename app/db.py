@@ -80,6 +80,11 @@ def init_db() -> None:
         # 업종 상위 글 패턴 캐시(셀러 패턴 학습 — 7일) : 키워드별 구조 신호 JSON
         c.execute("CREATE TABLE IF NOT EXISTS kw_pattern_cache("
                   "keyword TEXT PRIMARY KEY, data TEXT, created_at TEXT)")
+        # 매물 컨텍스트(셀러·병행) — 업로드에서 확정된 차종·연식·차급 누적(오토큐 롱테일 키워드 재료)
+        c.execute("CREATE TABLE IF NOT EXISTS inventory_context("
+                  "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, model TEXT, year TEXT, "
+                  "car_class TEXT, created_at TEXT)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_invctx_t ON inventory_context(tenant_id, created_at)")
         c.execute("CREATE TABLE IF NOT EXISTS place_news("
                   "id TEXT PRIMARY KEY, tenant_id TEXT, text TEXT, created_at TEXT)")
         c.execute("CREATE TABLE IF NOT EXISTS links("
@@ -819,6 +824,36 @@ def get_kw_pattern(keyword: str, max_age_days: int = 7) -> Optional[dict]:
         return _j.loads(r["data"] or "{}")
     except Exception:
         return None
+
+
+def save_inventory_context(tenant_id: str, model: str = "", year: str = "", car_class: str = "") -> None:
+    """매물 컨텍스트 저장(중복 억제 — 같은 차종·연식·차급이면 skip)."""
+    model, year, car_class = (model or "").strip(), (year or "").strip(), (car_class or "").strip()
+    if not (model or car_class):
+        return
+    try:
+        with _conn() as c:
+            ex = c.execute("SELECT 1 FROM inventory_context WHERE tenant_id=? AND model=? AND year=? AND car_class=? "
+                           "AND created_at > ?", (tenant_id, model, year, car_class,
+                           (__import__("datetime").datetime.utcnow() - __import__("datetime").timedelta(days=30)).isoformat())).fetchone()
+            if ex:
+                return
+            c.execute("INSERT INTO inventory_context(tenant_id, model, year, car_class, created_at) VALUES(?,?,?,?,?)",
+                      (tenant_id, model, year, car_class, _now()))
+    except Exception:
+        import logging
+        logging.getLogger("shopcast.db").exception("[db] inventory_context 저장 실패")
+
+
+def recent_inventory_context(tenant_id: str, limit: int = 6) -> list[dict]:
+    """최근 매물 컨텍스트 N개(최신순)."""
+    try:
+        with _conn() as c:
+            rows = c.execute("SELECT model, year, car_class, created_at FROM inventory_context "
+                             "WHERE tenant_id=? ORDER BY created_at DESC LIMIT ?", (tenant_id, limit)).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.OperationalError:
+        return []
 
 
 def save_kw_pattern(keyword: str, data: dict) -> None:

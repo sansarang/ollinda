@@ -106,6 +106,29 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
     except Exception:
         import logging as _lg3
         _lg3.getLogger("shopcast.kwpattern").exception("[kwpattern] 주입 실패(무시)")
+    # 🚗 매물 컨텍스트 저장(셀러·병행 중고차) — 오토큐 차종 롱테일 재료. 폼·vision 확정값에서만(날조 금지).
+    try:
+        _bt2 = (getattr(tenant, "biz_type", "local") or "local")
+        if _bt2 in ("seller", "hybrid") and "중고차" in ((tenant.industry or "") + (asset.note or "")):
+            import re as _rc
+            _src = (asset.note or "")
+            _MODELS = ("모닝", "레이", "스파크", "캐스퍼", "아반떼", "쏘나타", "그랜저", "K3", "K5", "K7", "K8",
+                       "코나", "티볼리", "셀토스", "투싼", "쏘렌토", "싼타페", "카니발", "스포티지", "포터", "봉고",
+                       "제네시스", "G80", "GV70", "GV80", "말리부", "트랙스", "베뉴", "팰리세이드")
+            _model = next((m for m in _MODELS if m in _src), "")
+            _year = next(iter(_rc.findall(r"(20[0-2]\d|19[89]\d)", _src)), "")
+            _CLASS = [("경차", ("경차", "모닝", "레이", "스파크", "캐스퍼")),
+                      ("SUV", ("SUV", "코나", "티볼리", "셀토스", "투싼", "쏘렌토", "싼타페", "스포티지", "팰리세이드", "GV70", "GV80")),
+                      ("준중형", ("아반떼", "K3")), ("중형", ("쏘나타", "K5", "말리부")),
+                      ("대형", ("그랜저", "K7", "K8", "제네시스", "G80")), ("승합", ("카니발", "스타리아", "포터", "봉고"))]
+            _cls = next((c for c, ks in _CLASS if any(k in _src for k in ks)), "")
+            if _model or _cls:
+                db.save_inventory_context(tenant.id, _model, _year, _cls)
+                import logging as _lg4
+                _lg4.getLogger("shopcast.ingest").info("[inventory] 컨텍스트 저장 t=%s model=%s year=%s class=%s",
+                                                       tenant.id, _model, _year, _cls)
+    except Exception:
+        pass
     # 📈 성과 학습 루프 — 지난 콘텐츠로 순위가 오른 키워드를 다음 생성에 강화 반영(쓸수록 똑똑해짐)
     try:
         learn = db.improving_keywords(tenant.id)
