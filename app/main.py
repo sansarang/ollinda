@@ -5591,10 +5591,23 @@ def admin_queue_clean_region(tid: str = ""):
     if not t:
         return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
     from app.services import autoqueue as _aq
+    import re as _rq
+    # 타 지역 오염 검출 — 키워드에 시·군·구 이름이 있는데 tenant 광역/기초 어느 것과도 안 맞으면 엉뚱 지역
+    _reg_all = set(_rq.findall(r"[가-힣]{2,}", (t.region or "")))
+    _reg_cores = set(_aq._basic_region_tokens(t.region or "")) | {
+        _rq.sub(r"(특별시|광역시|특별자치시|특별자치도|자치도|도)$", "", x) for x in _reg_all}
+    _CITY = _rq.compile(r"([가-힣]{2,3})(시|군|구|매매단지)")
+    def _foreign_region(kw):
+        for m2 in _CITY.finditer(kw or ""):
+            core = m2.group(1)
+            if core and not any(core in rc or rc in core for rc in _reg_cores if rc):
+                return True
+        return False
     removed = []
     for r in db.writing_queue_rows(tid, status="pending", limit=200):
-        if _aq._seller_kw_blocked(t, r.get("target_keyword") or ""):
-            removed.append({"id": r["id"], "kw": r.get("target_keyword")})
+        kw = r.get("target_keyword") or ""
+        if _aq._seller_kw_blocked(t, kw) or _foreign_region(kw):
+            removed.append({"id": r["id"], "kw": kw})
     if removed:
         with db._conn() as c:
             c.execute("DELETE FROM writing_queue WHERE id IN (%s)" % ",".join("?" * len(removed)),
