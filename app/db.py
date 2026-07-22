@@ -84,6 +84,9 @@ def init_db() -> None:
         c.execute("CREATE TABLE IF NOT EXISTS inventory_context("
                   "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, model TEXT, year TEXT, "
                   "car_class TEXT, created_at TEXT)")
+        # 업종 스키마 캐시(추론 검증된 캐시) — 업종명별 스키마 JSON(전 업종 동적 적응)
+        c.execute("CREATE TABLE IF NOT EXISTS industry_schema_cache("
+                  "industry_key TEXT PRIMARY KEY, data TEXT, source TEXT, created_at TEXT)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_invctx_t ON inventory_context(tenant_id, created_at)")
         c.execute("CREATE TABLE IF NOT EXISTS place_news("
                   "id TEXT PRIMARY KEY, tenant_id TEXT, text TEXT, created_at TEXT)")
@@ -854,6 +857,34 @@ def recent_inventory_context(tenant_id: str, limit: int = 6) -> list[dict]:
         return [dict(r) for r in rows]
     except sqlite3.OperationalError:
         return []
+
+
+def get_industry_schema(industry_key: str, max_age_days: int = 90) -> "dict | None":
+    import json as _j
+    from datetime import datetime as _dt, timedelta as _td
+    try:
+        with _conn() as c:
+            r = c.execute("SELECT data, source, created_at FROM industry_schema_cache WHERE industry_key=?",
+                          ((industry_key or "").strip().lower(),)).fetchone()
+        if not r:
+            return None
+        if (r["source"] or "") != "seed" and _dt.utcnow() - _dt.fromisoformat((r["created_at"] or "")[:19]) > _td(days=max_age_days):
+            return None
+        d = _j.loads(r["data"] or "{}"); d["_source"] = r["source"]
+        return d
+    except Exception:
+        return None
+
+
+def save_industry_schema(industry_key: str, data: dict, source: str = "inferred") -> None:
+    import json as _j
+    try:
+        with _conn() as c:
+            c.execute("INSERT OR REPLACE INTO industry_schema_cache(industry_key, data, source, created_at) VALUES(?,?,?,?)",
+                      ((industry_key or "").strip().lower(), _j.dumps(data, ensure_ascii=False), source, _now()))
+    except Exception:
+        import logging
+        logging.getLogger("shopcast.db").exception("[db] industry_schema 저장 실패")
 
 
 def save_kw_pattern(keyword: str, data: dict) -> None:
