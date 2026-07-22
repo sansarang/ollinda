@@ -5892,6 +5892,39 @@ def admin_set_pieces_json(asset_id: str):
     return {"asset_id": asset_id, "tenant_id": _tid0, "asset_note": (getattr(_a, "note", "") or "")[:2000], "pieces": out}
 
 
+@app.api_route("/admin/disk-sos", methods=["GET", "POST"])
+def admin_disk_sos(hard: str = "", days: int = 3):
+    """🚑 긴급 디스크 확보 — DB 미접근(디스크 풀로 SQLite 'disk I/O error' 상태 복구용).
+    안전 재생성 파일만 삭제: *.tmp/.part/.ass/.wav/.zip + *_vid.jpg(영상용 다운스케일 임시).
+    hard=1이면 days일 지난 mp4/png(영상·커버 — R2 미러 존재분)도 삭제. 원본 사진(jpg 등)·DB 파일 불변."""
+    import time as _t
+    import shutil as _sh
+    from app.storage import STORAGE_DIR
+    now = _t.time()
+    freed, n = 0, 0
+    SAFE = (".tmp", ".part", ".ass", ".wav", ".zip")
+    for root, _d, fs in os.walk(STORAGE_DIR):
+        for fn in fs:
+            fp = os.path.join(root, fn)
+            low = fn.lower()
+            if low.endswith(".db") or low.endswith(".sqlite") or "sqlite" in low or low.endswith((".db-wal", ".db-shm")):
+                continue                                    # DB 파일 절대 불변
+            try:
+                rm = low.endswith(SAFE) or low.endswith("_vid.jpg")
+                if not rm and hard == "1" and (low.endswith(".mp4") or low.endswith(".png")):
+                    rm = (now - os.path.getmtime(fp)) > days * 86400
+                if rm:
+                    sz = os.path.getsize(fp)
+                    os.remove(fp)
+                    freed += sz
+                    n += 1
+            except Exception:
+                pass
+    du = _sh.disk_usage(STORAGE_DIR)
+    return {"removed": n, "freed_mb": round(freed / 1e6, 1),
+            "disk_mb": {"free": round(du.free / 1e6), "used": round(du.used / 1e6)}}
+
+
 @app.api_route("/admin/disk", methods=["GET", "POST"])
 def admin_disk(prune: str = ""):
     """디스크 진단 — 확장자별 사용량 + DB 미참조(고아) 미디어 집계.
