@@ -5717,7 +5717,7 @@ def admin_set_pieces_json(asset_id: str):
         pl = p.payload or {}
         nv = pl.get("naver_video") or {}
         out.append({
-            "kind": str(p.kind), "id": p.id[:8],
+            "kind": str(p.kind), "id": p.id[:8], "full_id": p.id,
             "video_path": pl.get("video_path"),
             "video_exists": bool(pl.get("video_path")) and os.path.exists(pl.get("video_path") or ""),
             "duration_sec": pl.get("duration_sec"),
