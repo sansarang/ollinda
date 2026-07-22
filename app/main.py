@@ -182,11 +182,17 @@ async def admin_basic_auth(request, call_next):
 
 @app.on_event("startup")
 def _startup() -> None:
-    db.init_db()
-    if not db.list_tenants():           # 시작 업종 6종 데모 가게 시드
-        for key in ACTIVE_INDUSTRIES:
-            p = PROFILES[key]
-            db.create_tenant(name=f"데모 {p.name}", industry=p.name, region="수원")
+    # ⚠ 디스크 풀(SQLite 'disk I/O error')이어도 앱은 반드시 부팅해야 함 —
+    #   /health·/admin/disk-sos가 응답해야 긴급 정리로 복구 가능(startup 크래시 시 컨테이너 exit → 사이트 전면 다운).
+    try:
+        db.init_db()
+        if not db.list_tenants():       # 시작 업종 6종 데모 가게 시드
+            for key in ACTIVE_INDUSTRIES:
+                p = PROFILES[key]
+                db.create_tenant(name=f"데모 {p.name}", industry=p.name, region="수원")
+    except Exception:
+        import logging
+        logging.exception("[startup] DB 초기화 실패(디스크 풀 등) — 앱은 기동, /admin/disk-sos로 정리 필요")
     try:                                # 경쟁사 일일 자동 스캔(apscheduler 미설치 시 graceful)
         from app import scheduler
         scheduler.start()
