@@ -3578,10 +3578,14 @@ def admin_geo_gen(tid: str = "", industry: str = "", biz: str = "local", region:
     asset.target_kw = kw
     asset.angle = angle
     asset.content_type = "info"
-    pieces = _gen.generate_for(t, asset, [_CK.BLOG], images=(paths or []))
-    if not pieces:
-        return JSONResponse({"ok": False, "error": "생성 실패(로그 참조)"}, status_code=500)
-    p = pieces[0]
+    try:
+        from app.registry import get_generator as _gg
+        p = _gg(_CK.BLOG).generate(t, asset, paths or [])   # 직접 호출 — 예외 표면화(진단)
+    except Exception:
+        import traceback as _tb
+        return JSONResponse({"ok": False, "error": "생성 예외", "trace": _tb.format_exc()[-1200:]}, status_code=500)
+    if not p:
+        return JSONResponse({"ok": False, "error": "생성 실패(빈 결과)"}, status_code=500)
     gate = _geo.geo_gate(p.payload)
     if not gate["passed"]:
         try:
