@@ -5605,6 +5605,16 @@ def admin_relink_publish(old_piece: str = "", new_piece: str = ""):
         return JSONResponse({"ok": False, "error": repr(e)[:120]}, status_code=500)
 
 
+@app.get("/admin/indschema")
+def admin_indschema(industry: str = "", biz_type: str = "seller", desc: str = "", nocache: str = ""):
+    """진단 — 업종 스키마 추론 실값(V3). nocache=1이면 캐시·시드 무시하고 추론 강제."""
+    from app.services import indschema as _is
+    if nocache == "1":
+        inf = _is._infer(industry, biz_type, desc)
+        return JSONResponse({"industry": industry, "forced_infer": True, "schema": inf})
+    return JSONResponse({"industry": industry, "schema": _is.get_schema(industry, biz_type, desc)})
+
+
 @app.get("/admin/smartblock")
 def admin_smartblock(seed: str = "중고차", region: str = ""):
     """진단 — 스마트블록 세부주제 근사(연관어+검색량+의도유형→앵글). V2 검증."""
