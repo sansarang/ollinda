@@ -167,7 +167,8 @@ def _kw_rank_tier(kw: str, models: list, classes: list, wide: str, ind0: str) ->
 
 
 def select_target_keyword(candidates: list, biz_type: str = "local", region: str = "",
-                          industry: str = "", tenant_id: str = "", verify_volume: bool = True) -> str:
+                          industry: str = "", tenant_id: str = "", verify_volume: bool = True,
+                          primary_model: str = "") -> str:
     """★ 타깃 키워드 최종 선택 단일 관문(오토큐·직접생성 공통).
     ① 기초지역(구·군) 하드 배제(셀러·병행) ② 매물 속성 서열 정렬 ③ 검색량 검증(월 100회+, 실패 시 스킵).
     후보 전부 탈락하면 광역+업종 폴백. 매장(local)은 지역 규칙 미적용(원 후보 유지)."""
@@ -194,7 +195,16 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
     wide = next((_re_g.sub(r"(특별시|광역시|특별자치시|특별자치도|자치도|도)$", "", tk)
                  for tk in (region or "").split()
                  if _re_g.search(r"(특별시|광역시|특별자치시|특별자치도|도)$", tk)), "")
-    cands.sort(key=lambda c: _kw_rank_tier(c, models, classes, wide, ind0))
+    pm = (primary_model or "").strip()
+    if pm:
+        # 이번 업로드 매물 모델을 최우선 — 후보에 없으면 롱테일 보강
+        for extra in (f"{pm} 중고", f"{pm} 중고차"):
+            if extra not in cands:
+                cands.append(extra)
+    def _tier(c):
+        base = _kw_rank_tier(c, models, classes, wide, ind0)
+        return -1 if (pm and pm.replace(" ", "") in c.replace(" ", "")) else base
+    cands.sort(key=_tier)
     # 검색량 검증 — 서열 순으로 첫 통과
     fallback = f"{wide} {ind0} 추천".strip() if wide else (f"{ind0} 추천" if ind0 else "")
     if verify_volume:
