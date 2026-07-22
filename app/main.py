@@ -5733,7 +5733,8 @@ def admin_set_pieces_json(asset_id: str):
             "blog_tags": (_blog_tags(db.get_tenant(p.tenant_id), p) if p.kind and "BLOG" in str(p.kind) else None),
         })
     _a = db.get_asset(asset_id)
-    return {"asset_id": asset_id, "asset_note": (getattr(_a, "note", "") or "")[:2000], "pieces": out}
+    _tid0 = next((p.tenant_id for p in db.get_set_pieces(asset_id)), "")
+    return {"asset_id": asset_id, "tenant_id": _tid0, "asset_note": (getattr(_a, "note", "") or "")[:2000], "pieces": out}
 
 
 @app.api_route("/admin/disk", methods=["GET", "POST"])
