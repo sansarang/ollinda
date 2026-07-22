@@ -3536,14 +3536,20 @@ def admin_geo_topics(industry: str = "", biz: str = "local", region: str = "", d
 
 
 @app.get("/admin/geo-gen")
-def admin_geo_gen(tid: str = "", topic: str = "", nocache: str = ""):
-    """(진단) 트랙 B 정보성 글 1건 생성 + GEO 게이트(G1~G5) 통과표 — V1/V5 검증용.
-    topic 미지정 시 스키마에서 주제 1개 도출. 실제 발행 아님(읽기 진단)."""
-    t = db.get_tenant(tid)
-    if not t:
-        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+def admin_geo_gen(tid: str = "", industry: str = "", biz: str = "local", region: str = "",
+                  topic: str = "", nocache: str = ""):
+    """(진단) 트랙 B 정보성 글 1건 생성 + GEO 게이트(G1~G5) — V1 신규업종 검증용.
+    tid 지정 시 실가게, 미지정 시 industry/biz/region으로 합성 테넌트(신규 업종 임의 테스트).
+    정보글은 사진 불필요 → 사진 없으면 photoless 생성(업종 무관 공통, 실제 발행 아님).
+    ※ 제품 업종-적응 코드(스키마 추론·주제도출·키워드관문·생성 프롬프트·게이트)는 이 진단이 호출만 하며 불변."""
     from app.services import geo_track as _geo, indschema as _isc, generate as _gen
-    from app.domain.models import AssetType as _AT, ContentKind as _CK
+    from app.domain.models import AssetType as _AT, ContentKind as _CK, Tenant as _Tenant, Asset as _Asset
+    t = db.get_tenant(tid) if tid else None
+    if not t:
+        if not industry:
+            return JSONResponse({"ok": False, "error": "tid 또는 industry 필요"}, status_code=400)
+        t = _Tenant(id=f"diag_{abs(hash(industry)) % 10**8}", name=f"진단_{industry}",
+                    industry=industry, region=region, biz_type=biz)   # 합성(신규 업종 임의 테스트)
     biz = getattr(t, "biz_type", "local") or "local"
     sch = _isc.get_schema(t.industry, biz)
     if not topic:
@@ -3559,22 +3565,22 @@ def admin_geo_gen(tid: str = "", topic: str = "", nocache: str = ""):
         paths = _pp(t)[:4]
     except Exception:
         paths = []
-    if not paths:
-        return JSONResponse({"ok": False, "error": "사진 풀 없음(가게에 사진 필요)"}, status_code=409)
     note = f"[자동 글감·트랙B] {topic}"
-    try:
-        analysis = vision.analyze_all(paths, t.industry)
-        if analysis:
-            note += f"\n[사진 분석] {analysis[:1200]}"
-    except Exception:
-        pass
-    asset = db.create_asset(t.id, _AT.IMAGE, paths[0], note)
+    if paths:
+        try:
+            analysis = vision.analyze_all(paths, t.industry)
+            if analysis:
+                note += f"\n[사진 분석] {analysis[:1200]}"
+        except Exception:
+            pass
+    asset = _Asset(id=f"diag_{abs(hash(topic)) % 10**8}", tenant_id=t.id, type=_AT.IMAGE,
+                   path=(paths[0] if paths else ""), note=note)
     asset.target_kw = kw
     asset.angle = angle
     asset.content_type = "info"
-    pieces = _gen.generate_for(t, asset, [_CK.BLOG], images=paths)
+    pieces = _gen.generate_for(t, asset, [_CK.BLOG], images=(paths or []))
     if not pieces:
-        return JSONResponse({"ok": False, "error": "생성 실패"}, status_code=500)
+        return JSONResponse({"ok": False, "error": "생성 실패(로그 참조)"}, status_code=500)
     p = pieces[0]
     gate = _geo.geo_gate(p.payload)
     if not gate["passed"]:
