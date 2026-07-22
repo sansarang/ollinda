@@ -221,6 +221,26 @@ def refill(t, plan: str = "free") -> dict:
                     _log.info("[autoqueue] 적재 P4a(롱테일) t=%s kw=%r vol=%s", t.id, kw, v)
     except Exception:
         _log.exception("[autoqueue] P4a(롱테일) 적재 실패 t=%s", t.id)
+    # P4b — 스마트블록 세부주제(연관 키워드 근사, 월 100회+): 의도 유형으로 앵글 자동 정렬(2-3)
+    try:
+        if not db.writing_queue_rows(t.id, status="pending", limit=1):
+            from app.services import smartblock as _sb
+            ind0 = ((t.industry or "").replace("/", ",").split(",")[0] or "").strip()
+            _wide = " ".join(tk for tk in (t.region or "").split()
+                             if not __import__("re").search(r"(군|구|읍|면)$", tk))
+            seeds = [x for x in (ind0, f"{_wide} {ind0}".strip()) if x]
+            for st in _sb.subtopics(seeds, min_volume=MIN_QUEUE_VOLUME, limit=8):
+                if _skip_kw(t, st["keyword"]):
+                    continue
+                if db.enqueue_writing(t.id, "P4", st["keyword"], _sb.angle_for(st["keyword"]),
+                                      _reason(f"스마트블록 세부주제({st['intent']}형·월 {st['volume']}회 실측) 선점",
+                                              vol=st["volume"])):
+                    added["P4"] += 1
+                    _log.info("[autoqueue] 적재 P4b(블록:%s) t=%s kw=%r vol=%s",
+                              st["intent"], t.id, st["keyword"], st["volume"])
+                    break                              # 블록 세부주제는 1건이면 충분(큐 다양성)
+    except Exception:
+        _log.exception("[autoqueue] P4b(스마트블록) 적재 실패 t=%s", t.id)
     # P4 — 키워드 풀의 미사용 최고 승률(폴백 — 큐가 비지 않게)
     try:
         if not db.writing_queue_rows(t.id, status="pending", limit=1):

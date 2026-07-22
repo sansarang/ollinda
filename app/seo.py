@@ -391,6 +391,21 @@ BLOG_SELL_STRUCT = (
     "— 스마트블록·AI 답변 인용에 잡히게(정확·전문적으로 써야 AI가 인용)."
 )
 
+# 체류시간·정보 밀도(상위노출 v2) — 블로그 본문 전용. 정직 원칙 위에서.
+RETENTION_DENSITY = (
+    "[체류시간·정보 밀도 — 상위노출 v2(반드시 적용)]\n"
+    "① 도입 첫 3~4문장(모바일 첫 화면)에 세 가지를 담아라: (a) 검색자의 질문 재확인 "
+    "(b) 이 글이 주는 답 예고 (c) '끝까지 읽을 이유' 예고 — 예: '마지막에 서류 보는 법까지 알려드릴게요'. "
+    "이 셋이 스크롤 약속이 되어 초반 이탈을 막는다.\n"
+    "② 글 중반(대략 절반 지점)에 '궁금증 재점화' 1회 — 새 질문을 던져 계속 읽게 하라 "
+    "(예: 비용 글이면 '그런데 왜 견적이 업체마다 다를까요?'). 억지 말고 본문 주제에서 자연스럽게.\n"
+    "③ 허사·패딩 금지: '~에 대해 알아보겠습니다', 같은 사실을 말만 바꿔 반복, 결론을 뒤로 미루는 채우기 문장 금지. "
+    "각 문단은 '새 정보 1개 이상'을 담아라(정보 없는 문단 삭제).\n"
+    "④ 경험 분산: 사장님 경험담·사진에서 확인된 사실을 도입·중반·결론에 최소 1회씩 나눠 배치하라 "
+    "(한 문단에 몰아넣지 마라). 진짜 경험의 배치가 AI 판별을 이기는 정공법 — 없는 경험은 절대 만들지 마라.\n"
+    "⑤ 분량은 '정보 단위' 기준: 폼 입력·사진 사실을 다 쓰면 끝내라. 글자수 채우려 늘리기 금지(늘린 허사가 오히려 감점).\n"
+)
+
 # 영상 스크립트 — 파는 글쓰기 + 리텐션.
 VIDEO_SCRIPT_CRAFT = (
     "[영상 글쓰기 — 반드시]\n"
@@ -618,6 +633,45 @@ def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> d
     if kind == "blog":
         title = payload.get("title", "")
         main_kw = (payload.get("target_keywords") or [""])[0]
+        _body = payload.get("body") or text
+        _bparas = [p.strip() for p in re.split(r"\n{2,}", _body) if p.strip()]
+        # (v2 1-5) 5문단 연속 텍스트 검사 — 시각요소(사진[사진N]·표|·소제목##) 없이 텍스트 문단 5+ 연속
+        _txt_streak, _max_streak = 0, 0
+        for p in _bparas:
+            if p.startswith("#") or p.startswith("[사진") or p.startswith("|") or "[사진" in p[:8]:
+                _txt_streak = 0
+            else:
+                _txt_streak += 1
+                _max_streak = max(_max_streak, _txt_streak)
+        if _max_streak >= 5:
+            warnings.append(f"텍스트 {_max_streak}문단 연속(시각요소 없음) → 체류 이탈 위험(사진·표·소제목 삽입)")
+            score -= 8
+        # (v2 3-1) 허사·패딩 검사 — 결론 지연·무정보 클리셰 문장
+        _PAD = ("에 대해 알아보겠습니다", "에 대해 알아보아요", "지금부터 알아보", "함께 알아보",
+                "에 대해 살펴보겠습니다", "정리해보았습니다", "정리해 보았습니다", "도움이 되셨길", "포스팅을 시작")
+        _pad_hits = [w for w in _PAD if w in _body]
+        if _pad_hits:
+            warnings.append(f"허사·패딩 표현 {_pad_hits[:3]} → 정보 밀도 저하(삭제)")
+            score -= min(12, 4 * len(_pad_hits))
+        # (v2 3-1) 동어반복 문단 — 정규화 후 60%+ 겹치는 문단쌍
+        def _nrm(p):
+            return set(re.findall(r"[가-힣A-Za-z0-9]{2,}", p))
+        _dup = 0
+        _nts = [_nrm(p) for p in _bparas if len(p) >= 30]
+        for _i in range(len(_nts)):
+            for _j in range(_i + 1, len(_nts)):
+                if _nts[_i] and _nts[_j]:
+                    _ov = len(_nts[_i] & _nts[_j]) / len(_nts[_i] | _nts[_j])
+                    if _ov > 0.6:
+                        _dup += 1
+        if _dup:
+            warnings.append(f"동어반복 문단 {_dup}쌍 → 정보 밀도 저하(다른 정보로 교체)")
+            score -= min(10, 5 * _dup)
+        # (v2 1-5) 도입 훅 3요소 — 첫 3~4문장에 '읽을 이유 예고'(마지막·끝·아래·뒤에서) 신호
+        _intro = " ".join(_bparas[:2])[:220]
+        if _intro and not re.search(r"(마지막|끝까지|아래에서|뒤에서|끝에|글 후반|이 글에서.*알려|정리해 드릴|보여드릴게|확인하는 법)", _intro):
+            warnings.append("도입에 '끝까지 읽을 이유' 예고 없음 → 초반 이탈 위험(v2 도입 훅 3요소)")
+            score -= 6
         # 입력 원문 노출(생성품질 E2E #2): '썬팅,광택' 같은 쉼표 나열형이 제목/첫문단에 그대로 박히면 감점
         if re.search(r"[가-힣A-Za-z]{2,},[가-힣A-Za-z]{2,}", title + " " + text[:150]):
             warnings.append("쉼표 나열형 입력이 원문 그대로 노출 — 자연어로 풀어 쓰기('썬팅과 광택')")

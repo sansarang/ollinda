@@ -1196,7 +1196,8 @@ class ShortVideoGenerator(Generator):
         _reg = getattr(tenant, "region", "") or ""
         # 대본 단위 생성(구조 전환) — 대본 첫 줄이 훅(고정 템플릿 폐기), 훅 게이트(키워드 원형·지역) 경유.
         # 실패 시 기존 씬별 발췌+구어화 폴백(영상 흐름 불차단).
-        _n_scenes = min(7, max(4, len(vid_imgs)))
+        # 30초+ 하한(상위노출 v2 1-4): 정보 씬 8~9개(씬당 ~4초 + 훅·아웃트로 ≈ 30~40초). 허사 아닌 본문 내용으로.
+        _n_scenes = min(9, max(7, len(vid_imgs)))
         _rs = _script_from_body(body, _n_scenes, kw_nat, _fact_src, tone="info", biz_type=_biz, region=_reg)
         _script_mode = bool(_rs and len(_rs) >= 4)
         if _script_mode:
@@ -1232,7 +1233,21 @@ class ShortVideoGenerator(Generator):
         path, note, dur, _cover = self._build_scene_video(
             vid_imgs, SceneScript(hook=opening, sentences=sent, outro=outro, source="body_excerpt", evidence=body),
             kws, tenant, strat, f"{kw0} 정리")
-        # 15초 하한 가드(3-4): D.I.A.+ 동영상 가점 기준 미달이면 본문 발췌 캡션을 늘려 1회 재빌드
+        # 30초 하한 가드(v2 1-4): 정보형 영상은 30초+가 체류·D.I.A.+ 가점 유리. 대본이 짧으면 씬 확장 1회.
+        if path and dur and dur < 30 and _script_mode and len(sent) < 9:
+            _nlog.warning("[naver-video] %s초 < 30 — 대본 씬 확장 재생성", dur)
+            _rs2 = _script_from_body(body, min(9, len(sent) + 2), kw_nat, _fact_src, tone="info",
+                                     biz_type=_biz, region=_reg)
+            if _rs2 and len(_rs2) > len(sent):
+                opening2 = _rs2[0]; sent2 = _cap_lines([_strip_labels(x) for x in _rs2[1:]])
+                _gs2 = pl.get("gen_source") or ""
+                _vi2 = _match_photos(list(sent2), vid_imgs, _gs2, "naver-video") if _gs2 else vid_imgs
+                path2b, note2b, dur2b, _c2b = self._build_scene_video(
+                    _vi2, SceneScript(hook=opening2, sentences=sent2, outro=outro, source="body_excerpt", evidence=body),
+                    kws, tenant, strat, f"{kw0} 정리")
+                if path2b and os.path.exists(path2b) and (dur2b or 0) > dur:
+                    path, note, dur, _cover, opening, sent = path2b, note2b, dur2b, _c2b, opening2, sent2
+        # 15초 하한 가드(3-4, 폴백 발췌 경로): 캡션 확장
         if path and dur and dur < 15 and not _script_mode and len(caps) > len(sent) - len(heads):
             _nlog.warning("[naver-video] %s초 < 15 — 캡션 확장 재빌드", dur)
             sent2 = _to_spoken(([_cut_word(h, 30) for h in heads] + caps)[:MAX_SCENES + 2], _fact_src)
