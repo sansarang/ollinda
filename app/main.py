@@ -641,9 +641,10 @@ def demo_zip(asset_id: str, request: Request):
     if not pieces:
         return HTMLResponse(status_code=404)
     imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
+    _slug = _set_slug(pieces)
     entries = []
     for p in pieces:
-        entries += _piece_pack_entries(p, imgs, prefix=f"{_ch_folder(p)}/")
+        entries += _piece_pack_entries(p, imgs, prefix=f"{_ch_folder(p)}/", slug=_slug)
     out_dir = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), pieces[0].tenant_id)
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, f"demo_{asset_id[:8]}.zip")
@@ -2211,18 +2212,54 @@ def my_blog_published(request: Request, piece_id: str = Form(""), url: str = For
     return RedirectResponse(back + "?ok=" + _q("발행 기록 완료! 이 글의 순위 추적이 시작돼요"), status_code=303)
 
 
-def _seo_photo_name(tenant, blog) -> str:
-    """(이미지 SEO 5-1) 다운로드 파일명 — {지역}-{업종핵심어}-{피사체}. 피사체는 사장님이 확인한
-    사진 내용(confirmed)에서만(없으면 생략 — 날조 금지). 한글 파일명은 최신 브라우저 UTF-8 정상."""
+def _canonical_slug(tenant, blog) -> str:
+    """★ 세트 확정 슬러그 — 발행 산출물 모든 명명(태그·에셋 파일명·폴더·zip)의 단일 소스.
+    현재 세트 컨텍스트(매물/상품 실값)∪본문 실등장에서만 유도 + 태그 정합 게이트 통과.
+    stale target_keywords가 이전 세트 값('레이 중고')이어도 게이트가 걸러 현재 매물로 재구성
+    → 파일명·폴더·태그가 하나를 참조하므로 오염이 한 곳에서만 정정되면 전부 정정(재발 차단).
+    업종 불문 단일 규칙(업종별 분기 0)."""
     import re as _r
-    region = seo._kw_shorten(getattr(tenant, "region", "") or "").replace(" ", "-")
+    from app.services import indschema as _isc
+    pl = (getattr(blog, "payload", None) or {}) if blog else {}
+    kw = ((pl.get("target_keywords") or [""])[0] or "").strip()
+    biz = getattr(tenant, "biz_type", "local") or "local"
     ind = ((getattr(tenant, "industry", "") or "").replace("/", ",").split(",")[0] or "").strip()
+    sch = _isc.get_schema(getattr(tenant, "industry", ""), biz)
+    attr_vocab = _isc.attribute_tokens(sch)
+    note = ((pl.get("gen_source") or "") + "\n" + (pl.get("body") or ""))
+    region = getattr(tenant, "region", "") or ""
+    # 컨텍스트 = 매물/상품 실값(권위)만. 타깃 키워드는 '검증 대상'이지 권위 아님(stale 키워드 자기근거 금지).
+    ctx = []
+    try:
+        for c in db.recent_inventory_context(getattr(tenant, "id", "") or "", limit=6):
+            ctx += [c.get("model", ""), c.get("car_class", ""), c.get("year", "")]
+    except Exception:
+        pass
+    cand = _r.sub(r"\s+", "", kw)
+    kept, _dr = _isc.tag_consistency_gate([cand] if cand else [], sch, ctx, note,
+                                          region=region, general_tags=sch.get("general_tags"))
+    if kept:
+        base = kept[0]                                      # 확정 키워드가 현재 세트에 정합 → 그대로
+    else:
+        # 재구성: 현재 매물 1속성 + 업종 일반태그(없으면 지역+업종)
+        prim = next((c for c in ctx if c and c in attr_vocab), "")
+        gen0 = (sch.get("general_tags") or [ind] or [""])[0] if (sch.get("general_tags") or ind) else ""
+        base = (prim + gen0) if prim else (seo._kw_shorten(region).replace(" ", "") + ind)
+    base = _r.sub(r'[\\/:*?"<>|\s]', "", base).strip("_")[:30]
+    return base or "사진"
+
+
+def _seo_photo_name(tenant, blog) -> str:
+    """(이미지 SEO 5-1) 다운로드 파일명 — {확정슬러그}-{피사체}. 슬러그는 _canonical_slug 단일 소스
+    (현재 세트 컨텍스트 정합 보장). 피사체는 사장님이 확인한 사진 내용에서만(없으면 생략 — 날조 금지)."""
+    import re as _r
+    base = _canonical_slug(tenant, blog)
     subject = ""
     m = _r.search(r"사진 내용\(사장님 확인[^)]*\):\s*([^\n]+)", (blog.payload or {}).get("gen_source") or "")
     if m:
         toks = [t for t in _r.findall(r"[가-힣A-Za-z0-9]{2,}", m.group(1)) if t not in ("사진", "모습", "장면")][:2]
         subject = "-".join(toks)
-    _toks = [x for p in (region, ind, subject) if p for x in p.split("-") if x]
+    _toks = [x for p in (base, subject) if p for x in p.split("-") if x]
     _toks = list(dict.fromkeys(_toks))
     _toks = [t for t in _toks if not any(t != o and t in o for o in _toks)]   # 부분 포함 dedupe(2-2)
     name = _r.sub(r"[^가-힣A-Za-z0-9\-]", "", "-".join(_toks))
@@ -4441,12 +4478,14 @@ def _ch_folder(piece) -> str:
     return CHKO.get(piece.kind.value, piece.kind.value)
 
 
-def _piece_pack_entries(piece, imgs, prefix=""):
-    """채널 하나의 (zip경로, 소스) 목록 — 글.txt + 사진 + 영상 한 묶음."""
+def _piece_pack_entries(piece, imgs, prefix="", slug=""):
+    """채널 하나의 (zip경로, 소스) 목록 — 글.txt + 사진 + 영상 한 묶음.
+    이미지 파일명 슬러그는 세트 확정 슬러그(slug) 단일 소스 사용 — 미전달 시에만 자기 target_keywords 폴백."""
     import re as _re2
     k, pl = piece.kind.value, piece.payload
-    # 이미지 SEO — 파일명에 지역+업종 키워드(네이버·구글 이미지검색이 파일명을 읽음)
-    _kwbase = _re2.sub(r'[\\/:*?"<>|\s]+', "", ((pl.get("target_keywords") or [""])[0] or "")).strip("_")[:30] or "사진"
+    # 이미지 SEO — 파일명에 세트 확정 키워드(네이버·구글 이미지검색이 파일명을 읽음). 폴더/태그와 동일 소스.
+    _kwbase = (slug or "").strip() or (
+        _re2.sub(r'[\\/:*?"<>|\s]+', "", ((pl.get("target_keywords") or [""])[0] or "")).strip("_")[:30] or "사진")
     ent = []
 
     def add(name, src):
@@ -4483,6 +4522,18 @@ def _piece_pack_entries(piece, imgs, prefix=""):
         for i, im in enumerate(imgs, 1):
             add(f"{_kwbase}_{i}{os.path.splitext(im)[1] or '.jpg'}", im)
     return ent
+
+
+def _set_slug(pieces) -> str:
+    """세트 전체가 공유하는 확정 슬러그 — 블로그 피스(권위) 기준. 태그·에셋 파일명·폴더·zip 단일 소스."""
+    if not pieces:
+        return ""
+    blogp = next((p for p in pieces if getattr(p.kind, "value", "") == "blog"), pieces[0])
+    try:
+        t = db.get_tenant(blogp.tenant_id)
+    except Exception:
+        t = None
+    return _canonical_slug(t, blogp) if t else ""
 
 
 def _fetch_local_or_r2(path: str):
@@ -4544,7 +4595,7 @@ def kit_pack(request: Request, asset_id: str, pid: str):
     if not piece:
         return HTMLResponse(status_code=404)
     imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
-    data = _zip_bytes(_piece_pack_entries(piece, imgs))
+    data = _zip_bytes(_piece_pack_entries(piece, imgs, slug=_set_slug(pieces)))
     return _zip_response(data, f"{_safe_title(pieces)}_{_ch_folder(piece)}.zip")
 
 
@@ -4556,9 +4607,10 @@ def kit_pack_all(request: Request, asset_id: str):
     if not pieces:
         return HTMLResponse(status_code=404)
     imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
+    _slug = _set_slug(pieces)
     entries = []
     for p in pieces:
-        entries += _piece_pack_entries(p, imgs, prefix=f"{_ch_folder(p)}/")
+        entries += _piece_pack_entries(p, imgs, prefix=f"{_ch_folder(p)}/", slug=_slug)
     data = _zip_bytes(entries)
     return _zip_response(data, f"{_safe_title(pieces)}_5채널전체.zip")
 
