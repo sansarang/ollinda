@@ -3522,13 +3522,23 @@ async def my_citation_upload(request: Request):
 def admin_geo_topics(industry: str = "", biz: str = "local", region: str = "", desc: str = ""):
     """(진단) 업종 스키마 유래 트랙 B 질문형 주제 도출 + 키워드 관문 통과 결과 — 사진 불필요.
     V1의 '4업종 주제 도출·업종 어휘 하드코딩 0' 검증용."""
-    from app.services import geo_track as _geo, indschema as _isc
+    from app.services import geo_track as _geo, indschema as _isc, searchad as _sa
     sch = _isc.get_schema(industry, biz)
     topics = _geo.info_topics(industry, biz, sch, region=region, desc=desc)
+    _sa_ok = _sa.configured()
     out = []
     for tp in topics:
         kw = _geo.select_info_keyword([tp["topic"]], region, industry, verify_volume=True)
-        out.append({"topic": tp["topic"], "angle": tp["angle"], "gated_keyword": kw})
+        vol = None                                       # 검색량 실측(관문 경유값)
+        if _sa_ok:
+            try:
+                vv = {(_v.get("keyword") or "").replace(" ", ""): _v.get("total", 0)
+                      for _v in _sa.keyword_volumes([tp["topic"], kw], limit=20)}
+                vol = vv.get((kw or "").replace(" ", ""), vv.get((tp["topic"] or "").replace(" ", ""), 0))
+            except Exception:
+                vol = None
+        out.append({"topic": tp["topic"], "angle": tp["angle"], "gated_keyword": kw,
+                    "measured_volume": vol, "searchad": _sa_ok})
     return JSONResponse({"ok": bool(topics), "industry": industry, "biz_type": biz,
                          "schema_axes": [a.get("axis") for a in (sch.get("attribute_axes") or [])],
                          "content_angles": sch.get("content_angles"),
@@ -3594,10 +3604,27 @@ def admin_geo_gen(tid: str = "", industry: str = "", biz: str = "local", region:
             gate = _geo.geo_gate(p.payload)
         except Exception:
             pass
+    # 태그 정합 게이트(제품 파이프라인 그대로) — 최종 태그 + 게이트 제거 로그
+    try:
+        _final_tags = _blog_tags(t, p)                   # _blog_tags 내부에서 tag_consistency_gate 적용
+    except Exception:
+        _final_tags = p.payload.get("tags")
+    _tg = {}
+    try:
+        _sch_t = _isc.get_schema(t.industry, biz)
+        _av = _isc.attribute_tokens(_sch_t)
+        _ctxv = [a for a in _av if a and a in (kw or "")]
+        _kept, _dropped = _isc.tag_consistency_gate(list(p.payload.get("tags") or []), _sch_t, _ctxv,
+                                                    p.payload.get("body") or "", region=t.region or "",
+                                                    general_tags=_sch_t.get("general_tags"))
+        _tg = {"kept": _kept, "dropped": _dropped}
+    except Exception:
+        pass
     return JSONResponse({"ok": True, "tenant": t.name, "industry": t.industry, "biz_type": biz,
                          "topic": topic, "keyword": kw, "angle": angle,
                          "title": p.payload.get("title"), "body": p.payload.get("body"),
-                         "geo_gate": gate, "content_type": p.payload.get("content_type")})
+                         "geo_gate": gate, "tags": _final_tags, "tag_gate": _tg,
+                         "content_type": p.payload.get("content_type")})
 
 
 def _kfont(size: int):
