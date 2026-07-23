@@ -276,11 +276,16 @@ def refill(t, plan: str = "free") -> dict:
     #   source_type=R1(P4보다 뒤) → 매물·시공 글(P1~P4)이 항상 먼저 소비됨(트랙 A 우선순위 불변).
     try:
         from app.services import geo_track as _geo, indschema as _isc
-        if db.info_track_count_since(t.id, days=7) < _geo.WEEKLY_INFO_CAP:
+        # ★ 실경험 게이트: owner_experience(사장 실제 Q&A) 없으면 트랙 B 미적재(저품질·일반론 글 원천 차단).
+        #    안내는 대시보드가 담당(에러 아님). 트랙 A는 무관.
+        if not db.has_owner_experience(t.id):
+            _log.info("[autoqueue] 트랙B 보류 t=%s — 실경험(owner_experience) 미등록", t.id)
+        elif db.info_track_count_since(t.id, days=7) < _geo.WEEKLY_INFO_CAP:
             _bizB = getattr(t, "biz_type", "local") or "local"
             _schB = _isc.get_schema(t.industry, _bizB)
+            _expsB = db.list_owner_experience(t.id)          # 1순위 주제 = 사장 실경험 질문
             for tp in _geo.info_topics(t.industry, _bizB, _schB, region=t.region or "",
-                                       desc=(getattr(t, "topic_axis", "") or "")):
+                                       desc=(getattr(t, "topic_axis", "") or ""), experiences=_expsB):
                 kwB = _geo.select_info_keyword([tp["topic"]], t.region or "", t.industry, tenant_id=t.id)
                 if not kwB or _bad_kw(kwB):        # 정보형은 비지역 → 기초지역 배제만(select_info_keyword 내부) 적용
                     continue

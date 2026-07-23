@@ -220,13 +220,18 @@ class BlogDraftGenerator(Generator):
             "[이미지배치]\n(- 각 사진을 어디에 왜)\n"
             "[키워드]\n(쉼표로 5~8개, 타겟 키워드 우선)"
         )
+        _exp = []
         if _ctype == "info":
             # 트랙 B — 정보성 글(GEO 구조 강제). 트랙 A 프롬프트를 대체(훅-후답 구조 미사용).
+            # 사장 실경험 Q&A 주입 — 본문 핵심 단락에 반영 강제(G6 게이트가 검증). 경험은 asset 또는 DB에서.
             from app.services import geo_track as _geo
+            from app import db as _dbe
+            _exp = getattr(asset, "owner_experience", None) or _dbe.list_owner_experience(tenant.id)
             _trust = _geo._author_trust(tenant, asset.note or "")
             prompt = _geo.info_prompt(tenant, prof.name, tenant.region or "", kw0,
                                       getattr(asset, "angle", "howto") or "howto",
-                                      asset.note or "", min(len(imgs), SLOT_RECOMMENDED), trust=_trust)
+                                      asset.note or "", min(len(imgs), SLOT_RECOMMENDED),
+                                      trust=_trust, experiences=_exp)
         raw = _call_llm(prompt, self.model, 5500 if _ctype == "info" else 5000)
         d = _parse_sections(raw, ["제목후보", "제목", "메타설명", "본문", "이미지배치", "키워드"])
         # ① 제목 3안 → 상위노출 최적 1개 자동 선택 ([제목]으로 준 경우도 흡수)
@@ -303,6 +308,7 @@ class BlogDraftGenerator(Generator):
                      "angle": getattr(asset, "angle", "") or "",
                      "target_kw": tkw,
                      "content_type": _ctype,               # sell=트랙A / info=트랙B(GEO)
+                     "owner_experience": _exp,              # 트랙B 실경험 Q&A(G6 게이트 검증용)
                      "citation_count": None,                # 3층 성과: AI 브리핑 인용수(캡처 판독으로 채움 — 자리 예약)
                      "business_name": tenant.name,      # 게이트 업체명 정합 검사용(재검증 STEP 1-2a)
                      "brand_name": getattr(tenant, "brand_name", "") or "",

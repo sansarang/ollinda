@@ -2015,7 +2015,18 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                                          "<a href='/me?tab=content' class='flex-shrink-0 bg-violet-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>준비된 글 보기</a></div>")
                 except Exception:
                     pass
-            main_inner = (greeting + _upsell + _due_html + _guide_card(t) + _briefing_card(t, _plan) + _notice_html
+            # 트랙 B 실경험 배너 — 미등록이면 등록 유도(안내), 등록됐으면 관리 링크
+            _exp_banner = ""
+            try:
+                if not db.has_owner_experience(t.id):
+                    _exp_banner = ("<a href='/me/experience' class='block bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-5 hover:bg-amber-100 transition'>"
+                                   "<div class='text-sm text-amber-800'><b>📝 정보성 글(네이버 AI 브리핑용) 시작하기</b> — "
+                                   "손님이 자주 묻는 질문·답변을 등록하면 사장님 경험이 담긴 정보글이 자동으로 만들어져요.</div></a>")
+                else:
+                    _exp_banner = "<a href='/me/experience' class='block text-right text-xs text-slate-400 mb-2 hover:text-slate-600'>사장님 실경험 답변 관리 →</a>"
+            except Exception:
+                pass
+            main_inner = (greeting + _upsell + _due_html + _exp_banner + _guide_card(t) + _briefing_card(t, _plan) + _notice_html
                           + _calendar_card(t, _plan)
                           + _blog_nudge + upload_section
                           + "<div class='mt-5'></div>" + _store_info_card(t))
@@ -3485,6 +3496,89 @@ def my_rank(request: Request):
                          "blog_connected": bool(bid)})
 
 
+@app.get("/me/experience", response_class=HTMLResponse)
+def my_experience(request: Request, ok: str = "", err: str = ""):
+    """트랙 B 실경험 원료 관리 — 사장이 실제 받는 질문·답변 Q&A 등록/수정/삭제.
+    유효 Q&A 1건+ 있어야 정보성 글(트랙 B) 생성 시작(안내는 여기서). 트랙 A는 무관."""
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login?next=/me/experience", status_code=303)
+    t = _ensure_user_tenant(u)
+    exps = db.list_owner_experience(t.id)
+    # 질문 예시(스키마 content_angles 유래 — 업종 하드코딩 0). 실패해도 안내는 나옴.
+    hints = []
+    try:
+        from app.services import geo_track as _geo, indschema as _isc
+        sch = _isc.get_schema(t.industry, getattr(t, "biz_type", "local") or "local")
+        hints = [tp["topic"] for tp in _geo.info_topics(t.industry, getattr(t, "biz_type", "local") or "local",
+                 sch, region=t.region or "")][:2]
+    except Exception:
+        pass
+    sec = "bg-white rounded-2xl border border-slate-200 shadow-sm p-5 mb-5"
+    status = (f"<div class='bg-emerald-50 text-emerald-700 rounded-xl px-4 py-3 text-sm mb-4'>"
+              f"✅ 실경험 답변 {len(exps)}건 등록됨 — 정보성 글(네이버 AI 브리핑용)이 자동으로 시작됩니다.</div>"
+              if exps else
+              "<div class='bg-amber-50 text-amber-700 rounded-xl px-4 py-3 text-sm mb-4'>"
+              "📝 <b>경험 답변을 등록하면 정보성 글이 시작됩니다.</b> 손님이 실제로 자주 묻는 질문과, "
+              "사장님이 해주시는 답변을 적어주세요 — 이 내용이 네이버 AI가 인용하는 글이 됩니다.</div>")
+    items = "".join(
+        f"<div class='border border-slate-100 rounded-xl p-3 mb-2'>"
+        f"<div class='text-sm font-bold text-slate-800'>Q. {esc(e['question'])}</div>"
+        f"<div class='text-sm text-slate-600 mt-1 whitespace-pre-wrap'>A. {esc(e['answer'])}</div>"
+        f"<form method=post action='/me/experience/delete' class='mt-2'><input type=hidden name=exp_id value='{e['id']}'>"
+        f"<button class='text-xs text-rose-500 font-bold'>삭제</button></form></div>"
+        for e in exps) or "<div class='text-sm text-slate-400 mb-2'>아직 등록된 답변이 없어요.</div>"
+    ph = (f"예: {esc(hints[0])}" if hints else "예: 손님들이 가장 자주 묻는 질문")
+    ph_a = "예: 저는 항상 ~를 먼저 봅니다. 특히 ~인 경우엔 ~하라고 안내드려요. (실무 내용만, 맞춤법 신경 안 쓰셔도 돼요)"
+    inner = (
+        "<a href='/me' class='inline-block text-sm text-slate-500 font-bold mb-2'>← 작업실</a>"
+        "<h1 class='text-2xl font-extrabold text-slate-900 mb-1'>사장님 실경험 답변</h1>"
+        "<p class='text-slate-400 text-sm mb-5'>손님이 자주 묻는 질문과 실제 답변을 적어주세요. "
+        "사장님만 아는 현장 답변이 곧 네이버 AI 브리핑에 인용되는 글이 됩니다(맞춤법·문장력 불필요).</p>"
+        + (f"<div class='bg-emerald-50 text-emerald-700 rounded-xl px-4 py-2 text-sm mb-3'>{esc(ok)}</div>" if ok else "")
+        + (f"<div class='bg-rose-50 text-rose-600 rounded-xl px-4 py-2 text-sm mb-3'>{esc(err)}</div>" if err else "")
+        + status
+        + f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>등록된 Q&A</div>{items}</div>"
+        + f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>답변 추가</div>"
+        "<form method=post action='/me/experience/add' class='space-y-2'>"
+        f"<input name=question maxlength=200 placeholder=\"{ph}\" required class='w-full border border-slate-200 rounded-xl px-3 py-2 text-sm'>"
+        f"<textarea name=answer rows=4 placeholder=\"{ph_a}\" required class='w-full border border-slate-200 rounded-xl px-3 py-2 text-sm'></textarea>"
+        "<div class='text-[11px] text-slate-400'>답변은 최소 50자 — 실제로 해주시는 설명을 편하게 적어주세요.</div>"
+        "<button class='px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold'>답변 등록</button>"
+        "</form></div>")
+    return HTMLResponse(_subscriber_page("사장님 실경험", inner))
+
+
+@app.post("/me/experience/add")
+async def my_experience_add(request: Request):
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login?next=/me/experience", status_code=303)
+    t = _ensure_user_tenant(u)
+    from urllib.parse import quote as _q
+    form = await request.form()
+    q = (form.get("question") or "").strip()
+    a = (form.get("answer") or "").strip()
+    if db.save_owner_experience(t.id, q, a):
+        return RedirectResponse("/me/experience?ok=" + _q("답변을 등록했어요 — 정보성 글에 반영됩니다"), status_code=303)
+    return RedirectResponse("/me/experience?err=" + _q("답변은 최소 50자 이상 적어주세요(실무 내용만)"), status_code=303)
+
+
+@app.post("/me/experience/delete")
+async def my_experience_delete(request: Request):
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login?next=/me/experience", status_code=303)
+    t = _ensure_user_tenant(u)
+    from urllib.parse import quote as _q
+    form = await request.form()
+    try:
+        db.delete_owner_experience(int(form.get("exp_id") or 0), t.id)
+    except Exception:
+        pass
+    return RedirectResponse("/me/experience?ok=" + _q("삭제했어요"), status_code=303)
+
+
 @app.post("/me/citation-upload")
 async def my_citation_upload(request: Request):
     """PHASE 4 — 크리에이터 어드바이저 통계 캡처 업로드 → AI 브리핑 인용수 판독·저장(vision).
@@ -3547,11 +3641,11 @@ def admin_geo_topics(industry: str = "", biz: str = "local", region: str = "", d
 
 @app.get("/admin/geo-gen")
 def admin_geo_gen(tid: str = "", industry: str = "", biz: str = "local", region: str = "",
-                  topic: str = "", nocache: str = ""):
-    """(진단) 트랙 B 정보성 글 1건 생성 + GEO 게이트(G1~G5) — V1 신규업종 검증용.
-    tid 지정 시 실가게, 미지정 시 industry/biz/region으로 합성 테넌트(신규 업종 임의 테스트).
-    정보글은 사진 불필요 → 사진 없으면 photoless 생성(업종 무관 공통, 실제 발행 아님).
-    ※ 제품 업종-적응 코드(스키마 추론·주제도출·키워드관문·생성 프롬프트·게이트)는 이 진단이 호출만 하며 불변."""
+                  topic: str = "", nocache: str = "", exp_q: str = "", exp_a: str = ""):
+    """(진단) 트랙 B 정보성 글 1건 생성 + GEO 게이트(G1~G6) — 신규업종·실경험 검증용.
+    tid 지정 시 실가게(DB 실경험 사용), 미지정 시 industry/biz/region 합성 테넌트.
+    exp_q/exp_a 주면 테스트 실경험 Q&A 주입(합성 테넌트용). 실경험 0이면 트랙 B 보류(안내, 에러 아님).
+    ※ 제품 업종-적응 코드는 이 진단이 호출만 하며 불변."""
     from app.services import geo_track as _geo, indschema as _isc, generate as _gen
     from app.domain.models import AssetType as _AT, ContentKind as _CK, Tenant as _Tenant, Asset as _Asset
     t = db.get_tenant(tid) if tid else None
@@ -3561,9 +3655,19 @@ def admin_geo_gen(tid: str = "", industry: str = "", biz: str = "local", region:
         t = _Tenant(id=f"diag_{abs(hash(industry)) % 10**8}", name=f"진단_{industry}",
                     industry=industry, region=region, biz_type=biz)   # 합성(신규 업종 임의 테스트)
     biz = getattr(t, "biz_type", "local") or "local"
+    # 실경험 원료: 실가게=DB, 합성=exp_q/exp_a 파라미터
+    if tid:
+        _exps = db.list_owner_experience(t.id)
+    else:
+        _exps = [{"id": 1, "question": exp_q, "answer": exp_a}] if (exp_a and len(exp_a.strip()) >= 50) else []
+    if not _exps:
+        return JSONResponse({"ok": True, "held": True, "reason": "no_experience",
+                             "notice": "경험 답변을 등록하면 정보성 글이 시작됩니다",
+                             "industry": t.industry, "biz_type": biz})   # 보류(에러 아님)
     sch = _isc.get_schema(t.industry, biz)
     if not topic:
-        tps = _geo.info_topics(t.industry, biz, sch, region=t.region or "", desc=(getattr(t, "topic_axis", "") or ""))
+        tps = _geo.info_topics(t.industry, biz, sch, region=t.region or "",
+                               desc=(getattr(t, "topic_axis", "") or ""), experiences=_exps)
         if not tps:
             return JSONResponse({"ok": False, "error": "주제 도출 실패(LLM/스키마)"}, status_code=500)
         topic, angle = tps[0]["topic"], tps[0]["angle"]
@@ -3588,6 +3692,7 @@ def admin_geo_gen(tid: str = "", industry: str = "", biz: str = "local", region:
     asset.target_kw = kw
     asset.angle = angle
     asset.content_type = "info"
+    asset.owner_experience = _exps                       # 실경험 주입(생성기가 프롬프트·payload에 반영)
     try:
         from app.registry import get_generator as _gg
         p = _gg(_CK.BLOG).generate(t, asset, paths or [])   # 직접 호출 — 예외 표면화(진단)
@@ -3624,6 +3729,7 @@ def admin_geo_gen(tid: str = "", industry: str = "", biz: str = "local", region:
                          "topic": topic, "keyword": kw, "angle": angle,
                          "title": p.payload.get("title"), "body": p.payload.get("body"),
                          "geo_gate": gate, "tags": _final_tags, "tag_gate": _tg,
+                         "owner_experience_used": [{"q": e.get("question"), "a": e.get("answer")} for e in _exps],
                          "content_type": p.payload.get("content_type")})
 
 

@@ -712,6 +712,52 @@ def save_blog_citation(tenant_id: str, piece_id: str, keyword: str, count: "int 
         return False
 
 
+def save_owner_experience(tenant_id: str, question: str, answer: str) -> bool:
+    """트랙 B 실경험 원료 — 사장이 실제 받는 질문·답변 Q&A 저장. 답변 50자 미만이면 거부(빈 껍데기 금지).
+    형식 자유(맞춤법·문장력 무관, 실무 내용만). 저장 성공 시 True."""
+    q = " ".join((question or "").split())[:200]
+    a = (answer or "").strip()
+    if len(a) < 50:
+        return False
+    try:
+        with _conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS owner_experience("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, question TEXT, "
+                      "answer TEXT, created_at TEXT)")
+            c.execute("INSERT INTO owner_experience(tenant_id, question, answer, created_at) VALUES(?,?,?,?)",
+                      (tenant_id, q, a[:2000], _now()))
+        return True
+    except Exception:
+        return False
+
+
+def list_owner_experience(tenant_id: str, limit: int = 20) -> list[dict]:
+    """가게 실경험 Q&A 목록(최신순). 트랙 B 생성 조건·주제·프롬프트·G6 게이트 공용."""
+    try:
+        with _conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS owner_experience("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, question TEXT, "
+                      "answer TEXT, created_at TEXT)")
+            rows = c.execute("SELECT id, question, answer, created_at FROM owner_experience "
+                             "WHERE tenant_id=? ORDER BY created_at DESC LIMIT ?", (tenant_id, limit)).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def delete_owner_experience(exp_id: int, tenant_id: str) -> None:
+    try:
+        with _conn() as c:
+            c.execute("DELETE FROM owner_experience WHERE id=? AND tenant_id=?", (exp_id, tenant_id))
+    except Exception:
+        pass
+
+
+def has_owner_experience(tenant_id: str) -> bool:
+    """유효 Q&A 1건 이상 존재 여부 — 트랙 B 생성 게이트."""
+    return bool(list_owner_experience(tenant_id, limit=1))
+
+
 def blog_citations(tenant_id: str, limit: int = 30) -> list[dict]:
     """가게 인용수 기록(최신순) — 리포트 [글별 인용수]용."""
     try:
