@@ -75,7 +75,10 @@ def _seller_longtail_candidates(t) -> list:
         if c.get("year"):
             years.append(c["year"])
     if not attrs:
-        attrs = _isc.attribute_tokens(sch)[:6]
+        # ★ 재고 컨텍스트가 없으면 '스키마 예시 차종'을 실재고처럼 쓰지 마라 — 딜러에게 없는 모델
+        #   (캐스퍼·레이 등 예시 토큰)로 유령 키워드·콘텐츠가 생성된다. 스키마 토큰은 '업로드 인식'용이지
+        #   '없는 매물 키워드 생성'용이 아니다. 재고 없으면 모델별 롱테일은 건너뛰고 아래 지역+업종 generic만.
+        attrs = []
     out = []
 
     def _emit(g, subs):
