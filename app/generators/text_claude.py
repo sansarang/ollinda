@@ -153,6 +153,17 @@ class BlogDraftGenerator(Generator):
         # ★ 타깃 키워드 단일 관문(경로 무관) — 기초지역 배제·차종 서열·검색량. 셀러·병행 우회 원천 차단(3번째 재발 근본책).
         #    트랙 B(info)는 비지역 질문형 키워드 → 상업 관문(지역 결합·매물 서열) 미적용(트랙 B 관문은 큐에서 이미 통과).
         _biz_g = (getattr(tenant, "biz_type", "local") or "local")
+        # ★ canonical_region — 지역 토큰 단일 소스(키워드 관문과 동일: 검색량 실측 + 기초지역 배제).
+        #   제목 3안·훅·태그·해시태그·영상 등 지역 등장 전 표면이 이것만 참조(프로필 주소 직접 추출 제거).
+        try:
+            from app.services import indschema as _iscr
+            _hookr = _iscr.get_schema(getattr(tenant, "industry", ""), _biz_g).get("allow_region_hook")
+        except Exception:
+            _hookr = None
+        _creg = seo.canonical_region(tenant.region or "", _biz_g, prof.name, allow_region_hook=_hookr)
+        _reg_txt = _creg or "전국"                        # 프롬프트 표기용(셀러=전국)
+        _title_reg = (f"지역명은 '{_creg}'만 쓰고 구·군 등 기초지역 지명은 제목에 넣지 마라."
+                      if _creg else "제목에 지역 지명을 넣지 마라(전국 대상).")
         if _ctype != "info" and _biz_g in ("seller", "hybrid"):
             _pm = ""
             try:
@@ -179,14 +190,14 @@ class BlogDraftGenerator(Generator):
                        + (f" 구매 안내: {buy}" if buy else "") + place)
         else:
             # 고정정보(주소·전화·영업시간·주차·지도)는 템플릿이 자동 삽입 — LLM은 행동 유도만(블로그템플릿 PHASE 2)
+            _reg_line = (f"본문에서 업체명은 반드시 '{tenant.name}', 지역은 '{_creg}'으로 일관 표기(플레이스 등록정보 일치 = 신뢰 신호). 기초지역(구·군) 지명은 쓰지 마라."
+                         if _creg else f"본문에서 업체명은 '{tenant.name}'으로 일관 표기하고, 지역 지명은 넣지 마라(전국 대상).")
             closing = ("[마무리] 글 끝은 방문 유도 한두 문장으로만 마쳐라. 주소·전화·영업시간·지도 링크는 "
                        "시스템이 자동 삽입하니 본문에 쓰지 마라(중복 금지). "
                        f"'네이버에서 \"{tenant.name}\" 검색 → 플레이스 저장·방문자리뷰·예약' 행동 유도는 좋다"
-                       "(저장·리뷰·예약은 플레이스 순위의 핵심 신호). "
-                       f"본문에서 업체명은 반드시 '{tenant.name}', 지역은 '{tenant.region}'으로 일관 표기"
-                       "(플레이스 등록정보와 일치 = 상호 신뢰 신호).")
+                       "(저장·리뷰·예약은 플레이스 순위의 핵심 신호). " + _reg_line)
         prompt = (
-            f"[가게] {tenant.name} (업종: {prof.name}, 지역: {tenant.region})\n"
+            f"[가게] {tenant.name} (업종: {prof.name}, 지역: {_reg_txt})\n"
             f"[사업형태] {strat.label} — {strat.goal}\n"
             f"[페르소나] {prof.persona}\n[업종 톤] {prof.tone}\n"
             f"{industry_brief(prof)}"
@@ -196,15 +207,15 @@ class BlogDraftGenerator(Generator):
             f"{_tpl_sequence(tenant)}\n"
             f"{seo.BLOG_DIRECTIVES}\n{seo.BLOG_SELL_STRUCT}\n{seo.RETENTION_DENSITY}\n{seo.MOBILE_SPEC}\n{seo.COPY_PSYCH}\n{seo.FACTS_RULE}\n{seo.HUMAN_TOUCH}\n"
             + seo.geo_directive(getattr(tenant, "biz_type", "local") or "local", tenant.name, prof.name,
-                                tenant.region, getattr(tenant, "brand_name", "") or "",
-                                seo.geo_questions(prof.name, tenant.region, getattr(prof, "pain_points", "")))
+                                _creg, getattr(tenant, "brand_name", "") or "",
+                                seo.geo_questions(prof.name, _creg, getattr(prof, "pain_points", "")))
             + (seo.blog_angle_directive(getattr(asset, "angle", "")) + "\n"
                if getattr(asset, "angle", "") else "")
             + "[실경험 강화 · D.I.A.+ 핵심] 위 '사진 분석'의 구체 사실(색·질감·전후 변화·차종/제품·수치)을 "
             "1인칭 경험담('직접 해보니','만져보니','시공하고 나니')으로 녹여라. 추상적 미사여구·일반론 금지, 손에 잡히듯 구체적으로.\n"
             "[필수 섹션] ① '## 자주 묻는 질문'(Q&A 정확히 3쌍) ② 가격대/영업시간/찾아오는길을 마크다운 표(| 항목 | 내용 |) 1개 "
             "③ '## 한눈 요약'(핵심 3줄 목록 — GEO).\n"
-            + _kw_natural_directive(kw0, tenant.region)
+            + _kw_natural_directive(kw0, _creg)
             + "[입력 원문 노출 금지] 업종/키워드 입력이 '썬팅,광택'처럼 쉼표 나열형이면 제목·본문에 원문 그대로 "
             "박지 말고 자연어로 풀어 써라(예: '썬팅과 광택', '썬팅·광택 시공').\n"
             + (f"[연관 표현] '{', '.join(kplan['longtail'])}' 는 본문 문장 속에 자연스럽게 1회씩만 스치게 써라 — "
@@ -213,7 +224,7 @@ class BlogDraftGenerator(Generator):
             "다른 추적 키워드를 소제목으로 세우지 마라.\n"
             + f"사진 {min(len(imgs), SLOT_RECOMMENDED)}장 → 본문 문단 사이에 [사진1]..[사진{min(len(imgs), SLOT_RECOMMENDED)}]를 순서대로 한 번씩(한 줄 단독) 배치.\n\n"
             "아래 형식 그대로(대괄호 머리표 유지) 출력:\n"
-            f"[제목후보]\n(3줄. 각 줄 '{kw0}'를 맨 앞에 + 서로 다른 각도(후기형/정보형/혜택형), 22~35자 롱테일, 숫자·혜택으로 클릭 유도)\n"
+            f"[제목후보]\n(3줄. 각 줄 '{kw0}'를 맨 앞에 + 서로 다른 각도(후기형/정보형/혜택형), 22~35자 롱테일, 숫자·혜택으로 클릭 유도. {_title_reg})\n"
             "[메타설명]\n(150자 내외, 클릭 유도)\n"
             f"[본문]\n(첫 문장에 '{seo._kw_shorten(kw0)}' 같은 자연 변형 포함(원형 금지), ## 소제목 3~5개 + 마크다운 표 1개 + '## 자주 묻는 질문'(Q&A 3쌍), "
             "1500~2200자, [사진N] 마커 배치)\n"
@@ -308,6 +319,7 @@ class BlogDraftGenerator(Generator):
                      "angle": getattr(asset, "angle", "") or "",
                      "target_kw": tkw,
                      "content_type": _ctype,               # sell=트랙A / info=트랙B(GEO)
+                     "canonical_region": _creg,             # ★ 지역 토큰 단일 소스(전 표면·오염게이트 참조)
                      "owner_experience": _exp,              # 트랙B 실경험 Q&A(G6 게이트 검증용)
                      "citation_count": None,                # 3층 성과: AI 브리핑 인용수(캡처 판독으로 채움 — 자리 예약)
                      "business_name": tenant.name,      # 게이트 업체명 정합 검사용(재검증 STEP 1-2a)

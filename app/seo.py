@@ -149,6 +149,45 @@ def is_basic_region_kw(kw: str, region: str, biz_type: str) -> bool:
     return any(core in kwf for core in basic_region_cores(region))
 
 
+REGION_MIN_VOLUME = 100    # 기초지역 지명 표면 허용 최소 월검색량(기장 월20 류 차단 — 키워드 관문과 동일 기준)
+
+
+def _region_wide(region: str) -> str:
+    """광역 어간 — '부산광역시 기장군' → '부산'."""
+    return next((_re_g.sub(r"(특별시|광역시|특별자치시|특별자치도|자치도|도)$", "", tk)
+                 for tk in (region or "").split()
+                 if _re_g.search(r"(특별시|광역시|특별자치시|특별자치도|도)$", tk)), "")
+
+
+def canonical_region(region: str, biz_type: str = "local", industry: str = "",
+                     allow_region_hook=None, verify_volume: bool = True) -> str:
+    """★ 세트 지역 토큰 단일 소스(canonical) — 지역이 등장하는 전 표면(제목·훅·태그·해시태그·영상)이 참조.
+    키워드 관문과 동일 기준: 기초지역(구·군)은 '검색량 관문 통과 시에만' 허용, 아니면 광역.
+    셀러·hook=False는 '' (지역 토큰 미주입). 업종 중립(특정 지명 하드코딩 0).
+    반환: 표면용 지역 문자열('부산' / '부산 기장' / '')."""
+    biz = (biz_type or "local")
+    if allow_region_hook is False or biz == "seller":
+        return ""                                        # 전국 셀러·훅 차단 → 지역 토큰 없음
+    wide = _region_wide(region)
+    cores = basic_region_cores(region)
+    if not cores:
+        return wide or _kw_shorten(region)               # 기초지역 없음 → 광역
+    basic = cores[0]
+    ind0 = ((industry or "").replace("/", ",").split(",")[0] or "").strip()
+    if verify_volume and ind0:
+        try:
+            from app.services import searchad as _sa
+            if _sa.configured():
+                vv = {(_v.get("keyword") or "").replace(" ", ""): (_v.get("total") or 0)
+                      for _v in _sa.keyword_volumes([f"{basic} {ind0}", f"{wide} {ind0}"], limit=10)}
+                if vv.get((basic + ind0).replace(" ", ""), 0) >= REGION_MIN_VOLUME:
+                    return f"{wide} {basic}".strip() if wide else basic   # 기초지역 검색량 통과 → 허용
+                return wide or basic                     # 미달 → 광역(기장 배제)
+        except Exception:
+            pass
+    return wide or basic                                 # 무키/미검증 → 광역(안전)
+
+
 def _kw_rank_tier(kw: str, models: list, classes: list, wide: str, ind0: str) -> int:
     """매물 속성 서열 — 낮을수록 우선. 0:[속성+연식/거래어] 1:[분류+거래어] 2:[광역+속성] 3:[광역+업종] 4:기타.
     속성·분류는 세트 컨텍스트 + 업종 스키마 attribute_axes에서 공급(차량 하드코딩 제거·전 업종)."""

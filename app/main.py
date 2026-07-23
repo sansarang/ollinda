@@ -2452,18 +2452,19 @@ def _blog_tags(tenant, blog) -> list[str]:
     if _gt0:
         _ind_short = _gt0[0]                               # 지역+업종 태그의 업종어(중고차·썬팅·카페)
 
-    # d. 지역태그 1~2개 — 셀러·병행도 태그는 지역 포함(태그=유입면, 훅 규칙 무관)
-    def _strip_admin(t):                                   # 행정구역 접미 제거(단, 결과 2자 미만이면 원형 유지)
-        s = _r.sub(r"(특별시|광역시|특별자치시|특별자치도|자치도|시|군|구|도)$", "", t)
-        return s if len(s) >= 2 else t
-    _regparts = region.split()
-    reg_wide = _strip_admin(_regparts[0]) if _regparts else ""
-    reg_dong = next((t for t in _regparts if _r.search(r"(시|군|구)$", t)), "")
-    reg_dong = _strip_admin(reg_dong) if reg_dong else ""
-    if reg_wide and _ind_short:
-        cand.append(_sq(reg_wide + _ind_short))           # 부산중고차 / 부산썬팅
-    if reg_dong and _ind_short and reg_dong != reg_wide:
-        cand.append(_sq(reg_dong + _ind_short))           # 기장중고차 / 동구썬팅
+    # d. 지역태그 — ★ canonical_region만 참조(프로필 주소 직접 추출 제거). 기초지역(기장)은 canonical에 있을 때만.
+    #    canonical_region=''(셀러·hook=False)이면 지역태그 미생성(지역 토큰 표면 미주입).
+    _creg_tag = pl.get("canonical_region")
+    if _creg_tag is None:
+        try:
+            _hk = _sch3.get("allow_region_hook")
+            _creg_tag = seo.canonical_region(getattr(tenant, "region", "") or "", _bt3,
+                                             getattr(tenant, "industry", ""), allow_region_hook=_hk, verify_volume=False)
+        except Exception:
+            _creg_tag = ""
+    for _rt in (_creg_tag or "").split():                 # '부산' 또는 '부산 기장' → 각 파트 + 업종
+        if _rt and _ind_short:
+            cand.append(_sq(_rt + _ind_short))            # 부산중고차 (+ 기장중고차: canonical에 기장 있을 때만)
 
     # 근거: 모든 후보는 소스 추출값(키워드 토큰·본문 차종/연식/제품명 화이트리스트·프로필 지역/업종)으로만
     # 구성되므로 날조가 원천적으로 불가(무사고 등 미기재 신뢰어는 애초에 추가 안 함).
@@ -3807,26 +3808,37 @@ def admin_kit_verify(tid: str = "", asset_id: str = "", inject: str = "", regen:
     import re as _r
     def _scan(txt):
         return bool(_r.search(r"(?<![가-힣])레이", txt or ""))
+    _title_v = blog.payload.get("selected_title") or blog.payload.get("title", "")
     surfaces_rey = {
-        "제목": _scan(blog.payload.get("selected_title") or blog.payload.get("title", "")),
-        "본문": _scan(blog.payload.get("body", "")),
-        "태그": any(_scan(x) for x in (tags or [])),
-        "캡션": any(_scan(x) for x in (caps or [])),
-        "영상제목": _scan(nv_disp.get("title", "")),
-        "해시태그": any(_scan(x) for x in (nv_disp.get("hashtags") or [])),
+        "제목": _scan(_title_v), "본문": _scan(blog.payload.get("body", "")),
+        "태그": any(_scan(x) for x in (tags or [])), "캡션": any(_scan(x) for x in (caps or [])),
+        "영상제목": _scan(nv_disp.get("title", "")), "해시태그": any(_scan(x) for x in (nv_disp.get("hashtags") or [])),
         "슬러그": _scan(slug),
     }
+    # 지역 축 검증 — 기초지역(기장 등) 지명이 표면에 등장하나
+    _cores = seo.basic_region_cores(getattr(t, "region", "") or "")
+    _creg = blog.payload.get("canonical_region", "")
+    def _rscan(txt):
+        return [c for c in _cores if _r.search(r"(?<![가-힣])" + _r.escape(c), txt or "")]
+    region_by_surface = {
+        "제목": _rscan(_title_v), "본문(핵심)": _rscan(_body_core(blog.payload.get("body", ""))),
+        "태그": _rscan(" ".join(tags or [])), "영상제목": _rscan(nv_disp.get("title", "")),
+        "해시태그": _rscan(" ".join(nv_disp.get("hashtags") or [])),
+    }
     return JSONResponse({"ok": True, "tenant": t.name, "set_id": _set_id, "n_photos": len(paths),
+        "region_profile": getattr(t, "region", ""), "canonical_region": _creg, "basic_region_cores": _cores,
         "photo_basenames": [os.path.basename(p) for p in paths[:20]],
         "inventory_now": [{"model": c.get("model"), "class": c.get("car_class")} for c in db.recent_inventory_context(t.id, 6)],
-        "canonical_keyword": canon, "slug": slug,
-        "title": blog.payload.get("selected_title") or blog.payload.get("title"),
+        "canonical_keyword": canon, "slug": slug, "title": _title_v,
+        "title_options": blog.payload.get("title_options"),
         "captions": caps, "tags": tags,
         "video": {"title": nv_disp.get("title"), "desc": nv_disp.get("desc"), "hashtags": nv_disp.get("hashtags")},
         "filenames_sample": [f"{slug}_{i}.jpg" for i in range(1, 4)] + [f"{slug}_네이버영상.mp4"],
-        "레이_by_surface": surfaces_rey,
-        "레이_total": sum(1 for v in surfaces_rey.values() if v),
-        "contamination_gate": {"passed": gate["passed"], "violations": gate["violations"], "ctx": gate["ctx"]}})
+        "레이_by_surface": surfaces_rey, "레이_total": sum(1 for v in surfaces_rey.values() if v),
+        "기초지역_by_surface": region_by_surface,
+        "기초지역_total": sum(len(v) for v in region_by_surface.values()),
+        "contamination_gate": {"passed": gate["passed"], "violations": gate["violations"],
+                               "ctx": gate["ctx"], "canonical_region": gate.get("canonical_region")}})
 
 
 @app.get("/admin/contamination-scan")
@@ -5253,11 +5265,20 @@ def _nv_canonical(tenant, blog, nv: dict) -> dict:
     """PHASE 1 — 네이버 영상 메타(제목·설명·해시태그)를 canonical 키워드에서 재유도(낡은 저장값 오염 무시).
     표시·키트·게이트가 전부 이 결과를 참조. 업종 중립."""
     import re as _r
+    from app.services import indschema as _isc
     if not nv:
         return nv
     canon = _canonical_keyword(tenant, blog)
     ind = ((getattr(tenant, "industry", "") or "").replace("/", ",").split(",")[0] or "").strip()
-    region = seo._kw_shorten(getattr(tenant, "region", "") or "")
+    region = (blog.payload or {}).get("canonical_region")   # ★ canonical_region만(기초지역 누수 차단)
+    if region is None:
+        try:
+            _hk = _isc.get_schema(getattr(tenant, "industry", ""), getattr(tenant, "biz_type", "local") or "local").get("allow_region_hook")
+            region = seo.canonical_region(getattr(tenant, "region", "") or "", getattr(tenant, "biz_type", "local") or "local",
+                                          getattr(tenant, "industry", ""), allow_region_hook=_hk, verify_volume=False)
+        except Exception:
+            region = ""
+    region = region or ""
     title = f"{canon} 핵심만 정리했어요".strip()
     desc = (f"{canon} 관련 내용을 영상으로 정리했어요.\n{getattr(tenant,'name','')} · {region}\n"
             "자세한 내용은 블로그 본문에 있어요.")
@@ -5315,16 +5336,39 @@ def _kit_contamination_gate(tenant, pieces) -> dict:
         surfaces["영상제목"] = nv.get("title", "")
         surfaces["영상설명"] = nv.get("desc", "")
         surfaces["해시태그"] = " ".join(nv.get("hashtags") or [])
+    # 속성 축 — 스키마 속성 토큰이 세트 컨텍스트에 없이 표면 등장하면 위반(레이 등)
     violations = []
     for name, text in surfaces.items():
         for a in attr_vocab:
             if _wb(a, text) and a not in ctx:
-                violations.append({"surface": name, "token": a, "snippet": _r.sub(r"\s+", " ", text)[:80]})
+                violations.append({"surface": name, "token": a, "axis": "attr",
+                                   "snippet": _r.sub(r"\s+", " ", text)[:80]})
+    # ── 지역 축(PHASE 2) — 속성 축과 동일한 단일 규칙 틀. 기초지역(구·군) 지명이 canonical_region ∪
+    #    주소 표기 블록에 없이 표면에 등장하면 위반(제목·태그·해시태그·영상 등). 파일명·폴더는 지역 허용축.
+    _cores = seo.basic_region_cores(getattr(tenant, "region", "") or "")   # 예: 부산 기장군 → [기장]
+    _creg = pl.get("canonical_region")
+    if _creg is None:
+        try:
+            _hk = _isc.get_schema(getattr(tenant, "industry", ""), getattr(tenant, "biz_type", "local") or "local").get("allow_region_hook")
+            _creg = seo.canonical_region(getattr(tenant, "region", "") or "",
+                                         getattr(tenant, "biz_type", "local") or "local",
+                                         getattr(tenant, "industry", ""), allow_region_hook=_hk, verify_volume=False)
+        except Exception:
+            _creg = ""
+    _addr = (pl.get("fixed_info_block") or "")            # 찾아오는 길 주소 원문 — 여기의 기초지역은 정보(허용)
+    _region_ctx = (_creg or "") + " " + _addr
+    for name, text in surfaces.items():
+        if name in ("파일명",):                            # 파일명은 지역 결합 허용(부산중고차)
+            continue
+        for core in _cores:
+            if _wb(core, text) and not _wb(core, _region_ctx):
+                violations.append({"surface": name, "token": core, "axis": "region",
+                                   "snippet": _r.sub(r"\s+", " ", text)[:80]})
     if violations:
         import logging as _lg
         _lg.getLogger("shopcast.kit").warning("[오염게이트] 차단 %d건: %s", len(violations),
-                                              [(v["surface"], v["token"]) for v in violations][:8])
-    return {"passed": not violations, "violations": violations, "ctx": sorted(ctx)}
+                                              [(v["surface"], v.get("token")) for v in violations][:8])
+    return {"passed": not violations, "violations": violations, "ctx": sorted(ctx), "canonical_region": _creg}
 
 
 def _set_naver_video(pieces) -> dict:
