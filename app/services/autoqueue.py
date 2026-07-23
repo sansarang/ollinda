@@ -338,11 +338,19 @@ def _existing_kw_set(t) -> set:
 
 
 def photo_pool(t) -> list:
-    """재사용 가능한 최근 사진 세트(디스크 존재분) — 없으면 [] (사진 없이 글 안 지음)."""
+    """재사용 가능한 최근 사진 세트 — 로컬 소실 시 R2 미러에서 복원(설계상 원본은 R2 영구).
+    로컬 캐시만 비었을 뿐 사진은 R2에 있으므로 '사진 없음' 오판 금지(regen-naver와 동일 복원 경로)."""
     for s in db.list_sets(tenant_id=t.id, limit=10):
         ps = db.get_set_pieces(s["asset_id"])
         for p in ps:
-            paths = [x for x in (p.payload.get("image_paths") or []) if x and os.path.exists(x)]
+            raw = p.payload.get("image_paths") or []
+            paths = [x for x in raw if x and os.path.exists(x)]
+            if not paths and raw:                       # 로컬 소실 → R2 복원 시도(원본은 R2에 있음)
+                try:
+                    from app.services.ingest import _restore_media
+                    paths = _restore_media(p.tenant_id, raw)
+                except Exception:
+                    paths = []
             if paths:
                 return paths
     return []
