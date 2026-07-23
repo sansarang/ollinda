@@ -175,9 +175,13 @@ class BlogDraftGenerator(Generator):
                 from app.services import indschema as _iscpm
                 _axes_pm = (_iscpm.get_schema(getattr(tenant, "industry", ""), _biz_g).get("attribute_axes") or [])
                 _model_toks = (_axes_pm[0].get("tokens") if _axes_pm else []) or []   # 1축=핵심 매물(차종)
-                _cur_src = (kw0 or "") + " " + (asset.note or "")                     # 현재 세트만(tenant 인벤토리 아님)
-                _pm = next((t for t in _model_toks
-                            if t and _rpm.search(r"(?<![가-힣])" + _rpm.escape(t), _cur_src)), "")
+                # ★ 사진분석(asset.note)=실제 피사체 ground truth를 '먼저' 매칭 — kw0(검색어 유도)가
+                #   사진과 다른 차종이어도(예: 그랜저 사진 + 캐스퍼 검색어) 사진의 차종을 매물로 확정.
+                #   스키마 순서로 첫 매치를 뽑던 방식은 두 차종 공존 시 사진과 무관한 걸 골랐다.
+                def _first_model(src):
+                    return next((t for t in _model_toks
+                                 if t and _rpm.search(r"(?<![가-힣])" + _rpm.escape(t), src or "")), "")
+                _pm = _first_model(asset.note) or _first_model(kw0)
             except Exception:
                 pass
             _gk = seo.select_target_keyword([kw0] + list(kws), _biz_g, tenant.region or "",
