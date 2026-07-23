@@ -121,7 +121,7 @@ def analyze_all(image_paths: list[str], industry_name: str = "", max_imgs: int =
             f"위 사진 {len(paths)}장을 한국 소상공인 마케팅 관점에서 분석하라. 업종: {industry_name or '일반'}.\n"
             "각 사진마다 '[사진N]'으로 구분해서 무엇이 보이는지 구체적으로(피사체·제품·차종·전후 변화·사진 속 글자 그대로).\n"
             "마지막에 '[전체]'로, 사진들이 이어지는 하나의 이야기를 한 줄로(예: 시공 전→과정→완성, 제품→사용→결과).\n"
-            "타사 플랫폼 로고·워터마크(엔카/KB차차차/보배드림 등)가 크게 박힌 사진이 있으면 해당 [사진N] 줄에 '[워터마크]'라고만 덧붙여라.\n"
+            "촬영 피사체가 아니라 사진 위에 '덧씌워진' 오버레이 그래픽(반투명 로고·문자 스탬프·프레임 밴드 등, 특정 업체·플랫폼명 불문)이 있으면 해당 [사진N] 줄에 '[오버레이]'라고만 덧붙여라. 단, 피사체 자체에 부착·부착물(가림막·스티커 등)은 오버레이가 아니다.\n"
             "※ 사진에 실제로 보이는 것만. 추측·과장 금지. 각 항목 간결히."
             + ("\n" + _context_block(context) if context is not None else ""))
         # 사진 순서 표기는 프롬프트에 명시(각 이미지가 순서대로 [사진N]) — 어댑터는 이미지 나열 후 텍스트
@@ -162,3 +162,49 @@ def detect_personal_info(image_path: str) -> list[dict]:
         return [b for b in boxes if isinstance(b, dict) and all(k in b for k in ("x0", "y0", "x1", "y1"))]
     except Exception:
         return []
+
+
+def detect_overlay(image_path: str) -> dict:
+    """A-1: 사진 위 '오버레이성 표식' 구조화 판별 — 업체·플랫폼명 하드코딩 0(일반 '피사체가 아닌 덧씌운 그래픽' 판별).
+    반환 {present, type, x0..y1, coverage, kind}. type:
+      a=코너 스탬프형(가장자리·화면 10%↓)      → 제거 대상 후보
+      b=전면 반투명형(중앙·넓게 깔림)          → 제거 불가(원본 유지·강등)
+      c=피사체 부착물(번호판 가림막·스티커 등)  → 오버레이 아님·경고 아님(본인 가린 개인정보 오탐 금지)
+    확신 없으면 present=False(오탐 방지 기본값). 무키/실패 시 {present:False}."""
+    if not (configured() and image_path and os.path.exists(image_path)):
+        return {"present": False}
+    try:
+        import json
+        import re as _re
+        _mt, data = _b64_for_vision(image_path)
+        import anthropic
+        client = anthropic.Anthropic()
+        prompt = (
+            "이 사진에 '촬영된 피사체가 아니라 사진 위에 덧씌워진 오버레이 그래픽'이 있는지 판별하라. "
+            "특정 업체·플랫폼·브랜드명과 무관하게, 순수하게 '피사체냐 덧씌운 그래픽이냐'로만 판단한다.\n"
+            "유형을 반드시 구분하라:\n"
+            "  a = 코너/가장자리 스탬프형 로고·문자(화면의 약 10% 이하, 모서리 쪽)\n"
+            "  b = 화면 중앙을 넓게 덮는 전면 반투명 워터마크·문자 밴드\n"
+            "  c = 피사체에 실제로 '부착된' 물체(번호판을 가린 종이·가림막, 차체 스티커 등) — 이것은 오버레이가 아님\n"
+            "JSON 객체 하나만 출력(설명·코드블록 없이):\n"
+            '{"present":true|false,"type":"a|b|c","x0":0.0,"y0":0.0,"x1":0.0,"y1":0.0,"coverage":0.0,"kind":"짧은 설명"}\n'
+            "x0,y0=왼쪽위 x1,y1=오른쪽아래(0~1 정규화), coverage=오버레이가 덮은 면적 비율(0~1).\n"
+            "유형 c(피사체 부착물)이거나 오버레이가 없으면 present=false. 확신이 없어도 present=false. 오탐보다 미탐이 낫다."
+        )
+        resp = client.messages.create(
+            model=MODEL, max_tokens=300,
+            messages=[{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64",
+                 "media_type": _mt, "data": data}},
+                {"type": "text", "text": prompt},
+            ]}])
+        txt = next((b.text for b in resp.content if b.type == "text"), "")
+        m = _re.search(r"\{.*\}", txt, _re.S)
+        d = json.loads(m.group(0)) if m else {}
+        if not isinstance(d, dict) or not d.get("present"):
+            return {"present": False}
+        if d.get("type") == "c":                              # 피사체 부착물 → 오버레이 아님(오탐 방지)
+            return {"present": False, "type": "c"}
+        return d
+    except Exception:
+        return {"present": False}

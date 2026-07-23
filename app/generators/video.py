@@ -573,10 +573,29 @@ def _hint_bonus(scene_text: str, desc_text: str) -> float:
     return 0.0
 
 
-def _match_photos(lines: list, imgs: list, gen_source: str, log_tag: str = "") -> list:
-    """대본 확정 후 씬 내용 ↔ 사진 매칭 — gen_source의 [사진N] 묘사 토큰 겹침 + 유형 힌트 가점(2-3).
-    검수 자막→엔진룸/계기판, 서류 자막→문서, 가격·스펙→전면/측면 우선. 근거 없으면 원 순서.
-    매칭 스코어 로그 기록(검증용)."""
+def _distinctive_objects(descs: dict) -> set:
+    """vision 묘사에서 '변별력 있는 시각 대상 어휘' 추출 — 전 사진의 절반 이하에만 나오는 2자+ 명사류.
+    (엔진룸·계기판·휠·등록증·실내 등). 어휘는 데이터(vision 출력) 유래 — 업종 하드코딩 0."""
+    import re as _r
+    from collections import Counter
+    cnt = Counter()
+    for raw in descs.values():
+        toks = set(w for w in _r.findall(r"[가-힣]{2,}", raw or "")
+                   if w not in ("사진", "차량", "모습", "보이", "있습니다", "있는", "촬영", "제품", "매장"))
+        for w in toks:
+            cnt[w] += 1
+    n = max(1, len(descs))
+    # 절반 이하 사진에만 등장 = 변별력(전체에 다 나오는 일반어 제외)
+    return {w for w, c in cnt.items() if 1 <= c <= max(1, n // 2)}
+
+
+def _match_photos(lines: list, imgs: list, gen_source: str, log_tag: str = "",
+                  drops: "list | None" = None, axis_vocab: "set | None" = None) -> list:
+    """대본 확정 후 씬 내용 ↔ 사진 매칭 (B: 지시어 강제 대조 추가).
+    ① 자막의 '시각 대상 지시어'(vision 태그 변별어 유래·하드코딩 0)가 있으면, 배정 사진 vision 묘사에
+       그 지시어가 실제 있어야 함 — 없으면 그 사진 배정 금지(등록증 자막→전면샷 차단).
+    ② 지시어 일치 사진 없으면 order=None + drops에 인덱스 기록(호출부가 씬 삭제). 일치 사진 있으면 재배정.
+    ③ 매칭 로그: [자막 / 지시어 / 배정 사진 / 판정]."""
     import re as _r
     import logging as _lg
     descs, raws = {}, {}
@@ -587,31 +606,43 @@ def _match_photos(lines: list, imgs: list, gen_source: str, log_tag: str = "") -
             raws[i] = m.group(2)
     if not descs:
         return imgs
-    used, order, _scores = set(), [], []
-    for ln in lines:
+    # 지시어 소스 = vision 묘사 변별어 ∪ 스키마 attribute_axes 토큰(둘 다 데이터 유래·하드코딩 0)
+    obj_vocab = _distinctive_objects(raws) | {w for w in (axis_vocab or set()) if len(w) >= 2}
+    used, order, _log = set(), [], []
+    for li, ln in enumerate(lines):
         lt = _norm_line(ln)
+        refs = [w for w in obj_vocab if _r.search(r"(?<![가-힣])" + _r.escape(w), ln or "")]  # 자막의 지시어
         best, best_s = None, 0.0
         for i, dt in descs.items():
             if i in used or not dt:
                 continue
+            # ★ 지시어 강제: 자막에 지시어가 있으면 그 사진 묘사에 지시어가 실제 있어야 후보
+            if refs and not any(_r.search(r"(?<![가-힣])" + _r.escape(rf), raws.get(i, "") or "") for rf in refs):
+                continue
             s = len(lt & dt) / max(1, len(lt | dt)) + _hint_bonus(ln, raws.get(i, ""))
             if s > best_s:
                 best, best_s = i, s
+        _jud = "매칭" if best is not None and best_s >= 0.08 else ("지시어불일치→삭제" if refs else "순차")
         if best is not None and best_s >= 0.08:
-            order.append(best)
-            used.add(best)
-            _scores.append((ln[:16], best + 1, round(best_s, 2)))
+            order.append(best); used.add(best)
+        elif refs and drops is not None:                      # 지시어 있는데 일치 사진 없음 → 씬 삭제(opt-in)
+            order.append("DROP"); drops.append(li)
         else:
-            order.append(None)
-            _scores.append((ln[:16], None, 0.0))
+            order.append(None)                                # 지시어 없거나 삭제 미사용 → 순차 폴백(기존 동작)
+        _log.append((ln[:14], "·".join(refs) or "-", (best + 1) if isinstance(best, int) else "-", _jud))
     if log_tag:
-        _lg.getLogger("shopcast.video").warning("[%s] 씬-사진 매칭: %s", log_tag,
-            " / ".join(f"'{t}'→#{p}({s})" if p else f"'{t}'→순차" for t, p, s in _scores))
+        _lg.getLogger("shopcast.video").warning("[%s] 씬-자막 매칭: %s", log_tag,
+            " / ".join(f"'{t}'[지시:{r}]→#{p}({j})" for t, r, p, j in _log))
     remain = [i for i in range(len(imgs)) if i not in used]
     final = []
     for o in order:
-        final.append(imgs[o] if o is not None else imgs[remain.pop(0)] if remain else imgs[0])
-    final += [imgs[i] for i in remain]
+        if o == "DROP":
+            final.append(None)                                # 호출부가 씬 삭제(자막·사진 함께)
+        elif isinstance(o, int):
+            final.append(imgs[o])
+        else:
+            final.append(imgs[remain.pop(0)] if remain else (imgs[0] if imgs else None))
+    final += [imgs[i] for i in remain if imgs[i] not in final]
     return final
 
 
@@ -1228,7 +1259,30 @@ class ShortVideoGenerator(Generator):
         sent = _cap_lines([_strip_labels(s) for s in sent])   # 서식 세척 + 3줄 초과 강제 분할(캡 후 최종 sent로 1회만 매칭)
         _gen_src2 = pl.get("gen_source") or ""
         if _gen_src2 and sent:
-            vid_imgs = _match_photos(list(sent), vid_imgs, _gen_src2, "naver-video")   # 씬↔사진 매칭(유형 힌트+로그)
+            _drops = []
+            _axv = set()
+            try:                                              # 스키마 attribute_axes 토큰 → 지시어 소스(데이터 유래)
+                from app.services import indschema as _isc2
+                _sch2 = _isc2.get_schema(getattr(tenant, "industry", "") or "", _biz)
+                for _a in (_sch2.get("attribute_axes") or []):
+                    for _t in (_a.get("tokens") or []):
+                        if isinstance(_t, str):
+                            _axv.add(_t)
+            except Exception:
+                pass
+            _matched = _match_photos(list(sent), vid_imgs, _gen_src2, "naver-video", drops=_drops, axis_vocab=_axv)
+            _perline = _matched[:len(sent)]                   # 앞부분=자막별 배정(뒤는 미사용 잉여 사진)
+            _dropset = set(_drops)
+            # B: 지시어 불일치 씬 '삭제'(기본). 단 하한(3씬) 아래로 떨어지면 삭제 보류(그땐 순차 폴백 유지)
+            if _drops and (len(sent) - len(_drops)) >= 3:
+                _keep = [k for k in range(len(sent)) if k not in _dropset and _perline[k] is not None]
+                sent = [sent[k] for k in _keep]
+                vid_imgs = [_perline[k] for k in _keep]
+                _nlog.warning("[naver-video] 지시어 불일치 %d씬 삭제 → %d씬 남김", len(_drops), len(sent))
+            else:
+                vid_imgs = [x for x in _perline if x is not None] or vid_imgs
+                if _drops:
+                    _nlog.warning("[naver-video] 지시어 불일치 %d씬 — 하한 미달로 삭제 보류(순차 폴백)", len(_drops))
             _nlog.warning("[naver-video] 사진 재배정 %d씬↔%d장", len(sent), len(vid_imgs))
         path, note, dur, _cover = self._build_scene_video(
             vid_imgs, SceneScript(hook=opening, sentences=sent, outro=outro, source="body_excerpt", evidence=body),

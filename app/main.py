@@ -7362,7 +7362,8 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
         <span class='inline-block ml-1 bg-indigo-50 text-indigo-600 text-[11px] font-bold px-2 py-0.5 rounded-full'>자동 전문가 보정</span></label>
         <div id=up_preview class='grid grid-cols-3 sm:grid-cols-4 gap-2'></div>
         <input type=file name=photos id=up_photos accept='image/*' multiple required class='hidden'>
-        <p class='text-xs text-slate-400 mt-1.5'><b class='text-slate-500'>끌어서</b> 순서 변경 · <b class='text-slate-500'>＋</b> 로 여러 장 추가 · 올린 순서대로 영상·블로그에 배치돼요</p></div>
+        <p class='text-xs text-slate-400 mt-1.5'><b class='text-slate-500'>끌어서</b> 순서 변경 · <b class='text-slate-500'>＋</b> 로 여러 장 추가 · 올린 순서대로 영상·블로그에 배치돼요</p>
+        <p class='text-[11px] text-slate-400 mt-1'>※ <b class='text-slate-500'>본인이 촬영했거나 사용 권리를 가진 사진</b>만 올려주세요.</p></div>
       <div><label class='{lb}'>4. 목적 <span class='text-slate-400 font-normal text-xs'>(선택)</span></label>
         <div class='flex flex-wrap gap-2'>{chips}</div></div>
       {listing_field}
