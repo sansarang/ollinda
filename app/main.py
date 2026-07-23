@@ -5263,7 +5263,10 @@ def _kit_contamination_gate(tenant, pieces) -> dict:
     body = pl.get("body") or ""
     title = pl.get("selected_title") or pl.get("title") or ""
     canon = _canonical_keyword(tenant, blog)
-    # 허용 컨텍스트 = 인벤토리(정정본) ∪ 제목·canonical 속성 ∪ 본문 단어경계 실등장
+    gensrc = pl.get("gen_source") or ""                  # vision 분석(실사진 묘사) — 실 set 내용
+    # 허용 컨텍스트 = 인벤토리(정정본) ∪ 제목·canonical 속성 ∪ 본문·vision분석 단어경계 실등장.
+    #   ★ vision(gen_source) 유래 속성 토큰은 '실제 사진 묘사'라 정당 — 허용. 오염은 '실사진에도 본문에도 없는데'
+    #     낡은 키워드 경로로 새어든 토큰(레이 등)이다.
     ctx = set()
     try:
         for c in db.recent_inventory_context(getattr(tenant, "id", "") or "", limit=6):
@@ -5271,7 +5274,7 @@ def _kit_contamination_gate(tenant, pieces) -> dict:
     except Exception:
         pass
     for a in attr_vocab:
-        if _wb(a, title) or _wb(a, canon) or _wb(a, body):
+        if _wb(a, title) or _wb(a, canon) or _wb(a, body) or _wb(a, gensrc):
             ctx.add(a)
     ctx = {x for x in ctx if x}
     # 표면 수집 — canonical 유도 영상 메타 사용(낡은 저장값 아님)
