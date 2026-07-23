@@ -1412,6 +1412,18 @@ class ShortVideoGenerator(Generator):
             durs: list[float] = []                     # xfade 오프셋 계산용(체감 씬 길이)
             if v and aw:
                 vclips.append(v); awavs.append(aw); durs.append(hdur); t += hdur
+            # 문법 2: 데이터 카드 준비 — 세트 실값 수치(스키마 축 우선) + visual_preset 디자인 토큰
+            try:
+                from app.services import indschema as _isc
+                _biz = getattr(tenant, "biz_type", "local") or "local"
+                _sch = _isc.get_schema(getattr(tenant, "industry", "") or "", _biz)
+                _vtok = self._visual_tokens(_sch.get("visual_preset") or "basic")
+                _factsrc = " ".join(sentences) + "\n" + (getattr(script, "evidence", "") or "")
+                _dcards = self._extract_data_points(_factsrc, _factsrc, _sch, _biz)
+            except Exception:
+                _vtok, _dcards = self._visual_tokens("basic"), []
+            _dc_pos = {len(sentences) // 2} if (sentences and _dcards) else set()   # 중간 1장 삽입(색감 리셋)
+            _dc_i = 0
             # 1) 본문 씬들 — 자막은 ASS 카라오케로 별도(여기선 영상+켄번스+색보정만)
             #    ElevenLabs with-timestamps 실측 단어 타이밍(있으면) → 카라오케 싱크 정확(영상강화 PHASE 2)
             for i, text in enumerate(sentences):
@@ -1428,6 +1440,20 @@ class ShortVideoGenerator(Generator):
                     vclips.append(v); awavs.append(aw); durs.append(sdur); t += sdur
                 else:
                     dropped += 1
+                # 문법 2: 중간 데이터 카드 삽입(무음, 색감 리셋 겸 수치 강조)
+                if i in _dc_pos and _dc_i < len(_dcards):
+                    _val, _lab = _dcards[_dc_i]; _dc_i += 1
+                    _dc_png = os.path.join(work, f"dc{i}.png")
+                    try:
+                        self._data_card_png(_dc_png, _val, _lab, _vtok)
+                        _ddur = 1.8
+                        _dv = self._scene_card_video(_dc_png, _ddur, os.path.join(work, f"v_dc{i}.mp4"), tail=XFADE)
+                        _da = self._audio_segment(None, _ddur, os.path.join(work, f"a_dc{i}.wav"))
+                        if _dv and _da:
+                            vclips.append(_dv); awavs.append(_da); durs.append(_ddur); t += _ddur
+                            logging.getLogger("shopcast.video").info("[card] 데이터 카드 삽입: %s / %s", _lab, _val)
+                    except Exception:
+                        logging.getLogger("shopcast.video").exception("[card] 데이터 카드 실패")
             # 2) 아웃트로 CTA 카드(무음) — 셀러는 판매 QR(추적링크) 삽입 → 스캔 시 성과 집계
             qr_url = ""
             if strat.key == "seller":
@@ -1626,6 +1652,74 @@ class ShortVideoGenerator(Generator):
         if cur:
             runs.append((cur, curm))
         return runs
+
+    # ───────────── 문법 2: 타이포 카드 시스템(디자인 토큰 = visual_preset 유래) ─────────────
+    @staticmethod
+    def _visual_tokens(vpreset: str) -> dict:
+        """visual_preset(basic|soft|fresh|auto) → 카드·자막 공용 디자인 토큰(배경 그라데·포인트색·태그).
+        전 카드·전 자막이 같은 토큰 → 영상 전체가 한 브랜드로 보이게. 업종 중립(스키마 유래)."""
+        T = {
+            "auto":  {"bg": ((16, 18, 30), (40, 48, 92)), "accent": (90, 170, 255), "tag": "체크"},
+            "soft":  {"bg": ((28, 20, 34), (96, 60, 96)),  "accent": (255, 170, 190), "tag": "오늘"},
+            "fresh": {"bg": ((14, 26, 22), (30, 92, 70)),  "accent": (120, 230, 170), "tag": "신선"},
+            "basic": {"bg": ((16, 18, 26), (54, 40, 96)),  "accent": (255, 224, 77),  "tag": "확인"},
+        }
+        return T.get(vpreset or "basic", T["basic"])
+
+    @staticmethod
+    def _extract_data_points(body: str, gen_source: str, schema: dict, biz: str = "local") -> list:
+        """데이터 카드 수치 추출 — 세트 실값(본문·사진분석)만, 스키마 attribute_axes 축 우선순위로.
+        업종 하드코딩 0: 코드는 '수치+단위' 패턴만 인식하고, 어떤 축을 앞세울지는 스키마가 정한다.
+        반환 [(value_str, label)] 최대 3개. 없으면 []."""
+        import re as _r
+        src = (gen_source or "") + "\n" + (body or "")
+        # 축 이름 → 대표 라벨(스키마 axis명 그대로 라벨로). 수치 단위 패턴은 범용.
+        axes = [a.get("axis", "") for a in (schema.get("attribute_axes") or [])]
+        # 범용 수치 유형(단위 기반) — 우선순위는 스키마 축 순서에 맞춰 정렬
+        UNIT = [("주행거리", r"([\d,]{2,})\s*(?:km|㎞|키로|만km)"),
+                ("가격", r"([\d,]{3,})\s*(?:만원|원)"),
+                ("연식", r"((?:19|20)\d{2})\s*년?식"),
+                ("용량", r"([\d,]{2,})\s*(?:ml|mL|㎖|g|kg|리터|L)"),
+                ("소요시간", r"([\d,]{1,})\s*(?:분|시간)"),
+                ("횟수", r"([\d,]{1,})\s*회")]
+        found, seen = [], set()
+        # 스키마 축과 라벨이 겹치는 유형을 앞으로(중고차=주행거리·가격이 축에 있음)
+        def _axis_rank(label):
+            for i, ax in enumerate(axes):
+                if label[:2] in ax or ax[:2] in label:
+                    return i
+            return 99
+        for label, pat in sorted(UNIT, key=lambda u: _axis_rank(u[0])):
+            m = _r.search(pat, src)
+            if m and m.group(0) not in seen:
+                seen.add(m.group(0))
+                found.append((m.group(0).strip(), label))
+            if len(found) >= 3:
+                break
+        return found
+
+    def _data_card_png(self, out: str, value: str, label: str, tokens: dict) -> None:
+        """데이터 카드(풀스크린) — 라벨 + 큰 수치. 사진 없음·그라데 배경(디자인 토큰). 수치가 주인공."""
+        from PIL import Image, ImageDraw
+        c1, c2 = tokens["bg"]; accent = tokens["accent"]
+        img = Image.new("RGB", (W, H), c1); top = Image.new("RGB", (W, H), c2)
+        m = Image.new("L", (W, H)); md = ImageDraw.Draw(m)
+        for y in range(H):
+            md.line([(0, y), (W, y)], fill=int(255 * y / H))
+        img.paste(top, (0, 0), m)
+        d = ImageDraw.Draw(img)
+        fl = _pil_font(52, "Bold")
+        d.text(((W - d.textlength(label, font=fl)) / 2, H // 2 - 300), label, font=fl, fill=(210, 214, 235))
+        # 큰 수치 — 2줄 넘지 않게 폰트 자동
+        fv = _pil_font(150, "ExtraBold")
+        for fs in (170, 150, 130, 110, 92):
+            fv = _pil_font(fs, "ExtraBold")
+            if d.textlength(value, font=fv) <= W - 120:
+                break
+        d.text(((W - d.textlength(value, font=fv)) / 2, H // 2 - 130), value, font=fv, fill=accent)
+        # 하단 라인 장식
+        d.rectangle([W // 2 - 120, H // 2 + 130, W // 2 + 120, H // 2 + 138], fill=accent)
+        img.save(out)
 
     def _hook_photo_png(self, out: str, big: str, small: str, img_path: str, accent: str) -> bool:
         """첫 3초 훅 — 실사진 배경(cover crop) + 어둡게 + 큰 문제제기 텍스트(영상강화 PHASE 1).
