@@ -58,10 +58,18 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
             "lat": getattr(tenant, "lat", None), "lon": getattr(tenant, "lon", None),
         }
         photo_boost.enhance_all(paths, tenant.industry, _meta)
-        for _p in paths:
-            storage.mirror_to_r2(_p)
     except Exception:
-        pass
+        import logging as _lgm
+        _lgm.getLogger("shopcast.ingest").warning("[ingest] 사진 보정 실패(무시) — 미러는 별도 보장")
+    # ★ R2 미러 = 원본 영구 보존의 핵심 → 보정 성패와 무관하게 '항상' 실행 + 실패 로그(조용한 누락 금지).
+    #   설계상 로컬은 캐시라 미러가 없으면 로컬 만료 시 진짜 소실된다.
+    if storage.r2_configured():
+        _miss = [_p for _p in paths if _p and not storage.mirror_to_r2(_p)]
+        if _miss:
+            import logging as _lgr
+            _lgr.getLogger("shopcast.ingest").error(
+                "[ingest] ⚠️ R2 미러 실패 %d/%d — 로컬 캐시 만료 시 소실 위험: %s",
+                len(_miss), len(paths), [os.path.basename(m) for m in _miss][:5])
     # 대표 Asset(첫 장)에 메모 기록 — 나머지 장은 images로 전달
     asset = db.create_asset(tenant.id, AssetType.IMAGE, paths[0], note)
     # 🎯 진단→생성 연결(상위노출 PHASE 1): 타겟 키워드·앵글을 asset에 실어 생성기로 전달
