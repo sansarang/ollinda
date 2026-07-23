@@ -3692,6 +3692,57 @@ async def my_citation_upload(request: Request):
     return RedirectResponse(f"/me?ok=AI 브리핑 인용수 {cc}회를 기록했어요 — 리포트에 반영됩니다", status_code=303)
 
 
+@app.get("/admin/contamination-scan")
+def admin_contamination_scan(token: str = "레이", tid: str = "", limit: int = 300):
+    """PHASE 0 — DB 전수 오염 스캔. 전 테이블·전 텍스트 컬럼에서 token을 단어 경계로 조회
+    (앞이 한글이면 불일치 — '플레이스'의 '레이' 오탐 제외). tid 주면 그 tenant 관련만.
+    반환 [{table, column, rowid, tenant, snippet}]."""
+    import re as _r
+    pat = _r.compile(r"(?<![가-힣])" + _r.escape(token))
+    hits = []
+    try:
+        with db._conn() as c:
+            tables = [r[0] for r in c.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+            for tbl in tables:
+                try:
+                    cols = c.execute(f"PRAGMA table_info({tbl})").fetchall()
+                except Exception:
+                    continue
+                txt_cols = [col[1] for col in cols if str(col[2]).upper() in ("TEXT", "") or "CHAR" in str(col[2]).upper()]
+                if not txt_cols:
+                    continue
+                has_tid = any(col[1] == "tenant_id" for col in cols)
+                idcol = "id" if any(col[1] == "id" for col in cols) else "rowid"
+                try:
+                    rows = c.execute(f"SELECT {idcol} AS _id, {'tenant_id,' if has_tid else ''}"
+                                     f"{','.join(txt_cols)} FROM {tbl}").fetchall()
+                except Exception:
+                    continue
+                for row in rows:
+                    d = dict(row)
+                    rtid = d.get("tenant_id", "")
+                    if tid and rtid and rtid != tid:
+                        continue
+                    for col in txt_cols:
+                        v = d.get(col)
+                        if isinstance(v, str) and pat.search(v):
+                            hits.append({"table": tbl, "column": col, "rowid": d.get("_id"),
+                                         "tenant": (rtid or "")[:12],
+                                         "snippet": _r.sub(r"\s+", " ", v)[:160]})
+                            if len(hits) >= limit:
+                                break
+                    if len(hits) >= limit:
+                        break
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": repr(e)[:200]}, status_code=500)
+    # 테이블.컬럼별 집계
+    from collections import Counter
+    by = Counter(f"{h['table']}.{h['column']}" for h in hits)
+    return JSONResponse({"ok": True, "token": token, "total": len(hits),
+                         "by_table_column": dict(by), "hits": hits})
+
+
 @app.get("/admin/geo-topics")
 def admin_geo_topics(industry: str = "", biz: str = "local", region: str = "", desc: str = ""):
     """(진단) 업종 스키마 유래 트랙 B 질문형 주제 도출 + 키워드 관문 통과 결과 — 사진 불필요.
