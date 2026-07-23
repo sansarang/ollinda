@@ -166,8 +166,10 @@ def canonical_region(region: str, biz_type: str = "local", industry: str = "",
     셀러·hook=False는 '' (지역 토큰 미주입). 업종 중립(특정 지명 하드코딩 0).
     반환: 표면용 지역 문자열('부산' / '부산 기장' / '')."""
     biz = (biz_type or "local")
-    if allow_region_hook is False or biz == "seller":
-        return ""                                        # 전국 셀러·훅 차단 → 지역 토큰 없음
+    if biz == "seller":
+        return ""                                        # 전국 셀러 → 지역 토큰 없음(hook 규칙과 무관하게 biz가 권위)
+    # 하이브리드·매장은 스키마 hook=False여도 지역 적용(부산 광역은 로컬 SEO 신호). allow_region_hook은 호환용.
+    _ = allow_region_hook
     wide = _region_wide(region)
     cores = basic_region_cores(region)
     if not cores:
