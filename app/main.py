@@ -6548,12 +6548,26 @@ def admin_regen_naver(asset_id: str):
     kws = short.payload.get("target_keywords") or []
     old_nv = dict(short.payload.get("naver_video") or {})
     vid_imgs = gen._downscale_for_video(paths)
+    import logging as _lg2                                       # V4: 씬-자막 매칭 로그 캡처(판정표 표면화)
+    _mcap = []
+    class _MatchGrab(_lg2.Handler):
+        def emit(self, r):
+            try:
+                m = r.getMessage()
+                if "씬-자막 매칭" in m or "지시어 불일치" in m or "사진 재배정" in m:
+                    _mcap.append(m)
+            except Exception:
+                pass
+    _vlog = _lg2.getLogger("shopcast.video")
+    _grab = _MatchGrab(); _grab.setLevel(_lg2.WARNING); _vlog.addHandler(_grab)
     try:
         npath, nmeta = gen._naver_video(tenant, asset, vid_imgs, kws, resolve_strategy(tenant), out_dir)
     except Exception as e:
         import traceback
-        return JSONResponse({"ok": False, "error": traceback.format_exc()[-800:]}, status_code=500)
+        _vlog.removeHandler(_grab)
+        return JSONResponse({"ok": False, "error": traceback.format_exc()[-800:], "match_log": _mcap}, status_code=500)
     finally:
+        _vlog.removeHandler(_grab)
         for _vp in vid_imgs:
             if _vp not in paths and _vp.endswith("_vid.jpg") and os.path.exists(_vp):
                 try:
@@ -6577,7 +6591,7 @@ def admin_regen_naver(asset_id: str):
     if not any(p.kind == _CK.SHORT and (p.payload or {}).get("naver_video") for p in pieces):
         short.payload["naver_video"] = nmeta
         db.save_piece(short)
-    return JSONResponse({"ok": True, "naver_video": {k: nmeta.get(k) for k in
+    return JSONResponse({"ok": True, "match_log": _mcap, "naver_video": {k: nmeta.get(k) for k in
                         ("path", "filename", "title", "duration_sec", "quality", "hashtags")}})
 
 
