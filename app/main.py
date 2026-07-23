@@ -6599,6 +6599,57 @@ def admin_regen_blog(asset_id: str, dry: str = ""):
                          "new_kws": npl.get("target_keywords")})
 
 
+@app.get("/admin/phantom-sweep")
+def admin_phantom_sweep(tid: str = "", dry: str = "1"):
+    """4형제 등 '유령 속성 토큰' 전수 세척 — (1) 제목/태그 표면 오염 세트 asset_id 목록(regen-blog 대상),
+    (2) target_keywords 필드에서 유령 토큰만 제거(제자리·나머지 무변경 — 이 필드는 영상 카피 등 생성 입력으로
+    소비되는 씨앗). 컨텍스트=asset.note(사진분석·사장입력)+재고만(오염 가능한 제목/키워드는 컨텍스트서 제외).
+    dry=1 판정만. tid 필수(안전). 발행불가(_publish_blocked) 세트는 필드세척만·목록서 표시."""
+    from app.domain.models import ContentKind as _CK
+    if not tid:
+        return JSONResponse({"ok": False, "error": "tid 필요"}, status_code=400)
+    t = db.get_tenant(tid)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    _biz = getattr(t, "biz_type", "local") or "local"
+    _ind = getattr(t, "industry", "") or ""
+    _inv = [c.get("model") for c in db.recent_inventory_context(tid, limit=12) if c.get("model")]
+    phantom_title, swept = [], []
+    _seen_assets = set()
+    for s in db.list_sets(tenant_id=tid, limit=300):
+        aid = s.get("asset_id")
+        if not aid or aid in _seen_assets:
+            continue
+        _seen_assets.add(aid)
+        _a = db.get_asset(aid)
+        _note = (getattr(_a, "note", "") or "")            # ★ 컨텍스트 = 그라운드트루스만(note+재고), 제목/키워드 제외
+        for p in db.get_set_pieces(aid):
+            pl = p.payload or {}
+            title = pl.get("selected_title") or pl.get("title") or ""
+            # (1) 제목 표면 오염 판정(컨텍스트에 제목 자신 미포함)
+            if title:
+                _kt, _dt = seo.drop_phantom_attr_kws([title], _ind, _biz, context_text=_note, inventory_models=_inv)
+                if _dt:
+                    phantom_title.append({"asset_id": aid, "piece": p.id[:8], "kind": p.kind.value,
+                                          "title": title, "phantom": [d[1] for d in _dt if isinstance(d, tuple)],
+                                          "blocked": bool(pl.get("_publish_blocked"))})
+            # (2) target_keywords 필드 세척(씨앗 오염 제거)
+            tk = pl.get("target_keywords") or []
+            if tk:
+                _kk, _dk = seo.drop_phantom_attr_kws(list(tk), _ind, _biz, context_text=_note, inventory_models=_inv)
+                if _dk:
+                    swept.append({"asset_id": aid, "piece": p.id[:8], "kind": p.kind.value,
+                                  "removed": [d[0] for d in _dk if isinstance(d, tuple)],
+                                  "before": tk, "after": _kk})
+                    if dry != "1":
+                        pl["target_keywords"] = _kk
+                        p.payload = pl
+                        db.save_piece(p)
+    return JSONResponse({"ok": True, "tid": tid, "dry": dry == "1", "inventory": _inv,
+                         "phantom_title_count": len(phantom_title), "phantom_title_sets": phantom_title,
+                         "field_swept_count": len(swept), "field_swept": swept})
+
+
 @app.post("/admin/set/{asset_id}/regen-captions")
 def admin_regen_captions(asset_id: str):
     """사진 캡션 소스만 재생성 — gen_source의 [사진N] 묘사를 vision 재분석으로 교체.
