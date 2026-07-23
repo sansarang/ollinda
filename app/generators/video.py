@@ -590,7 +590,8 @@ def _distinctive_objects(descs: dict) -> set:
 
 
 def _match_photos(lines: list, imgs: list, gen_source: str, log_tag: str = "",
-                  drops: "list | None" = None, axis_vocab: "set | None" = None) -> list:
+                  drops: "list | None" = None, axis_vocab: "set | None" = None,
+                  subject_vocab: "set | None" = None) -> list:
     """대본 확정 후 씬 내용 ↔ 사진 매칭 (B: 지시어 강제 대조 추가).
     ① 자막의 '시각 대상 지시어'(vision 태그 변별어 유래·하드코딩 0)가 있으면, 배정 사진 vision 묘사에
        그 지시어가 실제 있어야 함 — 없으면 그 사진 배정 금지(등록증 자막→전면샷 차단).
@@ -613,11 +614,15 @@ def _match_photos(lines: list, imgs: list, gen_source: str, log_tag: str = "",
     _desc_words = set()
     for _raw in raws.values():
         _desc_words |= set(_r.findall(r"[가-힣]{2,}", _raw or ""))
+    # 영상 주제어(canonical subject, 예: 모델명 '그랜저')는 하드 지시어 제외 — 전 사진의 피사체이자
+    # 주제 언급일 뿐 특정 사진을 지시하지 않음(vision이 일부 묘사에만 적어 오드롭 유발). 부위(엔진룸)는 유지.
+    _subj = subject_vocab or set()
     used, order, _log = set(), [], []
     for li, ln in enumerate(lines):
         lt = _norm_line(ln)
         refs = [w for w in obj_vocab
-                if w in _desc_words and _r.search(r"(?<![가-힣])" + _r.escape(w), ln or "")]  # 자막의 지시어(vision 확인 가능한 것만)
+                if w in _desc_words and w not in _subj
+                and _r.search(r"(?<![가-힣])" + _r.escape(w), ln or "")]  # 자막의 지시어(vision 확인 가능·주제어 제외)
         best, best_s = None, 0.0
         for i, dt in descs.items():
             if i in used or not dt:
@@ -1276,7 +1281,11 @@ class ShortVideoGenerator(Generator):
                             _axv.add(_t)
             except Exception:
                 pass
-            _matched = _match_photos(list(sent), vid_imgs, _gen_src2, "naver-video", drops=_drops, axis_vocab=_axv)
+            import re as _rsub                                 # 영상 주제어(모델명 등) → 하드 지시어 제외
+            _subjv = {w for w in _rsub.findall(r"[가-힣]{2,}", (kw0 or "") + " " + (kw_nat or ""))
+                      if w not in ("중고", "구매", "판매", "추천", "가격", "후기", "정보")}
+            _matched = _match_photos(list(sent), vid_imgs, _gen_src2, "naver-video",
+                                     drops=_drops, axis_vocab=_axv, subject_vocab=_subjv)
             _perline = _matched[:len(sent)]                   # 앞부분=자막별 배정(뒤는 미사용 잉여 사진)
             _dropset = set(_drops)
             # B: 지시어 불일치 씬 '삭제'(기본). 단 하한(3씬) 아래로 떨어지면 삭제 보류(그땐 순차 폴백 유지)
