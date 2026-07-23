@@ -606,12 +606,18 @@ def _match_photos(lines: list, imgs: list, gen_source: str, log_tag: str = "",
             raws[i] = m.group(2)
     if not descs:
         return imgs
-    # 지시어 소스 = vision 묘사 변별어 ∪ 스키마 attribute_axes 토큰(둘 다 데이터 유래·하드코딩 0)
+    # 지시어 후보 = vision 묘사 변별어 ∪ 스키마 attribute_axes 토큰(둘 다 데이터 유래·하드코딩 0)
     obj_vocab = _distinctive_objects(raws) | {w for w in (axis_vocab or set()) if len(w) >= 2}
+    # ★ 하드 지시어는 'vision 묘사에 실제 등장하는 것'만 — 부위(엔진룸·실내)는 확인 가능하지만
+    #   모델명(그랜저 등 매물 정체성)은 vision이 안 적어 확인 불가 → 드롭 트리거에서 제외(과잉 삭제 방지).
+    _desc_words = set()
+    for _raw in raws.values():
+        _desc_words |= set(_r.findall(r"[가-힣]{2,}", _raw or ""))
     used, order, _log = set(), [], []
     for li, ln in enumerate(lines):
         lt = _norm_line(ln)
-        refs = [w for w in obj_vocab if _r.search(r"(?<![가-힣])" + _r.escape(w), ln or "")]  # 자막의 지시어
+        refs = [w for w in obj_vocab
+                if w in _desc_words and _r.search(r"(?<![가-힣])" + _r.escape(w), ln or "")]  # 자막의 지시어(vision 확인 가능한 것만)
         best, best_s = None, 0.0
         for i, dt in descs.items():
             if i in used or not dt:
