@@ -3854,6 +3854,65 @@ def admin_kit_verify(tid: str = "", asset_id: str = "", inject: str = "", regen:
                                "ctx": gate["ctx"], "canonical_region": gate.get("canonical_region")}})
 
 
+@app.get("/admin/overlay-test")
+def admin_overlay_test(asset_id: str = "", tid: str = "", limit: int = 16):
+    """(진단·A 검증) 세트 사진에 오버레이 탐지+제거를 '사본에서' 실행(원본 불변) →
+    V1 기법 판정표 + V2 오탐율. 반환 per-photo {file,detected,type,coverage,action,restored} +
+    summary{n, 탐지, 제거, 폴백, skip_b, 오탐후보}. 오탐후보=제거·인페인트 됐는데 코너 스탬프가 아닐 위험."""
+    import shutil as _sh
+    from app.media import photo_boost as _pb
+    # 세트 사진 로드(kit-verify와 동일 경로)
+    if asset_id:
+        _sp = db.get_set_pieces(asset_id)
+        _bl0 = next((p for p in _sp if p.kind.value == "blog"), None)
+        if not _bl0:
+            return JSONResponse({"ok": False, "error": "세트에 블로그 피스 없음"}, status_code=404)
+        paths = [x for x in (_bl0.payload.get("image_paths") or []) if x and os.path.exists(x)]
+        if not paths:
+            try:
+                from app.services.ingest import _restore_media
+                paths = _restore_media(_bl0.tenant_id, _bl0.payload.get("image_paths") or [])
+            except Exception:
+                paths = []
+    else:
+        t = db.get_tenant(tid)
+        if not t:
+            return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+        try:
+            from app.services.autoqueue import photo_pool as _pp
+            paths = _pp(t)[:limit]
+        except Exception:
+            paths = []
+    paths = [p for p in paths if p and os.path.exists(p)][:limit]
+    if not paths:
+        return JSONResponse({"ok": False, "error": "사진 없음"}, status_code=409)
+    _scratch = "/tmp/overlay_test"
+    os.makedirs(_scratch, exist_ok=True)
+    rows = []
+    for i, p in enumerate(paths):
+        cp = os.path.join(_scratch, f"c{i}.jpg")
+        try:
+            _sh.copyfile(p, cp)
+            rep = _pb.remove_overlay(cp, cp)     # 사본에서만 — 원본 세트 사진 불변
+        except Exception as e:
+            rep = {"action": "error", "err": str(e)[:80]}
+        rep["file"] = os.path.basename(p)
+        rows.append(rep)
+    acts = [r.get("action") for r in rows]
+    # cv2 미설치면 제거 자체가 no_cv2 — 그땐 오탐 측정 불가(탐지만 유효)
+    return JSONResponse({"ok": True, "n": len(rows),
+        "cv2": "미설치(no_cv2)" if any(a == "no_cv2" for a in acts) else "설치됨",
+        "summary": {
+            "탐지": sum(1 for r in rows if r.get("detected")),
+            "제거_inpainted": acts.count("inpainted"),
+            "폴백_reverted": sum(1 for a in acts if str(a).startswith("reverted")),
+            "skip_전면b": acts.count("skip_type_b"),
+            "skip_과대": acts.count("skip_large"),
+            "무처리_none": acts.count("none"),
+        },
+        "photos": rows})
+
+
 @app.get("/admin/contamination-scan")
 def admin_contamination_scan(token: str = "레이", tid: str = "", limit: int = 300):
     """PHASE 0 — DB 전수 오염 스캔. 전 테이블·전 텍스트 컬럼에서 token을 단어 경계로 조회

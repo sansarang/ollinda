@@ -97,6 +97,11 @@ def enhance_all(paths: list[str], industry: str = "", meta: dict | None = None) 
     for p in paths:
         if p and os.path.exists(p):
             mask_personal_info(p)   # 🔒 번호판·얼굴·전화·라벨 자동 가림(보정 전에)
+            if os.environ.get("SHOPCAST_OVERLAY_REMOVE", "1") != "0":
+                try:
+                    remove_overlay(p)   # 워터마크 오버레이 제거(유형 a·품질게이트·실패시 원본)
+                except Exception:
+                    pass
             if auto_enhance(p, p, industry, meta) == p:
                 n += 1
     return n
@@ -139,3 +144,109 @@ def mask_personal_info(path: str) -> int:
         return cnt
     except Exception:
         return 0
+
+
+# ── A-2/A-3: 워터마크 오버레이 제거(생성AI 금지 — cv2 고전기법·크롭·패치만) ──────────
+SMUDGE_MIN_STD = 4.0        # 인페인트 후 영역이 이보다 밋밋(near-flat)하면 얼룩 의심 → 폴백
+_REMOVE_MAX_COV = 0.12      # 유형 a라도 이보다 넓으면 인페인트 부담 → 보류(제거 안 함)
+
+
+def _norm_box(box: dict, W: int, H: int):
+    try:
+        x0 = max(0, min(W - 1, int(float(box.get("x0", 0)) * W)))
+        y0 = max(0, min(H - 1, int(float(box.get("y0", 0)) * H)))
+        x1 = max(x0 + 1, min(W, int(float(box.get("x1", 0)) * W)))
+        y1 = max(y0 + 1, min(H, int(float(box.get("y1", 0)) * H)))
+        return x0, y0, x1, y1
+    except Exception:
+        return None
+
+
+def _cv_inpaint(im, box: dict, method: str = "telea"):
+    """cv2.inpaint로 bbox 영역 복원(telea/ns). cv2·numpy 없으면 None(안전 폴백)."""
+    try:
+        import cv2
+        import numpy as np
+    except Exception:
+        return None
+    W, H = im.size
+    nb = _norm_box(box, W, H)
+    if not nb:
+        return None
+    x0, y0, x1, y1 = nb
+    from PIL import Image
+    arr = np.array(im.convert("RGB"))[:, :, ::-1].copy()          # RGB→BGR
+    mask = np.zeros(arr.shape[:2], np.uint8)
+    pw = int((x1 - x0) * 0.08); ph = int((y1 - y0) * 0.08)         # LLM 박스 정밀도 보정
+    mask[max(0, y0 - ph):min(H, y1 + ph), max(0, x0 - pw):min(W, x1 + pw)] = 255
+    flag = cv2.INPAINT_NS if method == "ns" else cv2.INPAINT_TELEA
+    res = cv2.inpaint(arr, mask, 3, flag)
+    return Image.fromarray(res[:, :, ::-1])                        # BGR→RGB
+
+
+def _region_std(im, box: dict) -> float:
+    """제거 영역의 밝기 표준편차 — 인페인트 얼룩(밋밋한 뭉갬) 검사용."""
+    try:
+        from PIL import ImageStat
+        W, H = im.size
+        nb = _norm_box(box, W, H)
+        if not nb:
+            return 999.0
+        x0, y0, x1, y1 = nb
+        reg = im.convert("L").crop((x0, y0, x1, y1))
+        return ImageStat.Stat(reg).stddev[0]
+    except Exception:
+        return 999.0
+
+
+def remove_overlay(path: str, out: str | None = None) -> dict:
+    """A-2/A-3: 오버레이 탐지 → 유형 a(코너 스탬프)면 크롭 여백 없이 인페인트로 제거 →
+    2차 vision 재판별 + 얼룩 검사 → 미달 시 원본 유지(폴백). 유형 b(전면 반투명)·c(부착물)는 제거 안 함.
+    생성AI 금지 — cv2 고전기법만. 반환 {detected,type,coverage,action,restored}."""
+    rep = {"detected": False, "type": None, "coverage": None, "action": "none", "restored": False}
+    tmp = out or path
+    if not (path and os.path.exists(path)):
+        return rep
+    try:
+        from app import vision
+        det = vision.detect_overlay(path)
+    except Exception:
+        return rep
+    if not det.get("present"):
+        return rep
+    rep.update(detected=True, type=det.get("type"), coverage=det.get("coverage"))
+    if det.get("type") != "a":                                    # b=전면 반투명(제거 불가·UI 강등), c=부착물(present=false라 여기 안 옴)
+        rep["action"] = "skip_type_b"
+        return rep
+    if (det.get("coverage") or 1.0) > _REMOVE_MAX_COV:            # 코너 스탬프치고 과대 → 오탐 의심·보류
+        rep["action"] = "skip_large"
+        return rep
+    try:
+        from PIL import Image, ImageOps
+        orig = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
+        box = {k: det.get(k, 0) for k in ("x0", "y0", "x1", "y1")}
+        fixed = _cv_inpaint(orig, box, "telea")
+        if fixed is None:
+            rep["action"] = "no_cv2"                              # cv2 미설치 → 원본 그대로(제거 안 함)
+            return rep
+        fixed.save(tmp, "JPEG", quality=92)
+        # A-3 품질 게이트 ① vision 2차 재판별 ② 얼룩(밋밋) 검사
+        try:
+            det2 = vision.detect_overlay(tmp)
+        except Exception:
+            det2 = {"present": True}                              # 재판별 실패 → 보수적 실패 처리
+        smudge = _region_std(fixed, box) < SMUDGE_MIN_STD
+        if det2.get("present") or smudge:
+            orig.save(tmp, "JPEG", quality=92)                    # 미달 → 원본 유지 폴백
+            rep.update(action=("reverted_smudge" if smudge else "reverted_still"), restored=True)
+        else:
+            rep["action"] = "inpainted"
+        return rep
+    except Exception:
+        try:                                                      # 예외 시 원본 보존
+            from PIL import Image, ImageOps
+            ImageOps.exif_transpose(Image.open(path)).convert("RGB").save(tmp, "JPEG", quality=92)
+        except Exception:
+            pass
+        rep.update(action="error", restored=True)
+        return rep
