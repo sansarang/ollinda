@@ -6533,6 +6533,72 @@ def admin_set_result_preview(asset_id: str):
     return HTMLResponse(html if html else "<pre>렌더 실패(소유 불일치)</pre>")
 
 
+@app.post("/admin/set/{asset_id}/regen-blog")
+def admin_regen_blog(asset_id: str, dry: str = ""):
+    """(phantom 세트 클린 교체) 세트 블로그를 R2 사진으로 재생성 → 4형제(캐스퍼·레이) 오염 없으면 제자리 교체.
+    ★ 보존 원칙: 발행 이력·채널 status·naver_video·image_paths 등은 유지, 콘텐츠 필드(제목·본문·키워드·태그원천)만
+    교체(save_piece는 같은 piece id로 REPLACE). 재생성물이 여전히 오염이면 미저장(409). 사진 소실이면 삭제·재생성
+    안 하고 '_publish_blocked' 표시만(보존, 사용자 재업로드 후 재생성). dry=1이면 판정만."""
+    import re as _r
+    import json as _j
+    from app.domain.models import ContentKind as _CK
+    from app.services.ingest import _restore_media
+    from app.registry import get_generator as _gg
+    pieces = db.get_set_pieces(asset_id)
+    blog = next((p for p in pieces if p.kind == _CK.BLOG), None)
+    if not blog:
+        return JSONResponse({"ok": False, "error": "블로그 피스 없음"}, status_code=404)
+    t = db.get_tenant(blog.tenant_id)
+    _a = db.get_asset(asset_id)
+    if not (t and _a):
+        return JSONResponse({"ok": False, "error": "tenant/asset 없음"}, status_code=404)
+    old = dict(blog.payload or {})
+    raw_paths = old.get("image_paths") or []
+    paths = [x for x in raw_paths if x and os.path.exists(x)] or _restore_media(blog.tenant_id, raw_paths)
+    if not paths:                                        # 사진 소실 → 발행불가 표시만(보존, 삭제·재생성 금지)
+        if dry != "1":
+            old["_publish_blocked"] = "phantom_no_photo"
+            blog.payload = old
+            db.save_piece(blog)
+        return JSONResponse({"ok": True, "action": "photo_lost_marked_blocked", "asset_id": asset_id,
+                             "note": "사진 소실 — 사용자 재업로드 후 재생성 필요. 발행불가 표시·보존."})
+    # 앵커 확보 위해 vision 재분석 note 보강(빈 반환 시 재시도는 analyze_all 내부)
+    note = (getattr(_a, "note", "") or "").strip() or "[자동 글감] 매물 실사진 세트"
+    try:
+        _an = vision.analyze_all(paths, t.industry)
+        if _an and "[사진 분석]" not in note:
+            note = note + f"\n[사진 분석] {_an[:2500]}"
+    except Exception:
+        pass
+    _a.note = note
+    _a.content_type = old.get("content_type") or "sell"
+    try:
+        newblog = _gg(_CK.BLOG).generate(t, _a, paths)
+    except Exception as e:
+        import traceback
+        return JSONResponse({"ok": False, "error": traceback.format_exc()[-500:]}, status_code=500)
+    npl = newblog.payload or {}
+    _chk = _j.dumps({k: npl.get(k) for k in ("title", "selected_title", "body", "target_keywords")}, ensure_ascii=False)
+    _phantom = [tok for tok in ("캐스퍼", "레이") if _r.search(r"(?<![가-힣])" + tok, _chk)]
+    _new_title = npl.get("selected_title") or npl.get("title") or ""
+    if _phantom:                                         # 재생성물도 오염 → 저장 안 함(안전)
+        return JSONResponse({"ok": False, "action": "still_contaminated", "phantom": _phantom,
+                             "new_title": _new_title}, status_code=409)
+    if dry == "1":
+        return JSONResponse({"ok": True, "action": "dry_clean", "new_title": _new_title,
+                             "new_kws": npl.get("target_keywords")})
+    # 콘텐츠 필드만 교체(나머지 payload=발행이력·status·naver_video·image_paths 보존)
+    for f in ("title", "selected_title", "body", "target_keywords", "gen_source", "title_options",
+              "canonical_region"):
+        if f in npl:
+            old[f] = npl[f]
+    old.pop("_publish_blocked", None)
+    blog.payload = old
+    db.save_piece(blog)
+    return JSONResponse({"ok": True, "action": "regenerated", "new_title": _new_title,
+                         "new_kws": npl.get("target_keywords")})
+
+
 @app.post("/admin/set/{asset_id}/regen-captions")
 def admin_regen_captions(asset_id: str):
     """사진 캡션 소스만 재생성 — gen_source의 [사진N] 묘사를 vision 재분석으로 교체.
