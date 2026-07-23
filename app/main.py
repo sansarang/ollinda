@@ -2381,16 +2381,27 @@ def _caption_gate(text: str) -> str:
     return ""
 
 
+def _body_core(body: str) -> str:
+    """태그·오염 판정용 본문 '핵심부' — 관련글 링크·고정정보(CTA·지도·플레이스 안내) 섹션 제외.
+    관련글의 타매물 링크·CTA 참조성 등장만으로 태그 승격/오염 판정되지 않게(현재 세트 기준만)."""
+    import re as _r
+    b = body or ""
+    for pat in (r"##\s*함께\s*보면", r"📍\s*찾아오는", r"\[여기 네이버 지도", r"네이버에서\s*['\"]"):
+        b = _r.split(pat, b)[0]
+    return b
+
+
 def _blog_tags(tenant, blog) -> list[str]:
     """(네이버 블로그 태그 자동 생성 — LLM 0, 코드 조합) 폼 실값·본문 근거 소스로 10~15개.
-    소스 우선순위: 키워드 토큰 조합 → 매물·시공 속성(차종·연식·필름명) → 업종 일반태그 → 지역태그.
-    규칙: 최대 15개, 부분중복 dedupe(파일명 로직 재사용), 금칙어 필터, 근거 없는 태그 금지(폼·본문 대조)."""
+    소스 우선순위: 키워드 토큰 조합 → 현재 세트 매물(canonical 주제) → 업종 일반태그 → 지역태그.
+    규칙: 최대 15개, 부분중복 dedupe, 금칙어 필터, 근거 없는 태그 금지. 태그 유래=현재 세트 컨텍스트∪본문 핵심부."""
     import re as _r
     pl = blog.payload or {}
     kws = pl.get("target_keywords") or []
     body = pl.get("body") or ""
     gen = pl.get("gen_source") or ""
-    note = (gen + "\n" + body)                              # 근거 = 폼 입력(gen_source) + 본문
+    note = (gen + "\n" + body)                              # 근거(§a 키워드용) = 폼 입력(gen_source) + 본문
+    _note_core = gen + "\n" + _body_core(body)             # §b 매물 속성용 = 핵심부(관련글·CTA 제외)
     region = seo._kw_shorten(getattr(tenant, "region", "") or "")
     ind = ((getattr(tenant, "industry", "") or "").replace("/", ",").split(",")[0] or "").strip()
 
@@ -2420,10 +2431,13 @@ def _blog_tags(tenant, blog) -> list[str]:
     _bt3 = (getattr(tenant, "biz_type", "local") or "local")
     _sch3 = _isc.get_schema(getattr(tenant, "industry", ""), _bt3)
     _attr_vocab = _isc.attribute_tokens(_sch3)
-    year = next(iter(_r.findall(r"(20\d{2}|19\d{2})", note)), "")
-    # 단어 경계 매칭 — 앞이 한글이면 불일치('플레이스'의 '레이' 배제, '레이 중고'·'그랜저 중고' 독립 등장은 유지).
-    # 규칙 하나(토큰 예외처리 없음): 속성 토큰이 다른 한글 단어의 '내부'에 박힌 경우만 오매칭에서 제외.
-    models = [w for w in _attr_vocab if w and _r.search(r"(?<![가-힣])" + _r.escape(w), note)]
+    year = next(iter(_r.findall(r"(20\d{2}|19\d{2})", _note_core)), "")
+    # ★ 태그 매물 속성 = '현재 세트 매물'(canonical 주제)만. 타매물·비교차종은 태그화 금지(그랜저 세트에 모닝 태그 금지).
+    #   canonical(제목 유래) 우선 + 본문 핵심부·vision 등장 속성. 단어경계('플레이스'의 '레이' 배제).
+    _canon_kw = _canonical_keyword(tenant, blog)
+    _canon_attrs = [a for a in _attr_vocab if a and _r.search(r"(?<![가-힣])" + _r.escape(a), _canon_kw)]
+    models = _canon_attrs or [w for w in _attr_vocab
+                              if w and _r.search(r"(?<![가-힣])" + _r.escape(w), _note_core)][:1]
     for md in dict.fromkeys(models[:2]):
         cand.append(_sq(md))
         if year:
@@ -2460,18 +2474,11 @@ def _blog_tags(tenant, blog) -> list[str]:
     # 근사 부분중복만 제거(길이차 1 이하 = '중고차들'⊂'중고차판매' 류) — 복합+구성요소(부산기장중고차/중고차판매)는
     # 태그 관행상 서로 다른 유입면이므로 둘 다 유지(파일명 dedupe보다 완화). 순서=소스 우선순위.
     deduped = [t for t in seen if not any(t != o and t in o and len(o) - len(t) <= 1 for o in seen)]
-    # ── 태그 정합 게이트(전 업종 단일 규칙) — 속성 토큰은 세트 컨텍스트(매물/상품 실값)∪본문 근거만.
-    #    현재 매물과 무관한 타차종·타메뉴·타향 태그 제거(레이 3번 재발 차단). 추가만, 기존 로직 불변.
-    _ctx_vals = []
-    try:
-        for _c in db.recent_inventory_context(getattr(tenant, "id", "") or "", limit=6):
-            _ctx_vals += [_c.get("model", ""), _c.get("car_class", ""), _c.get("year", "")]
-    except Exception:
-        pass
-    for _kw in kws:                                        # 타깃 키워드의 속성 토큰도 세트 컨텍스트(관문 확정 매물)
-        _ctx_vals += [a for a in _attr_vocab if a and a in _kw]
+    # ── 태그 정합 게이트(전 업종 단일 규칙) — 속성 토큰은 '현재 세트' 컨텍스트(canonical 매물)∪본문 핵심부만.
+    #    ★ tenant 인벤토리 전체가 아님 — 타매물(모닝) 토큰은 현재 세트 매물이 아니면 배제. 관련글·CTA 제외(_body_core).
+    _ctx_vals = [a for a in _attr_vocab if a and _r.search(r"(?<![가-힣])" + _r.escape(a), _canon_kw)]
     _kept, _dropped = _isc.tag_consistency_gate(
-        deduped[:15], _sch3, _ctx_vals, note,
+        deduped[:15], _sch3, _ctx_vals, _note_core,        # 본문 근거=핵심부(관련글·CTA 제외)
         region=getattr(tenant, "region", "") or "", general_tags=_sch3.get("general_tags"))
     return _kept
 
@@ -3729,22 +3736,41 @@ async def my_citation_upload(request: Request):
 
 
 @app.get("/admin/kit-verify")
-def admin_kit_verify(tid: str = "", inject: str = "", regen: str = ""):
+def admin_kit_verify(tid: str = "", asset_id: str = "", inject: str = "", regen: str = ""):
     """(진단) 트랙 A 세트 재생성 → 전 표면 실물(제목·본문·태그·캡션·영상메타·슬러그·파일명) +
-    PHASE 3 오염 게이트 판정. V2(레이 0)·V3(inject 시 게이트 차단) 검증용. 실발행 아님.
-    inject=1이면 낡은 필드에 '레이 중고' 강제 주입 → 게이트가 키트 차단하는지 확인."""
+    PHASE 3 오염 게이트 판정. asset_id 주면 '그 세트의 실제 사진'으로 재생성(사진-세트 정합).
+    미지정 시 tid의 photo_pool. inject=1이면 낡은 필드에 '레이 중고' 주입 → 게이트 차단 확인."""
     from app.services import generate as _gen
     from app.domain.models import AssetType as _AT, ContentKind as _CK
-    t = db.get_tenant(tid)
+    _set_id = ""
+    if asset_id:
+        _sp = db.get_set_pieces(asset_id)
+        _bl0 = next((p for p in _sp if p.kind.value == "blog"), None)
+        if not _bl0:
+            return JSONResponse({"ok": False, "error": "세트에 블로그 피스 없음"}, status_code=404)
+        t = db.get_tenant(_bl0.tenant_id)
+        paths = [x for x in (_bl0.payload.get("image_paths") or []) if x and os.path.exists(x)]  # 그 세트 실제 사진
+        _set_id = asset_id
+        if not paths:                                    # 로컬 소실 시 R2 복원
+            try:
+                from app.services.ingest import _restore_media
+                paths = _restore_media(_bl0.tenant_id, _bl0.payload.get("image_paths") or [])
+            except Exception:
+                paths = []
+    else:
+        t = db.get_tenant(tid)
+        if not t:
+            return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+        try:
+            from app.services.autoqueue import photo_pool as _pp
+            paths = _pp(t)[:16]
+        except Exception:
+            paths = []
     if not t:
         return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
-    try:
-        from app.services.autoqueue import photo_pool as _pp
-        paths = _pp(t)[:16]
-    except Exception:
-        paths = []
+    paths = paths[:20]
     if not paths:
-        return JSONResponse({"ok": False, "error": "사진 풀 없음"}, status_code=409)
+        return JSONResponse({"ok": False, "error": "사진 없음(세트 사진 소실 가능)"}, status_code=409)
     note = "[자동 글감] 매물 실사진 세트"
     try:
         analysis = vision.analyze_all(paths, t.industry)
@@ -3761,6 +3787,7 @@ def admin_kit_verify(tid: str = "", inject: str = "", regen: str = ""):
     # 오염 주입(V3): 낡은 필드에 '레이 중고' 강제 → 게이트가 잡는지
     if inject == "1":
         blog.payload["target_keywords"] = ["레이 중고"] + (blog.payload.get("target_keywords") or [])
+        blog.payload["tags"] = ["레이중고", "레이"] + (blog.payload.get("tags") or [])   # 저장 태그 오염(키트 txt 경로)
         blog.payload["_inject_nv"] = {"path": "/tmp/x.mp4", "title": "레이 중고 핵심만 정리했어요",
                                       "hashtags": ["#레이중고"], "desc": "레이 중고 영상"}
     n_imgs = len(blog.payload.get("image_paths") or paths)
@@ -3789,8 +3816,9 @@ def admin_kit_verify(tid: str = "", inject: str = "", regen: str = ""):
         "해시태그": any(_scan(x) for x in (nv_disp.get("hashtags") or [])),
         "슬러그": _scan(slug),
     }
-    return JSONResponse({"ok": True, "tenant": t.name, "inventory_now": [
-        {"model": c.get("model"), "class": c.get("car_class")} for c in db.recent_inventory_context(t.id, 6)],
+    return JSONResponse({"ok": True, "tenant": t.name, "set_id": _set_id, "n_photos": len(paths),
+        "photo_basenames": [os.path.basename(p) for p in paths[:20]],
+        "inventory_now": [{"model": c.get("model"), "class": c.get("car_class")} for c in db.recent_inventory_context(t.id, 6)],
         "canonical_keyword": canon, "slug": slug,
         "title": blog.payload.get("selected_title") or blog.payload.get("title"),
         "captions": caps, "tags": tags,
@@ -3837,7 +3865,7 @@ def admin_contamination_scan(token: str = "레이", tid: str = "", limit: int = 
                         v = d.get(col)
                         if isinstance(v, str) and pat.search(v):
                             hits.append({"table": tbl, "column": col, "rowid": d.get("_id"),
-                                         "tenant": (rtid or "")[:12],
+                                         "tenant": (rtid or "")[:12], "asset_id": d.get("asset_id", ""),
                                          "snippet": _r.sub(r"\s+", " ", v)[:160]})
                             if len(hits) >= limit:
                                 break
@@ -5264,23 +5292,18 @@ def _kit_contamination_gate(tenant, pieces) -> dict:
     title = pl.get("selected_title") or pl.get("title") or ""
     canon = _canonical_keyword(tenant, blog)
     gensrc = pl.get("gen_source") or ""                  # vision 분석(실사진 묘사) — 실 set 내용
-    # 허용 컨텍스트 = 인벤토리(정정본) ∪ 제목·canonical 속성 ∪ 본문·vision분석 단어경계 실등장.
-    #   ★ vision(gen_source) 유래 속성 토큰은 '실제 사진 묘사'라 정당 — 허용. 오염은 '실사진에도 본문에도 없는데'
-    #     낡은 키워드 경로로 새어든 토큰(레이 등)이다.
+    body_core = _body_core(body)                          # 관련글·CTA 제외(참조성 등장 배제)
+    # ★ 허용 컨텍스트 = '현재 세트'만 — canonical 매물(제목) ∪ 본문 핵심부·vision 실등장. tenant 인벤토리 전체 아님.
+    #   타매물(모닝) 토큰은 이 세트 본문/사진에 실제 등장할 때만 허용. 낡은 키워드 경로로 새어든 토큰(레이)은 차단.
     ctx = set()
-    try:
-        for c in db.recent_inventory_context(getattr(tenant, "id", "") or "", limit=6):
-            ctx |= {(c.get("model") or ""), (c.get("car_class") or "")}
-    except Exception:
-        pass
     for a in attr_vocab:
-        if _wb(a, title) or _wb(a, canon) or _wb(a, body) or _wb(a, gensrc):
+        if _wb(a, title) or _wb(a, canon) or _wb(a, body_core) or _wb(a, gensrc):
             ctx.add(a)
     ctx = {x for x in ctx if x}
-    # 표면 수집 — canonical 유도 영상 메타 사용(낡은 저장값 아님)
-    surfaces = {"본문": body, "제목": title, "파일명": _set_slug(pieces)}
-    try:
-        surfaces["태그"] = " ".join(_blog_tags(tenant, blog) or [])
+    # 표면 수집 — 본문은 핵심부(관련글·CTA 링크의 타매물 참조는 오염 아님). canonical 유도 영상 메타 사용.
+    surfaces = {"본문": body_core, "제목": title, "파일명": _set_slug(pieces)}
+    try:                                                  # 태그 = 재생성분(UI) + 저장분(키트 txt에 실림) 둘 다 스캔
+        surfaces["태그"] = " ".join((_blog_tags(tenant, blog) or []) + list(pl.get("tags") or []))
     except Exception:
         pass
     try:
