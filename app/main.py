@@ -203,7 +203,10 @@ def _startup() -> None:
 
 @app.get("/health")
 def health() -> dict:
-    return {"ok": True, "service": "shopcast", "version": app.version}
+    # 배포 커밋 SHA 노출 — "내 수정이 반영됐나" 검증용(Railway가 주입하는 env). 미설정 시 unknown.
+    _sha = (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or os.environ.get("SOURCE_COMMIT")
+            or os.environ.get("GIT_COMMIT") or "unknown")[:12]
+    return {"ok": True, "service": "shopcast", "version": app.version, "commit": _sha}
 
 
 @app.get("/", response_class=HTMLResponse)
