@@ -147,7 +147,7 @@ def mask_personal_info(path: str) -> int:
 
 
 # ── A-2/A-3: 워터마크 오버레이 제거(생성AI 금지 — cv2 고전기법·크롭·패치만) ──────────
-SMUDGE_MIN_STD = 4.0        # 인페인트 후 영역이 이보다 밋밋(near-flat)하면 얼룩 의심 → 폴백
+SMUDGE_REL = 0.45           # 인페인트 영역 std가 '주변 밴드' std의 이 비율 미만이면 얼룩(뭉갬) 의심 → 폴백
 _REMOVE_MAX_COV = 0.12      # 유형 a라도 이보다 넓으면 인페인트 부담 → 보류(제거 안 함)
 
 
@@ -184,19 +184,27 @@ def _cv_inpaint(im, box: dict, method: str = "telea"):
     return Image.fromarray(res[:, :, ::-1])                        # BGR→RGB
 
 
-def _region_std(im, box: dict) -> float:
-    """제거 영역의 밝기 표준편차 — 인페인트 얼룩(밋밋한 뭉갬) 검사용."""
+def _is_smudge(im, box: dict) -> bool:
+    """인페인트 얼룩(뭉갬) 상대 검사 — 영역 std가 '주변 밴드' std보다 크게 낮으면 얼룩.
+    어두운/균일 배경(스튜디오 컷)에서는 깨끗한 인페인트도 std가 낮으므로 절대값이 아닌 주변 대비로 판정.
+    주변도 균일(밴드 std가 매우 낮음)하면 얼룩 판정 안 함(폴백 오작동 방지)."""
     try:
         from PIL import ImageStat
+        g = im.convert("L")
         W, H = im.size
         nb = _norm_box(box, W, H)
         if not nb:
-            return 999.0
+            return False
         x0, y0, x1, y1 = nb
-        reg = im.convert("L").crop((x0, y0, x1, y1))
-        return ImageStat.Stat(reg).stddev[0]
+        reg_std = ImageStat.Stat(g.crop((x0, y0, x1, y1))).stddev[0]
+        bw = (x1 - x0); bh = (y1 - y0)
+        ox0 = max(0, x0 - bw); oy0 = max(0, y0 - bh); ox1 = min(W, x1 + bw); oy1 = min(H, y1 + bh)
+        out_std = ImageStat.Stat(g.crop((ox0, oy0, ox1, oy1))).stddev[0]
+        if out_std < 6.0:                       # 주변도 균일 → 상대 비교 무의미(얼룩 아님)
+            return False
+        return reg_std < SMUDGE_REL * out_std
     except Exception:
-        return 999.0
+        return False
 
 
 def remove_overlay(path: str, out: str | None = None) -> dict:
@@ -235,7 +243,7 @@ def remove_overlay(path: str, out: str | None = None) -> dict:
             det2 = vision.detect_overlay(tmp)
         except Exception:
             det2 = {"present": True}                              # 재판별 실패 → 보수적 실패 처리
-        smudge = _region_std(fixed, box) < SMUDGE_MIN_STD
+        smudge = _is_smudge(fixed, box)
         if det2.get("present") or smudge:
             orig.save(tmp, "JPEG", quality=92)                    # 미달 → 원본 유지 폴백
             rep.update(action=("reverted_smudge" if smudge else "reverted_still"), restored=True)
