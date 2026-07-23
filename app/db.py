@@ -1380,27 +1380,93 @@ def get_link(code: str) -> Optional[dict]:
 
 def incr_link_click(code: str, referrer: str = "", ua: str = "", utm_source: str = "",
                     content_id: str = "", channel: str = "",
-                    visitor_id: str = "", device: str = "", region: str = "") -> None:
-    """클릭 집계(누적 카운터) + 행 단위 로깅(시각·리퍼러·UA·채널·콘텐츠·익명방문자·기기·국가).
-    개인 신원 정보는 저장하지 않는다 — visitor_id는 익명 쿠키(방문 구분용)뿐(방문자 B1)."""
+                    visitor_id: str = "", device: str = "", region: str = "",
+                    is_bot: bool = False, set_id: str = "") -> None:
+    """클릭 집계 + 행 단위 로깅(시각·리퍼러·UA·채널·콘텐츠·세트·익명방문자·기기·국가·봇여부).
+    개인 신원 정보는 저장하지 않는다 — visitor_id는 익명 쿠키(방문 구분용)뿐(방문자 B1).
+    is_bot: 크롤러/봇 UA는 별도 플래그 — 사람 클릭 집계에서 제외(사장 언어 지표 정확도)."""
     with _conn() as c:
-        c.execute("UPDATE links SET clicks=clicks+1 WHERE code=?", (code,))
+        # 봇 클릭은 links.clicks(사람 지표 겸용) 누적에서 제외 — 행 로그에는 남김(감사).
+        if not is_bot:
+            c.execute("UPDATE links SET clicks=clicks+1 WHERE code=?", (code,))
         try:
             c.execute("CREATE TABLE IF NOT EXISTS link_clicks("
                       "id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT, ts TEXT, "
                       "referrer TEXT, ua TEXT, utm_source TEXT)")
-            for col in ("content_id", "channel", "visitor_id", "device", "region"):
+            for col in ("content_id", "channel", "visitor_id", "device", "region", "is_bot", "set_id"):
                 try:
                     c.execute(f"ALTER TABLE link_clicks ADD COLUMN {col} TEXT")
                 except sqlite3.OperationalError:
                     pass
             c.execute("INSERT INTO link_clicks(code, ts, referrer, ua, utm_source, content_id, channel, "
-                      "visitor_id, device, region) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                      "visitor_id, device, region, is_bot, set_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                       (code, _now(), referrer[:300], ua[:300], utm_source[:60],
                        (content_id or "")[:16], (channel or utm_source or "")[:40],
-                       (visitor_id or "")[:32], (device or "")[:10], (region or "")[:8]))
+                       (visitor_id or "")[:32], (device or "")[:10], (region or "")[:8],
+                       ("1" if is_bot else "0"), (set_id or "")[:16]))
         except Exception:
             pass
+
+
+def save_inquiry(tenant_id: str, source: str, memo: str = "") -> bool:
+    """문의 출처 기록(사장 3탭 UI) — 블로그/인스타/당근/기타/모름 + 메모 1줄. 전환 측정의 '문의 K건'."""
+    src = (source or "").strip()[:20]
+    if not src:
+        return False
+    try:
+        with _conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS inquiries("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, source TEXT, memo TEXT, created_at TEXT)")
+            c.execute("INSERT INTO inquiries(tenant_id, source, memo, created_at) VALUES(?,?,?,?)",
+                      (tenant_id, src, (memo or "").strip()[:200], _now()))
+        return True
+    except Exception:
+        return False
+
+
+def recent_inquiries(tenant_id: str, days: int = 30, limit: int = 50) -> list[dict]:
+    import datetime as _dt
+    since = (_dt.datetime.utcnow() - _dt.timedelta(days=days)).isoformat()
+    try:
+        with _conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS inquiries("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, source TEXT, memo TEXT, created_at TEXT)")
+            rows = c.execute("SELECT id, source, memo, created_at FROM inquiries "
+                             "WHERE tenant_id=? AND created_at>=? ORDER BY created_at DESC LIMIT ?",
+                             (tenant_id, since, limit)).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def human_clicks_since(tenant_id: str, days: int = 7) -> int:
+    """사람 클릭 수(봇 제외) — 최근 days일. links.tenant_id JOIN, is_bot='1' 제외."""
+    import datetime as _dt
+    since = (_dt.datetime.utcnow() - _dt.timedelta(days=days)).isoformat()
+    try:
+        with _conn() as c:
+            r = c.execute(
+                "SELECT COUNT(*) FROM link_clicks lc JOIN links l ON lc.code=l.code "
+                "WHERE l.tenant_id=? AND lc.ts>=? AND COALESCE(lc.is_bot,'0')!='1'",
+                (tenant_id, since)).fetchone()
+        return int(r[0]) if r else 0
+    except Exception:
+        return 0
+
+
+def weekly_conversion(tenant_id: str, days: int = 7) -> dict:
+    """사장 언어 전환 카드 — {posts 발행, clicks 사람클릭, inquiries 문의} (최근 days일)."""
+    import datetime as _dt
+    since = (_dt.datetime.utcnow() - _dt.timedelta(days=days)).isoformat()
+    posts = 0
+    try:
+        with _conn() as c:
+            posts = c.execute("SELECT COUNT(*) FROM blog_publishes WHERE tenant_id=? AND published_at>=?",
+                              (tenant_id, since)).fetchone()[0] or 0
+    except Exception:
+        posts = 0
+    return {"posts": int(posts), "clicks": human_clicks_since(tenant_id, days),
+            "inquiries": len(recent_inquiries(tenant_id, days, limit=200)), "days": days}
 
 
 # ── 콘텐츠별 클릭 실측(추적 P2·P3) — 전부 link_clicks 행 기반. '조회수'가 아니라

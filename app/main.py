@@ -2015,6 +2015,34 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                                          "<a href='/me?tab=content' class='flex-shrink-0 bg-violet-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>준비된 글 보기</a></div>")
                 except Exception:
                     pass
+            # 사장 언어 전환 카드(PHASE 3) — 발행→클릭→문의. 순위·인용수는 상세(tab=report)로.
+            _conv_card = ""
+            try:
+                _cv = db.weekly_conversion(t.id)
+                _srcs = ("블로그", "인스타", "당근", "기타", "모름")
+                _src_btns = "".join(
+                    f"<button name=source value='{s}' class='py-2 rounded-lg bg-slate-100 hover:bg-emerald-100 text-slate-700 text-xs font-bold'>{s}</button>"
+                    for s in _srcs)
+                _conv_card = (
+                    "<div class='bg-white rounded-2xl border border-slate-200 shadow-sm p-5 mb-5'>"
+                    "<div class='text-xs font-bold text-slate-400 mb-3'>이번 주 성과 — 블로그 보고 온 손님</div>"
+                    "<div class='flex items-center justify-between text-center'>"
+                    f"<div class='flex-1'><div class='text-2xl font-extrabold text-slate-900'>{_cv['posts']}</div><div class='text-[11px] text-slate-500'>글 발행</div></div>"
+                    "<div class='text-slate-300 px-1'>→</div>"
+                    f"<div class='flex-1'><div class='text-2xl font-extrabold text-indigo-600'>{_cv['clicks']}</div><div class='text-[11px] text-slate-500'>링크 클릭</div></div>"
+                    "<div class='text-slate-300 px-1'>→</div>"
+                    f"<div class='flex-1'><div class='text-2xl font-extrabold text-emerald-600'>{_cv['inquiries']}</div><div class='text-[11px] text-slate-500'>기록된 문의</div></div>"
+                    "</div>"
+                    "<details class='mt-4'><summary class='cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold text-center py-2.5 rounded-xl list-none select-none'>＋ 문의 왔어요 (손님이 연락왔어요)</summary>"
+                    "<form method=post action='/me/inquiry' class='mt-3'>"
+                    "<div class='text-xs text-slate-500 mb-2'>어디 보고 연락 왔나요? (누르면 바로 기록)</div>"
+                    f"<div class='grid grid-cols-5 gap-1.5 mb-2'>{_src_btns}</div>"
+                    "<input name=memo maxlength=200 placeholder='메모(선택, 1줄)' class='w-full border border-slate-200 rounded-lg px-3 py-2 text-sm'>"
+                    "</form></details>"
+                    "<a href='/me?tab=report' class='block text-right text-xs text-slate-400 mt-2 hover:text-slate-600'>순위·인용수 자세히 보기 →</a>"
+                    "</div>")
+            except Exception:
+                _conv_card = ""
             # 트랙 B 실경험 배너 — 미등록이면 등록 유도(안내), 등록됐으면 관리 링크
             _exp_banner = ""
             try:
@@ -2026,7 +2054,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                     _exp_banner = "<a href='/me/experience' class='block text-right text-xs text-slate-400 mb-2 hover:text-slate-600'>사장님 실경험 답변 관리 →</a>"
             except Exception:
                 pass
-            main_inner = (greeting + _upsell + _due_html + _exp_banner + _guide_card(t) + _briefing_card(t, _plan) + _notice_html
+            main_inner = (greeting + _conv_card + _upsell + _due_html + _exp_banner + _guide_card(t) + _briefing_card(t, _plan) + _notice_html
                           + _calendar_card(t, _plan)
                           + _blog_nudge + upload_section
                           + "<div class='mt-5'></div>" + _store_info_card(t))
@@ -3581,6 +3609,22 @@ async def my_experience_delete(request: Request):
     return RedirectResponse("/me/experience?ok=" + _q("삭제했어요"), status_code=303)
 
 
+@app.post("/me/inquiry")
+async def my_inquiry(request: Request):
+    """문의 출처 기록(초경량 3탭) — [문의 옴] → 출처(블로그/인스타/당근/기타/모름) + 메모 1줄(선택).
+    전환 측정의 '문의 K건'. 개인정보 저장 안 함(출처·메모만)."""
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login?next=/me", status_code=303)
+    t = _ensure_user_tenant(u)
+    from urllib.parse import quote as _q
+    form = await request.form()
+    src = (form.get("source") or "").strip()
+    if db.save_inquiry(t.id, src, form.get("memo") or ""):
+        return RedirectResponse("/me?ok=" + _q(f"문의 1건 기록됨({src}) — 전환 리포트에 반영돼요"), status_code=303)
+    return RedirectResponse("/me?err=" + _q("출처를 선택해 주세요"), status_code=303)
+
+
 @app.post("/me/citation-upload")
 async def my_citation_upload(request: Request):
     """PHASE 4 — 크리에이터 어드바이저 통계 캡처 업로드 → AI 브리핑 인용수 판독·저장(vision).
@@ -3897,25 +3941,41 @@ def my_set_delete(request: Request, asset_id: str):
     return RedirectResponse("/me?tab=content&ok=" + _q("콘텐츠를 삭제했어요"), status_code=303)
 
 
+_BOT_UA_RE = __import__("re").compile(
+    r"(bot|crawl|spider|slurp|bingpreview|facebookexternalhit|facebot|"
+    r"naverbot|yeti|googlebot|daumoa|kakaotalk-scrap|telegrambot|twitterbot|"
+    r"whatsapp|discordbot|pinterest|semrush|ahrefs|mj12bot|dotbot|python-requests|"
+    r"curl/|wget|headless|preview|monitor)", __import__("re").I)
+
+
+def _is_bot_ua(ua: str) -> bool:
+    """봇/크롤러/링크 미리보기 UA 판별 — 사람 클릭 집계에서 분리."""
+    return bool(_BOT_UA_RE.search(ua or "")) or not (ua or "").strip()
+
+
 @app.get("/r/{code}")
-def link_redirect(code: str, request: Request, utm_source: str = "", src: str = "", content: str = ""):
-    """제휴/추적 단축링크 — 클릭 집계(행 단위: 채널·콘텐츠·시각·리퍼러·UA) 후 원본으로 이동.
-    src={channel}&content={piece_id 앞8자} — 콘텐츠별 유입 실측(추적 P1). utm_source는 하위호환."""
+def link_redirect(code: str, request: Request, utm_source: str = "", src: str = "",
+                  content: str = "", set: str = ""):
+    """제휴/추적 단축링크 — 클릭 집계(행: 채널·콘텐츠·세트·시각·리퍼러·UA·봇여부) 후 원본으로 이동.
+    src={channel}&content={piece 앞8자}&set={asset 앞8자} — 콘텐츠·세트별 유입 실측. utm_source 하위호환.
+    봇/크롤러 UA는 별도 플래그로 기록하되 사람 클릭 집계엔 미포함(사장 언어 지표 정확도)."""
     link = db.get_link(code)
     if not link or not link.get("target"):
         return RedirectResponse("/", status_code=302)
     # 익명 방문자 특성(방문자 B1) — 신원 파악 금지: 익명 쿠키(방문 구분)·기기·국가(CF 헤더)까지만
     ua = request.headers.get("user-agent", "")
+    _bot = _is_bot_ua(ua)
     device = "mobile" if ("Mobi" in ua or "Android" in ua) else "pc"
     region = (request.headers.get("cf-ipcountry") or "").strip()[:8]   # 국가 단위(도시 아님 — 정직)
     vid = (request.cookies.get("ovid") or "").strip()[:32]
-    new_cookie = not vid
-    if new_cookie:
+    new_cookie = not vid and not _bot                  # 봇엔 쿠키 미발급
+    if not vid:
         vid = uuid.uuid4().hex[:16]
     db.incr_link_click(code, referrer=request.headers.get("referer", ""),
                        ua=ua, utm_source=utm_source,
                        content_id=content, channel=(src or utm_source),
-                       visitor_id=vid, device=device, region=region)
+                       visitor_id=(vid if not _bot else ""), device=device, region=region,
+                       is_bot=_bot, set_id=set)
     target = link["target"]
     if not target.startswith(("http://", "https://")):
         target = "https://" + target

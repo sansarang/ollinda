@@ -32,12 +32,13 @@ def tenant_link(t) -> "dict | None":
     return db.ensure_track_link(t.id, target, label)
 
 
-def tracked_url(t, channel: str, content_id: str) -> str:
-    """콘텐츠·채널별 추적 URL. 목적지 없으면 ''(억지 링크 금지)."""
+def tracked_url(t, channel: str, content_id: str, set_id: str = "") -> str:
+    """콘텐츠·채널별 추적 URL. 목적지 없으면 ''(억지 링크 금지). set_id=세트(asset) 앞8자."""
     link = tenant_link(t)
     if not link:
         return ""
-    return f"{_base()}/r/{link['code']}?src={channel}&content={(content_id or '')[:8]}"
+    _s = f"&set={(set_id or '')[:8]}" if set_id else ""
+    return f"{_base()}/r/{link['code']}?src={channel}&content={(content_id or '')[:8]}{_s}"
 
 
 def inject(t, piece) -> bool:
@@ -48,7 +49,12 @@ def inject(t, piece) -> bool:
     """
     if piece.kind not in (ContentKind.BLOG, ContentKind.CAPTION, ContentKind.MARKETPLACE):
         return False
-    url = tracked_url(t, piece.channel.value, piece.id)
+    # ★ 네이버 스팸 게이트 — 네이버가 단축링크를 저품질/스팸 판정할 위험. 실계정 테스트 글로
+    #   발행 정상·저품질 무영향 확인 전까지 네이버(블로그) 본문 치환 보류(SNS·마켓·당근만).
+    #   확인 후 env NAVER_SHORTLINK_OK=1 로 전면 적용.
+    if piece.kind == ContentKind.BLOG and os.environ.get("NAVER_SHORTLINK_OK") != "1":
+        return False
+    url = tracked_url(t, piece.channel.value, piece.id, set_id=getattr(piece, "asset_id", ""))
     if not url:
         return False
     import re as _r
@@ -65,7 +71,8 @@ def inject(t, piece) -> bool:
     if listing_raw:
         _ll = db.ensure_track_link(t.id, listing_raw, "매물")
         if _ll:
-            listing_url = f"{_base()}/r/{_ll['code']}?src={piece.channel.value}&content={(piece.id or '')[:8]}"
+            listing_url = (f"{_base()}/r/{_ll['code']}?src={piece.channel.value}"
+                           f"&content={(piece.id or '')[:8]}&set={(getattr(piece, 'asset_id', '') or '')[:8]}")
     raws = [u for u in {(getattr(t, "buy_url", "") or "").strip(),
                         (getattr(t, "map_url", "") or "").strip()} if u]
     changed = False
