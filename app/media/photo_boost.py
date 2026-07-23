@@ -97,9 +97,9 @@ def enhance_all(paths: list[str], industry: str = "", meta: dict | None = None) 
     for p in paths:
         if p and os.path.exists(p):
             mask_personal_info(p)   # 🔒 번호판·얼굴·전화·라벨 자동 가림(보정 전에)
-            if os.environ.get("SHOPCAST_OVERLAY_REMOVE", "0") == "1":   # 기본 OFF: 광택 배경 다중 오버레이서
-                try:                                                     # 얼룩 잔존 가능 → 품질 신뢰 전까지 opt-in
-                    remove_overlay(p)   # 워터마크 오버레이 제거(유형 a 배지 일괄 인페인트)
+            if os.environ.get("SHOPCAST_OVERLAY_REMOVE", "1") != "0":   # 기본 ON(사용자 요청). 끄려면 =0
+                try:                                                     # 유형 a 국소 오버레이 일괄 인페인트
+                    remove_overlay(p)   # (광택+다중 오버레이는 얼룩 잔존 가능 — 코너 워터마크는 깨끗)
                 except Exception:
                     pass
             if auto_enhance(p, p, industry, meta) == p:
