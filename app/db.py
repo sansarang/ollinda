@@ -934,6 +934,20 @@ def save_inventory_context(tenant_id: str, model: str = "", year: str = "", car_
         logging.getLogger("shopcast.db").exception("[db] inventory_context 저장 실패")
 
 
+def purge_inventory_context(tenant_id: str, model: str = "") -> int:
+    """매물 컨텍스트 정정/무효화 — model 지정 시 그 model만, 없으면 tenant 전체 삭제. 삭제 건수 반환.
+    손상 레코드(정합 안 맞는 model-class) 정정 및 오염 소스 처리용(PHASE 0)."""
+    try:
+        with _conn() as c:
+            if model:
+                cur = c.execute("DELETE FROM inventory_context WHERE tenant_id=? AND model=?", (tenant_id, model))
+            else:
+                cur = c.execute("DELETE FROM inventory_context WHERE tenant_id=?", (tenant_id,))
+            return cur.rowcount
+    except Exception:
+        return 0
+
+
 def recent_inventory_context(tenant_id: str, limit: int = 6) -> list[dict]:
     """최근 매물 컨텍스트 N개(최신순)."""
     try:

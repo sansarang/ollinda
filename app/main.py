@@ -6245,12 +6245,21 @@ def admin_regen_channel(asset_id: str, kind: str = "", force: str = ""):
 
 
 @app.post("/admin/inventory-save")
-def admin_inventory_save(tid: str = "", model: str = "", year: str = "", car_class: str = ""):
-    """진단/백필 — 매물 컨텍스트 수동 저장(기존 발행 매물 소급). 오토큐 롱테일 재료."""
+def admin_inventory_save(tid: str = "", model: str = "", year: str = "", car_class: str = "",
+                         purge: str = "", purge_model: str = ""):
+    """진단/백필 — 매물 컨텍스트 수동 저장. purge=1이면 저장 전 tenant 전체 정정(손상 레코드 무효화),
+    purge_model=X면 그 model만 삭제. PHASE 0 오염 소스 처리용."""
     if not tid.strip():
         return JSONResponse({"ok": False, "error": "tid 필요"}, status_code=400)
-    db.save_inventory_context(tid.strip(), model.strip(), year.strip(), car_class.strip())
-    return JSONResponse({"ok": True, "context": db.recent_inventory_context(tid.strip(), limit=6)})
+    _deleted = 0
+    if purge == "1":
+        _deleted = db.purge_inventory_context(tid.strip())          # 전체 정정(클린 슬레이트)
+    elif purge_model.strip():
+        _deleted = db.purge_inventory_context(tid.strip(), purge_model.strip())
+    if model.strip():
+        db.save_inventory_context(tid.strip(), model.strip(), year.strip(), car_class.strip())
+    return JSONResponse({"ok": True, "deleted": _deleted,
+                         "context": db.recent_inventory_context(tid.strip(), limit=10)})
 
 
 @app.post("/admin/relink-publish")

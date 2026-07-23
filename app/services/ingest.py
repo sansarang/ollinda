@@ -117,17 +117,34 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
             _sch2 = _isc.get_schema(tenant.industry, _bt2)
             _axes2 = _sch2.get("attribute_axes") or []
             _prim = [t for t in ((_axes2[0].get("tokens") if _axes2 else []) or []) if t]
-            _model = next((m for m in _prim if m in _src), "")
+
+            def _wb_pos(tok):                               # 단어경계 등장 위치(앞이 한글이면 불일치 — '플레이스'의 '레이' 배제)
+                mm = _rc.search(r"(?<![가-힣])" + _rc.escape(tok), _src)
+                return mm.start() if mm else -1
+
+            _COMPARE = ("보다", "같은", "처럼", "말고", "대신", "달리", "비해", "vs", "와 달", "과 달")
+            # 매물 model = 단어경계 등장 + '비교 언급'이 아닌 것(그랜저 글의 '레이보다' 배제). 가장 앞 등장 우선.
+            _cands = sorted([(p, _wb_pos(m), m) for m in _prim for p in [_wb_pos(m)] if p >= 0])
+            _model, _mpos = "", -1
+            for _pos, _, _m in _cands:
+                _after = _src[_pos + len(_m):_pos + len(_m) + 6]
+                if any(cw in _after for cw in _COMPARE):     # '레이보다/레이 같은' → 비교언급 → 매물 아님
+                    continue
+                _model, _mpos = _m, _pos
+                break
             _year = next(iter(_rc.findall(r"(20[0-2]\d|19[89]\d)", _src)), "")
-            _cls = ""
-            for _ax2 in _axes2[1:]:                         # 분류축(차급·용량 등)
-                _cls = next((t for t in (_ax2.get("tokens") or []) if t and t in _src), "")
-                if _cls:
-                    break
-            if _model or _cls:
+            # 분류(차급 등) — model에 '최근접'하고 ±40자 이내인 것만 채택(정합 검증).
+            #   '경차 레이보다' 같은 비교차의 차급이 아니라 매물(그랜저)에 붙은 차급을 고른다.
+            _cls, _best = "", 999
+            for _ax2 in _axes2[1:]:
+                for _t in (_ax2.get("tokens") or []):
+                    _cp = _wb_pos(_t)
+                    if _cp >= 0 and _mpos >= 0 and abs(_cp - _mpos) <= 40 and abs(_cp - _mpos) < _best:
+                        _cls, _best = _t, abs(_cp - _mpos)
+            if _model:                                      # 정합 원칙: model 없이는 저장 안 함(class만 떠도 매물 불명 → 오염 방지)
                 db.save_inventory_context(tenant.id, _model, _year, _cls)
                 import logging as _lg4
-                _lg4.getLogger("shopcast.ingest").info("[inventory] 컨텍스트 저장 t=%s model=%s year=%s class=%s",
+                _lg4.getLogger("shopcast.ingest").info("[inventory] 컨텍스트 저장 t=%s model=%s year=%s class=%s(정합)",
                                                        tenant.id, _model, _year, _cls)
     except Exception:
         pass
