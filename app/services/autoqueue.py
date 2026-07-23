@@ -429,57 +429,52 @@ def consume(t, files: list | None = None, plan: str = "free") -> dict:
             if any(mass.similarity(p.payload.get("body") or "", b) > SIM_THRESHOLD for b in recent_bodies[:6]):
                 revise_piece(p, "기존 글과 구성이 비슷하다. 도입·소제목·사례·문단 순서를 전혀 다르게 다시 써라. "
                                 f"타겟 키워드 '{kw}'와 검색 의도는 유지.")
-            gate = mass.industry_gate(prof, p.payload, getattr(t, "biz_type", "local") or "local")
-            if not gate["passed"]:                    # 품질 게이트 미달 자동 보완(기존)
-                try:
-                    revise_piece(p, autofix_instruction(p.payload.get("ranking_audit") or {}, "blog")
-                                 or "경험 문장과 구체 수치를 보강")
-                    gate = mass.industry_gate(prof, p.payload, getattr(t, "biz_type", "local") or "local")
-                except Exception:
-                    pass
-            # 트랙 B(info) 전용 GEO 구조 게이트(G1~G5) — 트랙 A 미적용(추가만).
-            #   불통과 시 1회 재생성, 재불통과 시 보류(save_piece 미호출 = 발행 안 됨). 날조 통과 금지.
-            if _ctype == "info":
-                from app.services import geo_track as _geo
-                ggate = _geo.geo_gate(p.payload)
-                if not ggate["passed"]:
-                    _log.info("[autoqueue] 트랙B GEO 1차 미달 t=%s kw=%r fails=%s", t.id, kw, ggate["fails"])
-                    try:
-                        revise_piece(p, _geo.regen_instruction(ggate["fails"]))
-                    except Exception:
-                        _log.exception("[autoqueue] 트랙B 재생성 실패 t=%s", t.id)
+            # ★ 게이트 체인(item 7) — 재생성이 일어나면 해당 게이트만이 아니라 그 트랙 '전체 체인'을
+            #   처음부터 재통과해야 한다(길이 고치다 구조 깨진 글·구조 고치다 길이 빠진 글 차단). 상한 2회.
+            #   트랙 A: 정직·사실 → 자수 → 모바일 규격 / 트랙 B: +G1~G6(GEO 구조+경험). 태그·오염은 조립 게이트.
+            from app.services import geo_track as _geo
+            _biz = getattr(t, "biz_type", "local") or "local"
+            _cf, _chain_ok = [], False
+            for _att in range(3):                       # 초기 1 + 재생성 2
+                _cf = []
+                gate = mass.industry_gate(prof, p.payload, _biz)          # 1) 정직·사실·품질
+                if not gate["passed"]:
+                    _cf.append(("honesty", autofix_instruction(p.payload.get("ranking_audit") or {}, "blog")
+                                or "경험 문장과 구체 수치를 보강(날조 금지)"))
+                ggate = None
+                if _ctype == "info":                                     # 2) 트랙B GEO 구조+경험
                     ggate = _geo.geo_gate(p.payload)
-                p.payload["geo_gate"] = ggate
-                if not ggate["passed"]:
-                    db.mark_writing(q["id"], "skipped",
-                                    reason_append="GEO 구조 게이트 재불통과: " + ",".join(ggate["fails"])[:120])
-                    _log.warning("[autoqueue] 트랙B GEO 재불통과 → 보류(미발행) t=%s kw=%r fails=%s",
-                                 t.id, kw, ggate["fails"])
-                    return {"ok": False, "geo_gate_failed": True, "keyword": kw, "fails": ggate["fails"]}
-            # 발행 규격 게이트(item 6 자수 + E-1 모바일 문단·표) — 트랙 A/B 공통. 위반 시 1회 재생성.
-            #   자수 하한 미달은 '실정보로만' 보강 재생성 → 그래도 미달이면 보류+안내(물타기·날조 금지, 정직 우선).
-            mg = seo.mobile_spec_gate(p.payload.get("body") or "", _ctype)
-            if not mg["passed"]:
-                _log.info("[autoqueue] 규격 게이트 1차 미달 t=%s kw=%r %s", t.id, kw, mg["fails"])
-                try:
+                    p.payload["geo_gate"] = ggate
+                    if not ggate["passed"]:
+                        _cf.append(("geo", _geo.regen_instruction(ggate["fails"])))
+                mg = seo.mobile_spec_gate(p.payload.get("body") or "", _ctype)   # 3) 자수 + 4) 모바일 규격
+                p.payload["spec_gate"] = mg
+                if not mg["passed"]:
                     if mg["below"]:
-                        revise_piece(p, "글이 짧다. 단, 글자수를 채우려 같은 말 반복·일반론 부연·수식어 부풀리기 절대 금지. "
-                                        "매물 실값·검수 디테일·사장 경험 같은 '실제 정보'로만 보강해 더 구체적으로 써라. "
-                                        "채울 실정보가 없으면 억지로 늘리지 마라.")
+                        _cf.append(("spec_below", "글이 짧다. 글자수 채우려 같은 말 반복·일반론 부연·수식어 부풀리기 절대 금지. "
+                                                  "매물 실값·검수 디테일·사장 경험 같은 '실제 정보'로만 보강. 채울 실정보 없으면 늘리지 마라."))
                     elif mg["above"]:
-                        revise_piece(p, "글이 너무 길다. 핵심을 유지하며 중복·군더더기를 압축해 더 간결하게 다시 써라(정보 손실 없이).")
+                        _cf.append(("spec_above", "글이 너무 길다. 핵심 유지하며 중복·군더더기를 압축(정보 손실 없이)."))
                     else:
-                        revise_piece(p, "모바일 규격 위반: 긴 문단은 3~4줄(90~130자)로 쪼개고, 표는 2열 이하로 재구성하라. 내용은 유지.")
+                        _cf.append(("spec_mobile", "모바일 규격 위반: 긴 문단은 3~4줄(90~130자)로 쪼개고, 표는 2열 이하로. 내용 유지."))
+                if not _cf:
+                    _chain_ok = True
+                    break
+                _log.info("[autoqueue] 게이트체인 %d차 미달 t=%s kw=%r fails=%s", _att + 1, t.id, kw, [c[0] for c in _cf])
+                if _att >= 2:                            # 재생성 상한(2회) 도달 — 전 체인 미통과
+                    break
+                try:
+                    revise_piece(p, _cf[0][1])           # 첫 실패 사유로 재생성 → 다음 루프에서 전 체인 재검사
                 except Exception:
-                    _log.exception("[autoqueue] 규격 재생성 실패 t=%s", t.id)
-                mg = seo.mobile_spec_gate(p.payload.get("body") or "", _ctype)
-            p.payload["spec_gate"] = mg
-            if mg["below"]:                              # 재생성 후에도 하한 미달 → 물타기 금지, 보류+안내
-                db.mark_writing(q["id"], "skipped",
-                                reason_append=f"자수 하한 미달({mg['char_count']}) — 실정보 부족. 사진·정보 추가 필요")
-                _log.warning("[autoqueue] 규격 하한 미달 → 보류(미발행) t=%s kw=%r 자수=%s", t.id, kw, mg["char_count"])
-                return {"ok": False, "spec_below": True, "keyword": kw, "char_count": mg["char_count"],
-                        "notice": "글이 짧아요 — 사진이나 매물 정보를 더 올려주시면 정보가 풍부한 글로 만들어드려요"}
+                    _log.exception("[autoqueue] 체인 재생성 실패 t=%s", t.id)
+            if not _chain_ok:                            # 상한 후에도 미통과 → 보류 + 사유 안내(발행 안 함)
+                _reason = ",".join(c[0] for c in _cf)
+                db.mark_writing(q["id"], "skipped", reason_append=f"게이트 체인 미통과: {_reason}")
+                _log.warning("[autoqueue] 게이트체인 최종 미통과 → 보류(미발행) t=%s kw=%r %s", t.id, kw, _reason)
+                _notice = ("글이 짧아요 — 사진이나 매물 정보를 더 올려주시면 정보가 풍부한 글로 만들어드려요"
+                           if any(c[0] == "spec_below" for c in _cf) else "품질 기준 미달로 보류 — 사진·정보를 보강해 주세요")
+                return {"ok": False, "chain_failed": True, "keyword": kw,
+                        "fails": [c[0] for c in _cf], "notice": _notice}
             try:
                 from app.services import tracklinks
                 tracklinks.inject(t, p)

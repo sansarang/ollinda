@@ -646,6 +646,9 @@ def demo_zip(asset_id: str, request: Request):
     pieces = db.get_set_pieces(asset_id)
     if not pieces:
         return HTMLResponse(status_code=404)
+    _blk = _contamination_block(pieces)
+    if _blk:
+        return _blk
     imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
     _slug = _set_slug(pieces)
     _nv = _set_naver_video(pieces)
@@ -2296,6 +2299,34 @@ def _canonical_slug(tenant, blog) -> str:
     return base or "사진"
 
 
+def _canonical_keyword(tenant, blog) -> str:
+    """★ 세트 확정 키워드(읽기 전용, 단일 소스) — 제목(주제) 유래. 슬러그와 동일 원칙.
+    tenant-level 인벤토리·낡은 target_keywords 오염 무관. 본문·캡션·영상메타·태그가 전부 이걸 참조.
+    반환은 읽기용 구('그랜저 중고차'). 업종 중립."""
+    import re as _r
+    from app.services import indschema as _isc
+    pl = (getattr(blog, "payload", None) or {}) if blog else {}
+    title = ((pl.get("selected_title") or pl.get("title") or "")).strip()
+    kw = ((pl.get("target_keywords") or [""])[0] or "").strip()
+    biz = getattr(tenant, "biz_type", "local") or "local"
+    ind = ((getattr(tenant, "industry", "") or "").replace("/", ",").split(",")[0] or "").strip()
+    sch = _isc.get_schema(getattr(tenant, "industry", ""), biz)
+    attr_vocab = _isc.attribute_tokens(sch)
+    region = getattr(tenant, "region", "") or ""
+    gen0 = (sch.get("general_tags") or [ind] or [""])[0] if (sch.get("general_tags") or ind) else ind
+
+    def _wb(tok, text):
+        return bool(tok) and bool(_r.search(r"(?<![가-힣])" + _r.escape(tok), text or ""))
+
+    title_attr = next((a for a in attr_vocab if _wb(a, title)), "")
+    kw_attr = next((a for a in attr_vocab if a and a in _r.sub(r"\s+", "", kw)), "")
+    if title_attr:                                     # 제목 주제가 명확 → 정합 키워드 or 제목주제+업종
+        return kw if (kw_attr and _wb(kw_attr, title)) else f"{title_attr} {gen0}".strip()
+    if kw_attr and not _wb(kw_attr, title):            # 제목엔 없고 키워드만 stale 속성 → 안전(지역+업종)
+        return f"{seo._kw_shorten(region)} {ind}".strip()
+    return kw or f"{seo._kw_shorten(region)} {ind}".strip()
+
+
 def _seo_photo_name(tenant, blog) -> str:
     """(이미지 SEO 5-1) 다운로드 파일명 — {확정슬러그}-{피사체}. 슬러그는 _canonical_slug 단일 소스
     (현재 세트 컨텍스트 정합 보장). 피사체는 사장님이 확인한 사진 내용에서만(없으면 생략 — 날조 금지)."""
@@ -2454,7 +2485,7 @@ def _photo_captions(tenant, blog, n: int) -> list[str]:
     import logging as _lg
     from app.services import indschema as _isc
     srcnote = (blog.payload or {}).get("gen_source") or ""
-    kw = seo._kw_shorten(((blog.payload or {}).get("target_keywords") or [""])[0] or "")
+    kw = seo._kw_shorten(_canonical_keyword(tenant, blog))   # PHASE 1: 낡은 target_keywords 대신 canonical(제목 유래)
     imgs_ = (blog.payload or {}).get("image_paths") or []
     ind0 = ((getattr(tenant, "industry", "") or "").replace("/", ",").split(",")[0] or "").strip()
     _priv = _isc.get_schema(getattr(tenant, "industry", ""),
@@ -2485,9 +2516,9 @@ def _photo_captions(tenant, blog, n: int) -> list[str]:
             out.append(f"{ind0} 확인 서류 사진 ({i}번)".strip() if ind0 else f"확인 서류 사진 ({i}번)")
         elif len(desc) >= 4:
             out.append(f"{desc} — {kw} 현장 사진입니다." if (kw and i in kw_slots) else f"{desc}.")
-        else:                                          # 전수 보장 최소 캡션(분석 실패) — 빈 문자열 금지, 인덱스로 고유
-            _fails.append(i)
-            out.append(f"{kw} 현장 사진 {i}" if kw else (f"{ind0} 현장 사진 {i}" if ind0 else f"현장 사진 {i}"))
+        else:                                          # PHASE 2: 분석 실패 → 빈칸(키워드 때움 템플릿 금지 — 오염 원천).
+            _fails.append(i)                            # UI가 '직접 적어주세요' 안내. 지어낸 캡션보다 빈칸(정직 게이트).
+            out.append("")
     # 중복 금지 — 동일 문구는 사진 번호 접미로 결정적 구분(빈 재생성 대신 확정 구분)
     _seen = {}
     for _ix, _c in enumerate(out):
@@ -2515,26 +2546,31 @@ def _caption_box(tenant, blog, n: int) -> str:
     import re as _rg
     import logging as _lg
 
-    def _ok(i, c):
-        if not (c and not _rg.match(r"^\s*[—\-–]", c) and len(c.split("—")[0].strip()) >= 4):
-            return False                                # (4-2b) 빈 묘사 캡션 미출력
+    def _clean(i, c):
+        if not c or not c.strip():
+            return ""                                    # PHASE 2: 빈칸(분석 실패) — UI가 '직접 적어주세요' 표시
         bad = _caption_gate(c)
-        if bad:                                          # 오염 캡션은 렌더 직전 차단(자막 게이트와 동일 원칙)
+        if bad:
             _lg.getLogger("shopcast.kit").warning("[캡션게이트] 사진%d 차단(%s): %r", i + 1, bad, c[:60])
-            return False
-        return True
+            return ""
+        return c
 
-    vis = [(i, c) for i, c in enumerate(caps) if _ok(i, c)]
-    if len(vis) < n:                                     # 생략은 침묵 금지 — 정합 경고(사진10 누락 유형)
-        _miss = sorted(set(range(1, n + 1)) - {i + 1 for i, _ in vis})
-        _lg.getLogger("shopcast.kit").warning("[캡션정합] %d/%d건 렌더 — 생략 사진: %s", len(vis), n, _miss)
+    # 전수 렌더 — 실패(빈칸) 사진은 '직접 적어주세요' 안내(침묵 생략 금지, 지어낸 캡션 금지)
+    caps = [_clean(i, c) for i, c in enumerate(caps)]
+    _fail_n = sorted(i + 1 for i, c in enumerate(caps) if not c)
+    if _fail_n:
+        _lg.getLogger("shopcast.kit").warning("[캡션] 분석 실패 사진 %s/%d → 빈칸+직접입력 안내(때움 금지)", _fail_n, n)
     rows = "".join(
-        f"<div class='flex items-start gap-2 py-1.5 border-b border-slate-100'>"
-        f"<span class='text-xs font-bold text-slate-400 flex-shrink-0 mt-0.5'>사진{i + 1}</span>"
-        f"<span class='flex-1 text-xs text-slate-600'>{esc(c)}</span>"
-        f"<textarea id='cap{i}' class='hidden'>{esc(c)}</textarea>"
-        f"<button type=button onclick=\"nvcp('cap{i}',this)\" class='flex-shrink-0 text-[11px] font-bold text-indigo-600'>복사</button></div>"
-        for i, c in vis)
+        (f"<div class='flex items-start gap-2 py-1.5 border-b border-slate-100'>"
+         f"<span class='text-xs font-bold text-slate-400 flex-shrink-0 mt-0.5'>사진{i + 1}</span>"
+         + (f"<span class='flex-1 text-xs text-slate-600'>{esc(c)}</span>"
+            f"<textarea id='cap{i}' class='hidden'>{esc(c)}</textarea>"
+            f"<button type=button onclick=\"nvcp('cap{i}',this)\" class='flex-shrink-0 text-[11px] font-bold text-indigo-600'>복사</button>"
+            if c else
+            "<span class='flex-1 text-xs text-amber-500'>이 사진은 분석에 실패했어요 — 직접 한 줄 적어주세요</span>")
+         + "</div>")
+        for i, c in enumerate(caps))
+    vis = [(i, c) for i, c in enumerate(caps) if c]
     doc_tip = ("<div class='text-[11px] text-amber-600 mt-1.5'>⚠ 서류 사진은 개인정보(성명·주소·차량번호)를 가리고 올리세요.</div>"
                if any("서류" in c for _, c in vis) else "")
     return ("<div class='mt-3 bg-slate-50 rounded-xl p-3'>"
@@ -3692,6 +3728,79 @@ async def my_citation_upload(request: Request):
     return RedirectResponse(f"/me?ok=AI 브리핑 인용수 {cc}회를 기록했어요 — 리포트에 반영됩니다", status_code=303)
 
 
+@app.get("/admin/kit-verify")
+def admin_kit_verify(tid: str = "", inject: str = "", regen: str = ""):
+    """(진단) 트랙 A 세트 재생성 → 전 표면 실물(제목·본문·태그·캡션·영상메타·슬러그·파일명) +
+    PHASE 3 오염 게이트 판정. V2(레이 0)·V3(inject 시 게이트 차단) 검증용. 실발행 아님.
+    inject=1이면 낡은 필드에 '레이 중고' 강제 주입 → 게이트가 키트 차단하는지 확인."""
+    from app.services import generate as _gen
+    from app.domain.models import AssetType as _AT, ContentKind as _CK
+    t = db.get_tenant(tid)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    try:
+        from app.services.autoqueue import photo_pool as _pp
+        paths = _pp(t)[:16]
+    except Exception:
+        paths = []
+    if not paths:
+        return JSONResponse({"ok": False, "error": "사진 풀 없음"}, status_code=409)
+    note = "[자동 글감] 매물 실사진 세트"
+    try:
+        analysis = vision.analyze_all(paths, t.industry)
+        if analysis:
+            note += f"\n[사진 분석] {analysis[:2500]}"
+    except Exception:
+        pass
+    asset = db.create_asset(t.id, _AT.IMAGE, paths[0], note)
+    asset.content_type = "sell"
+    from app.registry import get_generator as _gg
+    blog = _gg(_CK.BLOG).generate(t, asset, paths)
+    if not blog:
+        return JSONResponse({"ok": False, "error": "생성 실패"}, status_code=500)
+    # 오염 주입(V3): 낡은 필드에 '레이 중고' 강제 → 게이트가 잡는지
+    if inject == "1":
+        blog.payload["target_keywords"] = ["레이 중고"] + (blog.payload.get("target_keywords") or [])
+        blog.payload["_inject_nv"] = {"path": "/tmp/x.mp4", "title": "레이 중고 핵심만 정리했어요",
+                                      "hashtags": ["#레이중고"], "desc": "레이 중고 영상"}
+    n_imgs = len(blog.payload.get("image_paths") or paths)
+    caps = _photo_captions(t, blog, n_imgs)
+    tags = _blog_tags(t, blog)
+    slug = _canonical_slug(t, blog)
+    canon = _canonical_keyword(t, blog)
+    # 영상 메타 — inject면 주입한 stale, 아니면 canonical 유도(클린)
+    _mock_short = type("P", (), {"kind": _CK.SHORT, "channel": type("C", (), {"value": "youtube"})(),
+                                 "payload": {"naver_video": blog.payload.get("_inject_nv") or
+                                             {"path": "/tmp/x.mp4", "title": f"{canon} 핵심만 정리했어요",
+                                              "hashtags": [], "desc": ""}},
+                                 "id": "mock", "tenant_id": t.id})()
+    pieces = [blog, _mock_short]
+    nv_disp = _nv_canonical(t, blog, _set_naver_video(pieces)) if inject != "1" else _set_naver_video(pieces)
+    gate = _kit_contamination_gate(t, pieces)
+    import re as _r
+    def _scan(txt):
+        return bool(_r.search(r"(?<![가-힣])레이", txt or ""))
+    surfaces_rey = {
+        "제목": _scan(blog.payload.get("selected_title") or blog.payload.get("title", "")),
+        "본문": _scan(blog.payload.get("body", "")),
+        "태그": any(_scan(x) for x in (tags or [])),
+        "캡션": any(_scan(x) for x in (caps or [])),
+        "영상제목": _scan(nv_disp.get("title", "")),
+        "해시태그": any(_scan(x) for x in (nv_disp.get("hashtags") or [])),
+        "슬러그": _scan(slug),
+    }
+    return JSONResponse({"ok": True, "tenant": t.name, "inventory_now": [
+        {"model": c.get("model"), "class": c.get("car_class")} for c in db.recent_inventory_context(t.id, 6)],
+        "canonical_keyword": canon, "slug": slug,
+        "title": blog.payload.get("selected_title") or blog.payload.get("title"),
+        "captions": caps, "tags": tags,
+        "video": {"title": nv_disp.get("title"), "desc": nv_disp.get("desc"), "hashtags": nv_disp.get("hashtags")},
+        "filenames_sample": [f"{slug}_{i}.jpg" for i in range(1, 4)] + [f"{slug}_네이버영상.mp4"],
+        "레이_by_surface": surfaces_rey,
+        "레이_total": sum(1 for v in surfaces_rey.values() if v),
+        "contamination_gate": {"passed": gate["passed"], "violations": gate["violations"], "ctx": gate["ctx"]}})
+
+
 @app.get("/admin/contamination-scan")
 def admin_contamination_scan(token: str = "레이", tid: str = "", limit: int = 300):
     """PHASE 0 — DB 전수 오염 스캔. 전 테이블·전 텍스트 컬럼에서 token을 단어 경계로 조회
@@ -4128,6 +4237,11 @@ def _result_naver_video(pieces, asset_id: str) -> str:
         from app.domain.models import ContentKind as _CKr
         short = next((p for p in pieces if p.kind == _CKr.SHORT and (p.payload or {}).get("naver_video")), None)
         nv = (short.payload.get("naver_video") or {}) if short else {}
+        if nv:                                            # PHASE 1: 영상 메타 canonical(제목·해시태그 오염 제거)
+            _bl = next((p for p in pieces if p.kind == _CKr.BLOG), None)
+            _tn = db.get_tenant(pieces[0].tenant_id) if pieces else None
+            if _bl and _tn:
+                nv = _nv_canonical(_tn, _bl, nv)
         src_p = nv.get("path") or ""
         if src_p:
             _dl = f"/dl/{asset_id}/{os.path.basename(src_p)}"
@@ -4880,7 +4994,7 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
     photos = [im for im in imgs if im]                          # /dl이 R2로 서빙
     vid = next((p for p in pieces if p.kind.value == "short" and p.payload.get("video_path")), None)
     vurl = f"/dl/{asset_id}/{os.path.basename(vid.payload['video_path'])}" if vid else ""  # 블로그 본문 삽입용
-    _nv = _set_naver_video(pieces)          # 네이버용 영상 메타 — video_path 유무 무관, 모든 피스에서 조회
+    _nv = _nv_canonical(tenant, blog, _set_naver_video(pieces))   # PHASE 1: 영상 메타 canonical(제목·해시태그 오염 제거)
     def _media_exists(p_):
         """로컬 또는 R2 미러 존재 — 컨테이너 교체로 로컬만 사라진 경우 오탐 방지(근본수정 [결함2])."""
         if p_ and os.path.exists(p_):
@@ -5107,6 +5221,86 @@ def _set_slug(pieces) -> str:
     return _canonical_slug(t, blogp) if t else ""
 
 
+def _nv_canonical(tenant, blog, nv: dict) -> dict:
+    """PHASE 1 — 네이버 영상 메타(제목·설명·해시태그)를 canonical 키워드에서 재유도(낡은 저장값 오염 무시).
+    표시·키트·게이트가 전부 이 결과를 참조. 업종 중립."""
+    import re as _r
+    if not nv:
+        return nv
+    canon = _canonical_keyword(tenant, blog)
+    ind = ((getattr(tenant, "industry", "") or "").replace("/", ",").split(",")[0] or "").strip()
+    region = seo._kw_shorten(getattr(tenant, "region", "") or "")
+    title = f"{canon} 핵심만 정리했어요".strip()
+    desc = (f"{canon} 관련 내용을 영상으로 정리했어요.\n{getattr(tenant,'name','')} · {region}\n"
+            "자세한 내용은 블로그 본문에 있어요.")
+    seeds = [canon.replace(" ", ""), (region + ind).replace(" ", ""), ind,
+             (region.split()[0] if region.split() else "") + ind]
+    tags = []
+    for s in seeds:
+        s = _r.sub(r"[^가-힣A-Za-z0-9]", "", s)
+        if s and len(s) >= 2 and f"#{s}" not in tags:
+            tags.append(f"#{s}")
+    return {**nv, "title": title, "desc": desc + "\n" + " ".join(tags[:5]), "hashtags": tags[:5]}
+
+
+def _kit_contamination_gate(tenant, pieces) -> dict:
+    """★ PHASE 3 — 발행 산출물 전 텍스트 표면 오염 게이트(최후 방어선, 업종 중립, 단어경계).
+    스키마 attribute_axes 속성 토큰이 (세트 컨텍스트 ∪ 본문 실등장)에 없이 어떤 표면(본문·태그·캡션·
+    영상 제목/설명/해시태그·파일명·폴더)에 등장하면 오염 → 차단. 특정 토큰('레이') 예외처리 0.
+    반환 {passed, violations:[{surface, token, snippet}], ctx}."""
+    import re as _r
+    from app.services import indschema as _isc
+    blog = next((p for p in pieces if getattr(p.kind, "value", "") == "blog"), None)
+    if not blog:
+        return {"passed": True, "violations": [], "ctx": []}
+    sch = _isc.get_schema(getattr(tenant, "industry", ""), getattr(tenant, "biz_type", "local") or "local")
+    attr_vocab = [a for a in _isc.attribute_tokens(sch) if a]
+
+    def _wb(tok, text):
+        return bool(_r.search(r"(?<![가-힣])" + _r.escape(tok), text or ""))
+
+    pl = blog.payload or {}
+    body = pl.get("body") or ""
+    title = pl.get("selected_title") or pl.get("title") or ""
+    canon = _canonical_keyword(tenant, blog)
+    # 허용 컨텍스트 = 인벤토리(정정본) ∪ 제목·canonical 속성 ∪ 본문 단어경계 실등장
+    ctx = set()
+    try:
+        for c in db.recent_inventory_context(getattr(tenant, "id", "") or "", limit=6):
+            ctx |= {(c.get("model") or ""), (c.get("car_class") or "")}
+    except Exception:
+        pass
+    for a in attr_vocab:
+        if _wb(a, title) or _wb(a, canon) or _wb(a, body):
+            ctx.add(a)
+    ctx = {x for x in ctx if x}
+    # 표면 수집 — canonical 유도 영상 메타 사용(낡은 저장값 아님)
+    surfaces = {"본문": body, "제목": title, "파일명": _set_slug(pieces)}
+    try:
+        surfaces["태그"] = " ".join(_blog_tags(tenant, blog) or [])
+    except Exception:
+        pass
+    try:
+        surfaces["캡션"] = " ".join(c for c in (_photo_captions(tenant, blog, len(pl.get("image_paths") or [])) or []) if c)
+    except Exception:
+        pass
+    nv = _nv_canonical(tenant, blog, _set_naver_video(pieces))
+    if nv:
+        surfaces["영상제목"] = nv.get("title", "")
+        surfaces["영상설명"] = nv.get("desc", "")
+        surfaces["해시태그"] = " ".join(nv.get("hashtags") or [])
+    violations = []
+    for name, text in surfaces.items():
+        for a in attr_vocab:
+            if _wb(a, text) and a not in ctx:
+                violations.append({"surface": name, "token": a, "snippet": _r.sub(r"\s+", " ", text)[:80]})
+    if violations:
+        import logging as _lg
+        _lg.getLogger("shopcast.kit").warning("[오염게이트] 차단 %d건: %s", len(violations),
+                                              [(v["surface"], v["token"]) for v in violations][:8])
+    return {"passed": not violations, "violations": violations, "ctx": sorted(ctx)}
+
+
 def _set_naver_video(pieces) -> dict:
     """세트의 네이버용 영상 메타({path,filename}) — short 피스에 저장됨. 없으면 {}."""
     for p in (pieces or []):
@@ -5165,6 +5359,26 @@ def _safe_title(pieces) -> str:
     return t or "올린다콘텐츠"
 
 
+def _contamination_block(pieces):
+    """PHASE 3 최후 방어선 — 오염 게이트 미통과면 다운로드 차단 응답 반환(통과면 None)."""
+    try:
+        t = db.get_tenant(pieces[0].tenant_id) if pieces else None
+        if not t:
+            return None
+        g = _kit_contamination_gate(t, pieces)
+        if not g["passed"]:
+            _vs = ", ".join(f"{v['surface']}:{v['token']}" for v in g["violations"][:8])
+            return HTMLResponse(
+                "<div style='font-family:sans-serif;max-width:520px;margin:60px auto;padding:24px'>"
+                "<h2 style='color:#e11d48'>⚠ 오염 감지 — 키트 생성 보류</h2>"
+                f"<p>현재 매물과 무관한 속성이 발행물에 섞여 있어 다운로드를 막았습니다: <b>{esc(_vs)}</b></p>"
+                "<p>이 글을 <b>다시 생성</b>하면 정정된 매물 정보로 깨끗하게 만들어져요. "
+                "재생성 후 다시 받아주세요.</p></div>", status_code=409)
+    except Exception:
+        return None
+    return None
+
+
 @app.get("/kit/{asset_id}/pack/{pid}")
 def kit_pack(request: Request, asset_id: str, pid: str):
     """채널 1개 통째 ZIP(글+사진+영상)."""
@@ -5175,6 +5389,9 @@ def kit_pack(request: Request, asset_id: str, pid: str):
     piece = next((p for p in pieces if p.id == pid), None)
     if not piece:
         return HTMLResponse(status_code=404)
+    _blk = _contamination_block(pieces)
+    if _blk:
+        return _blk
     imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
     data = _zip_bytes(_piece_pack_entries(piece, imgs, slug=_set_slug(pieces), nv=_set_naver_video(pieces)))
     return _zip_response(data, f"{_safe_title(pieces)}_{_ch_folder(piece)}.zip")
@@ -5187,6 +5404,9 @@ def kit_pack_all(request: Request, asset_id: str):
     pieces = _owned_pieces(u, asset_id) if u else None
     if not pieces:
         return HTMLResponse(status_code=404)
+    _blk = _contamination_block(pieces)
+    if _blk:
+        return _blk
     imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
     _slug = _set_slug(pieces)
     _nv = _set_naver_video(pieces)
