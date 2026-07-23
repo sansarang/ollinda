@@ -160,7 +160,8 @@ class BlogDraftGenerator(Generator):
             _hookr = _iscr.get_schema(getattr(tenant, "industry", ""), _biz_g).get("allow_region_hook")
         except Exception:
             _hookr = None
-        _creg = seo.canonical_region(tenant.region or "", _biz_g, prof.name, allow_region_hook=_hookr)
+        _creg = seo.canonical_region(tenant.region or "", _biz_g,
+                                     (getattr(tenant, "industry", "") or prof.name), allow_region_hook=_hookr)
         _reg_txt = _creg or "전국"                        # 프롬프트 표기용(셀러=전국)
         _title_reg = (f"지역명은 '{_creg}'만 쓰고 구·군 등 기초지역 지명은 제목에 넣지 마라."
                       if _creg else "제목에 지역 지명을 넣지 마라(전국 대상).")
