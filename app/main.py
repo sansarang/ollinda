@@ -5231,7 +5231,13 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
         + ((f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>4. 네이버용 영상 <span class='text-emerald-600'>(블로그 첨부 · 클립 겸용)</span></div>"
             "<p class='text-xs text-slate-500 mb-3'>이 영상을 <b>본문 첫 소제목 아래</b>에 넣으세요 — 15초+ 영상은 검색 가점(D.I.A.+). "
             "같은 영상을 네이버 클립에도 올리면 지면이 하나 더 생겨요.</p>"
-            + _nv_media_html + "</div>") if _nv else "")
+            + _nv_media_html + "</div>") if _nv else
+           # C-light: 영상 미생성이어도 섹션·사유·버튼 노출(조용한 부재 금지) — 기존 regen-naver 배선 재사용.
+           (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>4. 네이버용 영상</div>"
+            "<div class='text-xs text-slate-500 mb-2'>이 세트는 아직 <b>영상이 만들어지지 않았어요</b> — "
+            "본문에 소제목(##)이 없거나 생성이 중단된 경우예요. 아래 버튼으로 지금 만들 수 있어요.</div>"
+            f"<form method=post action='/kit/{asset_id}/regen-naver'>"
+            f"<button class='{cbtn} bg-emerald-600 hover:bg-emerald-700'>🎬 네이버 영상 만들기</button></form></div>"))
         # 5. 발행 후 마무리 — 사진 6장 권장(#3) + 서치어드바이저 색인(#3)
         + (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>{'5' if _nv else '4'}. 발행 후 — 상위노출 마무리</div>"
            "<ul class='text-xs text-slate-600 space-y-1.5 mb-3 list-none'>"
@@ -5441,11 +5447,13 @@ def _kit_contamination_gate(tenant, pieces) -> dict:
         surfaces["캡션"] = " ".join(c for c in (_photo_captions(tenant, blog, len(pl.get("image_paths") or [])) or []) if c)
     except Exception:
         pass
-    nv = _nv_canonical(tenant, blog, _set_naver_video(pieces))
+    _rawnv = _set_naver_video(pieces) or {}
+    nv = _nv_canonical(tenant, blog, _rawnv)
     if nv:
         surfaces["영상제목"] = nv.get("title", "")
         surfaces["영상설명"] = nv.get("desc", "")
         surfaces["해시태그"] = " ".join(nv.get("hashtags") or [])
+        surfaces["영상자막"] = " ".join(_rawnv.get("scene_texts") or [])   # 자막 오염도 영상 표면으로 격리
     # 속성 축 — 스키마 속성 토큰이 세트 컨텍스트에 없이 표면 등장하면 위반(레이 등)
     violations = []
     for name, text in surfaces.items():
@@ -5539,23 +5547,41 @@ def _safe_title(pieces) -> str:
     return t or "올린다콘텐츠"
 
 
-def _contamination_block(pieces):
-    """PHASE 3 최후 방어선 — 오염 게이트 미통과면 다운로드 차단 응답 반환(통과면 None)."""
+# D-3: 표면별 격리 — 핵심 표면(본문·제목) 위반만 전체 차단, 비핵심(영상·태그·캡션 등)은 해당 표면만 제외.
+_CORE_SURFACES = ("본문", "제목")
+_VIDEO_SURFACES = ("영상제목", "영상설명", "해시태그", "영상자막")
+
+
+def _contam_status(pieces) -> dict:
+    """오염 표면 분류 → {core_block, dirty:set, video_dirty, violations}. 게이트는 그대로(판정 재사용)."""
     try:
         t = db.get_tenant(pieces[0].tenant_id) if pieces else None
         if not t:
-            return None
+            return {"core_block": False, "dirty": set(), "video_dirty": False, "violations": []}
         g = _kit_contamination_gate(t, pieces)
-        if not g["passed"]:
-            _vs = ", ".join(f"{v['surface']}:{v['token']}" for v in g["violations"][:8])
-            return HTMLResponse(
-                "<div style='font-family:sans-serif;max-width:520px;margin:60px auto;padding:24px'>"
-                "<h2 style='color:#e11d48'>⚠ 오염 감지 — 키트 생성 보류</h2>"
-                f"<p>현재 매물과 무관한 속성이 발행물에 섞여 있어 다운로드를 막았습니다: <b>{esc(_vs)}</b></p>"
-                "<p>이 글을 <b>다시 생성</b>하면 정정된 매물 정보로 깨끗하게 만들어져요. "
-                "재생성 후 다시 받아주세요.</p></div>", status_code=409)
+        if g.get("passed"):
+            return {"core_block": False, "dirty": set(), "video_dirty": False, "violations": []}
+        dirty = {v["surface"] for v in g.get("violations", [])}
+        return {"core_block": any(s in _CORE_SURFACES for s in dirty),
+                "dirty": dirty, "video_dirty": any(s in _VIDEO_SURFACES for s in dirty),
+                "violations": g.get("violations", [])}
     except Exception:
-        return None
+        return {"core_block": False, "dirty": set(), "video_dirty": False, "violations": []}
+
+
+def _contamination_block(pieces):
+    """PHASE 3 최후 방어선 — ★ 핵심 표면(본문·제목) 오염만 전체 다운로드 차단(409). 비핵심 표면 오염은
+    차단하지 않고(None 반환) 호출부가 해당 표면만 zip에서 제외(D-3 표면별 격리). 통과면 None."""
+    st = _contam_status(pieces)
+    if st["core_block"]:
+        _core = [v for v in st["violations"] if v["surface"] in _CORE_SURFACES]
+        _vs = ", ".join(f"{v['surface']}:{v['token']}" for v in _core[:8])
+        return HTMLResponse(
+            "<div style='font-family:sans-serif;max-width:520px;margin:60px auto;padding:24px'>"
+            "<h2 style='color:#e11d48'>⚠ 오염 감지 — 키트 생성 보류</h2>"
+            f"<p>글의 핵심(본문·제목)에 현재 매물과 무관한 속성이 섞여 있어 다운로드를 막았습니다: <b>{esc(_vs)}</b></p>"
+            "<p>이 글을 <b>다시 생성</b>하면 정정된 매물 정보로 깨끗하게 만들어져요. "
+            "재생성 후 다시 받아주세요.</p></div>", status_code=409)
     return None
 
 
@@ -5572,8 +5598,10 @@ def kit_pack(request: Request, asset_id: str, pid: str):
     _blk = _contamination_block(pieces)
     if _blk:
         return _blk
+    _st = _contam_status(pieces)                              # D-3: 영상 표면 오염이면 영상만 제외(글·사진은 유지)
     imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
-    data = _zip_bytes(_piece_pack_entries(piece, imgs, slug=_set_slug(pieces), nv=_set_naver_video(pieces)))
+    _nv = None if _st["video_dirty"] else _set_naver_video(pieces)
+    data = _zip_bytes(_piece_pack_entries(piece, imgs, slug=_set_slug(pieces), nv=_nv))
     return _zip_response(data, f"{_safe_title(pieces)}_{_ch_folder(piece)}.zip")
 
 
@@ -5587,9 +5615,10 @@ def kit_pack_all(request: Request, asset_id: str):
     _blk = _contamination_block(pieces)
     if _blk:
         return _blk
+    _st = _contam_status(pieces)                              # D-3: 영상 표면 오염이면 영상만 제외(글·사진·타채널 유지)
     imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
     _slug = _set_slug(pieces)
-    _nv = _set_naver_video(pieces)
+    _nv = None if _st["video_dirty"] else _set_naver_video(pieces)
     entries = []
     for p in pieces:
         entries += _piece_pack_entries(p, imgs, prefix=f"{_ch_folder(p)}/", slug=_slug, nv=_nv)
@@ -6831,7 +6860,21 @@ def admin_set_pieces_json(asset_id: str):
         })
     _a = db.get_asset(asset_id)
     _tid0 = next((p.tenant_id for p in db.get_set_pieces(asset_id)), "")
-    return {"asset_id": asset_id, "tenant_id": _tid0, "asset_note": (getattr(_a, "note", "") or "")[:2000], "pieces": out}
+    # 진단 신뢰: 피스 0건인데 asset은 존재 → 이 asset_id가 스테일(재생성으로 세트 앵커가 새 asset_id로 갈림).
+    _hint = None
+    if not out and _a:
+        _atid = getattr(_a, "tenant_id", "") or ""
+        _recent = []
+        try:                                            # 같은 tenant의 최신 세트 asset_id 안내(올바른 조회 대상)
+            for s in db.list_sets(tenant_id=_atid, limit=5):
+                _recent.append({"asset_id": s.get("asset_id"), "title": (s.get("title") or "")[:40]})
+        except Exception:
+            pass
+        _hint = {"issue": "이 asset_id에 content_pieces 0건 — asset은 존재. 재생성으로 세트 앵커가 "
+                          "새 asset_id로 갈렸을 가능성(스테일 참조). 검증기 버그 아님.",
+                 "tenant_id": _atid, "recent_sets": _recent}
+    return {"asset_id": asset_id, "tenant_id": _tid0 or getattr(_a, "tenant_id", ""),
+            "asset_note": (getattr(_a, "note", "") or "")[:2000], "pieces": out, "stale_hint": _hint}
 
 
 @app.api_route("/admin/disk-sos", methods=["GET", "POST"])
