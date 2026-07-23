@@ -3916,7 +3916,18 @@ def admin_overlay_test(asset_id: str = "", tid: str = "", limit: int = 16):
             if det0.get("present") and det0.get("type") == "a":
                 _bx = {k: det0.get(k, 0) for k in ("x0", "y0", "x1", "y1")}
                 rep["before"] = _thumb_b64(p, _bx)          # 전(빨간 박스)
-                rep["after"] = _thumb_b64(cp)               # 후(제거 시도 결과)
+                rep["after"] = _thumb_b64(cp)               # 후(게이트 통과 후 최종)
+                try:                                        # raw 인페인트(게이트 전) — 품질 육안 판정용
+                    from PIL import Image as _Im2, ImageOps as _IO2
+                    import io as _io2, base64 as _b642
+                    _o = _IO2.exif_transpose(_Im2.open(p)).convert("RGB")
+                    _raw = _pb._cv_inpaint(_o, _bx, "telea")
+                    if _raw is not None:
+                        _raw.thumbnail((420, 420))
+                        _bf = _io2.BytesIO(); _raw.save(_bf, "JPEG", quality=72)
+                        rep["after_raw"] = "data:image/jpeg;base64," + _b642.b64encode(_bf.getvalue()).decode()
+                except Exception:
+                    pass
         except Exception as e:
             rep = {"action": "error", "err": str(e)[:80]}
         rep["file"] = os.path.basename(p)

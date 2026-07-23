@@ -200,9 +200,9 @@ def _is_smudge(im, box: dict) -> bool:
         bw = (x1 - x0); bh = (y1 - y0)
         ox0 = max(0, x0 - bw); oy0 = max(0, y0 - bh); ox1 = min(W, x1 + bw); oy1 = min(H, y1 + bh)
         out_std = ImageStat.Stat(g.crop((ox0, oy0, ox1, oy1))).stddev[0]
-        if out_std < 6.0:                       # 주변도 균일 → 상대 비교 무의미(얼룩 아님)
+        if out_std < 12.0:                      # 주변이 충분히 텍스처하지 않으면 판정 안 함(코너 스탬프=대개 배경 위)
             return False
-        return reg_std < SMUDGE_REL * out_std
+        return reg_std < SMUDGE_REL * out_std   # 텍스처 배경인데 인페인트 영역만 뭉갬 → 얼룩
     except Exception:
         return False
 
