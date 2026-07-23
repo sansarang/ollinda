@@ -213,7 +213,7 @@ def _kw_rank_tier(kw: str, models: list, classes: list, wide: str, ind0: str) ->
 
 def select_target_keyword(candidates: list, biz_type: str = "local", region: str = "",
                           industry: str = "", tenant_id: str = "", verify_volume: bool = True,
-                          primary_model: str = "") -> str:
+                          primary_model: str = "", allow_inventory_rank: bool = False) -> str:
     """★ 타깃 키워드 최종 선택 단일 관문(오토큐·직접생성 공통).
     ① 기초지역(구·군) 하드 배제(셀러·병행) ② 매물 속성 서열 정렬 ③ 검색량 검증(월 100회+, 실패 시 스킵).
     후보 전부 탈락하면 광역+업종 폴백. 매장(local)은 지역 규칙 미적용(원 후보 유지)."""
@@ -227,7 +227,9 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
     cands = [c for c in cands if not is_basic_region_kw(c, region, biz)]
     # 매물 속성(핵심 속성·분류) — 세트 컨텍스트 + 업종 스키마 attribute_axes에서 공급(전 업종)
     models, classes = [], []
-    if tenant_id:
+    # ★ tenant 전체 인벤토리로 후보 랭킹 = 타세트 매물 유입 통로 → 기본 차단. '매물 목록형' 등 정당한 곳만
+    #   allow_inventory_rank=True로 명시 허용. 일반 세트는 primary_model(현재 세트)로 이미 확정됨.
+    if tenant_id and allow_inventory_rank:
         try:
             from app import db as _db
             for ctx in _db.recent_inventory_context(tenant_id, limit=6):
@@ -523,6 +525,10 @@ FACTS_RULE = (
     "'정말 ○○일까?'·'숨겨진 ○○'·'믿어도 될까' 식으로 흔드는 프레이밍 금지 — 판매자가 밝힌 사실은 확정으로 다루고, "
     "필요하면 입력에 있는 증빙(성능점검·인증·기록부 등)으로 뒷받침하라. 일반적 불안·리스크는 '이런 걱정 많으시죠'까지만 "
     "공감하되, 그 불안을 '이 상품/매물'에 씌워 상태 사실과 모순되게 쓰지 마라.\n"
+    "- [서류·이력 정직 고지] 입력(사진분석·서류 판독)에서 확인된 '주요 사용·이력성 사실'(예: 렌트/리스/영업용 출신, "
+    "용도변경 이력, 리퍼·전시품, 단순수리 등 — 업종 불문 서류·이력에서 드러난 사실)은 절대 감추지 말고 본문에 정직하게 "
+    "고지하라. 방식: 장점으로 포장하지 말고 사실 그대로 서술 + '이런 이력의 상품 볼 때 확인점'을 안내(구매자가 스스로 "
+    "검증하게). 확인된 이력을 언급조차 안 하고 침묵하면 표면 간 불일치·기만이다. (없는 이력을 지어내는 것도 금지 — 입력에 있는 것만.)\n"
     "- 과장·낚시 금지: 최고/최저가/100%/무조건/보장/완벽/1위/유일/대박.\n"
     "- [🔒 개인정보 보호] 사진분석에 차량 번호판·전화번호·차대번호(VIN)·이름·주소·라벨 숫자가 보여도 "
     "콘텐츠(글·자막·해시태그)에 절대 그대로 쓰지 마라. 특정 개인·차량을 식별할 수 있는 값은 언급 자체를 생략하라."

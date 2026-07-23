@@ -166,11 +166,18 @@ class BlogDraftGenerator(Generator):
         _title_reg = (f"지역명은 '{_creg}'만 쓰고 구·군 등 기초지역 지명은 제목에 넣지 마라."
                       if _creg else "제목에 지역 지명을 넣지 마라(전국 대상).")
         if _ctype != "info" and _biz_g in ("seller", "hybrid"):
+            # ★ primary_model = '현재 세트' 매물만 — 예전엔 recent_inventory_context(tenant, limit=1)로
+            #   '가게의 가장 최근 인벤토리'를 읽어, 그랜저 세트를 만들어도 최근 업로드가 모닝이면 kw0='모닝'으로
+            #   샜다(타세트 유입 근본). 현재 세트 소스(제목 키워드 + 사장 입력·사진분석)의 스키마 차종 토큰만 사용.
             _pm = ""
             try:
-                from app import db as _dbctx
-                _ctx = _dbctx.recent_inventory_context(tenant.id, limit=1)
-                _pm = (_ctx[0].get("model") if _ctx else "") or ""
+                import re as _rpm
+                from app.services import indschema as _iscpm
+                _axes_pm = (_iscpm.get_schema(getattr(tenant, "industry", ""), _biz_g).get("attribute_axes") or [])
+                _model_toks = (_axes_pm[0].get("tokens") if _axes_pm else []) or []   # 1축=핵심 매물(차종)
+                _cur_src = (kw0 or "") + " " + (asset.note or "")                     # 현재 세트만(tenant 인벤토리 아님)
+                _pm = next((t for t in _model_toks
+                            if t and _rpm.search(r"(?<![가-힣])" + _rpm.escape(t), _cur_src)), "")
             except Exception:
                 pass
             _gk = seo.select_target_keyword([kw0] + list(kws), _biz_g, tenant.region or "",
