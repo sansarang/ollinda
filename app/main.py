@@ -3846,6 +3846,9 @@ def admin_kit_verify(tid: str = "", asset_id: str = "", inject: str = "", regen:
         "photo_basenames": [os.path.basename(p) for p in paths[:20]],
         "inventory_now": [{"model": c.get("model"), "class": c.get("car_class")} for c in db.recent_inventory_context(t.id, 6)],
         "canonical_keyword": canon, "slug": slug, "title": _title_v,
+        "_diag_note": (note or "")[:600],                    # 진단: 생성 입력 note(캐스퍼 유입 추적)
+        "_diag_target_kws": blog.payload.get("target_keywords"),   # 진단: 생성기가 확정한 키워드
+        "_diag_search_kw": getattr(t, "search_kw", ""),
         "title_options": blog.payload.get("title_options"),
         "captions": caps, "tags": tags,
         "video": {"title": nv_disp.get("title"), "desc": nv_disp.get("desc"), "hashtags": nv_disp.get("hashtags")},
