@@ -57,6 +57,11 @@ def drop_phantom_attr_kws(kws: list[str], industry: str, biz: str,
     (그랜저 딜러에 캐스퍼중고가격 / 라벤더 캔들집에 타향 / 카페에 타메뉴 키워드 차단.) 단어경계 동일.
     반환 (kept, dropped)."""
     import re as _r
+    # ★ 재고 앵커(recent_inventory_context)로 '보유/미보유'를 판정하는 필터라 재고형(seller/hybrid) 전용.
+    #   서비스업(local 방문형)은 재고가 없고 axis0 토큰(썬팅지·PPF 등)이 전부 '정당한 시공/메뉴 어휘'라
+    #   재고 부재를 근거로 지우면 오탐(썬팅지 오제거 사고). local은 필터 미적용 — 전량 통과.
+    if (biz or "local") not in ("seller", "hybrid"):
+        return list(kws), []
     try:
         from app.services import indschema as _isc
         sch = _isc.get_schema(industry, biz)

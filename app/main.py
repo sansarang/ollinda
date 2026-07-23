@@ -6599,6 +6599,43 @@ def admin_regen_blog(asset_id: str, dry: str = ""):
                          "new_kws": npl.get("target_keywords")})
 
 
+@app.get("/admin/restore-token")
+def admin_restore_token(tid: str = "", token: str = "", dry: str = "1"):
+    """(복구) 과오 세척 되돌림 — tid 가게의 전 피스 target_keywords에서, token(예 '썬팅지')이 스키마 속성
+    토큰이면 '이 가게가 정당히 취급하는 것'으로 보고 누락된 곳에 재추가. 루마 '썬팅지' 오제거 복원용.
+    안전: token이 해당 업종 스키마 attribute_axes에 실제 있을 때만 재추가(임의 주입 금지). dry=1 판정만."""
+    from app.services import indschema as _isc
+    if not (tid and token):
+        return JSONResponse({"ok": False, "error": "tid·token 필요"}, status_code=400)
+    t = db.get_tenant(tid)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    _biz = getattr(t, "biz_type", "local") or "local"
+    _toks = _isc.attribute_tokens(_isc.get_schema(getattr(t, "industry", ""), _biz))
+    if token not in _toks:
+        return JSONResponse({"ok": False, "error": f"'{token}'은 이 업종 스키마 속성 토큰 아님 — 재추가 거부(임의 주입 금지)"}, status_code=400)
+    restored, seen = [], set()
+    for s in db.list_sets(tenant_id=tid, limit=300):
+        aid = s.get("asset_id")
+        if not aid or aid in seen:
+            continue
+        seen.add(aid)
+        for p in db.get_set_pieces(aid):
+            pl = p.payload or {}
+            tk = pl.get("target_keywords")
+            if isinstance(tk, list) and token not in tk:
+                # 원래 있었는지 확신 불가 → 제목/본문/gen_source에 이 토큰이 등장하는 피스에만 재추가(근거 보존)
+                _ctx = " ".join(str(pl.get(k) or "") for k in ("title", "selected_title", "gen_source", "body"))
+                if token in _ctx:
+                    restored.append({"asset": aid[:8], "piece": p.id[:8]})
+                    if dry != "1":
+                        pl["target_keywords"] = tk + [token]
+                        p.payload = pl
+                        db.save_piece(p)
+    return JSONResponse({"ok": True, "tid": tid, "token": token, "dry": dry == "1",
+                         "restored_count": len(restored), "restored": restored[:40]})
+
+
 @app.get("/admin/phantom-sweep")
 def admin_phantom_sweep(tid: str = "", dry: str = "1"):
     """4형제 등 '유령 속성 토큰' 전수 세척 — (1) 제목/태그 표면 오염 세트 asset_id 목록(regen-blog 대상),
