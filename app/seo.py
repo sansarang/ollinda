@@ -49,6 +49,37 @@ def _apply_volume(kws: list[str], limit: int, hints: list[str] | None = None) ->
     return list(dict.fromkeys(keep + extra))[:limit]
 
 
+def drop_phantom_attr_kws(kws: list[str], industry: str, biz: str,
+                          context_text: str = "", inventory_models: list | None = None) -> tuple:
+    """★ Layer 1(2차 방어) — searchad 주입 등으로 섞인 '유령 속성 키워드' 제거(업종 중립).
+    스키마 attribute_axes 속성 토큰(차종·향·메뉴 등)이 키워드에 있는데 그 토큰이 '현재 세트 컨텍스트
+    (context_text) ∪ 재고(inventory_models)'에 없으면 = 이 가게가 안 파는 것 → 제거.
+    (그랜저 딜러에 캐스퍼중고가격 / 라벤더 캔들집에 타향 / 카페에 타메뉴 키워드 차단.) 단어경계 동일.
+    반환 (kept, dropped)."""
+    import re as _r
+    try:
+        from app.services import indschema as _isc
+        sch = _isc.get_schema(industry, biz)
+        axis0 = [t for t in ((sch.get("attribute_axes") or [{}])[0].get("tokens") or []) if t]  # 1축=핵심 속성
+    except Exception:
+        axis0 = []
+    if not axis0:
+        return list(kws), []                                    # 속성 앵커 없는 업종 → 필터 무의미(통과)
+    def _wb(tok, text):
+        return bool(tok) and bool(_r.search(r"(?<![가-힣])" + _r.escape(tok), text or ""))
+    allowed = {a for a in axis0 if _wb(a, context_text)}
+    for m in (inventory_models or []):
+        mn = " ".join((m or "").split())
+        for a in axis0:
+            if a and (a in mn or _wb(a, mn)):
+                allowed.add(a)
+    kept, dropped = [], []
+    for k in kws:
+        bad = [a for a in axis0 if _wb(a, k) and a not in allowed]
+        (dropped if bad else kept).append(k if not bad else (k, ",".join(bad)))
+    return kept, dropped
+
+
 def product_keywords(note: str = "", brand: str = "", limit: int = 10, industry: str = "",
                      region: str = "") -> list[str]:
     """상품/후기축 키워드 — 온라인 셀러용(지역 대신 상품명+구매의도).

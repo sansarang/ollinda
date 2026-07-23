@@ -166,28 +166,43 @@ class BlogDraftGenerator(Generator):
         _title_reg = (f"지역명은 '{_creg}'만 쓰고 구·군 등 기초지역 지명은 제목에 넣지 마라."
                       if _creg else "제목에 지역 지명을 넣지 마라(전국 대상).")
         if _ctype != "info" and _biz_g in ("seller", "hybrid"):
-            # ★ primary_model = '현재 세트' 매물만 — 예전엔 recent_inventory_context(tenant, limit=1)로
-            #   '가게의 가장 최근 인벤토리'를 읽어, 그랜저 세트를 만들어도 최근 업로드가 모닝이면 kw0='모닝'으로
-            #   샜다(타세트 유입 근본). 현재 세트 소스(제목 키워드 + 사장 입력·사진분석)의 스키마 차종 토큰만 사용.
-            _pm = ""
+            import re as _rpm
+            import logging as _lgk
+            _slog = _lgk.getLogger("shopcast.seo")
             try:
-                import re as _rpm
                 from app.services import indschema as _iscpm
                 _axes_pm = (_iscpm.get_schema(getattr(tenant, "industry", ""), _biz_g).get("attribute_axes") or [])
-                _model_toks = (_axes_pm[0].get("tokens") if _axes_pm else []) or []   # 1축=핵심 매물(차종)
-                # ★ 사진분석(asset.note)=실제 피사체 ground truth를 '먼저' 매칭 — kw0(검색어 유도)가
-                #   사진과 다른 차종이어도(예: 그랜저 사진 + 캐스퍼 검색어) 사진의 차종을 매물로 확정.
-                #   스키마 순서로 첫 매치를 뽑던 방식은 두 차종 공존 시 사진과 무관한 걸 골랐다.
-                def _first_model(src):
-                    return next((t for t in _model_toks
-                                 if t and _rpm.search(r"(?<![가-힣])" + _rpm.escape(t), src or "")), "")
-                _pm = _first_model(asset.note) or _first_model(kw0)
+                _model_toks = (_axes_pm[0].get("tokens") if _axes_pm else []) or []   # 1축=핵심 속성(차종·향·메뉴)
             except Exception:
-                pass
-            _gk = seo.select_target_keyword([kw0] + list(kws), _biz_g, tenant.region or "",
-                                            prof.name, tenant_id=tenant.id, primary_model=_pm)
-            import logging as _lgk
-            _lgk.getLogger("shopcast.seo").warning("[target-gate] biz=%s pm=%r kw0=%r → %r", _biz_g, _pm, kw0, _gk)
+                _model_toks = []
+            try:
+                _inv = [c.get("model") for c in db.recent_inventory_context(tenant.id, limit=6) if c.get("model")]
+            except Exception:
+                _inv = []
+            # ★ Layer 1(2차 방어): searchad 주입 등 '유령 속성 키워드'(현재 세트 note·재고에 없는 속성 토큰)
+            #   제거 — 그랜저 딜러에 '캐스퍼중고가격', 캔들집에 타향, 카페에 타메뉴 키워드 차단(업종 중립).
+            _kept, _drop = seo.drop_phantom_attr_kws([kw0] + list(kws), getattr(tenant, "industry", ""),
+                                                     _biz_g, context_text=(asset.note or ""), inventory_models=_inv)
+            if _drop:
+                _slog.warning("[phantom-filter] 유령 속성 키워드 제거(%d): %s", len(_drop), _drop[:6])
+            if _kept:
+                kw0 = _kept[0]
+                kws = list(dict.fromkeys(_kept))[:10]
+            # primary_model = '현재 세트'(사진분석 note 우선 → kw0). 스키마 순서 tie-break 대신 note 실피사체 우선.
+            def _first_model(src):
+                return next((t for t in _model_toks
+                             if t and _rpm.search(r"(?<![가-힣])" + _rpm.escape(t), src or "")), "")
+            _pm = _first_model(asset.note) or _first_model(kw0)
+            # ★ Layer 2b(앵커 부재 게이트): 속성 앵커가 기대되는 업종(_model_toks 존재)인데 현재 세트에 앵커 0
+            #   (note·kw0 어디에도 스키마 속성 없음)이면 검색량 랭킹으로 넘기지 마라 — 앵커 없는 세트가 인기
+            #   타모델 키워드에 납치되는 구조 차단. 안전 제네릭(지역+업종)으로 확정. 방문형(속성축 없는 업종)은 미적용.
+            if _model_toks and not _pm and not _first_model(" ".join(kws)):
+                _gk = f"{seo._kw_shorten(tenant.region or '')} {prof.name}".strip() or prof.name
+                _slog.warning("[anchor-gate] 앵커 부재 → 검색량 랭킹 보류, 제네릭 확정: %r (note앵커0)", _gk)
+            else:
+                _gk = seo.select_target_keyword([kw0] + list(kws), _biz_g, tenant.region or "",
+                                                prof.name, tenant_id=tenant.id, primary_model=_pm)
+            _slog.warning("[target-gate] biz=%s pm=%r kw0=%r → %r", _biz_g, _pm, kw0, _gk)
             if _gk:
                 kw0 = _gk
                 kws = list(dict.fromkeys([_gk] + [k for k in kws

@@ -130,7 +130,23 @@ def analyze_all(image_paths: list[str], industry_name: str = "", max_imgs: int =
         # 사진 순서 표기는 프롬프트에 명시(각 이미지가 순서대로 [사진N]) — 어댑터는 이미지 나열 후 텍스트
         prompt_all = "이미지들은 순서대로 [사진1]..[사진N]이다.\n" + prompt_all
         from app import llm
-        return llm.call_task("vision", prompt_all, 1000, default_model=MODEL, images=imgs64).strip()
+        # ★ 재시도 1회 — 빈 반환(과부하·레이트리밋) 시 조용히 진행하면 note에 매물 앵커가 없어 유령 키워드에
+        #   납치된다(캐스퍼 사건 1차 원인). 빈/실패면 1회 재시도 후에도 비면 "" 반환(호출부가 앵커부재 처리).
+        for _try in (1, 2):
+            try:
+                _out = (llm.call_task("vision", prompt_all, 1000, default_model=MODEL, images=imgs64) or "").strip()
+            except Exception:
+                _out = ""
+            if _out:
+                return _out
+            if _try == 1:
+                import logging as _lgv
+                _lgv.getLogger("shopcast.vision").warning("[vision] analyze_all 빈 반환 — 1회 재시도")
+                import time as _tv
+                _tv.sleep(2)
+        import logging as _lgv2
+        _lgv2.getLogger("shopcast.vision").error("[vision] analyze_all 재시도 후에도 빈 반환 (%d장) — note 앵커 부재 위험", len(paths))
+        return ""
     except Exception:
         return ""
 
