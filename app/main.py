@@ -3815,9 +3815,21 @@ def admin_kit_verify(tid: str = "", asset_id: str = "", inject: str = "", regen:
         "영상제목": _scan(nv_disp.get("title", "")), "해시태그": any(_scan(x) for x in (nv_disp.get("hashtags") or [])),
         "슬러그": _scan(slug),
     }
-    # 지역 축 검증 — 기초지역(기장 등) 지명이 표면에 등장하나
+    # 지역 축 검증 — 기초지역(기장 등) 지명이 표면에 등장하나 + V2 근거(searchad 실측 비교)
     _cores = seo.basic_region_cores(getattr(t, "region", "") or "")
     _creg = blog.payload.get("canonical_region", "")
+    _region_vols = {}
+    try:
+        from app.services import searchad as _sa
+        _indv = ((t.industry or "").replace("/", ",").split(",")[0] or "").strip()
+        _wide = seo._region_wide(getattr(t, "region", "") or "")
+        _cands = [f"{_wide} {_indv}"] + [f"{c} {_indv}" for c in _cores]
+        if _sa.configured() and _indv:
+            _region_vols = {(_v.get("keyword") or ""): (_v.get("total") or 0)
+                            for _v in _sa.keyword_volumes(_cands, limit=10)}
+        _region_vols["_threshold"] = seo.REGION_MIN_VOLUME
+    except Exception:
+        pass
     def _rscan(txt):
         return [c for c in _cores if _r.search(r"(?<![가-힣])" + _r.escape(c), txt or "")]
     region_by_surface = {
@@ -3827,6 +3839,7 @@ def admin_kit_verify(tid: str = "", asset_id: str = "", inject: str = "", regen:
     }
     return JSONResponse({"ok": True, "tenant": t.name, "set_id": _set_id, "n_photos": len(paths),
         "region_profile": getattr(t, "region", ""), "canonical_region": _creg, "basic_region_cores": _cores,
+        "region_volumes_실측": _region_vols,
         "photo_basenames": [os.path.basename(p) for p in paths[:20]],
         "inventory_now": [{"model": c.get("model"), "class": c.get("car_class")} for c in db.recent_inventory_context(t.id, 6)],
         "canonical_keyword": canon, "slug": slug, "title": _title_v,
