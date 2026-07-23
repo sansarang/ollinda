@@ -685,6 +685,60 @@ def _kw_variant_hits(text: str, kw: str) -> int:
     return sum(1 for s in re.split(r"[\n.!?]", text) if all(t in s for t in toks))
 
 
+# ── 모바일 규격(E-1) — 생성 프롬프트 주입용. 네이버 트래픽 대부분이 모바일. 업종 중립. ──
+MOBILE_SPEC = (
+    "[모바일 규격 — 반드시 지켜라. 네이버 블로그 독자 대부분이 폰이다]\n"
+    "① 문단: 모바일 3~4줄(공백 제외 90~130자) 단위로 끊어라. PC 기준 장문단 금지. 문단 사이 빈 줄 1개.\n"
+    "② 표: 열 2개 이하만(모바일에서 3열+ 표는 옆으로 잘린다). 비교가 3항목+면 '| 항목 | 내용 |' 2열로 재구성하거나 서술로.\n"
+    "③ 한 문장 60자 내외 — 폰에서 한 문장이 4줄 넘어가면 나눠라.\n"
+    "④ 소제목 사이 본문이 모바일 5~7스크린을 넘지 않게(체류 유지하되 이탈 방지).\n"
+)
+
+
+def _body_char_count(body: str) -> int:
+    """본문 실자수(공백 제외) — 표행·[사진N]·소제목 기호 제외, 내용만. 글자수 게이트 기준."""
+    lines = []
+    for ln in (body or "").split("\n"):
+        s = ln.strip()
+        if not s or s.startswith("|") or s.startswith("[사진"):
+            continue
+        s = re.sub(r"^#{1,4}\s*", "", s)              # 소제목 기호만 제거(내용은 카운트)
+        lines.append(s)
+    return len(re.sub(r"\s", "", "".join(lines)))
+
+
+def mobile_spec_gate(body: str, content_type: str = "sell") -> dict:
+    """발행 규격 게이트(item 6 + E-1) — 자수 범위·모바일 문단 길이·표 열수. 트랙 A/B 공통, 업종 중립.
+    반환 {passed, fails[], char_count, range, below(하한미달), above(상한초과)}."""
+    fails = []
+    cc = _body_char_count(body)
+    lo, hi = (1500, 3000) if content_type == "info" else (1500, 2500)
+    below = cc < lo
+    above = cc > hi
+    if below:
+        fails.append(f"자수 하한 미달({cc}/{lo})")
+    elif above:
+        fails.append(f"자수 상한 초과({cc}/{hi})")
+    # 모바일 문단 길이 — 빈 줄 분할, 소제목·표·리스트·사진 제외, 공백제외 130자 초과 금지
+    paras = [p.strip() for p in re.split(r"\n\s*\n", body or "") if p.strip()]
+    long_p = [p for p in paras
+              if not p.startswith(("#", "|", "-", "•", "1.", "2.", "3.", "[사진"))
+              and len(re.sub(r"\s", "", p)) > 130]
+    if long_p:
+        fails.append(f"장문단 {len(long_p)}개(모바일 130자 초과)")
+    # 표 열수 ≤2
+    over = 0
+    for ln in (body or "").split("\n"):
+        s = ln.strip()
+        if s.startswith("|") and not re.match(r"^\|[\s:\-|]+\|$", s):
+            if len([c for c in s.strip("|").split("|") if c.strip()]) > 2:
+                over += 1
+    if over:
+        fails.append(f"표 3열+({over}행)")
+    return {"passed": not fails, "fails": fails, "char_count": cc,
+            "range": [lo, hi], "below": below, "above": above}
+
+
 def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> dict:
     """네이버 랭킹 신호(C-Rank·D.I.A.+·플레이스) 기준 채점(0~100) + 개선 경고.
     가점: 검색의도 정합·1차 경험·구체 수치·이미지 4+·Q&A·제목-본문 일치·롱테일.

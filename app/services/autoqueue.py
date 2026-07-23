@@ -456,6 +456,30 @@ def consume(t, files: list | None = None, plan: str = "free") -> dict:
                     _log.warning("[autoqueue] 트랙B GEO 재불통과 → 보류(미발행) t=%s kw=%r fails=%s",
                                  t.id, kw, ggate["fails"])
                     return {"ok": False, "geo_gate_failed": True, "keyword": kw, "fails": ggate["fails"]}
+            # 발행 규격 게이트(item 6 자수 + E-1 모바일 문단·표) — 트랙 A/B 공통. 위반 시 1회 재생성.
+            #   자수 하한 미달은 '실정보로만' 보강 재생성 → 그래도 미달이면 보류+안내(물타기·날조 금지, 정직 우선).
+            mg = seo.mobile_spec_gate(p.payload.get("body") or "", _ctype)
+            if not mg["passed"]:
+                _log.info("[autoqueue] 규격 게이트 1차 미달 t=%s kw=%r %s", t.id, kw, mg["fails"])
+                try:
+                    if mg["below"]:
+                        revise_piece(p, "글이 짧다. 단, 글자수를 채우려 같은 말 반복·일반론 부연·수식어 부풀리기 절대 금지. "
+                                        "매물 실값·검수 디테일·사장 경험 같은 '실제 정보'로만 보강해 더 구체적으로 써라. "
+                                        "채울 실정보가 없으면 억지로 늘리지 마라.")
+                    elif mg["above"]:
+                        revise_piece(p, "글이 너무 길다. 핵심을 유지하며 중복·군더더기를 압축해 더 간결하게 다시 써라(정보 손실 없이).")
+                    else:
+                        revise_piece(p, "모바일 규격 위반: 긴 문단은 3~4줄(90~130자)로 쪼개고, 표는 2열 이하로 재구성하라. 내용은 유지.")
+                except Exception:
+                    _log.exception("[autoqueue] 규격 재생성 실패 t=%s", t.id)
+                mg = seo.mobile_spec_gate(p.payload.get("body") or "", _ctype)
+            p.payload["spec_gate"] = mg
+            if mg["below"]:                              # 재생성 후에도 하한 미달 → 물타기 금지, 보류+안내
+                db.mark_writing(q["id"], "skipped",
+                                reason_append=f"자수 하한 미달({mg['char_count']}) — 실정보 부족. 사진·정보 추가 필요")
+                _log.warning("[autoqueue] 규격 하한 미달 → 보류(미발행) t=%s kw=%r 자수=%s", t.id, kw, mg["char_count"])
+                return {"ok": False, "spec_below": True, "keyword": kw, "char_count": mg["char_count"],
+                        "notice": "글이 짧아요 — 사진이나 매물 정보를 더 올려주시면 정보가 풍부한 글로 만들어드려요"}
             try:
                 from app.services import tracklinks
                 tracklinks.inject(t, p)

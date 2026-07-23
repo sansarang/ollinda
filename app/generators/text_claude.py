@@ -194,7 +194,7 @@ class BlogDraftGenerator(Generator):
             f"{seo.speaker_frame(strat.key)}\n"
             f"{seo.keywords_line(kws)}\n{closing}\n\n"
             f"{_tpl_sequence(tenant)}\n"
-            f"{seo.BLOG_DIRECTIVES}\n{seo.BLOG_SELL_STRUCT}\n{seo.RETENTION_DENSITY}\n{seo.COPY_PSYCH}\n{seo.FACTS_RULE}\n{seo.HUMAN_TOUCH}\n"
+            f"{seo.BLOG_DIRECTIVES}\n{seo.BLOG_SELL_STRUCT}\n{seo.RETENTION_DENSITY}\n{seo.MOBILE_SPEC}\n{seo.COPY_PSYCH}\n{seo.FACTS_RULE}\n{seo.HUMAN_TOUCH}\n"
             + seo.geo_directive(getattr(tenant, "biz_type", "local") or "local", tenant.name, prof.name,
                                 tenant.region, getattr(tenant, "brand_name", "") or "",
                                 seo.geo_questions(prof.name, tenant.region, getattr(prof, "pain_points", "")))

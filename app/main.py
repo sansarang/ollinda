@@ -4702,6 +4702,101 @@ def _naver_publish_confirm_box(tenant, blog, sec: str, cbtn: str, ok: str = "", 
             f"<button class='{cbtn} bg-indigo-600 hover:bg-indigo-700 whitespace-nowrap'>발행함 ✓</button></form></div>")
 
 
+def _md_inline(s: str) -> str:
+    """인라인 마크다운(**강조**) → <b>. HTML 이스케이프 후 변환(주입 방지). 업종 중립."""
+    import re as _r
+    s = esc(s or "")
+    s = _r.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
+    s = _r.sub(r"__(.+?)__", r"<b>\1</b>", s)
+    return s
+
+
+def _md_to_naver_html(md: str) -> str:
+    """마크다운 본문 → 네이버 스마트에디터 붙여넣기용 HTML(PHASE D).
+    본문 15px(font-family 미지정=에디터 기본체) / 소제목(##) 19px bold(h태그 대신 인라인 스타일) /
+    강조 bold / 표는 실제 <table>(2열 규격) / [사진N]·구분선·이모지 유지. 업종 중립."""
+    import re as _r
+    lines = (md or "").split("\n")
+    out, i, n = [], 0, len(lines)
+    _P = "<p style=\"font-size:15px;line-height:1.8;margin:0 0 12px\">{0}</p>"
+    while i < n:
+        ln = lines[i].rstrip()
+        s = ln.strip()
+        if not s:
+            i += 1
+            continue
+        if s in ("---", "***", "___"):
+            out.append("<hr style=\"border:none;border-top:1px solid #ddd;margin:16px 0\">")
+            i += 1
+            continue
+        if s.startswith("## "):                      # 소제목 → 19px bold(인라인)
+            out.append("<p style=\"font-size:19px;font-weight:bold;margin:18px 0 8px\">"
+                       + _md_inline(s[3:].lstrip("# ").strip()) + "</p>")
+            i += 1
+            continue
+        if s.startswith("### "):
+            out.append("<p style=\"font-size:17px;font-weight:bold;margin:14px 0 6px\">"
+                       + _md_inline(s[4:].strip()) + "</p>")
+            i += 1
+            continue
+        if s.startswith("|") and i + 1 < n and _r.match(r"^\s*\|[\s:\-|]+\|\s*$", lines[i + 1]):
+            # 표 블록: 헤더행 + 구분행 + 데이터행 → 실제 <table>(스마트에디터 지원)
+            rows = []
+            while i < n and lines[i].strip().startswith("|"):
+                rows.append([c.strip() for c in lines[i].strip().strip("|").split("|")])
+                i += 1
+            body_rows = [r for j, r in enumerate(rows) if not (j == 1 and all(_r.match(r"^[:\-\s]*$", c) for c in r))]
+            th = "<table style=\"border-collapse:collapse;width:100%;font-size:15px;margin:0 0 12px\">"
+            for j, r in enumerate(body_rows):
+                cells = "".join(
+                    f"<{'th' if j == 0 else 'td'} style=\"border:1px solid #ccc;padding:6px 8px;"
+                    f"{'background:#f5f5f5;font-weight:bold;' if j == 0 else ''}text-align:left\">{_md_inline(c)}</{'th' if j == 0 else 'td'}>"
+                    for c in r)
+                th += f"<tr>{cells}</tr>"
+            out.append(th + "</table>")
+            continue
+        if _r.match(r"^(\-|\*|•)\s+", s):             # 불릿 — •로(에디터 리스트 처리 편차 회피)
+            out.append(_P.format("• " + _md_inline(_r.sub(r"^(\-|\*|•)\s+", "", s))))
+            i += 1
+            continue
+        if _r.match(r"^\d+\.\s+", s):                 # 번호 리스트 — 번호 유지 평문형
+            out.append(_P.format(_md_inline(s)))
+            i += 1
+            continue
+        out.append(_P.format(_md_inline(s)))          # 일반 문단
+        i += 1
+    return "".join(out)
+
+
+def _md_to_plain(md: str) -> str:
+    """마크다운 본문 → 순수 평문(text/plain 폴백). ## 삭제·** 삭제·표는 '항목: 내용' 줄바꿈 서술. 업종 중립."""
+    import re as _r
+    lines = (md or "").split("\n")
+    out, i, n = [], 0, len(lines)
+    while i < n:
+        s = lines[i].strip()
+        if s.startswith("|") and i + 1 < n and _r.match(r"^\s*\|[\s:\-|]+\|\s*$", lines[i + 1]):
+            rows = []
+            while i < n and lines[i].strip().startswith("|"):
+                rows.append([c.strip() for c in lines[i].strip().strip("|").split("|")])
+                i += 1
+            data = [r for j, r in enumerate(rows) if not (j == 1 and all(_r.match(r"^[:\-\s]*$", c) for c in r))]
+            hdr = data[0] if data else []
+            for r in data[1:] if len(data) > 1 else data:
+                if len(r) == 2:
+                    out.append(f"{r[0]}: {r[1]}")     # 2열 → 항목: 내용
+                else:                                  # 3열+ → 첫 열을 라벨, 나머지는 헤더: 값
+                    _kv = ", ".join(f"{hdr[k]}: {c}" for k, c in enumerate(r) if k >= 1 and c and k < len(hdr))
+                    out.append(f"{r[0]} — {_kv}" if _kv else " · ".join(c for c in r if c))
+            continue
+        s = _r.sub(r"^#{1,4}\s*", "", s)              # ## 삭제
+        s = _r.sub(r"\*\*(.+?)\*\*", r"\1", s)        # ** 삭제
+        s = _r.sub(r"__(.+?)__", r"\1", s)
+        out.append(s)
+        i += 1
+    return "\n".join(out).strip()
+
+
 @app.get("/kit/{asset_id}/naver", response_class=HTMLResponse)
 def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
     """네이버 블로그 붙여넣기 전용 화면 — 제목/본문(사진 위치 표시)/사진 순서대로 다운."""
@@ -4789,11 +4884,12 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
         f"<div class='text-lg font-extrabold text-slate-900 mb-3'>{esc(title)}</div>"
         f"<textarea id='nvT' class='hidden'>{esc(title)}</textarea>"
         f"<button onclick=\"nvcp('nvT',this)\" class='{cbtn} bg-indigo-600 hover:bg-indigo-700'>제목 복사</button></div>"
-        # 본문
-        f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>2. 본문 <span class='text-emerald-600'>(사진 위치 표시 포함)</span></div>"
+        # 본문 — 리치텍스트 복사(PHASE D): text/html(서식 유지) + text/plain(기호 제거) dual-format
+        f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>2. 본문 <span class='text-emerald-600'>(붙여넣으면 소제목·굵기·표 서식 유지)</span></div>"
         f"<div class='bg-slate-50 rounded-xl p-4 text-sm text-slate-700 whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto mb-3'>{esc(body_marked)}</div>"
-        f"<textarea id='nvB' class='hidden'>{esc(body_marked)}</textarea>"
-        f"<button onclick=\"nvcp('nvB',this)\" class='{cbtn} bg-emerald-500 hover:bg-emerald-600 w-full'>전체 본문 복사</button></div>"
+        f"<div id='nvHtml' style='position:absolute;left:-9999px' aria-hidden='true'>{_md_to_naver_html(body_marked)}</div>"
+        f"<textarea id='nvPlain' class='hidden'>{esc(_md_to_plain(body_marked))}</textarea>"
+        f"<button onclick=\"copyRich2('nvHtml','nvPlain',this)\" style='min-height:48px' class='{cbtn} bg-emerald-500 hover:bg-emerald-600 w-full'>전체 본문 복사 (서식 유지)</button></div>"
         # 블로그 태그(쉼표 구분, 원클릭 복사) — 클립 해시태그(# 5개)와 형식·용도 구분
         + ((lambda _tags: (
             f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>태그 "
@@ -4839,7 +4935,16 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
         + "<div id='nvToast' class='fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-sm font-bold px-5 py-3 rounded-xl shadow-xl opacity-0 pointer-events-none transition-opacity'>✅ 복사됨</div>"
         + "<script>function nvcp(id,btn){var t=document.getElementById(id);omCopy(t.value);"
         "var o=btn.textContent;btn.textContent='✅ 복사됨';var tt=document.getElementById('nvToast');tt.style.opacity='1';"
-        "setTimeout(function(){btn.textContent=o;tt.style.opacity='0';},1600);}</script>")
+        "setTimeout(function(){btn.textContent=o;tt.style.opacity='0';},1600);}"
+        # PHASE D — dual-format 복사: text/html(서식) + text/plain(기호제거 폴백). 미지원 브라우저는 평문 폴백+안내.
+        "async function copyRich2(hid,pid,btn){var h=document.getElementById(hid),p=document.getElementById(pid);"
+        "var o=btn.textContent;var tt=document.getElementById('nvToast');"
+        "function done(m){btn.textContent=m;tt.textContent=m;tt.style.opacity='1';setTimeout(function(){btn.textContent=o;tt.style.opacity='0';tt.textContent='✅ 복사됨';},2200);}"
+        "try{if(navigator.clipboard&&window.ClipboardItem){await navigator.clipboard.write([new ClipboardItem("
+        "{'text/html':new Blob([h.innerHTML],{type:'text/html'}),'text/plain':new Blob([p.value],{type:'text/plain'})})]);"
+        "done('✅ 서식까지 복사됨! 네이버 글쓰기에 붙여넣기');return;}}catch(e){}"
+        "try{await omCopy(p.value);done('✅ 글 복사됨(이 폰은 평문 — 붙여넣고 소제목만 굵게)');}catch(e2){done('길게 눌러 복사');}}"
+        "</script>")
     return HTMLResponse(_subscriber_page("네이버 블로그", body))
 
 
