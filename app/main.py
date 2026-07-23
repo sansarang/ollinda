@@ -2361,7 +2361,9 @@ def _blog_tags(tenant, blog) -> list[str]:
     _sch3 = _isc.get_schema(getattr(tenant, "industry", ""), _bt3)
     _attr_vocab = _isc.attribute_tokens(_sch3)
     year = next(iter(_r.findall(r"(20\d{2}|19\d{2})", note)), "")
-    models = [w for w in _attr_vocab if w and w in note]
+    # 단어 경계 매칭 — 앞이 한글이면 불일치('플레이스'의 '레이' 배제, '레이 중고'·'그랜저 중고' 독립 등장은 유지).
+    # 규칙 하나(토큰 예외처리 없음): 속성 토큰이 다른 한글 단어의 '내부'에 박힌 경우만 오매칭에서 제외.
+    models = [w for w in _attr_vocab if w and _r.search(r"(?<![가-힣])" + _r.escape(w), note)]
     for md in dict.fromkeys(models[:2]):
         cand.append(_sq(md))
         if year:

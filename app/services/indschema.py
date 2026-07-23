@@ -175,7 +175,7 @@ def tag_consistency_gate(tags, schema, context_values, body_text, region="",
     지역·업종 일반태그는 통과(오탐 0). 반환: (kept, dropped[(tag, reason)])."""
     attr_vocab = [_norm_tag(t) for t in attribute_tokens(schema) if t]
     ctx = {_norm_tag(v) for v in (context_values or []) if v and _norm_tag(v)}
-    body_n = _norm_tag(body_text)
+    body_raw = (body_text or "").lower()   # 원문(공백 보존) — 단어 경계 판정용
     gens = {_norm_tag(g) for g in (general_tags or schema.get("general_tags") or []) if _norm_tag(g)}
     # 문법 리터럴(중고·추천 등 구조어) — 스키마 search_grammar의 플레이스홀더 제거 후 남는 단어
     struct = set(_TRADE_SUFFIX)
@@ -189,8 +189,11 @@ def tag_consistency_gate(tags, schema, context_values, body_text, region="",
         if len(st) >= 2:
             reg_stems.add(_norm_tag(st))
 
+    def _in_body(tok):    # 본문 등장 판정 — 단어 경계(앞이 한글이면 불일치: '플레이스'의 '레이' 배제,
+        return bool(tok) and bool(re.search(r"(?<![가-힣])" + re.escape(tok), body_raw))  # '레이 중고'는 유지)
+
     def _grounded(tok):   # 컨텍스트(권위) 우선 — 없을 때만 본문이 근거(비교언급 누수 차단)
-        return tok in ctx or (not ctx and tok in body_n)
+        return tok in ctx or (not ctx and _in_body(tok))
 
     kept, dropped = [], []
     for t in tags:
