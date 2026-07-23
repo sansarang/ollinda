@@ -1,14 +1,17 @@
 """
-사진 분석(비전) — Claude(opus-4-8) 멀티모달로 업로드 사진을 실제로 '보고' 분석.
+사진 분석(비전) — Claude 멀티모달로 업로드 사진을 실제로 '보고' 분석.
 업로드당 1회 호출 → 결과를 글/영상 생성 프롬프트에 넣어 '사진과 일치'하게.
 키 없으면 "" 반환(graceful, 메모만으로 생성).
+
+모델: Sonnet 기본(Opus는 멀티이미지에서 30~50s+ → 프론트/인프라 타임아웃으로 '분석 안 됨'.
+Sonnet은 사진 분석·오버레이 탐지 품질 충분하면서 ~3배 빠름). env LLM_VISION로 오버라이드 가능.
 """
 from __future__ import annotations
 
 import base64
 import os
 
-MODEL = "claude-opus-4-8"
+MODEL = os.environ.get("SHOPCAST_VISION_MODEL", "claude-sonnet-5")
 
 
 def configured() -> bool:
