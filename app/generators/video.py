@@ -1454,9 +1454,9 @@ class ShortVideoGenerator(Generator):
                         _da = self._audio_segment(None, _ddur, os.path.join(work, f"a_dc{i}.wav"))
                         if _dv and _da:
                             vclips.append(_dv); awavs.append(_da); durs.append(_ddur); t += _ddur
-                            logging.getLogger("shopcast.video").info("[card] 데이터 카드 삽입: %s / %s", _lab, _val)
+                            __import__("logging").getLogger("shopcast.video").info("[card] 데이터 카드 삽입: %s / %s", _lab, _val)
                     except Exception:
-                        logging.getLogger("shopcast.video").exception("[card] 데이터 카드 실패")
+                        __import__("logging").getLogger("shopcast.video").exception("[card] 데이터 카드 실패")
             # 2) 아웃트로 CTA 카드(무음) — 셀러는 판매 QR(추적링크) 삽입 → 스캔 시 성과 집계
             qr_url = ""
             if strat.key == "seller":
