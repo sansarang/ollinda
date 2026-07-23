@@ -3938,8 +3938,9 @@ def admin_overlay_test(asset_id: str = "", tid: str = "", limit: int = 16):
         "cv2": "미설치(no_cv2)" if any(a == "no_cv2" for a in acts) else "설치됨",
         "summary": {
             "탐지": sum(1 for r in rows if r.get("detected")),
-            "제거_inpainted": acts.count("inpainted"),
-            "폴백_reverted": sum(1 for a in acts if str(a).startswith("reverted")),
+            "완전제거": acts.count("inpainted"),
+            "부분제거": acts.count("inpainted_partial"),
+            "총제거오버레이수": sum(int(r.get("removed") or 0) for r in rows),
             "skip_전면b": acts.count("skip_type_b"),
             "skip_과대": acts.count("skip_large"),
             "무처리_none": acts.count("none"),

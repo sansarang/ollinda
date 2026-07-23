@@ -207,56 +207,62 @@ def _is_smudge(im, box: dict) -> bool:
         return False
 
 
+_MAX_PASSES = 4             # 한 사진에 오버레이 여럿(코너 로고 + 중앙 배지 등) → 없어질 때까지 반복 제거
+
+
 def remove_overlay(path: str, out: str | None = None) -> dict:
-    """A-2/A-3: 오버레이 탐지 → 유형 a(코너 스탬프)면 크롭 여백 없이 인페인트로 제거 →
-    2차 vision 재판별 + 얼룩 검사 → 미달 시 원본 유지(폴백). 유형 b(전면 반투명)·c(부착물)는 제거 안 함.
-    생성AI 금지 — cv2 고전기법만. 반환 {detected,type,coverage,action,restored}."""
-    rep = {"detected": False, "type": None, "coverage": None, "action": "none", "restored": False}
+    """A-2/A-3: 유형 a(위치 무관 국소 불투명 배지·로고) 오버레이를 vision으로 탐지→telea 인페인트로 제거,
+    남은 게 없을 때까지 최대 _MAX_PASSES 반복(코너 로고+중앙 배지 등 다중 대응). 유형 b(전면 반투명)·
+    c(피사체 부착물)는 제거 안 함. 각 패스 인페인트 결과를 유지(부분 제거 허용 — 지울 수 있는 건 다 지움).
+    생성AI 금지 — cv2 고전기법만. 반환 {detected,type,coverage,action,removed,kinds,restored}."""
+    rep = {"detected": False, "type": None, "coverage": None, "action": "none",
+           "removed": 0, "kinds": [], "restored": False}
     tmp = out or path
     if not (path and os.path.exists(path)):
         return rep
     try:
         from app import vision
-        det = vision.detect_overlay(path)
-    except Exception:
-        return rep
-    if not det.get("present"):
-        return rep
-    rep.update(detected=True, type=det.get("type"), coverage=det.get("coverage"))
-    if det.get("type") != "a":                                    # b=전면 반투명(제거 불가·UI 강등), c=부착물(present=false라 여기 안 옴)
-        rep["action"] = "skip_type_b"
-        return rep
-    if (det.get("coverage") or 1.0) > _REMOVE_MAX_COV:            # 코너 스탬프치고 과대 → 오탐 의심·보류
-        rep["action"] = "skip_large"
-        return rep
-    try:
         from PIL import Image, ImageOps
-        orig = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
-        box = {k: det.get(k, 0) for k in ("x0", "y0", "x1", "y1")}
-        fixed = _cv_inpaint(orig, box, "telea")
-        if fixed is None:
-            rep["action"] = "no_cv2"                              # cv2 미설치 → 원본 그대로(제거 안 함)
-            return rep
-        fixed.save(tmp, "JPEG", quality=92)
-        # A-3 품질 게이트 ① vision 2차 재판별 ② 얼룩(밋밋) 검사
-        try:
-            det2 = vision.detect_overlay(tmp)
-        except Exception:
-            det2 = {"present": True}                              # 재판별 실패 → 보수적 실패 처리
-        # A-3 품질 게이트: vision 2차 재판별이 신뢰 가능한 유일 트리거(얼룩 std 휴리스틱은 어두운 배경에서
-        # 깨끗한 인페인트를 오폴백 → 자문 로그로만 강등, revert는 vision 2차가 '여전히 있음' 할 때만).
-        rep["smudge_hint"] = _is_smudge(fixed, box)
-        if det2.get("present"):
-            orig.save(tmp, "JPEG", quality=92)                    # 워터마크 잔존 → 원본 유지 폴백
-            rep.update(action="reverted_still", restored=True)
-        else:
-            rep["action"] = "inpainted"
-        return rep
+        cur = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
     except Exception:
-        try:                                                      # 예외 시 원본 보존
-            from PIL import Image, ImageOps
-            ImageOps.exif_transpose(Image.open(path)).convert("RGB").save(tmp, "JPEG", quality=92)
-        except Exception:
-            pass
-        rep.update(action="error", restored=True)
         return rep
+    removed, kinds, stop_type = 0, [], None
+    for _pass in range(_MAX_PASSES):
+        probe = path if _pass == 0 else tmp                       # 2패스부터는 직전 결과(tmp)에서 재탐지
+        try:
+            det = vision.detect_overlay(probe)
+        except Exception:
+            break
+        if _pass == 0 and det.get("present"):
+            rep.update(detected=True, type=det.get("type"), coverage=det.get("coverage"))
+        if not det.get("present"):
+            break                                                 # 더 없음 → 완료(깨끗)
+        if det.get("type") != "a":                                # b(전면 반투명) 등 = 제거 불가 → 중단(지금까지 제거분 유지)
+            stop_type = det.get("type") or "b"
+            break
+        if (det.get("coverage") or 1.0) > _REMOVE_MAX_COV:        # 국소치고 과대 → 오탐 의심 → 중단
+            stop_type = "large"
+            break
+        box = {k: det.get(k, 0) for k in ("x0", "y0", "x1", "y1")}
+        fixed = _cv_inpaint(cur, box, "telea")
+        if fixed is None:
+            rep["action"] = "no_cv2"                              # cv2 미설치 → 원본 그대로
+            return rep
+        cur = fixed
+        removed += 1
+        if det.get("kind"):
+            kinds.append(det["kind"])
+        try:
+            cur.save(tmp, "JPEG", quality=92)                     # 다음 패스 탐지 대상 = 이 결과
+        except Exception:
+            break
+    rep["removed"] = removed
+    rep["kinds"] = kinds
+    if removed == 0:                                              # 제거한 것 없음 → 파일 미변경
+        rep["action"] = {"large": "skip_large", "b": "skip_type_b"}.get(stop_type, "none")
+        if stop_type and stop_type not in ("large", "b"):
+            rep["action"] = "skip_type_b"
+        return rep
+    # 지울 수 있는 오버레이는 다 제거 — 결과(tmp) 유지. b/과대가 남아 중단됐으면 부분 제거로 표기.
+    rep["action"] = "inpainted_partial" if stop_type else "inpainted"
+    return rep
