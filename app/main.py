@@ -6467,7 +6467,9 @@ def admin_regen_naver(asset_id: str):
                 except Exception:
                     pass
     if not npath:
-        return JSONResponse({"ok": False, "error": "naver 재생성 실패(로그 참조)", "old_kept": True}, status_code=500)
+        return JSONResponse({"ok": False, "error": "naver 재생성 실패",
+                             "build_note": (nmeta or {}).get("_build_note", "(사유 미기록)"),
+                             "old_kept": True}, status_code=500)
     for fp in (old_nv.get("path"), old_nv.get("body_path")):   # 이전 산출물 폐기(블러 패딩 파일 포함)
         if fp and fp != npath and os.path.exists(fp):
             try:

@@ -1233,6 +1233,9 @@ class ShortVideoGenerator(Generator):
         path, note, dur, _cover = self._build_scene_video(
             vid_imgs, SceneScript(hook=opening, sentences=sent, outro=outro, source="body_excerpt", evidence=body),
             kws, tenant, strat, f"{kw0} 정리")
+        _nlog.warning("[naver-video] _build_scene_video 결과 path=%s dur=%s note=%r", bool(path), dur, (note or "")[:200])
+        if not path:
+            return None, {"_build_note": (note or "")[:300]}     # 실패 사유 표면화(진단)
         # 30초 하한 가드(v2 1-4): 정보형 영상은 30초+가 체류·D.I.A.+ 가점 유리. 대본이 짧으면 씬 확장 1회.
         if path and dur and dur < 30 and _script_mode and len(sent) < 9:
             _nlog.warning("[naver-video] %s초 < 30 — 대본 씬 확장 재생성", dur)
