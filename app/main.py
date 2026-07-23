@@ -3888,12 +3888,35 @@ def admin_overlay_test(asset_id: str = "", tid: str = "", limit: int = 16):
         return JSONResponse({"ok": False, "error": "사진 없음"}, status_code=409)
     _scratch = "/tmp/overlay_test"
     os.makedirs(_scratch, exist_ok=True)
+    def _thumb_b64(fp, box=None):
+        try:
+            import base64 as _b64
+            import io as _io
+            from PIL import Image as _Im, ImageOps as _IO, ImageDraw as _ID
+            im = _IO.exif_transpose(_Im.open(fp)).convert("RGB")
+            im.thumbnail((420, 420))
+            if box:                                          # 탐지 bbox 빨간 테두리(전 이미지용)
+                W, H = im.size
+                d = _ID.Draw(im)
+                d.rectangle([box.get("x0", 0) * W, box.get("y0", 0) * H,
+                             box.get("x1", 0) * W, box.get("y1", 0) * H], outline=(255, 0, 0), width=3)
+            buf = _io.BytesIO(); im.save(buf, "JPEG", quality=72)
+            return "data:image/jpeg;base64," + _b64.b64encode(buf.getvalue()).decode()
+        except Exception:
+            return ""
     rows = []
     for i, p in enumerate(paths):
         cp = os.path.join(_scratch, f"c{i}.jpg")
         try:
+            from app import vision as _vs
+            det0 = _vs.detect_overlay(p)                     # kind·bbox 확보(원본 기준)
             _sh.copyfile(p, cp)
             rep = _pb.remove_overlay(cp, cp)     # 사본에서만 — 원본 세트 사진 불변
+            rep["kind"] = det0.get("kind")
+            if det0.get("present") and det0.get("type") == "a":
+                _bx = {k: det0.get(k, 0) for k in ("x0", "y0", "x1", "y1")}
+                rep["before"] = _thumb_b64(p, _bx)          # 전(빨간 박스)
+                rep["after"] = _thumb_b64(cp)               # 후(제거 시도 결과)
         except Exception as e:
             rep = {"action": "error", "err": str(e)[:80]}
         rep["file"] = os.path.basename(p)
