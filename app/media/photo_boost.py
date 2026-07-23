@@ -243,10 +243,12 @@ def remove_overlay(path: str, out: str | None = None) -> dict:
             det2 = vision.detect_overlay(tmp)
         except Exception:
             det2 = {"present": True}                              # 재판별 실패 → 보수적 실패 처리
-        smudge = _is_smudge(fixed, box)
-        if det2.get("present") or smudge:
-            orig.save(tmp, "JPEG", quality=92)                    # 미달 → 원본 유지 폴백
-            rep.update(action=("reverted_smudge" if smudge else "reverted_still"), restored=True)
+        # A-3 품질 게이트: vision 2차 재판별이 신뢰 가능한 유일 트리거(얼룩 std 휴리스틱은 어두운 배경에서
+        # 깨끗한 인페인트를 오폴백 → 자문 로그로만 강등, revert는 vision 2차가 '여전히 있음' 할 때만).
+        rep["smudge_hint"] = _is_smudge(fixed, box)
+        if det2.get("present"):
+            orig.save(tmp, "JPEG", quality=92)                    # 워터마크 잔존 → 원본 유지 폴백
+            rep.update(action="reverted_still", restored=True)
         else:
             rep["action"] = "inpainted"
         return rep
