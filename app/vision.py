@@ -166,11 +166,12 @@ def detect_personal_info(image_path: str) -> list[dict]:
 
 def detect_overlay(image_path: str) -> dict:
     """A-1: 사진 위 '오버레이성 표식' 구조화 판별 — 업체·플랫폼명 하드코딩 0(일반 '피사체가 아닌 덧씌운 그래픽' 판별).
-    반환 {present, type, x0..y1, coverage, kind}. type:
-      a=코너 스탬프형(가장자리·화면 10%↓)      → 제거 대상 후보
-      b=전면 반투명형(중앙·넓게 깔림)          → 제거 불가(원본 유지·강등)
-      c=피사체 부착물(번호판 가림막·스티커 등)  → 오버레이 아님·경고 아님(본인 가린 개인정보 오탐 금지)
-    확신 없으면 present=False(오탐 방지 기본값). 무키/실패 시 {present:False}."""
+    한 번의 호출로 '지워야 할 불투명 로고·문자·배지'를 모두 배열로 반환(반복 재탐지 스파이럴 방지).
+    반환 {present, type, x0..y1, coverage, kind, overlays:[{x0..y1,coverage,kind}, ...]}. type:
+      a=국소 불투명 로고·배지(위치 무관)  → 제거 대상(overlays에 개별 박스)
+      b=전면 반투명형(넓게 깔림)          → 제거 불가(원본 유지·강등)
+      c=피사체 부착물(번호판 가림막 등)   → 오버레이 아님(본인 가린 개인정보 오탐 금지)
+    ★ 반사·글레어·흐림 얼룩·피사체 자체 무늬는 오버레이 아님. 확신 없으면 present=False. 무키/실패 시 {present:False}."""
     if not (configured() and image_path and os.path.exists(image_path)):
         return {"present": False}
     try:
@@ -180,21 +181,20 @@ def detect_overlay(image_path: str) -> dict:
         import anthropic
         client = anthropic.Anthropic()
         prompt = (
-            "이 사진에 '촬영된 피사체가 아니라 사진 위에 덧씌워진 오버레이 그래픽'이 있는지 판별하라. "
-            "특정 업체·플랫폼·브랜드명과 무관하게, 순수하게 '피사체냐 덧씌운 그래픽이냐'로만 판단한다.\n"
-            "유형을 반드시 구분하라:\n"
-            "  a = 국소(작은) 불투명 로고·문자·배지 — 화면의 약 12% 이하. 위치 무관(모서리 스탬프든, "
-            "피사체 위에 '떠 있는' 배지·라벨 그래픽이든). 사진 여러 곳에 있으면 그중 '가장 두드러진 것 하나'만.\n"
-            "  b = 화면을 넓게 덮는 전면 반투명 워터마크·문자 밴드\n"
-            "  c = 피사체에 실제로 '부착된' 물체(번호판을 가린 종이·가림막, 차체 스티커 등) — 이것은 오버레이가 아님\n"
+            "이 사진 위에 '촬영된 피사체가 아니라 나중에 덧씌워진 불투명 그래픽'(로고·브랜드 문자·배지·"
+            "라벨·페이지 카운터·재생 UI 등)을 모두 찾아라. 특정 업체·플랫폼·브랜드명과 무관하게 판단한다.\n"
+            "반드시 '지워야 할 것'만: 뚜렷하고 불투명한 인공 그래픽. 다음은 오버레이가 '아니다'(절대 포함 금지):\n"
+            "  · 유리·차체에 비친 반사/글레어, 흐릿한 얼룩·그림자, 피사체 자체의 무늬·엠블럼·번호판\n"
+            "  · 화면을 넓게 덮는 전면 반투명 워터마크 밴드(이건 제거 불가 유형 b)\n"
+            "  · 피사체에 물리적으로 부착된 종이·가림막·스티커(유형 c)\n"
             "JSON 객체 하나만 출력(설명·코드블록 없이):\n"
-            '{"present":true|false,"type":"a|b|c","x0":0.0,"y0":0.0,"x1":0.0,"y1":0.0,"coverage":0.0,"kind":"짧은 설명"}\n'
-            "x0,y0=왼쪽위 x1,y1=오른쪽아래(0~1 정규화). 박스는 '그래픽이 실제 차지한 범위에 딱 맞게'(여백 최소).\n"
-            "coverage=오버레이가 덮은 면적 비율(0~1).\n"
-            "유형 c(피사체 부착물)이거나 오버레이가 없으면 present=false. 확신이 없어도 present=false. 오탐보다 미탐이 낫다."
+            '{"present":true|false,"type":"a|b|c","overlays":[{"x0":0.0,"y0":0.0,"x1":0.0,"y1":0.0,"coverage":0.0,"kind":"무엇"}]}\n'
+            "overlays=지워야 할 불투명 그래픽들의 배열. x0,y0=왼쪽위 x1,y1=오른쪽아래(0~1). 박스는 그래픽 범위에 딱 맞게(여백 최소).\n"
+            "type: 지울 국소 그래픽이 하나라도 있으면 'a', 전면 반투명뿐이면 'b', 부착물뿐이면 'c'.\n"
+            "지울 그래픽이 없거나 확신 없으면 present=false, overlays=[]. 반사·흐림을 그래픽으로 착각하지 마라. 오탐보다 미탐이 낫다."
         )
         resp = client.messages.create(
-            model=MODEL, max_tokens=300,
+            model=MODEL, max_tokens=500,
             messages=[{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64",
                  "media_type": _mt, "data": data}},
@@ -207,6 +207,15 @@ def detect_overlay(image_path: str) -> dict:
             return {"present": False}
         if d.get("type") == "c":                              # 피사체 부착물 → 오버레이 아님(오탐 방지)
             return {"present": False, "type": "c"}
+        ovs = [o for o in (d.get("overlays") or []) if isinstance(o, dict)
+               and all(k in o for k in ("x0", "y0", "x1", "y1"))]
+        if d.get("type") == "a" and not ovs:                  # a인데 박스 없음 → 신뢰 불가
+            return {"present": False}
+        d["overlays"] = ovs
+        if ovs:                                               # 하위호환: 대표(첫) 박스를 top-level에도
+            first = ovs[0]
+            for k in ("x0", "y0", "x1", "y1", "coverage", "kind"):
+                d.setdefault(k, first.get(k))
         return d
     except Exception:
         return {"present": False}

@@ -207,14 +207,11 @@ def _is_smudge(im, box: dict) -> bool:
         return False
 
 
-_MAX_PASSES = 4             # 한 사진에 오버레이 여럿(코너 로고 + 중앙 배지 등) → 없어질 때까지 반복 제거
-
-
 def remove_overlay(path: str, out: str | None = None) -> dict:
-    """A-2/A-3: 유형 a(위치 무관 국소 불투명 배지·로고) 오버레이를 vision으로 탐지→telea 인페인트로 제거,
-    남은 게 없을 때까지 최대 _MAX_PASSES 반복(코너 로고+중앙 배지 등 다중 대응). 유형 b(전면 반투명)·
-    c(피사체 부착물)는 제거 안 함. 각 패스 인페인트 결과를 유지(부분 제거 허용 — 지울 수 있는 건 다 지움).
-    생성AI 금지 — cv2 고전기법만. 반환 {detected,type,coverage,action,removed,kinds,restored}."""
+    """A-2/A-3: 단일 vision 호출로 '지워야 할 불투명 로고·배지'를 모두 받아(overlays 배열) 각각 telea 인페인트로
+    제거(한 사진에 코너 로고+중앙 배지 등 다중 대응, 반복 재탐지 스파이럴 없음 → 반사·글레어 과잉제거 방지).
+    유형 b(전면 반투명)·c(부착물)는 제거 안 함. coverage 과대 박스는 개별 skip. 생성AI 금지 — cv2 고전기법만.
+    반환 {detected,type,coverage,action,removed,kinds,restored}."""
     rep = {"detected": False, "type": None, "coverage": None, "action": "none",
            "removed": 0, "kinds": [], "restored": False}
     tmp = out or path
@@ -226,43 +223,40 @@ def remove_overlay(path: str, out: str | None = None) -> dict:
         cur = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
     except Exception:
         return rep
-    removed, kinds, stop_type = 0, [], None
-    for _pass in range(_MAX_PASSES):
-        probe = path if _pass == 0 else tmp                       # 2패스부터는 직전 결과(tmp)에서 재탐지
-        try:
-            det = vision.detect_overlay(probe)
-        except Exception:
-            break
-        if _pass == 0 and det.get("present"):
-            rep.update(detected=True, type=det.get("type"), coverage=det.get("coverage"))
-        if not det.get("present"):
-            break                                                 # 더 없음 → 완료(깨끗)
-        if det.get("type") != "a":                                # b(전면 반투명) 등 = 제거 불가 → 중단(지금까지 제거분 유지)
-            stop_type = det.get("type") or "b"
-            break
-        if (det.get("coverage") or 1.0) > _REMOVE_MAX_COV:        # 국소치고 과대 → 오탐 의심 → 중단
-            stop_type = "large"
-            break
-        box = {k: det.get(k, 0) for k in ("x0", "y0", "x1", "y1")}
+    try:
+        det = vision.detect_overlay(path)
+    except Exception:
+        return rep
+    if not det.get("present"):
+        return rep
+    rep.update(detected=True, type=det.get("type"), coverage=det.get("coverage"))
+    if det.get("type") != "a":                                    # b=전면 반투명(제거 불가·UI 강등), c=부착물(미탐)
+        rep["action"] = "skip_type_b"
+        return rep
+    overlays = det.get("overlays") or []
+    removed, kinds, skipped_large = 0, [], 0
+    for ov in overlays:
+        if (ov.get("coverage") or 1.0) > _REMOVE_MAX_COV:         # 국소치고 과대 → 오탐 의심 → 이 박스만 skip
+            skipped_large += 1
+            continue
+        box = {k: ov.get(k, 0) for k in ("x0", "y0", "x1", "y1")}
         fixed = _cv_inpaint(cur, box, "telea")
         if fixed is None:
             rep["action"] = "no_cv2"                              # cv2 미설치 → 원본 그대로
             return rep
         cur = fixed
         removed += 1
-        if det.get("kind"):
-            kinds.append(det["kind"])
-        try:
-            cur.save(tmp, "JPEG", quality=92)                     # 다음 패스 탐지 대상 = 이 결과
-        except Exception:
-            break
+        if ov.get("kind"):
+            kinds.append(ov["kind"])
     rep["removed"] = removed
     rep["kinds"] = kinds
-    if removed == 0:                                              # 제거한 것 없음 → 파일 미변경
-        rep["action"] = {"large": "skip_large", "b": "skip_type_b"}.get(stop_type, "none")
-        if stop_type and stop_type not in ("large", "b"):
-            rep["action"] = "skip_type_b"
+    if removed == 0:
+        rep["action"] = "skip_large" if skipped_large else "none"
         return rep
-    # 지울 수 있는 오버레이는 다 제거 — 결과(tmp) 유지. b/과대가 남아 중단됐으면 부분 제거로 표기.
-    rep["action"] = "inpainted_partial" if stop_type else "inpainted"
+    try:
+        cur.save(tmp, "JPEG", quality=92)                         # 제거 결과 저장
+    except Exception:
+        rep.update(action="error", restored=True)
+        return rep
+    rep["action"] = "inpainted_partial" if skipped_large else "inpainted"
     return rep
