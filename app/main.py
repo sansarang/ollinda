@@ -6623,15 +6623,14 @@ def admin_restore_token(tid: str = "", token: str = "", dry: str = "1"):
         for p in db.get_set_pieces(aid):
             pl = p.payload or {}
             tk = pl.get("target_keywords")
+            # token이 이 업종 스키마 속성 토큰(위에서 검증)이면 이 가게가 정당히 취급하는 것 → 누락분에 재추가.
+            #   (오제거 복원: 서비스업 axis0 토큰은 전부 정당하므로 무조건 재추가가 안전. 임의 토큰은 위 400에서 차단.)
             if isinstance(tk, list) and token not in tk:
-                # 원래 있었는지 확신 불가 → 제목/본문/gen_source에 이 토큰이 등장하는 피스에만 재추가(근거 보존)
-                _ctx = " ".join(str(pl.get(k) or "") for k in ("title", "selected_title", "gen_source", "body"))
-                if token in _ctx:
-                    restored.append({"asset": aid[:8], "piece": p.id[:8]})
-                    if dry != "1":
-                        pl["target_keywords"] = tk + [token]
-                        p.payload = pl
-                        db.save_piece(p)
+                restored.append({"asset": aid[:8], "piece": p.id[:8]})
+                if dry != "1":
+                    pl["target_keywords"] = tk + [token]
+                    p.payload = pl
+                    db.save_piece(p)
     return JSONResponse({"ok": True, "tid": tid, "token": token, "dry": dry == "1",
                          "restored_count": len(restored), "restored": restored[:40]})
 
