@@ -151,6 +151,46 @@ def analyze_all(image_paths: list[str], industry_name: str = "", max_imgs: int =
         return ""
 
 
+def build_catalog(image_paths: list[str], industry_name: str = "", max_imgs: int = 30) -> list[dict]:
+    """PHASE 2-A: 디렉터의 눈 — 사진별 구조화 카탈로그. 반환 [{id, subject, part, text, shot, flags}].
+    part(촬영 부위)는 vision이 '본 대로' 자유 명명(업종 하드코딩 0 — 엔진룸·실내·서류·계기판·외관·휠 등
+    사진에 실제 보이는 부위). shot=전체|클로즈업, flags=[흐림|표식|저해상]. 부실/실패 시 []."""
+    paths = [p for p in (image_paths or []) if p and os.path.exists(p)][:max_imgs]
+    if not (configured() and paths):
+        return []
+    import json as _j
+    import re as _r
+    from app import llm as _llm
+    out = []
+    for ci in range(0, len(paths), 6):                       # 6장 청크(rate limit·토큰 관리)
+        chunk = paths[ci:ci + 6]
+        try:
+            imgs64 = [_b64_for_vision(p) for p in chunk]
+            prompt = (
+                f"이미지들은 순서대로 [사진1]..[사진{len(chunk)}]이다. 업종: {industry_name or '일반'}.\n"
+                "각 사진을 마케팅 영상 편집자 관점에서 구조화 분석하라. 사진에 실제 보이는 것만(추측 금지).\n"
+                "JSON 배열만 출력(설명·코드블록 없이). 각 원소:\n"
+                '{"id":번호,"subject":"주요 피사체 한 줄","part":"촬영 부위(사진에 보이는 그대로 — 예: 외관 전면, '
+                '엔진룸, 실내 대시보드, 휠, 계기판, 서류/성능점검부, 트렁크 등. 특정 업종 어휘 강요 말고 실제 보이는 부위명)",'
+                '"text":"사진 속 글자 그대로(서류 항목·수치 등, 없으면 빈칸)","shot":"전체|클로즈업",'
+                '"flags":["흐림"|"표식"|"저해상" 중 해당되는 것만, 없으면 빈 배열]}\n'
+                "part는 '이 사진이 무엇을 보여주는 컷인지'다 — 서류 사진은 '서류', 엔진룸 사진은 '엔진룸'으로 정확히.")
+            resp = _llm.call_task("vision", prompt, 1400, default_model=MODEL, images=imgs64)
+            m = _r.search(r"\[.*\]", resp or "", _r.S)
+            arr = _j.loads(m.group(0)) if m else []
+            for i, e in enumerate(arr):
+                if isinstance(e, dict):
+                    out.append({"id": ci + i + 1,
+                                "subject": str(e.get("subject", ""))[:80],
+                                "part": str(e.get("part", ""))[:40],
+                                "text": str(e.get("text", ""))[:120],
+                                "shot": ("클로즈업" if "클로즈" in str(e.get("shot", "")) else "전체"),
+                                "flags": [f for f in (e.get("flags") or []) if f in ("흐림", "표식", "저해상")]})
+        except Exception:
+            continue
+    return out
+
+
 def detect_personal_info(image_path: str) -> list[dict]:
     """사진 속 개인정보 위치를 정규화 bbox로 반환 → 모자이크용. 실패/무키 시 []."""
     if not (configured() and image_path and os.path.exists(image_path)):

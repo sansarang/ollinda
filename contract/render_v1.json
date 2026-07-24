@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "shopcast 콘티(Storyboard) 계약 v1 — 디렉터 출력 = 렌더러 입력",
+  "description": "AI 디렉터가 출력하고 렌더러(현행 Python·향후 Go 워커)가 소비하는 유일 인터페이스. 렌더러는 이 콘티의 '실행자'이며 씬 구성·순서·길이·매칭을 자체 판단하지 않는다. 픽셀 생성 금지: shot.photo_id는 세트 실사진만, card는 세트 실값만.",
+  "type": "object",
+  "required": ["version", "meta", "scenes"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {"const": "render_v1"},
+    "meta": {
+      "type": "object",
+      "required": ["channel", "aspect", "canonical"],
+      "additionalProperties": false,
+      "properties": {
+        "channel": {"enum": ["naver", "shorts", "reels"], "description": "채널 스펙(길이·비율 결정)"},
+        "aspect": {"enum": ["9:16", "1:1", "16:9"]},
+        "canonical": {"type": "string", "description": "canonical 키워드(전 표면 단일 소스). 제목·해시태그 이것만 참조."},
+        "set_id": {"type": "string"},
+        "duration_target_sec": {"type": "number", "description": "채널 목표 길이(참고). 실제는 씬 weight 합으로 배분."}
+      }
+    },
+    "scenes": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 12,
+      "description": "콘텐츠가 씬 수를 정한다(고정 씬 수·균일 길이 금지). 글의 서사 순서를 따른다 — 사진 업로드 순서 아님.",
+      "items": {
+        "type": "object",
+        "required": ["role", "line", "shot", "duration_weight", "beat"],
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "enum": ["hook", "empathy", "reveal", "inspect", "docs", "data_card", "honesty", "cta"],
+            "description": "씬 역할(서사 비트). hook=훅, empathy=공감, reveal=핵심 공개, inspect=부위 검수, docs=서류, data_card=수치 카드, honesty=정직 고지(렌트·단점), cta=마무리."
+          },
+          "line": {
+            "type": "string",
+            "maxLength": 60,
+            "description": "자막·멘트. 본문 사실 범위 내 재작성(새 사실 0 — 기존 정직·사실 게이트 경유). 대상 지시어는 shot의 카탈로그 part와 일치해야(VG4)."
+          },
+          "shot": {
+            "type": "object",
+            "description": "이 씬에 무엇을 보여주나. 사진 배정(photo) 또는 카드(card) 택1. 억지 배정 금지 — 대응 사진 없으면 card 또는 생략.",
+            "oneOf": [
+              {
+                "required": ["photo_id", "crop"],
+                "additionalProperties": false,
+                "properties": {
+                  "photo_id": {"type": "integer", "description": "카탈로그의 사진 id(세트 실사진만). 픽셀 생성 금지."},
+                  "crop": {"enum": ["full", "closeup"], "description": "전체 또는 클로즈업(크롭·이동만 허용, 픽셀 생성 금지)."},
+                  "reason": {"type": "string", "description": "왜 이 사진(의미 기반 배정 근거 — line 대목 ↔ 카탈로그 part). 검증·로그용."}
+                }
+              },
+              {
+                "required": ["card"],
+                "additionalProperties": false,
+                "properties": {
+                  "card": {
+                    "type": "object",
+                    "required": ["value", "label"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "value": {"type": "string", "description": "세트 실값만(예 '12,272km'). 임의 수치 금지."},
+                      "label": {"type": "string", "description": "라벨(예 '실주행')."}
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "duration_weight": {
+            "type": "number",
+            "minimum": 0.5,
+            "maximum": 3.0,
+            "description": "상대 길이(균일 금지). 훅·카드·정직 고지 길게(1.5~3), 단순 나열 짧게(0.5~1). 실제 초는 채널 목표 × weight 정규화."
+          },
+          "beat": {"enum": ["normal", "pause", "punch"], "description": "리듬. pause=여운, punch=강조 컷."}
+        }
+      }
+    },
+    "notes": {"type": "string", "description": "디렉터 메모(폴백 사유·억지배정 회피 로그 등). 렌더 무관."}
+  }
+}

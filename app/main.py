@@ -6622,6 +6622,82 @@ def _regen_piece_common(asset_id: str, kind_val: str, channel_val: str = "", dry
     return {"ok": True, "action": "regenerated", "kind": kind_val, "new_title": _new_title}
 
 
+@app.get("/admin/set/{asset_id}/catalog")
+def admin_set_catalog(asset_id: str):
+    """PHASE 2-A: 사진 카탈로그(디렉터의 눈) — 세트 사진 R2 복원 → vision.build_catalog. V3 검증용.
+    반환 {n_photos, catalog:[{id,subject,part,text,shot,flags}], blocked?}. 카탈로그 부실이면 blocked."""
+    from app.domain.models import ContentKind as _CK
+    from app.services.ingest import _restore_media
+    pieces = db.get_set_pieces(asset_id)
+    blog = next((p for p in pieces if p.kind == _CK.BLOG), None)
+    if not blog:
+        return JSONResponse({"ok": False, "error": "블로그 피스 없음"}, status_code=404)
+    t = db.get_tenant(blog.tenant_id)
+    raw = (next((p.payload.get("image_paths") for p in pieces if (p.payload or {}).get("image_paths")), [])
+           or [])
+    paths = [x for x in raw if x and os.path.exists(x)] or _restore_media(blog.tenant_id, raw)
+    if not paths:
+        return JSONResponse({"ok": True, "blocked": "photo_lost", "n_photos": 0,
+                             "note": "사진 소실 — 재업로드 후 재시도(대체 이미지 금지)."})
+    cat = vision.build_catalog(paths, getattr(t, "industry", "") or "")
+    if not cat or len(cat) < max(1, len(paths) // 2):        # 카탈로그 부실 → 디렉터 콜 금지(앵커 게이트 원칙)
+        return JSONResponse({"ok": True, "blocked": "catalog_poor", "n_photos": len(paths),
+                             "catalog_n": len(cat), "note": "카탈로그 부실 — 영상 보류(재분석 필요)."})
+    return JSONResponse({"ok": True, "n_photos": len(paths), "catalog_n": len(cat), "catalog": cat})
+
+
+@app.get("/admin/set/{asset_id}/storyboard")
+def admin_set_storyboard(asset_id: str, channel: str = "naver"):
+    """PHASE 2-B: 디렉터 콘티 생성 — 세트 사진 카탈로그 + 본문 → director.build_storyboard(계약 render_v1).
+    V4(콘티 원문)·V5(line→사진 부위 대조) 검증용. 카탈로그/본문 부실이면 blocked(억지 생성 금지)."""
+    from app.domain.models import ContentKind as _CK
+    from app.services.ingest import _restore_media
+    from app.services import director as _dir
+    from app.generators.video import ShortVideoGenerator as _SVG
+    pieces = db.get_set_pieces(asset_id)
+    blog = next((p for p in pieces if p.kind == _CK.BLOG), None)
+    if not blog:
+        return JSONResponse({"ok": False, "error": "블로그 피스 없음"}, status_code=404)
+    t = db.get_tenant(blog.tenant_id)
+    pl = blog.payload or {}
+    body = pl.get("body") or ""
+    raw = pl.get("image_paths") or []
+    paths = [x for x in raw if x and os.path.exists(x)] or _restore_media(blog.tenant_id, raw)
+    if not paths:
+        return JSONResponse({"ok": True, "blocked": "photo_lost", "note": "사진 소실 — 재업로드 후."})
+    cat = vision.build_catalog(paths, getattr(t, "industry", "") or "")
+    if not cat or len(cat) < max(1, len(paths) // 2):
+        return JSONResponse({"ok": True, "blocked": "catalog_poor", "catalog_n": len(cat),
+                             "note": "카탈로그 부실 — 영상 보류."})
+    canon = _canonical_keyword(t, blog)
+    # 세트 실값(data_card 전용) — 기존 추출기 재사용
+    try:
+        from app.services import indschema as _isc
+        _sch = _isc.get_schema(getattr(t, "industry", "") or "", getattr(t, "biz_type", "local") or "local")
+        _dvals = _SVG._extract_data_points(body, pl.get("gen_source") or "", _sch,
+                                           getattr(t, "biz_type", "local") or "local")
+    except Exception:
+        _dvals = []
+    sb = _dir.build_storyboard(body, cat, canon, channel=channel, data_values=_dvals)
+    if not sb:
+        return JSONResponse({"ok": True, "blocked": "storyboard_failed",
+                             "note": "콘티 생성 실패(재시도 후) — 현행 로직 폴백 대상.", "catalog": cat})
+    # V5 대조: line → 배정 사진 부위
+    _by_id = {c["id"]: c for c in cat}
+    mapping = []
+    for s in sb.get("scenes", []):
+        sh = s.get("shot") or {}
+        if "photo_id" in sh:
+            _c = _by_id.get(sh["photo_id"], {})
+            mapping.append({"role": s.get("role"), "line": s.get("line", "")[:40],
+                            "photo_id": sh["photo_id"], "part": _c.get("part", ""),
+                            "crop": sh.get("crop"), "reason": sh.get("reason", "")[:50]})
+        else:
+            mapping.append({"role": s.get("role"), "line": s.get("line", "")[:40], "card": sh.get("card")})
+    return JSONResponse({"ok": True, "n_photos": len(paths), "canonical": canon,
+                         "catalog": cat, "storyboard": sb, "line_photo_mapping": mapping})
+
+
 @app.post("/admin/set/{asset_id}/regen-piece")
 def admin_regen_piece(asset_id: str, kind: str = "blog", channel: str = "", dry: str = ""):
     """전 피스 타입 공통 재생성 — kind=blog|short|caption|x_post|marketplace, channel(선택 youtube/instagram)."""
