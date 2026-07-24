@@ -58,6 +58,34 @@ def test_all_piece_types_have_generator():
         assert k in GENERATORS, f"{k} 생성기 누락 — 공통 재생성 경로가 이 타입을 못 다룸(피스 타입 누락 재발)"
 
 
+def test_all_generators_route_through_shared_keyword():
+    """구조 보증(#4): 키워드를 자체 결정하는 전 생성기가 seo.resolve_target_keyword(공유 관문)를 경유.
+    생성기별 raw seo.target_keywords 직결로 키워드를 정하던 계보(SHORT 캐스퍼) 재발 방지 —
+    새 생성기가 공유 관문을 안 거치면 이 테스트가 실패한다."""
+    import pathlib
+    base = pathlib.Path(__file__).parent.parent / "app"
+    # 키워드 결정 생성기 파일 → 공유 관문 호출 필수
+    for rel in ("generators/text_claude.py", "generators/video.py",
+                "generators/x_text.py", "generators/strategist.py"):
+        src = (base / rel).read_text(encoding="utf-8")
+        assert "resolve_target_keyword" in src, f"{rel}: 공유 키워드 관문(resolve_target_keyword) 미경유"
+
+
+def test_resolve_keyword_drops_phantom_keeps_anchor():
+    """공유 관문 자체가 phantom 차단 + 앵커 확정 — 그랜저 note→그랜저, bare note→제네릭(캐스퍼 미유입)."""
+    import app.seo as seo
+    kw_g, _ = seo.resolve_target_keyword(industry="중고차", region="부산 기장",
+                                         note="현대 더 뉴 그랜저 IG 매물", biz="seller",
+                                         content_type="sell", keyword_axis="product",
+                                         prof_name="중고차판매", verify_volume=False)
+    assert "캐스퍼" not in kw_g and "그랜저" in kw_g
+    kw_b, _ = seo.resolve_target_keyword(industry="중고차", region="부산 기장",
+                                         note="매물 실사진 세트", biz="seller",
+                                         content_type="sell", keyword_axis="product",
+                                         prof_name="중고차판매", verify_volume=False)
+    assert "캐스퍼" not in kw_b            # 앵커 부재 → 제네릭, 인기 타모델 미납치
+
+
 def test_visit_type_industry_not_filtered():
     """속성 앵커 축이 없는(또는 무의미한) 업종은 필터 무적용 — 업종 중립(방문형 기존 흐름 유지)."""
     # 존재하지 않는 업종 → 스키마 기본(속성 예시 토큰 비어있음) → 전부 통과

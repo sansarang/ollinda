@@ -24,8 +24,12 @@ class XPostGenerator(Generator):
         imgs = images or [asset.path]
         prof = resolve_industry(tenant.industry)
         strat = resolve_strategy(tenant)
-        kws = seo.target_keywords(prof.name, tenant.region, asset.note,
-                                  axis=strat.keyword_axis, brand=tenant.brand_name)
+        _kw0x, kws = seo.resolve_target_keyword(   # 공유 관문(전 생성기 공통)
+            industry=(getattr(tenant, "industry", "") or prof.name), region=tenant.region or "",
+            note=asset.note or "", biz=(getattr(tenant, "biz_type", "local") or "local"),
+            content_type=(getattr(asset, "content_type", "sell") or "sell"), brand=tenant.brand_name or "",
+            keyword_axis=strat.keyword_axis, target_kw_override=(getattr(asset, "target_kw", "") or ""),
+            tenant_id=tenant.id, prof_name=prof.name)
         buy = buy_block(tenant)
         # X는 외부 링크가 도달 50~90% 깎음(2026) → URL 제거하고 '검색/프로필' 유도만
         import re as _re

@@ -103,8 +103,12 @@ class CaptionGenerator(Generator):
         imgs = images or [asset.path]
         prof = resolve_industry(tenant.industry)
         strat = resolve_strategy(tenant)
-        kws = seo.target_keywords(prof.name, tenant.region, asset.note,
-                                  axis=strat.keyword_axis, brand=tenant.brand_name)
+        _kw0c, kws = seo.resolve_target_keyword(   # 공유 관문(전 생성기 공통)
+            industry=(getattr(tenant, "industry", "") or prof.name), region=tenant.region or "",
+            note=asset.note or "", biz=(getattr(tenant, "biz_type", "local") or "local"),
+            content_type=(getattr(asset, "content_type", "sell") or "sell"), brand=tenant.brand_name or "",
+            keyword_axis=strat.keyword_axis, target_kw_override=(getattr(asset, "target_kw", "") or ""),
+            tenant_id=tenant.id, prof_name=prof.name)
         from app import llm as _llm
         text = _llm.call_task("caption", self._prompt(tenant, asset, len(imgs), kws), 1200,
                               default_model=self.model)   # 인스타 캡션(이원화)
@@ -136,25 +140,21 @@ class BlogDraftGenerator(Generator):
         imgs = _select_slot_photos(imgs, asset.note or "")   # 슬롯 선별(권장 초과분은 뒤로 — 그리드·ZIP 전용)
         prof = resolve_industry(tenant.industry)
         strat = resolve_strategy(tenant)
-        kws = seo.target_keywords(prof.name, tenant.region, asset.note,
-                                  axis=strat.keyword_axis, brand=tenant.brand_name)
         kplan = seo.keyword_plan(prof.name, tenant.region, asset.note,
                                  axis=strat.keyword_axis, brand=tenant.brand_name)   # 대표+롱테일(PHASE 6)
         buy = buy_block(tenant)
-        kw0 = kplan.get("headline") or (kws[0] if kws else prof.name)
-        # 🎯 진단→생성 연결(상위노출 PHASE 1): 진단에서 고른 미노출 키워드가 있으면 그 키워드가 대표
-        tkw = (getattr(asset, "target_kw", "") or "").strip()
-        if tkw:
-            kw0 = tkw
-            kws = list(dict.fromkeys([tkw] + kws))[:10]
-            kplan["longtail"] = []      # 1글 1키워드(자동 글감 큐): 타깃 외 키워드 소제목 헤딩화 금지
-        # 글 유형(트랙): sell=트랙 A(매물·시공, 불변) / info=트랙 B(정보성·GEO, 신설)
         _ctype = (getattr(asset, "content_type", "sell") or "sell")
-        # ★ 타깃 키워드 단일 관문(경로 무관) — 기초지역 배제·차종 서열·검색량. 셀러·병행 우회 원천 차단(3번째 재발 근본책).
-        #    트랙 B(info)는 비지역 질문형 키워드 → 상업 관문(지역 결합·매물 서열) 미적용(트랙 B 관문은 큐에서 이미 통과).
         _biz_g = (getattr(tenant, "biz_type", "local") or "local")
-        # ★ canonical_region — 지역 토큰 단일 소스(키워드 관문과 동일: 검색량 실측 + 기초지역 배제).
-        #   제목 3안·훅·태그·해시태그·영상 등 지역 등장 전 표면이 이것만 참조(프로필 주소 직접 추출 제거).
+        tkw = (getattr(asset, "target_kw", "") or "").strip()   # 진단 유래 미노출 키워드(있으면 대표)
+        # ★ 키워드 결정 = 공유 관문 seo.resolve_target_keyword(전 생성기 공통) — phantom 필터·앵커 게이트·
+        #   검색량·기초지역 배제 일괄. 생성기별 자체 결정 금지(3번째 재발 근본책 + SHORT/캐스퍼 계보 차단).
+        kw0, kws = seo.resolve_target_keyword(
+            industry=(getattr(tenant, "industry", "") or prof.name), region=tenant.region or "",
+            note=asset.note or "", biz=_biz_g, content_type=_ctype, brand=tenant.brand_name or "",
+            keyword_axis=strat.keyword_axis, target_kw_override=tkw, tenant_id=tenant.id, prof_name=prof.name)
+        if tkw:
+            kplan["longtail"] = []      # 1글 1키워드(자동 글감 큐): 타깃 외 키워드 소제목 헤딩화 금지
+        # ★ canonical_region — 지역 토큰 단일 소스(검색량 실측 + 기초지역 배제).
         try:
             from app.services import indschema as _iscr
             _hookr = _iscr.get_schema(getattr(tenant, "industry", ""), _biz_g).get("allow_region_hook")
@@ -165,48 +165,6 @@ class BlogDraftGenerator(Generator):
         _reg_txt = _creg or "전국"                        # 프롬프트 표기용(셀러=전국)
         _title_reg = (f"지역명은 '{_creg}'만 쓰고 구·군 등 기초지역 지명은 제목에 넣지 마라."
                       if _creg else "제목에 지역 지명을 넣지 마라(전국 대상).")
-        if _ctype != "info" and _biz_g in ("seller", "hybrid"):
-            import re as _rpm
-            import logging as _lgk
-            _slog = _lgk.getLogger("shopcast.seo")
-            try:
-                from app.services import indschema as _iscpm
-                _axes_pm = (_iscpm.get_schema(getattr(tenant, "industry", ""), _biz_g).get("attribute_axes") or [])
-                _model_toks = (_axes_pm[0].get("tokens") if _axes_pm else []) or []   # 1축=핵심 속성(차종·향·메뉴)
-            except Exception:
-                _model_toks = []
-            try:
-                _inv = [c.get("model") for c in db.recent_inventory_context(tenant.id, limit=6) if c.get("model")]
-            except Exception:
-                _inv = []
-            # ★ Layer 1(2차 방어): searchad 주입 등 '유령 속성 키워드'(현재 세트 note·재고에 없는 속성 토큰)
-            #   제거 — 그랜저 딜러에 '캐스퍼중고가격', 캔들집에 타향, 카페에 타메뉴 키워드 차단(업종 중립).
-            _kept, _drop = seo.drop_phantom_attr_kws([kw0] + list(kws), getattr(tenant, "industry", ""),
-                                                     _biz_g, context_text=(asset.note or ""), inventory_models=_inv)
-            if _drop:
-                _slog.warning("[phantom-filter] 유령 속성 키워드 제거(%d): %s", len(_drop), _drop[:6])
-            if _kept:
-                kw0 = _kept[0]
-                kws = list(dict.fromkeys(_kept))[:10]
-            # primary_model = '현재 세트'(사진분석 note 우선 → kw0). 스키마 순서 tie-break 대신 note 실피사체 우선.
-            def _first_model(src):
-                return next((t for t in _model_toks
-                             if t and _rpm.search(r"(?<![가-힣])" + _rpm.escape(t), src or "")), "")
-            _pm = _first_model(asset.note) or _first_model(kw0)
-            # ★ Layer 2b(앵커 부재 게이트): 속성 앵커가 기대되는 업종(_model_toks 존재)인데 현재 세트에 앵커 0
-            #   (note·kw0 어디에도 스키마 속성 없음)이면 검색량 랭킹으로 넘기지 마라 — 앵커 없는 세트가 인기
-            #   타모델 키워드에 납치되는 구조 차단. 안전 제네릭(지역+업종)으로 확정. 방문형(속성축 없는 업종)은 미적용.
-            if _model_toks and not _pm and not _first_model(" ".join(kws)):
-                _gk = f"{seo._kw_shorten(tenant.region or '')} {prof.name}".strip() or prof.name
-                _slog.warning("[anchor-gate] 앵커 부재 → 검색량 랭킹 보류, 제네릭 확정: %r (note앵커0)", _gk)
-            else:
-                _gk = seo.select_target_keyword([kw0] + list(kws), _biz_g, tenant.region or "",
-                                                prof.name, tenant_id=tenant.id, primary_model=_pm)
-            _slog.warning("[target-gate] biz=%s pm=%r kw0=%r → %r", _biz_g, _pm, kw0, _gk)
-            if _gk:
-                kw0 = _gk
-                kws = list(dict.fromkeys([_gk] + [k for k in kws
-                          if not seo.is_basic_region_kw(k, tenant.region or "", _biz_g)]))[:10]
         if strat.closing == "buy":
             closing = ("[마무리] 글 끝은 '구매 유도'로. 상세페이지/스토어로 자연스럽게 연결하고 찜·후기를 권하라."
                        + (f" 구매 안내 문구: {buy}" if buy else ""))

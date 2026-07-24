@@ -963,8 +963,13 @@ class ShortVideoGenerator(Generator):
         vid_imgs = self._downscale_for_video(imgs)   # 대용량 원본(5712×4284) → zoompan 타임아웃 방지(백그라운드 스레드)
         prof = resolve_industry(tenant.industry)
         strat = resolve_strategy(tenant)
-        kws = seo.target_keywords(prof.name, tenant.region, asset.note,
-                                  axis=strat.keyword_axis, brand=tenant.brand_name)
+        # ★ 키워드 = 공유 관문(전 생성기 공통) — SHORT가 자체 target_keywords로 정하다 캐스퍼에 납치된 계보 차단.
+        _kw0s, kws = seo.resolve_target_keyword(
+            industry=(getattr(tenant, "industry", "") or prof.name), region=tenant.region or "",
+            note=asset.note or "", biz=(getattr(tenant, "biz_type", "local") or "local"),
+            content_type=(getattr(asset, "content_type", "sell") or "sell"), brand=tenant.brand_name or "",
+            keyword_axis=strat.keyword_axis, target_kw_override=(getattr(asset, "target_kw", "") or ""),
+            tenant_id=tenant.id, prof_name=prof.name)
         buy = buy_block(tenant)
         cta_hint = (f"마지막 자막/내레이션은 구매 유도: {buy}" if strat.closing in ("buy", "both") and buy
                     else "마지막 자막/내레이션은 방문·예약 유도(지역/연락)")

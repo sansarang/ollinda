@@ -316,6 +316,66 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
     return cands[0] if cands else fallback
 
 
+def resolve_target_keyword(industry: str, region: str, note: str, biz: str = "local",
+                           content_type: str = "sell", brand: str = "", keyword_axis: str = "local",
+                           target_kw_override: str = "", tenant_id: str = "", prof_name: str = "",
+                           verify_volume: bool = True) -> tuple:
+    """★ 전 생성기 공통 키워드 결정 단일 관문 — 키워드를 자체 결정하는 유일 경로.
+    ① target_keywords 후보 생성 → ② Layer1 phantom 필터(현재 세트·재고 밖 속성 토큰 제거) →
+    ③ primary_model(사진분석 note 우선) → ④ Layer2 앵커 게이트(앵커 부재 시 검색량 랭킹 보류·제네릭) →
+    ⑤ select_target_keyword(검색량 관문 + 기초지역 배제). 반환 (kw0, kws).
+    생성기가 이 함수를 안 거치고 seo.target_keywords로 직접 키워드를 정하면 phantom·기초지역 누수 재발."""
+    import logging as _lgk
+    _slog = _lgk.getLogger("shopcast.seo")
+    prof_name = prof_name or ((industry or "").replace("/", ",").split(",")[0].strip())
+    kws = target_keywords(prof_name, region, note, axis=keyword_axis, brand=brand)
+    kplan = keyword_plan(prof_name, region, note, axis=keyword_axis, brand=brand)
+    kw0 = kplan.get("headline") or (kws[0] if kws else prof_name)
+    tkw = (target_kw_override or "").strip()
+    if tkw:
+        kw0 = tkw
+        kws = list(dict.fromkeys([tkw] + kws))[:10]
+    _biz = biz or "local"
+    if content_type != "info" and _biz in ("seller", "hybrid"):
+        import re as _rpm
+        try:
+            from app.services import indschema as _iscpm
+            _axes = (_iscpm.get_schema(industry, _biz).get("attribute_axes") or [])
+            _model_toks = (_axes[0].get("tokens") if _axes else []) or []
+        except Exception:
+            _model_toks = []
+        _inv = []
+        if tenant_id:
+            try:
+                from app import db as _db
+                _inv = [c.get("model") for c in _db.recent_inventory_context(tenant_id, limit=6) if c.get("model")]
+            except Exception:
+                pass
+        _kept, _drop = drop_phantom_attr_kws([kw0] + list(kws), industry, _biz,
+                                             context_text=(note or ""), inventory_models=_inv)
+        if _drop:
+            _slog.warning("[resolve-kw] phantom 제거(%d): %s", len(_drop), _drop[:5])
+        if _kept:
+            kw0 = _kept[0]
+            kws = list(dict.fromkeys(_kept))[:10]
+
+        def _fm(src):
+            return next((t for t in _model_toks
+                         if t and _rpm.search(r"(?<![가-힣])" + _rpm.escape(t), src or "")), "")
+        _pm = _fm(note) or _fm(kw0)
+        if _model_toks and not _pm and not _fm(" ".join(kws)):     # 앵커 부재 → 검색량 랭킹 보류·제네릭
+            _gk = f"{_kw_shorten(region or '')} {prof_name}".strip() or prof_name
+            _slog.warning("[resolve-kw] 앵커 부재 → 제네릭 확정: %r", _gk)
+        else:
+            _gk = select_target_keyword([kw0] + list(kws), _biz, region or "", prof_name,
+                                        tenant_id=tenant_id, primary_model=_pm, verify_volume=verify_volume)
+        if _gk:
+            kw0 = _gk
+            kws = list(dict.fromkeys([_gk] + [k for k in kws
+                       if not is_basic_region_kw(k, region or "", _biz)]))[:10]
+    return kw0, kws
+
+
 def keyword_plan(industry_name: str, region: str, note: str = "", axis: str = "local", brand: str = "") -> dict:
     """대표키워드 1개(제목) + 롱테일 2~3개(본문 소제목) + 실검색량 여부('추정') — 성장 PHASE 5.
     지역+업종+의도 3요소 조합, 실검색량 500~5,000 롱테일 우선(searchad 주경로, 무키 시 규칙 폴백=추정)."""

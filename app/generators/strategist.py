@@ -19,8 +19,12 @@ def _fallback_brief(tenant, asset) -> dict:
     """Claude 없이도 기존 로직으로 일관된 브리프 구성."""
     prof = resolve_industry(tenant.industry)
     strat = resolve_strategy(tenant)
-    kws = seo.target_keywords(prof.name, tenant.region, asset.note,
-                              axis=strat.keyword_axis, brand=tenant.brand_name)
+    _kw0b, kws = seo.resolve_target_keyword(   # 공유 관문(전 생성기 공통 — 브리프 core_keyword도 phantom 차단)
+        industry=(getattr(tenant, "industry", "") or prof.name), region=tenant.region or "",
+        note=asset.note or "", biz=(getattr(tenant, "biz_type", "local") or "local"),
+        content_type=(getattr(asset, "content_type", "sell") or "sell"), brand=tenant.brand_name or "",
+        keyword_axis=strat.keyword_axis, target_kw_override=(getattr(asset, "target_kw", "") or ""),
+        tenant_id=tenant.id, prof_name=prof.name)
     fmt = pick_format(getattr(tenant, "biz_type", "local") or "local", asset.note)
     return {
         "angle": f"{prof.name}의 핵심 매력을 솔직하게",
