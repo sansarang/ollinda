@@ -39,7 +39,7 @@ except Exception:
 import threading as _threading
 # 동시 렌더 상한 — ffmpeg 폭주(업로드 N건=프로세스 N개) 방지. PHASE 1: 기본 1건 직렬화(디스크·CPU 안전).
 RENDER_SEM = _threading.BoundedSemaphore(int(os.environ.get("SHOPCAST_RENDER_CONCURRENCY", "1")))
-_RENDER_FLOOR_MB = int(os.environ.get("SHOPCAST_RENDER_FLOOR_MB", "300"))   # 이하면 렌더 보류(만차 502 차단)
+_RENDER_FLOOR_MB = int(os.environ.get("SHOPCAST_RENDER_FLOOR_MB", "120"))   # 이하면 렌더 보류(만차 502 차단). 출력 mp4 ~10MB라 120MB=충분한 안전마진(볼륨 445MB)
 
 
 def _disk_free_mb(path: str = None) -> "int | None":
