@@ -6758,7 +6758,7 @@ def admin_set_storyboard(asset_id: str, channel: str = "naver"):
 
 
 @app.get("/admin/set/{asset_id}/render-storyboard")
-def admin_render_storyboard(asset_id: str, channel: str = "naver", price: str = ""):
+def admin_render_storyboard(asset_id: str, channel: str = "naver", price: str = "", mileage: str = ""):
     """2-C 콘티→렌더 어댑터 실행 — catalog→director→ShortVideoGenerator.render_storyboard.
     콘티 존재 시에만 어댑터, 없으면 blocked(호출부가 기존 경로 폴백). 렌더 큐(RENDER_SEM)·디스크 하한 게이트 경유.
     반환: 디렉터판 영상 URL + 씬별 [콘티 지정 vs 렌더 실행] 대조 로그."""
@@ -6795,6 +6795,7 @@ def admin_render_storyboard(asset_id: str, channel: str = "naver", price: str = 
     #   어디에도 없으면 ''=가격 카드 금지(서류 출고가 승격 차단).
     _gsrc = pl.get("gen_source") or ""
     _sale = (price or "").strip() or _vid._resolve_sale_price(_gsrc, body)
+    _mile = (mileage or "").strip()   # 주행거리 canonical(딜러 명시) — 전 표면 단일화 기준
     try:
         from app.services import indschema as _isc
         _sch = _isc.get_schema(getattr(t, "industry", "") or "", getattr(t, "biz_type", "local") or "local")
@@ -6814,7 +6815,8 @@ def admin_render_storyboard(asset_id: str, channel: str = "naver", price: str = 
     # 렌더 큐(동시성 세마포어) 경유 — 만차·중복 렌더 방지(기존 게이트 불변 재사용)
     with _vid.RENDER_SEM:
         vp, note, dur, cover, compare = gen.render_storyboard(
-            sb, img_by_id, kws, t, strat, title=(pl.get("title") or canon), sale_price=_sale)
+            sb, img_by_id, kws, t, strat, title=(pl.get("title") or canon),
+            sale_price=_sale, mileage=_mile)
     if not vp:
         return JSONResponse({"ok": True, "blocked": "render_failed", "note": note, "compare": compare})
     vurl = f"/admin/media/{t.id}/{os.path.basename(vp)}"
@@ -6823,6 +6825,7 @@ def admin_render_storyboard(asset_id: str, channel: str = "naver", price: str = 
                          "duration_sec": dur, "n_scenes_directed": len(sb.get("scenes", [])),
                          "n_scenes_rendered": len([c for c in compare if c.get("dur")]),
                          "canonical": canon, "sale_price": _sale or "(미명시 — 가격 카드 없음)",
+                         "mileage": _mile or "(미명시 — 단일화 안 함)",
                          "compare": compare,
                          "escalation_trace": getattr(_dir, "_SB_TRACE", [])})
 

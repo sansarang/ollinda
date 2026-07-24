@@ -148,6 +148,77 @@ _PRICE_RE = __import__("re").compile(r"(\d[\d,]*\s*만\s?원|\d[\d,]{2,}\s*원)"
 _EVIDENCE_REF = __import__("re").compile(
     r"(\d[\d,]*\s*(?:km|㎞|만\s?km|만원|원|년식)|일치|기록부|점검부|성능부|계기판|주행거리|확인해)")
 
+# ── TTS 숫자 발화 정규화(자막 원문 불변, 발화 텍스트만) + 주행거리 단일화 ──
+_KR_DIG = ["영", "일", "이", "삼", "사", "오", "육", "칠", "팔", "구"]
+_KR_POS = ["", "십", "백", "천"]
+_KR_BIG = ["", "만", "억", "조"]
+
+
+def _num_to_kr(n: int) -> str:
+    """정수 → 사이-한국어 수사. 12272→'만 이천이백칠십이', 2900→'이천구백', 2022→'이천이십이'."""
+    if n == 0:
+        return "영"
+    parts, gi = [], 0
+    while n > 0:
+        grp = n % 10000
+        if grp:
+            if grp == 1 and gi > 0:
+                parts.append(_KR_BIG[gi])                 # 만/억 앞 '일' 생략(만, 억)
+            else:
+                g, ui, digs = grp, 0, []
+                while g > 0:
+                    d = g % 10
+                    if d:
+                        digs.append(("" if (d == 1 and ui > 0) else _KR_DIG[d]) + _KR_POS[ui])
+                    g //= 10
+                    ui += 1
+                parts.append("".join(reversed(digs)) + _KR_BIG[gi])
+        n //= 10000
+        gi += 1
+    return " ".join(reversed(parts))
+
+
+def _speechify(text: str) -> str:
+    """자막 원문은 그대로 두고, TTS로 넘길 '발화 텍스트'만 생성 — 수량 숫자를 한국어 수사로, 단위 정규화.
+    ('12,272km'→'만 이천이백칠십이 킬로미터', '2,900만원'→'이천구백만 원', '2022년식'→'이천이십이 년식').
+    낱자 유형(전화·차대번호 등 하이픈/장문 숫자열)은 변환 예외(패턴 판별, 특정값 하드코딩 없음)."""
+    import re as _r
+    if not text:
+        return text
+    _n = lambda s: _num_to_kr(int(s.replace(",", "")))     # noqa: E731
+
+    def _rep(pat, fmt):
+        nonlocal text
+        text = _r.sub(pat, lambda m: fmt(m), text)
+    # 순서 중요: 만원→원, 만km→km, 년식→년
+    _rep(r"(?<![\d-])(\d[\d,]*)\s*만\s*원", lambda m: _n(m.group(1)) + "만 원")
+    _rep(r"(?<![\d-])(\d[\d,]{1,})\s*원", lambda m: _n(m.group(1)) + " 원")
+    _rep(r"(?<![\d-])(\d[\d,]*)\s*만\s*(?:km|㎞|키로)", lambda m: _n(m.group(1)) + "만 킬로미터")
+    _rep(r"(?<![\d-])(\d[\d,]{1,})\s*(?:km|㎞|키로)", lambda m: _n(m.group(1)) + " 킬로미터")
+    _rep(r"(?<![\d-])(\d{4})\s*년\s*식", lambda m: _n(m.group(1)) + " 년식")
+    _rep(r"(?<![\d-])(\d[\d,]*)\s*년(?!식)", lambda m: _n(m.group(1)) + " 년")
+    _rep(r"(?<![\d-])(\d[\d,]*)\s*(개|명|장|회|분|시간|퍼센트|명분)", lambda m: _n(m.group(1)) + " " + m.group(2))
+    return text
+
+
+def _speech_number_left(text: str) -> str:
+    """발화 게이트 — 변환 안 된 4자리+ 수량 숫자가 남아 있으면 그 값 반환(반려용). 하이픈 숫자열(전화·VIN)은 예외."""
+    import re as _r
+    m = _r.search(r"(?<![\d-])\d{4,}(?![\d-])", text or "")
+    return m.group(0) if m else ""
+
+
+def _normalize_mileage(text: str, canonical: str) -> str:
+    """주행거리 단일화 — 자막·본문의 km 수치를 canonical 하나로 통일(오판독값 제거). canonical='12,272km' 형태."""
+    import re as _r
+    if not (text and canonical):
+        return text
+    cm = _r.search(r"[\d,]{2,}", canonical)
+    if not cm:
+        return text
+    cval = cm.group(0)
+    return _r.sub(r"([\d,]{2,})(\s*(?:km|㎞|키로))", lambda m: cval + m.group(2), text)
+
 
 def _resolve_sale_price(gen_source: str, body: str = "") -> str:
     """딜러가 '명시'한 판매가만 반환 — 서류 유래 수치(출고가·취득가)는 절대 아님. 없으면 ''(가격 카드 금지).
@@ -1684,7 +1755,7 @@ class ShortVideoGenerator(Generator):
 
     # ───────────────── 콘티→렌더 어댑터 (2-C) — 결정권만 콘티로 ─────────────────
     def render_storyboard(self, sb: dict, img_by_id: dict, kws, tenant, strat, title="",
-                          evidence="", sale_price=""):
+                          evidence="", sale_price="", mileage=""):
         """AI 디렉터 콘티(render_v1) → mp4. ★ 새 렌더 로직 발명 없음 — _build_scene_video 자산
         (_scene_video/_scene_card_video/_data_card_png/_audio_segment/_concat*/_post_overlay/_mux)
         을 그대로 호출하고, 씬 순서·사진·crop·길이·카드 '결정'만 콘티가 내린다.
@@ -1718,6 +1789,9 @@ class ShortVideoGenerator(Generator):
             for i, s in enumerate(scenes):
                 role = s.get("role", "")
                 line = (s.get("line") or "").strip()
+                # ★ 주행거리 단일화: 자막·발화 모두 canonical 하나로(오판독값 제거). 전 표면 동일 수치.
+                if mileage:
+                    line = _normalize_mileage(line, mileage)
                 sh = s.get("shot") or {}
                 spec_line = {"role": role, "line": line[:40],
                              "weight": round(float(s.get("duration_weight", 1) or 1), 2)}
@@ -1728,8 +1802,17 @@ class ShortVideoGenerator(Generator):
                     compare.append({**spec_line, "shot": (sh.get("card") or sh.get("photo_id")),
                                     "실행": f"탈락(VG3 가격: {_pv})", "dur": 0})
                     continue
-                # line → TTS(음성) + ASS 자막(기존 스타일 토큰 그대로)
-                seg_tts, word_times = tts_lib.synthesize_timed(line, work) if line else (None, [])
+                # ★ TTS 발화 정규화: 자막(line) 원문 불변, 발화 텍스트만 숫자→한국어 수사. 게이트로 미변환 검출.
+                _speak = _speechify(line)
+                _left = _speech_number_left(_speak)
+                if _left:
+                    dropped += 1
+                    compare.append({**spec_line, "실행": f"탈락(발화 미변환 숫자: {_left})", "dur": 0})
+                    continue
+                # line → TTS(발화 정규화본) + ASS 자막(원문 line). 발화≠자막이면 단어싱크 비활성(카라오케 드리프트 방지).
+                seg_tts, word_times = tts_lib.synthesize_timed(_speak, work) if line else (None, [])
+                if _speak != line:
+                    word_times = []
                 td = _probe_dur(seg_tts) if seg_tts else 0
                 # ★ 예산 정합: 씬 길이 = TTS 길이(+여유)만. duration_weight로 부풀리지 않는다(예산 초과 방지).
                 #   나레이션은 안 자름(끊김 방지) — 부풀림만 제거. 추정식(estimate_duration)과 일치.
@@ -1755,6 +1838,8 @@ class ShortVideoGenerator(Generator):
                 elif "card" in sh:                               # data_card → 기존 타이포 카드 렌더러
                     cv = str((sh["card"] or {}).get("value", "")).strip()
                     cl = str((sh["card"] or {}).get("label", "")).strip()
+                    if mileage:                                  # 카드 수치도 주행거리 단일화
+                        cv = _normalize_mileage(cv, mileage)
                     spec_line["shot"] = f"card:{cv}({cl})"
                     if not cv:
                         dropped += 1
@@ -1782,7 +1867,7 @@ class ShortVideoGenerator(Generator):
                     ass_scenes.append((t, sdur, _text, word_times, _emph))
                     vclips.append(v); awavs.append(aw); durs.append(sdur); t += sdur
                     compare.append({**spec_line, "실행": exec_desc, "dur": round(sdur, 1),
-                                    "tts": round(td, 1)})
+                                    "tts": round(td, 1), "자막": line, "발화": _speak})
                 else:
                     dropped += 1
                     compare.append({**spec_line, "실행": "탈락(클립 생성 실패)", "dur": 0})
