@@ -53,40 +53,57 @@ def build_storyboard(body: str, catalog: list, canonical: str, channel: str = "n
         "6. line은 본문에 있는 사실만(새 수치·차종·이력 추가 금지). data_card value는 아래 실값 목록에서만.\n"
         f"\n[채널] {channel} ({spec['aspect']}, ~{spec['dur']}초)\n[canonical] {canonical}\n"
         f"[세트 실값(data_card 전용)] {dv}\n[사진 카탈로그]\n{_catalog_block(catalog)}\n\n[본문]\n{body[:3500]}")
-    global _SB_LAST_FAIL
+    global _SB_LAST_FAIL, _SB_TRACE
     _SB_LAST_FAIL = ""
+    _SB_TRACE = []          # 승급 로그(Haiku 시도→실패 사유→Sonnet 성공) + 콜별 실측 토큰·원가
     valid_ids = {c.get("id") for c in catalog}
     feedback = ""
     # Haiku 우선(원가), 2회 실패 시 Sonnet 에스컬레이션(콘티 품질 미달 시만 — 스펙대로)
     for _try, _mdl in ((1, None), (2, None), (3, "claude-sonnet-5")):
+        _ent = {"try": _try, "requested": _mdl or "haiku"}
         try:
             raw = _llm.call_task("spoken", base + feedback, max_tokens=1800, default_model=_mdl)
         except Exception as _e:
             _SB_LAST_FAIL = f"콜 실패: {repr(_e)[:80]}"
+            _ent["outcome"] = f"콜 실패: {repr(_e)[:60]}"
+            _SB_TRACE.append(_ent)
             continue
+        _u = dict(getattr(_llm, "LAST_USAGE", {}) or {})   # 방금 콜의 실측 토큰
+        _ent.update(model=_u.get("model") or (_mdl or "haiku"),
+                    in_tok=_u.get("in", 0), out_tok=_u.get("out", 0),
+                    cost_usd=_llm.usd_cost(_u.get("model", ""), _u.get("in", 0), _u.get("out", 0)))
         m = re.search(r"\{.*\}", raw or "", re.S)
         if not m:
             _SB_LAST_FAIL = f"JSON 없음(모델={_mdl or 'haiku'}) raw[:80]={ (raw or '')[:80]!r}"
             feedback = "\n\n[재시도] JSON 객체 하나만 출력하라(설명 금지)."
+            _ent["outcome"] = "실패: JSON 없음"
+            _SB_TRACE.append(_ent)
             continue
         try:
             sb = json.loads(m.group(0))
         except Exception:
             _SB_LAST_FAIL = f"JSON 파싱 실패(모델={_mdl or 'haiku'})"
             feedback = "\n\n[재시도] 유효한 JSON이 아니다. 형식을 정확히 지켜라."
+            _ent["outcome"] = "실패: JSON 파싱"
+            _SB_TRACE.append(_ent)
             continue
         ok, why = _validate(sb, valid_ids)
         if ok:
             sb.setdefault("meta", {})["channel"] = channel
             sb["meta"]["aspect"] = spec["aspect"]
             sb["meta"]["canonical"] = canonical or ""
+            _ent["outcome"] = "성공"
+            _SB_TRACE.append(_ent)
             return sb
         _SB_LAST_FAIL = f"검증 실패(모델={_mdl or 'haiku'}): {why}"
         feedback = f"\n\n[재시도] 콘티 규칙 위반: {why}. 고쳐서 다시."
+        _ent["outcome"] = f"실패(검증): {why[:50]}"
+        _SB_TRACE.append(_ent)
     return {}
 
 
 _SB_LAST_FAIL = ""   # 진단: 마지막 콘티 실패 사유
+_SB_TRACE: list = []   # 승급 로그(시도별 모델·결과·실측 토큰·원가)
 
 
 def _validate(sb: dict, valid_ids: set) -> tuple:

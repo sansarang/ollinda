@@ -35,11 +35,29 @@ def call(prompt: str, model: str = MODEL, max_tokens: int = 1200) -> str:
             model=model, max_tokens=max_tokens * 2,
             messages=[{"role": "user", "content": prompt}], **_kw,
         )
-    global last_finish_reason
+    global last_finish_reason, LAST_USAGE
     last_finish_reason = getattr(resp, "stop_reason", "") or ""
+    _u = getattr(resp, "usage", None)                     # 실측 토큰(원가 추적) — resp.usage
+    if _u is not None:
+        LAST_USAGE = {"in": getattr(_u, "input_tokens", 0) or 0,
+                      "out": getattr(_u, "output_tokens", 0) or 0, "model": model}
+        USAGE["anthropic"]["in"] = USAGE["anthropic"].get("in", 0) + LAST_USAGE["in"]
+        USAGE["anthropic"]["out"] = USAGE["anthropic"].get("out", 0) + LAST_USAGE["out"]
     import logging
     logging.getLogger("shopcast.llm").info("[llm] stop_reason=%s max_tokens=%s", last_finish_reason, max_tokens)
     return next((b.text for b in resp.content if b.type == "text"), "")
+
+
+LAST_USAGE: dict = {"in": 0, "out": 0, "model": ""}   # 마지막 Anthropic 콜 실측 토큰
+# USD/1M 토큰(리스트가) — 실측 토큰 × 가격 = 콜 원가. 모델군별 (input, output).
+_PRICE = {"haiku": (1.0, 5.0), "sonnet": (3.0, 15.0), "opus": (15.0, 75.0)}
+
+
+def usd_cost(model: str, tin: int, tout: int) -> float:
+    """실측 토큰(입력·출력)에 모델군 리스트가를 적용한 콜 원가(USD)."""
+    key = "opus" if "opus" in (model or "") else "sonnet" if "sonnet" in (model or "") else "haiku"
+    pi, po = _PRICE[key]
+    return round(tin / 1e6 * pi + tout / 1e6 * po, 6)
 
 
 def ping() -> bool:

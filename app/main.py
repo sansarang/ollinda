@@ -6753,7 +6753,8 @@ def admin_set_storyboard(asset_id: str, channel: str = "naver"):
         else:
             mapping.append({"role": s.get("role"), "line": s.get("line", "")[:40], "card": sh.get("card")})
     return JSONResponse({"ok": True, "n_photos": len(paths), "canonical": canon,
-                         "catalog": cat, "storyboard": sb, "line_photo_mapping": mapping})
+                         "catalog": cat, "storyboard": sb, "line_photo_mapping": mapping,
+                         "escalation_trace": getattr(_dir, "_SB_TRACE", [])})
 
 
 @app.get("/admin/set/{asset_id}/render-storyboard")
@@ -6817,7 +6818,8 @@ def admin_render_storyboard(asset_id: str, channel: str = "naver"):
     return JSONResponse({"ok": True, "video_url": vurl, "cover_url": curl, "note": note,
                          "duration_sec": dur, "n_scenes_directed": len(sb.get("scenes", [])),
                          "n_scenes_rendered": len([c for c in compare if c.get("dur")]),
-                         "canonical": canon, "compare": compare})
+                         "canonical": canon, "compare": compare,
+                         "escalation_trace": getattr(_dir, "_SB_TRACE", [])})
 
 
 @app.post("/admin/set/{asset_id}/regen-piece")
