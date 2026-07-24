@@ -16,9 +16,10 @@ _CHANNEL_SPEC = {
     "shorts": {"aspect": "9:16", "dur": 30, "dmin": 25, "dmax": 35, "scenes": "5~7"},
     "reels": {"aspect": "1:1", "dur": 28, "dmin": 20, "dmax": 35, "scenes": "5~7"},
 }
-# 한국어 TTS 실측 근사: 씬 길이 ≈ 글자수×CPS_SEC + 씬당 여유. 렌더의 TTS 길이 배분과 정합(오차 허용).
-_CPS_SEC = 0.17
-_SCENE_PAD = 0.6
+# 한국어 TTS 실측 근사: 씬 길이 ≈ 글자수×CPS_SEC + 씬당 여유. 렌더가 TTS 길이만 쓰도록 정합(weight 인플레 제거).
+#   실측 보정: 숫자·문장부호로 낭독이 느려 CPS≈0.22였음 → 0.23(약간 보수적, 상한 초과 방지 마진).
+_CPS_SEC = 0.23
+_SCENE_PAD = 0.4
 
 
 def estimate_duration(scenes: list) -> float:

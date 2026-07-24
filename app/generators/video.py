@@ -1713,25 +1713,14 @@ class ShortVideoGenerator(Generator):
             except Exception:
                 _vtok = self._visual_tokens("basic")
             scenes = sb["scenes"]
-            # 가중치 길이 배분 기준 = 콘티 예산 추정치(디렉터가 예산 내로 짠 값). 없으면 25s.
-            try:
-                spec_dur = float((sb.get("meta") or {}).get("est_sec") or 25.0)
-            except Exception:
-                spec_dur = 25.0
-            # duration_weight → 길이 배분: 목표초를 weight 비율로 나누되, 실 TTS 길이는 절대 안 자름
-            try:
-                weights = [max(0.3, float(s.get("duration_weight", 1))) for s in scenes]
-            except Exception:
-                weights = [1.0] * len(scenes)
-            wsum = sum(weights) or 1.0
             vclips, awavs, durs, ass_scenes, compare = [], [], [], [], []
             t, dropped = 0.0, 0
             for i, s in enumerate(scenes):
                 role = s.get("role", "")
                 line = (s.get("line") or "").strip()
                 sh = s.get("shot") or {}
-                w_target = weights[i] / wsum * spec_dur          # 콘티 리듬 → 목표 길이
-                spec_line = {"role": role, "line": line[:40], "weight": round(weights[i], 2)}
+                spec_line = {"role": role, "line": line[:40],
+                             "weight": round(float(s.get("duration_weight", 1) or 1), 2)}
                 # ★ VG3(가격 날조): 자막에 판매가와 불일치하는 '라벨 없는 가격'이 실리면 씬 탈락
                 _pv = _price_semantics_violation(line, sale_price)
                 if _pv:
@@ -1742,8 +1731,10 @@ class ShortVideoGenerator(Generator):
                 # line → TTS(음성) + ASS 자막(기존 스타일 토큰 그대로)
                 seg_tts, word_times = tts_lib.synthesize_timed(line, work) if line else (None, [])
                 td = _probe_dur(seg_tts) if seg_tts else 0
-                sdur = min(15.0, max(MIN_SCENE, td + 0.4, w_target)) if td > 0.3 else \
-                    self._clamp(max(w_target, len(line) * 0.13 + 1.2))
+                # ★ 예산 정합: 씬 길이 = TTS 길이(+여유)만. duration_weight로 부풀리지 않는다(예산 초과 방지).
+                #   나레이션은 안 자름(끊김 방지) — 부풀림만 제거. 추정식(estimate_duration)과 일치.
+                sdur = min(15.0, max(MIN_SCENE, td + 0.4)) if td > 0.3 else \
+                    self._clamp(len(line) * 0.14 + 1.0)
                 if "photo_id" in sh:                             # photo_id → 사진(_restore_media 경유 경로)
                     pid = sh.get("photo_id")
                     crop = sh.get("crop", "full")
