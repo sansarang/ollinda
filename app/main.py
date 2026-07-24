@@ -6665,7 +6665,11 @@ def admin_set_storyboard(asset_id: str, channel: str = "naver"):
     paths = [x for x in raw if x and os.path.exists(x)] or _restore_media(blog.tenant_id, raw)
     if not paths:
         return JSONResponse({"ok": True, "blocked": "photo_lost", "note": "사진 소실 — 재업로드 후."})
-    cat = vision.build_catalog(paths, getattr(t, "industry", "") or "")
+    try:
+        cat = vision.build_catalog(paths, getattr(t, "industry", "") or "")
+    except Exception:
+        import traceback
+        return JSONResponse({"ok": False, "error": "catalog: " + traceback.format_exc()[-400:]}, status_code=500)
     if not cat or len(cat) < max(1, len(paths) // 2):
         return JSONResponse({"ok": True, "blocked": "catalog_poor", "catalog_n": len(cat),
                              "note": "카탈로그 부실 — 영상 보류."})
@@ -6678,7 +6682,12 @@ def admin_set_storyboard(asset_id: str, channel: str = "naver"):
                                            getattr(t, "biz_type", "local") or "local")
     except Exception:
         _dvals = []
-    sb = _dir.build_storyboard(body, cat, canon, channel=channel, data_values=_dvals)
+    try:
+        sb = _dir.build_storyboard(body, cat, canon, channel=channel, data_values=_dvals)
+    except Exception:
+        import traceback
+        return JSONResponse({"ok": False, "error": "director: " + traceback.format_exc()[-400:],
+                             "catalog": cat}, status_code=500)
     if not sb:
         return JSONResponse({"ok": True, "blocked": "storyboard_failed",
                              "note": "콘티 생성 실패(재시도 후) — 현행 로직 폴백 대상.", "catalog": cat})
