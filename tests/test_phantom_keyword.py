@@ -47,6 +47,17 @@ def test_field_sweep_seeds_removed_reals_kept():
     assert "부산 기장 중고차판매" in kept and "중고차판매 추천" in kept  # 지역·제네릭 유지(기장=지역, 속성축 아님)
 
 
+def test_all_piece_types_have_generator():
+    """구조 보증(#4): 전 피스 타입에 생성기 존재 → 공통 재생성 경로(_regen_piece_common)가 어떤 타입도
+    누락 안 함. 'regen-blog·naver 따로 만들다 SHORT 누락'한 계보의 구조적 재발 방지 — 새 타입 추가 시
+    생성기 없으면 이 테스트가 실패해 공통 경로 미지원을 잡는다."""
+    from app.registry import GENERATORS
+    from app.domain.models import ContentKind
+    for k in (ContentKind.BLOG, ContentKind.SHORT, ContentKind.CAPTION,
+              ContentKind.X_POST, ContentKind.MARKETPLACE):
+        assert k in GENERATORS, f"{k} 생성기 누락 — 공통 재생성 경로가 이 타입을 못 다룸(피스 타입 누락 재발)"
+
+
 def test_visit_type_industry_not_filtered():
     """속성 앵커 축이 없는(또는 무의미한) 업종은 필터 무적용 — 업종 중립(방문형 기존 흐름 유지)."""
     # 존재하지 않는 업종 → 스키마 기본(속성 예시 토큰 비어있음) → 전부 통과
