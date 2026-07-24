@@ -6662,17 +6662,20 @@ def admin_phantom_sweep(tid: str = "", dry: str = "1"):
         for p in db.get_set_pieces(aid):
             pl = p.payload or {}
             title = pl.get("selected_title") or pl.get("title") or ""
+            # ★ 원리 통일(#2): allowed = 현재 세트 컨텍스트 ∪ 본문 실등장 — note + 본문 + gen_source(사진분석).
+            #   재고는 부가일 뿐(재고 개념 없는 서비스업도 본문에 실등장한 정당어=썬팅지는 통과 → 오제거 방지).
+            _ctx = _note + "\n" + (pl.get("body") or "") + "\n" + (pl.get("gen_source") or "")
             # (1) 제목 표면 오염 판정(컨텍스트에 제목 자신 미포함)
             if title:
-                _kt, _dt = seo.drop_phantom_attr_kws([title], _ind, _biz, context_text=_note, inventory_models=_inv)
+                _kt, _dt = seo.drop_phantom_attr_kws([title], _ind, _biz, context_text=_ctx, inventory_models=_inv)
                 if _dt:
                     phantom_title.append({"asset_id": aid, "piece": p.id[:8], "kind": p.kind.value,
                                           "title": title, "phantom": [d[1] for d in _dt if isinstance(d, tuple)],
                                           "blocked": bool(pl.get("_publish_blocked"))})
-            # (2) target_keywords 필드 세척(씨앗 오염 제거)
+            # (2) target_keywords 필드 세척(씨앗 오염 제거) — 컨텍스트=note+본문+gen_source(본문 실등장 반영)
             tk = pl.get("target_keywords") or []
             if tk:
-                _kk, _dk = seo.drop_phantom_attr_kws(list(tk), _ind, _biz, context_text=_note, inventory_models=_inv)
+                _kk, _dk = seo.drop_phantom_attr_kws(list(tk), _ind, _biz, context_text=_ctx, inventory_models=_inv)
                 if _dk:
                     swept.append({"asset_id": aid, "piece": p.id[:8], "kind": p.kind.value,
                                   "removed": [d[0] for d in _dk if isinstance(d, tuple)],
