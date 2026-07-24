@@ -168,7 +168,7 @@ def build_catalog(image_paths: list[str], industry_name: str = "", max_imgs: int
     import time as _tq
     for ci in range(0, len(paths), 6):                       # 6장 청크(rate limit·토큰 관리)
         if ci > 0:
-            _tq.sleep(float(os.environ.get("SHOPCAST_VISION_GAP", "2")))   # ★ vision 큐: 청크 간 간격(쿼터 소진 방지)
+            _tq.sleep(float(os.environ.get("SHOPCAST_VISION_GAP", "6")))   # ★ vision 큐: 청크 간 간격(레이트 회복·쿼터 소진 방지)
         chunk = paths[ci:ci + 6]
         try:
             imgs64 = [_b64_for_vision(p) for p in chunk]
