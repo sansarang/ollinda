@@ -53,20 +53,26 @@ def build_storyboard(body: str, catalog: list, canonical: str, channel: str = "n
         "6. line은 본문에 있는 사실만(새 수치·차종·이력 추가 금지). data_card value는 아래 실값 목록에서만.\n"
         f"\n[채널] {channel} ({spec['aspect']}, ~{spec['dur']}초)\n[canonical] {canonical}\n"
         f"[세트 실값(data_card 전용)] {dv}\n[사진 카탈로그]\n{_catalog_block(catalog)}\n\n[본문]\n{body[:3500]}")
+    global _SB_LAST_FAIL
+    _SB_LAST_FAIL = ""
     valid_ids = {c.get("id") for c in catalog}
     feedback = ""
-    for _try in (1, 2):
+    # Haiku 우선(원가), 2회 실패 시 Sonnet 에스컬레이션(콘티 품질 미달 시만 — 스펙대로)
+    for _try, _mdl in ((1, None), (2, None), (3, "claude-sonnet-5")):
         try:
-            raw = _llm.call_task("spoken", base + feedback, max_tokens=1600)   # spoken=Haiku 라우팅(원가)
-        except Exception:
-            return {}
+            raw = _llm.call_task("spoken", base + feedback, max_tokens=1800, default_model=_mdl)
+        except Exception as _e:
+            _SB_LAST_FAIL = f"콜 실패: {repr(_e)[:80]}"
+            continue
         m = re.search(r"\{.*\}", raw or "", re.S)
         if not m:
-            feedback = "\n\n[재시도] JSON 객체 하나만 출력하라."
+            _SB_LAST_FAIL = f"JSON 없음(모델={_mdl or 'haiku'}) raw[:80]={ (raw or '')[:80]!r}"
+            feedback = "\n\n[재시도] JSON 객체 하나만 출력하라(설명 금지)."
             continue
         try:
             sb = json.loads(m.group(0))
         except Exception:
+            _SB_LAST_FAIL = f"JSON 파싱 실패(모델={_mdl or 'haiku'})"
             feedback = "\n\n[재시도] 유효한 JSON이 아니다. 형식을 정확히 지켜라."
             continue
         ok, why = _validate(sb, valid_ids)
@@ -75,8 +81,12 @@ def build_storyboard(body: str, catalog: list, canonical: str, channel: str = "n
             sb["meta"]["aspect"] = spec["aspect"]
             sb["meta"]["canonical"] = canonical or ""
             return sb
+        _SB_LAST_FAIL = f"검증 실패(모델={_mdl or 'haiku'}): {why}"
         feedback = f"\n\n[재시도] 콘티 규칙 위반: {why}. 고쳐서 다시."
     return {}
+
+
+_SB_LAST_FAIL = ""   # 진단: 마지막 콘티 실패 사유
 
 
 def _validate(sb: dict, valid_ids: set) -> tuple:

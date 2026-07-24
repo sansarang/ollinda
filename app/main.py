@@ -6738,7 +6738,8 @@ def admin_set_storyboard(asset_id: str, channel: str = "naver"):
                              "catalog": cat}, status_code=500)
     if not sb:
         return JSONResponse({"ok": True, "blocked": "storyboard_failed",
-                             "note": "콘티 생성 실패(재시도 후) — 현행 로직 폴백 대상.", "catalog": cat})
+                             "note": "콘티 생성 실패(재시도 후) — 현행 로직 폴백 대상.",
+                             "_fail": getattr(_dir, "_SB_LAST_FAIL", ""), "catalog": cat})
     # V5 대조: line → 배정 사진 부위
     _by_id = {c["id"]: c for c in cat}
     mapping = []
