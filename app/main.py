@@ -6594,12 +6594,31 @@ def _regen_piece_common(asset_id: str, kind_val: str, channel_val: str = "", dry
         return {"ok": False, "action": "still_contaminated", "phantom": _phantom, "new_title": _new_title, "status": 409}
     if dry:
         return {"ok": True, "action": "dry_clean", "kind": kind_val, "new_title": _new_title}
+    # 옛 렌더 파일 경로 수집(교체로 고아가 될 것) — 디스크 만차 유발 방지. 사진(image_paths)은 절대 제외.
+    def _vid_paths(d):
+        out = []
+        for k in ("video_path", "body_path"):
+            if isinstance(d.get(k), str) and d[k].endswith(".mp4"):
+                out.append(d[k])
+        _nv = d.get("naver_video") or {}
+        for k in ("path", "body_path"):
+            if isinstance(_nv.get(k), str) and _nv[k].endswith(".mp4"):
+                out.append(_nv[k])
+        return out
+    _old_vids = set(_vid_paths(old))
     for k, v in npl.items():                             # 새 콘텐츠 반영, meta(사진·발행상태)만 보존
         if k not in _REGEN_PRESERVE:
             old[k] = v
     old.pop("_publish_blocked", None)
     target.payload = old
     db.save_piece(target)
+    _new_vids = set(_vid_paths(old))
+    for _ov in (_old_vids - _new_vids):                  # 교체된 옛 영상만 삭제(사진 원본 불포함 — .mp4만)
+        try:
+            if _ov and os.path.exists(_ov) and _ov.endswith(".mp4"):
+                os.remove(_ov)
+        except Exception:
+            pass
     return {"ok": True, "action": "regenerated", "kind": kind_val, "new_title": _new_title}
 
 
