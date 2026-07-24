@@ -6643,7 +6643,8 @@ def admin_set_catalog(asset_id: str):
     cat = _vzc0.build_catalog(paths, getattr(t, "industry", "") or "")
     if not cat or len(cat) < max(1, len(paths) // 2):        # 카탈로그 부실 → 디렉터 콜 금지(앵커 게이트 원칙)
         return JSONResponse({"ok": True, "blocked": "catalog_poor", "n_photos": len(paths),
-                             "catalog_n": len(cat), "note": "카탈로그 부실 — 영상 보류(재분석 필요)."})
+                             "catalog_n": len(cat), "note": "카탈로그 부실 — 영상 보류(재분석 필요).",
+                             "_raw": getattr(_vzc0, "_CATALOG_LAST_RAW", "")})
     return JSONResponse({"ok": True, "n_photos": len(paths), "catalog_n": len(cat), "catalog": cat})
 
 

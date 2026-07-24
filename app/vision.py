@@ -12,6 +12,7 @@ import base64
 import os
 
 MODEL = os.environ.get("SHOPCAST_VISION_MODEL", "claude-sonnet-5")
+_CATALOG_LAST_RAW = ""   # 진단: build_catalog 첫 청크 원시 응답(catalog_n=0 원인 추적)
 
 
 def configured() -> bool:
@@ -161,6 +162,8 @@ def build_catalog(image_paths: list[str], industry_name: str = "", max_imgs: int
     import json as _j
     import re as _r
     from app import llm as _llm
+    global _CATALOG_LAST_RAW
+    _CATALOG_LAST_RAW = ""
     out = []
     for ci in range(0, len(paths), 6):                       # 6장 청크(rate limit·토큰 관리)
         chunk = paths[ci:ci + 6]
@@ -182,6 +185,8 @@ def build_catalog(image_paths: list[str], industry_name: str = "", max_imgs: int
                     break
                 import time as _tv
                 _tv.sleep(2)
+            if not _CATALOG_LAST_RAW:
+                _CATALOG_LAST_RAW = resp[:600]               # 진단: 첫 청크 원시 응답
             m = _r.search(r"\[.*\]", resp, _r.S)
             arr = []
             if m:
