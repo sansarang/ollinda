@@ -175,9 +175,27 @@ def build_catalog(image_paths: list[str], industry_name: str = "", max_imgs: int
                 '"text":"사진 속 글자 그대로(서류 항목·수치 등, 없으면 빈칸)","shot":"전체|클로즈업",'
                 '"flags":["흐림"|"표식"|"저해상" 중 해당되는 것만, 없으면 빈 배열]}\n'
                 "part는 '이 사진이 무엇을 보여주는 컷인지'다 — 서류 사진은 '서류', 엔진룸 사진은 '엔진룸'으로 정확히.")
-            resp = _llm.call_task("vision", prompt, 1400, default_model=MODEL, images=imgs64)
-            m = _r.search(r"\[.*\]", resp or "", _r.S)
-            arr = _j.loads(m.group(0)) if m else []
+            resp = ""
+            for _try in (1, 2):                              # 빈 반환(과부하) 재시도 — analyze_all과 동일 원칙
+                resp = (_llm.call_task("vision", prompt, 1400, default_model=MODEL, images=imgs64) or "").strip()
+                if resp:
+                    break
+                import time as _tv
+                _tv.sleep(2)
+            m = _r.search(r"\[.*\]", resp, _r.S)
+            arr = []
+            if m:
+                try:
+                    arr = _j.loads(m.group(0))
+                except Exception:                            # 배열 파싱 실패 → 개별 {객체} 견고 파싱
+                    for mm in _r.finditer(r"\{[^{}]*\}", m.group(0)):
+                        try:
+                            arr.append(_j.loads(mm.group(0)))
+                        except Exception:
+                            pass
+            if not arr:
+                import logging as _lgc
+                _lgc.getLogger("shopcast.vision").warning("[catalog] 청크 파싱 0 — resp[:120]=%r", resp[:120])
             for i, e in enumerate(arr):
                 if isinstance(e, dict):
                     out.append({"id": ci + i + 1,
