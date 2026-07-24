@@ -6639,7 +6639,8 @@ def admin_set_catalog(asset_id: str):
     if not paths:
         return JSONResponse({"ok": True, "blocked": "photo_lost", "n_photos": 0,
                              "note": "사진 소실 — 재업로드 후 재시도(대체 이미지 금지)."})
-    cat = vision.build_catalog(paths, getattr(t, "industry", "") or "")
+    from app import vision as _vzc0
+    cat = _vzc0.build_catalog(paths, getattr(t, "industry", "") or "")
     if not cat or len(cat) < max(1, len(paths) // 2):        # 카탈로그 부실 → 디렉터 콜 금지(앵커 게이트 원칙)
         return JSONResponse({"ok": True, "blocked": "catalog_poor", "n_photos": len(paths),
                              "catalog_n": len(cat), "note": "카탈로그 부실 — 영상 보류(재분석 필요)."})
@@ -6666,7 +6667,8 @@ def admin_set_storyboard(asset_id: str, channel: str = "naver"):
     if not paths:
         return JSONResponse({"ok": True, "blocked": "photo_lost", "note": "사진 소실 — 재업로드 후."})
     try:
-        cat = vision.build_catalog(paths, getattr(t, "industry", "") or "")
+        from app import vision as _vzc
+        cat = _vzc.build_catalog(paths, getattr(t, "industry", "") or "")
     except Exception:
         import traceback
         return JSONResponse({"ok": False, "error": "catalog: " + traceback.format_exc()[-400:]}, status_code=500)
