@@ -6758,7 +6758,7 @@ def admin_set_storyboard(asset_id: str, channel: str = "naver"):
 
 
 @app.get("/admin/set/{asset_id}/render-storyboard")
-def admin_render_storyboard(asset_id: str, channel: str = "naver"):
+def admin_render_storyboard(asset_id: str, channel: str = "naver", price: str = ""):
     """2-C 콘티→렌더 어댑터 실행 — catalog→director→ShortVideoGenerator.render_storyboard.
     콘티 존재 시에만 어댑터, 없으면 blocked(호출부가 기존 경로 폴백). 렌더 큐(RENDER_SEM)·디스크 하한 게이트 경유.
     반환: 디렉터판 영상 URL + 씬별 [콘티 지정 vs 렌더 실행] 대조 로그."""
@@ -6791,9 +6791,10 @@ def admin_render_storyboard(asset_id: str, channel: str = "naver"):
         return JSONResponse({"ok": True, "blocked": "catalog_poor", "catalog_n": len(cat),
                              "note": "카탈로그 부실 — 어댑터 보류(기존 경로 폴백)."})
     canon = _canonical_keyword(t, blog)
-    # ★ VG3: 판매가는 딜러 명시값만(gen_source→body 순). 미명시면 ''=가격 카드 금지(서류 출고가 승격 차단).
+    # ★ VG3: 판매가는 딜러 명시값만. price 파라미터(딜러 직접 입력) 최우선, 없으면 gen_source→body에서 해석.
+    #   어디에도 없으면 ''=가격 카드 금지(서류 출고가 승격 차단).
     _gsrc = pl.get("gen_source") or ""
-    _sale = _vid._resolve_sale_price(_gsrc, body)
+    _sale = (price or "").strip() or _vid._resolve_sale_price(_gsrc, body)
     try:
         from app.services import indschema as _isc
         _sch = _isc.get_schema(getattr(t, "industry", "") or "", getattr(t, "biz_type", "local") or "local")
