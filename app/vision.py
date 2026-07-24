@@ -193,12 +193,13 @@ def build_catalog(image_paths: list[str], industry_name: str = "", max_imgs: int
             entries[p] = _c
         else:
             uncached.append((p, _hh))
-    # ② 미캐시만 vision(6장 청크 + 6초 큐)
+    # ② 미캐시만 vision(작은 청크 + 큐) — 큰 청크가 결정적 빈반환 유발(6장 실증), 3장이 안정적. 캐시로 누적.
+    _CH = int(os.environ.get("SHOPCAST_CATALOG_CHUNK", "3"))
     _calls, _oks = 0, 0
-    for ci in range(0, len(uncached), 6):
+    for ci in range(0, len(uncached), _CH):
         if ci > 0:
             _tq.sleep(float(os.environ.get("SHOPCAST_VISION_GAP", "6")))
-        chunk = uncached[ci:ci + 6]
+        chunk = uncached[ci:ci + _CH]
         try:
             imgs64 = [_b64_for_vision(p) for p, _ in chunk]
             prompt = (
