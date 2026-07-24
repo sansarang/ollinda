@@ -1667,7 +1667,11 @@ class ShortVideoGenerator(Generator):
             except Exception:
                 _vtok = self._visual_tokens("basic")
             scenes = sb["scenes"]
-            spec_dur = 25.0
+            # 가중치 길이 배분 기준 = 콘티 예산 추정치(디렉터가 예산 내로 짠 값). 없으면 25s.
+            try:
+                spec_dur = float((sb.get("meta") or {}).get("est_sec") or 25.0)
+            except Exception:
+                spec_dur = 25.0
             # duration_weight → 길이 배분: 목표초를 weight 비율로 나누되, 실 TTS 길이는 절대 안 자름
             try:
                 weights = [max(0.3, float(s.get("duration_weight", 1))) for s in scenes]

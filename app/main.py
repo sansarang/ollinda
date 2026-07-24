@@ -6822,6 +6822,57 @@ def admin_render_storyboard(asset_id: str, channel: str = "naver"):
                          "escalation_trace": getattr(_dir, "_SB_TRACE", [])})
 
 
+@app.get("/admin/set/{asset_id}/mask-trace")
+def admin_mask_trace(asset_id: str):
+    """워터마크·개인정보 오폭 원인 확정 — 세트 사진마다 detect_personal_info/detect_overlay를 dry-run,
+    [사진/박스/유형/신뢰도/처리여부] 실측. would_process=현 신뢰도 게이트(PII/OVERLAY_CONF_MIN) 통과 여부.
+    ※ 현 저장본은 이미 마스킹 반영본(ingest 제자리) — 이 추적은 검출기 거동·신뢰도 재현용이다."""
+    from app.domain.models import ContentKind as _CK
+    from app.services.ingest import _restore_media
+    from app import vision as _vzc
+    from app.media import photo_boost as _pb
+    pieces = db.get_set_pieces(asset_id)
+    blog = next((p for p in pieces if p.kind == _CK.BLOG), None)
+    if not blog:
+        return JSONResponse({"ok": False, "error": "블로그 피스 없음"}, status_code=404)
+    raw = (blog.payload or {}).get("image_paths") or []
+    paths = _restore_media(blog.tenant_id, raw)
+    if not paths:
+        return JSONResponse({"ok": True, "blocked": "photo_lost"})
+    out = []
+    for i, p in enumerate(paths, 1):
+        try:
+            pii = _vzc.detect_personal_info(p)
+        except Exception:
+            pii = []
+        try:
+            ov = _vzc.detect_overlay(p)
+        except Exception:
+            ov = {"present": False}
+        pii_rows = [{"type": b.get("type"), "conf": round(float(b.get("conf", 0.5)), 2),
+                     "box": [round(float(b.get(k, 0)), 3) for k in ("x0", "y0", "x1", "y1")],
+                     "would_process": float(b.get("conf", 0.5)) >= _pb.PII_CONF_MIN} for b in pii]
+        ov_rows = [{"kind": o.get("kind"), "conf": round(float(o.get("conf", 0.5)), 2),
+                    "coverage": o.get("coverage"),
+                    "box": [round(float(o.get(k, 0)), 3) for k in ("x0", "y0", "x1", "y1")],
+                    "would_process": (float(o.get("conf", 0.5)) >= _pb.OVERLAY_CONF_MIN
+                                      and (o.get("coverage") or 1.0) <= _pb._REMOVE_MAX_COV)}
+                   for o in (ov.get("overlays") or [])]
+        out.append({"id": i, "url": f"/admin/media/{blog.tenant_id}/{os.path.basename(p)}",
+                    "pii": pii_rows, "overlay_type": ov.get("type"),
+                    "attached_c": ov.get("type") == "c", "overlays": ov_rows})
+    # ★ Encar 가림막 등 부착물(type-c) — 제거 불가. '지워지지 않는다' 경고(원본 교체 판단용).
+    attached = [{"id": r["id"], "url": r["url"]} for r in out if r["attached_c"]]
+    would = sum(1 for r in out for x in (r["pii"] + r["overlays"]) if x.get("would_process"))
+    return JSONResponse({"ok": True, "n_photos": len(paths),
+                         "gate": {"pii_conf_min": _pb.PII_CONF_MIN, "overlay_conf_min": _pb.OVERLAY_CONF_MIN,
+                                  "overlay_max_cov": _pb._REMOVE_MAX_COV},
+                         "would_process_total": would,
+                         "attached_warning": {"note": "이 사진들의 부착물(가림막·스티커)은 자동 제거되지 않습니다 — 원본 교체를 검토하세요.",
+                                              "photos": attached} if attached else None,
+                         "photos": out})
+
+
 @app.post("/admin/set/{asset_id}/regen-piece")
 def admin_regen_piece(asset_id: str, kind: str = "blog", channel: str = "", dry: str = ""):
     """전 피스 타입 공통 재생성 — kind=blog|short|caption|x_post|marketplace, channel(선택 youtube/instagram)."""

@@ -92,18 +92,26 @@ def auto_enhance(src: str, out: str | None = None, industry: str = "", meta: dic
 
 
 def enhance_all(paths: list[str], industry: str = "", meta: dict | None = None) -> int:
-    """여러 장 일괄 보정(제자리) + 개인정보 자동 모자이크 + EXIF·GPS 삽입. 보정 성공 개수 반환."""
+    """여러 장 일괄 보정(제자리) + 개인정보 자동 모자이크 + EXIF·GPS 삽입. 보정 성공 개수 반환.
+    ★ 마스킹은 신뢰도 게이트 통과 박스만(오폭 방지). 부착물(type-c)은 미제거 + attached 플래그(UI 경고)."""
+    global _MASK_LAST_LOG
+    _MASK_LAST_LOG = []          # 이 배치의 [사진/박스/유형/신뢰도/처리여부] 로그 시작
+    attached_photos = []
     n = 0
     for p in paths:
         if p and os.path.exists(p):
-            mask_personal_info(p)   # 🔒 번호판·얼굴·전화·라벨 자동 가림(보정 전에)
-            if os.environ.get("SHOPCAST_OVERLAY_REMOVE", "1") != "0":   # 기본 ON(사용자 요청). 끄려면 =0
-                try:                                                     # 유형 a 국소 오버레이 일괄 인페인트
-                    remove_overlay(p)   # (광택+다중 오버레이는 얼룩 잔존 가능 — 코너 워터마크는 깨끗)
+            mask_personal_info(p)   # 🔒 번호판·얼굴·전화·라벨 자동 가림(신뢰도 게이트)
+            if os.environ.get("SHOPCAST_OVERLAY_REMOVE", "1") != "0":   # 기본 ON. 끄려면 =0
+                try:                                                     # 유형 a 국소 오버레이(신뢰도 게이트)
+                    _r = remove_overlay(p)
+                    if _r.get("attached"):                               # 부착물 가림막 잔존 → UI 경고 대상
+                        attached_photos.append(os.path.basename(p))
                 except Exception:
                     pass
             if auto_enhance(p, p, industry, meta) == p:
                 n += 1
+    if attached_photos:                                                  # 배치 요약(호출부가 세트에 경고 저장)
+        _MASK_LAST_LOG.append({"src": "summary", "attached_photos": attached_photos})
     return n
 
 
@@ -126,9 +134,17 @@ def _pixelate_region(im, box) -> bool:
     return True
 
 
+# 좌표 신뢰도 게이트 — 확신 없는 박스는 처리 안 함(오폭 블러보다 워터마크·개인정보 잔존이 낫다).
+#   '어설픈 제거보다 원본' 품질게이트 원칙을 좌표 신뢰도에도 적용. 미달 박스는 스킵+로그.
+PII_CONF_MIN = float(os.environ.get("SHOPCAST_PII_CONF_MIN", "0.7"))
+OVERLAY_CONF_MIN = float(os.environ.get("SHOPCAST_OVERLAY_CONF_MIN", "0.7"))
+_MASK_LAST_LOG: list = []   # 진단: 마지막 마스킹의 [사진/박스/유형/신뢰도/처리여부]
+
+
 def mask_personal_info(path: str) -> int:
     """사진 속 개인정보(번호판·얼굴·전화·라벨·주소) 자동 모자이크(제자리). 가린 개수 반환.
-    끄기: 환경변수 SHOPCAST_PII_MASK=0."""
+    ★ 신뢰도 게이트: conf<PII_CONF_MIN 박스는 처리 안 함(정상 차체 오폭 방지). 끄기: SHOPCAST_PII_MASK=0."""
+    global _MASK_LAST_LOG
     if os.environ.get("SHOPCAST_PII_MASK", "1") == "0":
         return 0
     try:
@@ -138,7 +154,23 @@ def mask_personal_info(path: str) -> int:
             return 0
         from PIL import Image
         im = Image.open(path).convert("RGB")
-        cnt = sum(1 for b in boxes if _pixelate_region(im, b))
+        cnt = 0
+        for b in boxes:
+            conf = float(b.get("conf", 0.5))
+            entry = {"photo": os.path.basename(path), "src": "pii", "type": b.get("type"),
+                     "conf": round(conf, 2), "box": [round(float(b.get(k, 0)), 3) for k in ("x0", "y0", "x1", "y1")]}
+            if conf < PII_CONF_MIN:                    # 신뢰도 미달 → 스킵(오폭 금지) + 로그
+                entry["processed"] = False
+                entry["reason"] = f"conf<{PII_CONF_MIN}"
+                _MASK_LAST_LOG.append(entry)
+                continue
+            done = _pixelate_region(im, b)
+            entry["processed"] = bool(done)
+            if not done:
+                entry["reason"] = "box_too_small"
+            _MASK_LAST_LOG.append(entry)
+            if done:
+                cnt += 1
         if cnt:
             im.save(path, quality=90)
         return cnt
@@ -212,8 +244,9 @@ def remove_overlay(path: str, out: str | None = None) -> dict:
     제거(한 사진에 코너 로고+중앙 배지 등 다중 대응, 반복 재탐지 스파이럴 없음 → 반사·글레어 과잉제거 방지).
     유형 b(전면 반투명)·c(부착물)는 제거 안 함. coverage 과대 박스는 개별 skip. 생성AI 금지 — cv2 고전기법만.
     반환 {detected,type,coverage,action,removed,kinds,restored}."""
+    global _MASK_LAST_LOG
     rep = {"detected": False, "type": None, "coverage": None, "action": "none",
-           "removed": 0, "kinds": [], "restored": False}
+           "removed": 0, "kinds": [], "restored": False, "attached": False}
     tmp = out or path
     if not (path and os.path.exists(path)):
         return rep
@@ -227,17 +260,36 @@ def remove_overlay(path: str, out: str | None = None) -> dict:
         det = vision.detect_overlay(path)
     except Exception:
         return rep
+    # type-c(피사체 부착물: 번호판 가림막·스티커) — detect_overlay가 present:False,type:c로 알림.
+    #   제거 대상 아님이 맞다(오탐 방지) — 단 '지워지지 않는다'를 UI가 경고하도록 attached 기록.
+    if det.get("type") == "c":
+        rep.update(type="c", attached=True, action="attached_skip")
+        _MASK_LAST_LOG.append({"photo": os.path.basename(path), "src": "overlay", "type": "c",
+                               "conf": None, "processed": False, "reason": "부착물(가림막)-제거불가·UI경고"})
+        return rep
     if not det.get("present"):
         return rep
     rep.update(detected=True, type=det.get("type"), coverage=det.get("coverage"))
-    if det.get("type") != "a":                                    # b=전면 반투명(제거 불가·UI 강등), c=부착물(미탐)
+    if det.get("type") != "a":                                    # b=전면 반투명(제거 불가·UI 강등)
         rep["action"] = "skip_type_b"
         return rep
     overlays = det.get("overlays") or []
-    removed, kinds, skipped_large = 0, [], 0
+    removed, kinds, skipped_large, skipped_lowconf = 0, [], 0, 0
     for ov in overlays:
-        if (ov.get("coverage") or 1.0) > _REMOVE_MAX_COV:         # 국소치고 과대 → 오탐 의심 → 이 박스만 skip
+        conf = float(ov.get("conf", 0.5))
+        cov = ov.get("coverage") or 1.0
+        entry = {"photo": os.path.basename(path), "src": "overlay", "type": "a",
+                 "kind": ov.get("kind"), "conf": round(conf, 2), "coverage": cov,
+                 "box": [round(float(ov.get(k, 0)), 3) for k in ("x0", "y0", "x1", "y1")]}
+        if conf < OVERLAY_CONF_MIN:                              # ★ 신뢰도 미달 → telea 오폭 금지, 스킵+로그
+            skipped_lowconf += 1
+            entry.update(processed=False, reason=f"conf<{OVERLAY_CONF_MIN}")
+            _MASK_LAST_LOG.append(entry)
+            continue
+        if cov > _REMOVE_MAX_COV:                                # 국소치고 과대 → 오탐 의심 → 이 박스만 skip
             skipped_large += 1
+            entry.update(processed=False, reason=f"coverage>{_REMOVE_MAX_COV}")
+            _MASK_LAST_LOG.append(entry)
             continue
         box = {k: ov.get(k, 0) for k in ("x0", "y0", "x1", "y1")}
         fixed = _cv_inpaint(cur, box, "telea")
@@ -246,12 +298,15 @@ def remove_overlay(path: str, out: str | None = None) -> dict:
             return rep
         cur = fixed
         removed += 1
+        entry["processed"] = True
+        _MASK_LAST_LOG.append(entry)
         if ov.get("kind"):
             kinds.append(ov["kind"])
     rep["removed"] = removed
     rep["kinds"] = kinds
     if removed == 0:
-        rep["action"] = "skip_large" if skipped_large else "none"
+        rep["action"] = ("skip_lowconf" if skipped_lowconf else
+                         "skip_large" if skipped_large else "none")
         return rep
     try:
         cur.save(tmp, "JPEG", quality=92)                         # 제거 결과 저장

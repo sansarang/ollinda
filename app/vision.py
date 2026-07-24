@@ -271,8 +271,9 @@ def detect_personal_info(image_path: str) -> list[dict]:
             "이 사진에서 '가려야 할 개인정보'의 위치를 모두 찾아라: "
             "차량 번호판, 사람 얼굴, 전화번호, 이름표·차량정보 라벨·차대번호(VIN), 주소·명함.\n"
             "각 항목을 이미지 기준 0~1로 정규화한 사각형으로, JSON 배열만 출력(설명·코드블록 없이):\n"
-            '[{"type":"plate|face|phone|label|address","x0":0.00,"y0":0.00,"x1":0.00,"y1":0.00}]\n'
-            "x0,y0=왼쪽위, x1,y1=오른쪽아래. 없으면 [] 만 출력. 확실한 것만, 넉넉하게 잡아라."
+            '[{"type":"plate|face|phone|label|address","x0":0.00,"y0":0.00,"x1":0.00,"y1":0.00,"conf":0.00}]\n'
+            "x0,y0=왼쪽위, x1,y1=오른쪽아래. conf=이게 정말 그 개인정보라는 확신도(0~1, 애매하면 낮게).\n"
+            "없으면 [] 만 출력. ★ 정상 차체·배경을 개인정보로 착각하지 마라 — 확신 없으면 아예 넣지 마라(오탐 금지)."
         )
         resp = client.messages.create(
             model=MODEL, max_tokens=700,
@@ -284,7 +285,15 @@ def detect_personal_info(image_path: str) -> list[dict]:
         txt = next((b.text for b in resp.content if b.type == "text"), "")
         m = _re.search(r"\[.*\]", txt, _re.S)
         boxes = json.loads(m.group(0)) if m else []
-        return [b for b in boxes if isinstance(b, dict) and all(k in b for k in ("x0", "y0", "x1", "y1"))]
+        out = []
+        for b in boxes:
+            if isinstance(b, dict) and all(k in b for k in ("x0", "y0", "x1", "y1")):
+                try:
+                    b["conf"] = float(b.get("conf", 0.5))     # 미제공 시 중립(0.5) — 게이트가 판단
+                except Exception:
+                    b["conf"] = 0.5
+                out.append(b)
+        return out
     except Exception:
         return []
 
@@ -313,8 +322,9 @@ def detect_overlay(image_path: str) -> dict:
             "  · 화면을 넓게 덮는 전면 반투명 워터마크 밴드(이건 제거 불가 유형 b)\n"
             "  · 피사체에 물리적으로 부착된 종이·가림막·스티커(유형 c)\n"
             "JSON 객체 하나만 출력(설명·코드블록 없이):\n"
-            '{"present":true|false,"type":"a|b|c","overlays":[{"x0":0.0,"y0":0.0,"x1":0.0,"y1":0.0,"coverage":0.0,"kind":"무엇"}]}\n'
+            '{"present":true|false,"type":"a|b|c","overlays":[{"x0":0.0,"y0":0.0,"x1":0.0,"y1":0.0,"coverage":0.0,"conf":0.0,"kind":"무엇"}]}\n'
             "overlays=지워야 할 불투명 그래픽들의 배열. x0,y0=왼쪽위 x1,y1=오른쪽아래(0~1). 박스는 그래픽 범위에 딱 맞게(여백 최소).\n"
+            "conf=이게 정말 '덧씌운 인공 그래픽'이라는 확신도(0~1). 정상 차체·반사·무늬면 애초에 넣지 말고, 애매하면 conf를 낮게.\n"
             "type: 지울 국소 그래픽이 하나라도 있으면 'a', 전면 반투명뿐이면 'b', 부착물뿐이면 'c'.\n"
             "지울 그래픽이 없거나 확신 없으면 present=false, overlays=[]. 반사·흐림을 그래픽으로 착각하지 마라. 오탐보다 미탐이 낫다."
         )
@@ -334,6 +344,11 @@ def detect_overlay(image_path: str) -> dict:
             return {"present": False, "type": "c"}
         ovs = [o for o in (d.get("overlays") or []) if isinstance(o, dict)
                and all(k in o for k in ("x0", "y0", "x1", "y1"))]
+        for o in ovs:                                         # conf 정규화(미제공 시 중립 0.5 — 게이트가 판단)
+            try:
+                o["conf"] = float(o.get("conf", 0.5))
+            except Exception:
+                o["conf"] = 0.5
         if d.get("type") == "a" and not ovs:                  # a인데 박스 없음 → 신뢰 불가
             return {"present": False}
         d["overlays"] = ovs

@@ -10,11 +10,24 @@ import json
 import re
 
 _ROLES = ("hook", "empathy", "reveal", "inspect", "docs", "data_card", "honesty", "cta")
+# dur=목표초, dmin/dmax=채널 예산(콘티 검증 조건 — 초과 시 반려·재생성). 예산은 렌더 실측 길이 기준.
 _CHANNEL_SPEC = {
-    "naver": {"aspect": "9:16", "dur": 25, "scenes": "5~8"},
-    "shorts": {"aspect": "9:16", "dur": 20, "scenes": "5~7"},
-    "reels": {"aspect": "1:1", "dur": 20, "scenes": "5~7"},
+    "naver": {"aspect": "9:16", "dur": 45, "dmin": 30, "dmax": 60, "scenes": "6~9"},
+    "shorts": {"aspect": "9:16", "dur": 30, "dmin": 25, "dmax": 35, "scenes": "5~7"},
+    "reels": {"aspect": "1:1", "dur": 28, "dmin": 20, "dmax": 35, "scenes": "5~7"},
 }
+# 한국어 TTS 실측 근사: 씬 길이 ≈ 글자수×CPS_SEC + 씬당 여유. 렌더의 TTS 길이 배분과 정합(오차 허용).
+_CPS_SEC = 0.17
+_SCENE_PAD = 0.6
+
+
+def estimate_duration(scenes: list) -> float:
+    """콘티 line 길이로 총 렌더 길이 추정(예산 게이트용). 렌더는 TTS 실측을 쓰므로 근사값이다."""
+    tot = 0.0
+    for s in scenes:
+        ln = len((s or {}).get("line") or "")
+        tot += min(15.0, max(2.2, ln * _CPS_SEC + _SCENE_PAD))
+    return round(tot, 1)
 
 
 def _catalog_block(catalog: list) -> str:
@@ -47,19 +60,21 @@ def build_storyboard(body: str, catalog: list, canonical: str, channel: str = "n
         "2. 문장→사진은 '의미'로 배정. line이 서류 얘기면 카탈로그 부위:서류 사진, 엔진룸 얘기면 부위:엔진룸 사진. "
         "순서로 기계 배정 금지. reason에 근거를 적어라.\n"
         "3. 대응 사진이 없는 대목은 card(실값 있으면) 또는 생략. 없는 걸 억지로 사진에 붙이지 마라.\n"
-        "4. 씬 수·길이는 콘텐츠가 정한다(권장 " + spec["scenes"] + "씬, 목표 " + str(spec["dur"]) + "초). "
+        "4. ★ 길이 예산 필수: 이 영상은 나레이션 합계가 반드시 " + str(spec.get("dmin", 20)) + "~"
+        + str(spec.get("dmax", 60)) + "초여야 한다(목표 " + str(spec["dur"]) + "초, 권장 " + spec["scenes"] + "씬). "
+        "한국어 나레이션은 대략 글자수×0.17초가 걸린다 — line이 길면 씬을 줄이고, 각 line은 핵심만 짧게 써라. "
         "duration_weight 균일 금지 — 훅·정직고지·카드 길게(1.5~3), 나열 짧게(0.5~1).\n"
         "5. 품질 플래그(흐림·표식·저해상) 사진은 hook·reveal 등 대표 씬에 쓰지 마라.\n"
         "6. line은 본문에 있는 사실만(새 수치·차종·이력 추가 금지). data_card value는 아래 실값 목록에서만.\n"
-        f"\n[채널] {channel} ({spec['aspect']}, ~{spec['dur']}초)\n[canonical] {canonical}\n"
+        f"\n[채널] {channel} ({spec['aspect']}, 예산 {spec.get('dmin',20)}~{spec.get('dmax',60)}초)\n[canonical] {canonical}\n"
         f"[세트 실값(data_card 전용)] {dv}\n[사진 카탈로그]\n{_catalog_block(catalog)}\n\n[본문]\n{body[:3500]}")
     global _SB_LAST_FAIL, _SB_TRACE
     _SB_LAST_FAIL = ""
     _SB_TRACE = []          # 승급 로그(Haiku 시도→실패 사유→Sonnet 성공) + 콜별 실측 토큰·원가
     valid_ids = {c.get("id") for c in catalog}
     feedback = ""
-    # Haiku 우선(원가), 2회 실패 시 Sonnet 에스컬레이션(콘티 품질 미달 시만 — 스펙대로)
-    for _try, _mdl in ((1, None), (2, None), (3, "claude-sonnet-5")):
+    # Haiku 우선(원가), 2회 실패 시 Sonnet 에스컬레이션. 스키마+예산 2중 게이트라 수렴 여유로 4시도.
+    for _try, _mdl in ((1, None), (2, None), (3, "claude-sonnet-5"), (4, "claude-sonnet-5")):
         _ent = {"try": _try, "requested": _mdl or "haiku"}
         try:
             raw = _llm.call_task("spoken", base + feedback, max_tokens=1800, default_model=_mdl)
@@ -89,10 +104,27 @@ def build_storyboard(body: str, catalog: list, canonical: str, channel: str = "n
             continue
         ok, why = _validate(sb, valid_ids)
         if ok:
+            # ★ 길이 예산 게이트(콘티 검증 조건) — 초과 콘티는 반려·재생성(렌더 자르기 금지).
+            est = estimate_duration(sb.get("scenes", []))
+            dmin, dmax = spec.get("dmin", 20), spec.get("dmax", 60)
+            if not (dmin <= est <= dmax):
+                _SB_LAST_FAIL = f"예산 초과(모델={_mdl or 'haiku'}): 추정 {est}s ∉ [{dmin},{dmax}]s"
+                _ent["outcome"] = f"실패(예산): 추정 {est}s ∉ [{dmin},{dmax}]"
+                _ent["est_sec"] = est
+                _SB_TRACE.append(_ent)
+                if est > dmax:
+                    feedback = (f"\n\n[재시도] 총 길이 추정 {est}초가 예산 {dmin}~{dmax}초를 초과했다. "
+                                "씬 수를 줄이거나 각 line을 더 짧게(핵심만) 압축해 다시 짜라. 정보는 유지하되 군더더기 제거.")
+                else:
+                    feedback = (f"\n\n[재시도] 총 길이 추정 {est}초가 예산 {dmin}~{dmax}초에 못 미친다. "
+                                "씬을 더 넣거나 line을 조금 더 충실히 채워 다시 짜라.")
+                continue
             sb.setdefault("meta", {})["channel"] = channel
             sb["meta"]["aspect"] = spec["aspect"]
             sb["meta"]["canonical"] = canonical or ""
+            sb["meta"]["est_sec"] = est
             _ent["outcome"] = "성공"
+            _ent["est_sec"] = est
             _SB_TRACE.append(_ent)
             return sb
         _SB_LAST_FAIL = f"검증 실패(모델={_mdl or 'haiku'}): {why}"
