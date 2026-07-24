@@ -6559,7 +6559,7 @@ def _regen_piece_common(asset_id: str, kind_val: str, channel_val: str = "", dry
     old = dict(target.payload or {})
     _imgs = (next((p.payload.get("image_paths") for p in pieces if (p.payload or {}).get("image_paths")), [])
              or old.get("image_paths") or [])
-    paths = [x for x in _imgs if x and os.path.exists(x)] or _restore_media(target.tenant_id, _imgs)
+    paths = _restore_media(target.tenant_id, _imgs)   # 디스크+R2 전량 복원(일부 디스크존재 시 누락 방지)
     if not paths:                                        # 사진 소실 → blocked 표시만(보존, 삭제·재생성 금지)
         if not dry:
             old["_publish_blocked"] = "phantom_no_photo"
@@ -6672,7 +6672,7 @@ def admin_set_catalog(asset_id: str):
     t = db.get_tenant(blog.tenant_id)
     raw = (next((p.payload.get("image_paths") for p in pieces if (p.payload or {}).get("image_paths")), [])
            or [])
-    paths = [x for x in raw if x and os.path.exists(x)] or _restore_media(blog.tenant_id, raw)
+    paths = _restore_media(blog.tenant_id, raw)   # 디스크+R2 합쳐 전량 복원(일부 디스크존재 시 나머지 R2 누락 버그 수정)
     if not paths:
         return JSONResponse({"ok": True, "blocked": "photo_lost", "n_photos": 0,
                              "note": "사진 소실 — 재업로드 후 재시도(대체 이미지 금지)."})
@@ -6701,7 +6701,7 @@ def admin_set_storyboard(asset_id: str, channel: str = "naver"):
     pl = blog.payload or {}
     body = pl.get("body") or ""
     raw = pl.get("image_paths") or []
-    paths = [x for x in raw if x and os.path.exists(x)] or _restore_media(blog.tenant_id, raw)
+    paths = _restore_media(blog.tenant_id, raw)   # 디스크+R2 전량
     if not paths:
         return JSONResponse({"ok": True, "blocked": "photo_lost", "note": "사진 소실 — 재업로드 후."})
     try:
