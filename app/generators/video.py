@@ -1636,6 +1636,144 @@ class ShortVideoGenerator(Generator):
                 pass
             return None, f"씬 빌드 오류: {str(e)[:120]}", 0, None
 
+    # ───────────────── 콘티→렌더 어댑터 (2-C) — 결정권만 콘티로 ─────────────────
+    def render_storyboard(self, sb: dict, img_by_id: dict, kws, tenant, strat, title="",
+                          evidence=""):
+        """AI 디렉터 콘티(render_v1) → mp4. ★ 새 렌더 로직 발명 없음 — _build_scene_video 자산
+        (_scene_video/_scene_card_video/_data_card_png/_audio_segment/_concat*/_post_overlay/_mux)
+        을 그대로 호출하고, 씬 순서·사진·crop·길이·카드 '결정'만 콘티가 내린다.
+        img_by_id = {photo_id: 실경로}(호출부가 _restore_media로 R2 포함 복원해 넘김).
+        반환: (final_path, note, total_dur, cover, compare_log). compare_log = 씬별 [콘티 지정 vs 렌더 실행]."""
+        if not (isinstance(sb, dict) and isinstance(sb.get("scenes"), list) and sb["scenes"]):
+            return None, "콘티 없음 — 기존 경로", 0, None, []
+        if not shutil.which("ffmpeg"):
+            return None, "ffmpeg 미설치", 0, None, []
+        # ★ 디스크 하한 게이트(_build_scene_video와 동일) — 만차 렌더 보류
+        _free = _disk_free_mb(os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage")))
+        if _free is not None and _free < _RENDER_FLOOR_MB:
+            return (None, f"디스크 여유 부족({_free}MB) — 렌더 보류", 0, None, [])
+        out_dir = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), tenant.id)
+        os.makedirs(out_dir, exist_ok=True)
+        import tempfile
+        work = os.path.join(tempfile.gettempdir(), f"omc_sb_{uuid.uuid4().hex}")
+        os.makedirs(work, exist_ok=True)
+        try:
+            # 데이터 카드 디자인 토큰(업종 중립 — 스키마 visual_preset)
+            try:
+                from app.services import indschema as _isc
+                _biz = getattr(tenant, "biz_type", "local") or "local"
+                _sch = _isc.get_schema(getattr(tenant, "industry", "") or "", _biz)
+                _vtok = self._visual_tokens(_sch.get("visual_preset") or "basic")
+            except Exception:
+                _vtok = self._visual_tokens("basic")
+            scenes = sb["scenes"]
+            spec_dur = 25.0
+            # duration_weight → 길이 배분: 목표초를 weight 비율로 나누되, 실 TTS 길이는 절대 안 자름
+            try:
+                weights = [max(0.3, float(s.get("duration_weight", 1))) for s in scenes]
+            except Exception:
+                weights = [1.0] * len(scenes)
+            wsum = sum(weights) or 1.0
+            vclips, awavs, durs, ass_scenes, compare = [], [], [], [], []
+            t, dropped = 0.0, 0
+            for i, s in enumerate(scenes):
+                role = s.get("role", "")
+                line = (s.get("line") or "").strip()
+                sh = s.get("shot") or {}
+                w_target = weights[i] / wsum * spec_dur          # 콘티 리듬 → 목표 길이
+                # line → TTS(음성) + ASS 자막(기존 스타일 토큰 그대로)
+                seg_tts, word_times = tts_lib.synthesize_timed(line, work) if line else (None, [])
+                td = _probe_dur(seg_tts) if seg_tts else 0
+                sdur = min(15.0, max(MIN_SCENE, td + 0.4, w_target)) if td > 0.3 else \
+                    self._clamp(max(w_target, len(line) * 0.13 + 1.2))
+                spec_line = {"role": role, "line": line[:40], "weight": round(weights[i], 2)}
+                if "photo_id" in sh:                             # photo_id → 사진(_restore_media 경유 경로)
+                    pid = sh.get("photo_id")
+                    crop = sh.get("crop", "full")
+                    img = img_by_id.get(pid)
+                    spec_line["shot"] = f"photo#{pid}/{crop}"
+                    if not (img and os.path.exists(img)):        # 사진 소실 → 씬 탈락(픽셀 생성 금지)
+                        dropped += 1
+                        compare.append({**spec_line, "실행": "탈락(사진 없음)", "dur": 0})
+                        continue
+                    v = self._scene_video(img, sdur, i, os.path.join(work, f"v{i}.mp4"),
+                                          tail=XFADE, crop=crop)
+                    exec_desc = f"사진 렌더 crop={crop}"
+                elif "card" in sh:                               # data_card → 기존 타이포 카드 렌더러
+                    cv = str((sh["card"] or {}).get("value", "")).strip()
+                    cl = str((sh["card"] or {}).get("label", "")).strip()
+                    spec_line["shot"] = f"card:{cv}({cl})"
+                    if not cv:
+                        dropped += 1
+                        compare.append({**spec_line, "실행": "탈락(카드값 없음)", "dur": 0})
+                        continue
+                    _cp = os.path.join(work, f"c{i}.png")
+                    self._data_card_png(_cp, cv, cl, _vtok)
+                    v = self._scene_card_video(_cp, sdur, os.path.join(work, f"v{i}.mp4"),
+                                               punch=True, fade_in=(i == 0), tail=XFADE)
+                    exec_desc = "타이포 카드 렌더"
+                else:
+                    dropped += 1
+                    compare.append({**spec_line, "shot": "?", "실행": "탈락(shot 없음)", "dur": 0})
+                    continue
+                aw = self._audio_segment(seg_tts, sdur, os.path.join(work, f"a{i}.wav"))
+                if v and aw:
+                    _text, _emph = _parse_emphasis(line)
+                    ass_scenes.append((t, sdur, _text, word_times, _emph))
+                    vclips.append(v); awavs.append(aw); durs.append(sdur); t += sdur
+                    compare.append({**spec_line, "실행": exec_desc, "dur": round(sdur, 1),
+                                    "tts": round(td, 1)})
+                else:
+                    dropped += 1
+                    compare.append({**spec_line, "실행": "탈락(클립 생성 실패)", "dur": 0})
+            if not vclips:
+                return None, "씬 클립 생성 실패", 0, None, compare
+            total = t
+            video_only = self._concat_xfade(vclips, durs, os.path.join(work, "video.mp4"))
+            full_wav = self._concat(awavs, os.path.join(work, "audio.wav"))
+            if not (video_only and full_wav):
+                return None, "concat 실패", 0, None, compare
+            from app.industries import subtitle_preset as _sp
+            ass = _build_ass(ass_scenes, kws, strat.key, os.path.join(work, "cap.ass"),
+                             preset=_sp(getattr(tenant, "industry", "") or ""))
+            fx = self._post_overlay(video_only, ass, total, strat.key)
+            final = self._mux(fx, full_wav, out_dir, mood=bgm_lib.mood_for(tenant.industry))
+            if final and os.path.exists(final):
+                _ws = os.path.join(out_dir, f"sbshort_{uuid.uuid4().hex}.mp4")
+                if _web_safe_encode(final, _ws) and os.path.exists(_ws):
+                    if out_dir in final:
+                        try:
+                            os.remove(final)
+                        except Exception:
+                            pass
+                    final = _ws
+                elif work in final:
+                    try:
+                        shutil.copy(final, _ws); final = _ws
+                    except Exception:
+                        pass
+            cover = os.path.join(out_dir, f"sbcover_{uuid.uuid4().hex}.png")   # 첫 프레임 = 커버
+            try:
+                _run_ff(["ffmpeg", "-y", "-i", final or video_only, "-vframes", "1",
+                         "-q:v", "3", cover], 40, "sbcover")
+                cover = cover if os.path.exists(cover) else None
+            except Exception:
+                cover = None
+            try:
+                shutil.rmtree(work, ignore_errors=True)
+            except Exception:
+                pass
+            note = (f"디렉터판(콘티 render_v1) · 씬 {len(vclips)}개 · xfade · 켄번스+색보정 · "
+                    f"단어자막(ASS) · {'TTS싱크' if tts_lib.configured() else '무음'}"
+                    f"{f' · 씬탈락 {dropped}' if dropped else ''}")
+            return final, note, round(total), cover, compare
+        except Exception as e:
+            try:
+                shutil.rmtree(work, ignore_errors=True)
+            except Exception:
+                pass
+            return None, f"콘티 렌더 오류: {str(e)[:120]}", 0, None, []
+
     def _clamp(self, v: float) -> float:
         return max(MIN_SCENE, min(MAX_SCENE, v or MIN_SCENE))
 
@@ -1960,12 +2098,17 @@ class ShortVideoGenerator(Generator):
             return ""
         return f",fade=t=in:st=0:d=0.22,fade=t=out:st={max(0.0, dur - 0.25):.2f}:d=0.22"
 
-    def _scene_video(self, img, dur, idx, out, tail: float = 0.0) -> str | None:
+    def _scene_video(self, img, dur, idx, out, tail: float = 0.0, crop: str = "full") -> str | None:
         """이미지 → 켄번스 + 색보정(통일감), 정확히 dur(+tail)초 무음 영상. 자막은 ASS로 별도.
-        tail>0 = xfade 전환용 여유 꼬리(전환에 소모돼 체감 길이는 dur) — 페이드 없음(검은 플래시 제거)."""
+        tail>0 = xfade 전환용 여유 꼬리(전환에 소모돼 체감 길이는 dur) — 페이드 없음(검은 플래시 제거).
+        crop='closeup' = 콘티 지정 클로즈업 — 기존 zoompan을 더 타이트하게 파라미터화(새 렌더 로직 아님)."""
         total_t = dur + max(0.0, tail)
         frames = max(1, int(total_t * FPS))
-        zdir = "min(zoom+0.0012,1.12)" if idx % 2 == 0 else "if(eq(on,1),1.12,max(zoom-0.0012,1.0))"
+        if crop == "closeup":                              # 콘티 crop 힌트 → zoompan 시작 배율 상향(부위 강조)
+            zdir = ("if(eq(on,1),1.22,min(zoom+0.0012,1.38))" if idx % 2 == 0
+                    else "if(eq(on,1),1.38,max(zoom-0.0012,1.22))")
+        else:
+            zdir = "min(zoom+0.0012,1.12)" if idx % 2 == 0 else "if(eq(on,1),1.12,max(zoom-0.0012,1.0))"
         vf = (f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,"
               f"eq=contrast=1.06:saturation=1.12:brightness=0.02,"
               f"zoompan=z='{zdir}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"

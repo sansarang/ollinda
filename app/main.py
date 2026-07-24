@@ -6756,6 +6756,70 @@ def admin_set_storyboard(asset_id: str, channel: str = "naver"):
                          "catalog": cat, "storyboard": sb, "line_photo_mapping": mapping})
 
 
+@app.get("/admin/set/{asset_id}/render-storyboard")
+def admin_render_storyboard(asset_id: str, channel: str = "naver"):
+    """2-C 콘티→렌더 어댑터 실행 — catalog→director→ShortVideoGenerator.render_storyboard.
+    콘티 존재 시에만 어댑터, 없으면 blocked(호출부가 기존 경로 폴백). 렌더 큐(RENDER_SEM)·디스크 하한 게이트 경유.
+    반환: 디렉터판 영상 URL + 씬별 [콘티 지정 vs 렌더 실행] 대조 로그."""
+    from app.domain.models import ContentKind as _CK
+    from app.services.ingest import _restore_media
+    from app.services import director as _dir
+    from app.generators import video as _vid
+    from app.strategies import resolve_strategy
+    pieces = db.get_set_pieces(asset_id)
+    blog = next((p for p in pieces if p.kind == _CK.BLOG), None)
+    if not blog:
+        return JSONResponse({"ok": False, "error": "블로그 피스 없음"}, status_code=404)
+    t = db.get_tenant(blog.tenant_id)
+    pl = blog.payload or {}
+    body = pl.get("body") or ""
+    raw = pl.get("image_paths") or []
+    paths = _restore_media(blog.tenant_id, raw)   # 디스크+R2 전량 복원
+    if not paths:
+        return JSONResponse({"ok": True, "blocked": "photo_lost", "note": "사진 소실 — 재업로드 후."})
+    try:
+        from app import vision as _vzc
+        cat = _vzc.build_catalog(paths, getattr(t, "industry", "") or "")
+    except Exception:
+        import traceback
+        return JSONResponse({"ok": False, "error": "catalog: " + traceback.format_exc()[-400:]}, status_code=500)
+    if getattr(_vzc, "_CATALOG_CREDIT_EXHAUSTED", False):
+        return JSONResponse({"ok": False, "blocked": "vision_credit",
+                             "note": "사진 분석 크레딧 소진 — 확인/충전 후 재시도."}, status_code=402)
+    if not cat or len(cat) < max(1, len(paths) // 2):
+        return JSONResponse({"ok": True, "blocked": "catalog_poor", "catalog_n": len(cat),
+                             "note": "카탈로그 부실 — 어댑터 보류(기존 경로 폴백)."})
+    canon = _canonical_keyword(t, blog)
+    try:
+        from app.services import indschema as _isc
+        _sch = _isc.get_schema(getattr(t, "industry", "") or "", getattr(t, "biz_type", "local") or "local")
+        _dvals = _vid.ShortVideoGenerator._extract_data_points(
+            body, pl.get("gen_source") or "", _sch, getattr(t, "biz_type", "local") or "local")
+    except Exception:
+        _dvals = []
+    sb = _dir.build_storyboard(body, cat, canon, channel=channel, data_values=_dvals)
+    if not sb:                                    # ★ 콘티 없으면 어댑터 미가동 — 기존 경로가 폴백(자동)
+        return JSONResponse({"ok": True, "blocked": "no_storyboard", "note": "콘티 없음 — 기존 렌더 경로 폴백.",
+                             "_fail": getattr(_dir, "_SB_LAST_FAIL", "")})
+    # catalog id = paths의 1-기반 인덱스 → 사진 경로 매핑(_restore_media 경유 경로)
+    img_by_id = {c["id"]: paths[c["id"] - 1] for c in cat if 1 <= c.get("id", 0) <= len(paths)}
+    strat = resolve_strategy(t)
+    kws = [canon] if canon else []
+    gen = _vid.ShortVideoGenerator()
+    # 렌더 큐(동시성 세마포어) 경유 — 만차·중복 렌더 방지(기존 게이트 불변 재사용)
+    with _vid.RENDER_SEM:
+        vp, note, dur, cover, compare = gen.render_storyboard(
+            sb, img_by_id, kws, t, strat, title=(pl.get("title") or canon))
+    if not vp:
+        return JSONResponse({"ok": True, "blocked": "render_failed", "note": note, "compare": compare})
+    vurl = f"/admin/media/{t.id}/{os.path.basename(vp)}"
+    curl = f"/admin/media/{t.id}/{os.path.basename(cover)}" if cover else ""
+    return JSONResponse({"ok": True, "video_url": vurl, "cover_url": curl, "note": note,
+                         "duration_sec": dur, "n_scenes_directed": len(sb.get("scenes", [])),
+                         "n_scenes_rendered": len([c for c in compare if c.get("dur")]),
+                         "canonical": canon, "compare": compare})
+
+
 @app.post("/admin/set/{asset_id}/regen-piece")
 def admin_regen_piece(asset_id: str, kind: str = "blog", channel: str = "", dry: str = ""):
     """전 피스 타입 공통 재생성 — kind=blog|short|caption|x_post|marketplace, channel(선택 youtube/instagram)."""
