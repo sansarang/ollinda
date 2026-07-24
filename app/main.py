@@ -7111,9 +7111,18 @@ def admin_disk(prune: str = ""):
     """디스크 진단 — 확장자별 사용량 + DB 미참조(고아) 미디어 집계.
     prune=1이면 고아 영상·커버·임시파일만 삭제(사진·DB·참조 파일 불변 — R2 무관하게 안전)."""
     import shutil as _sh
+    import time as _tp
     from collections import defaultdict
     from app.storage import STORAGE_DIR
-    refs = _referenced_media()
+    # ★ PHASE 1(1-3): 만차 시 _referenced_media(DB 조회)가 SQLite I/O로 죽어 prune 전체가 500 → 복구 불가였다.
+    #   DB 조회 실패면 '파일 기준 폴백'(나이 든 mp4/png/wav/ass = 고아 취급, R2 미러가 서빙하므로 안전). 사진(jpg) 절대 제외.
+    try:
+        refs = _referenced_media()
+        _refs_ok = True
+    except Exception as _re:
+        refs, _refs_ok = set(), False
+        logging.warning("[disk] 참조 조회 실패(만차 추정) — 파일 기준 폴백 복구: %s", repr(_re)[:100])
+    _now = _tp.time()
     by_ext = defaultdict(lambda: [0, 0])
     orphans, orphan_bytes = [], 0
     for root, _d, fs in os.walk(STORAGE_DIR):
@@ -7126,10 +7135,18 @@ def admin_disk(prune: str = ""):
             ext = fn.rsplit(".", 1)[-1].lower()[:6] if "." in fn else "?"
             by_ext[ext][0] += 1
             by_ext[ext][1] += sz
-            # 고아 후보: 생성 산출물류만(mp4/png/wav/ass) — 원본 사진(jpg 등)은 건드리지 않음
-            if ext in ("mp4", "png", "wav", "ass") and os.path.realpath(fp) not in refs:
-                orphans.append(fp)
-                orphan_bytes += sz
+            # 고아 후보: 생성 산출물류만(mp4/png/wav/ass) — 원본 사진(jpg 등)은 절대 건드리지 않음
+            if ext in ("mp4", "png", "wav", "ass"):
+                if _refs_ok:
+                    _orphan = os.path.realpath(fp) not in refs
+                else:                                    # DB 미조회 폴백: 나이 든(>1일) 산출물만(R2 서빙)
+                    try:
+                        _orphan = (_now - os.path.getmtime(fp)) > 86400
+                    except Exception:
+                        _orphan = False
+                if _orphan:
+                    orphans.append(fp)
+                    orphan_bytes += sz
     freed = 0
     if prune == "1":
         for fp in orphans:

@@ -37,8 +37,20 @@ except Exception:
     pass
 
 import threading as _threading
-# 동시 렌더 상한 — ffmpeg 폭주(업로드 N건=프로세스 N개) 방지(성장 PHASE 12)
-RENDER_SEM = _threading.BoundedSemaphore(int(os.environ.get("SHOPCAST_RENDER_CONCURRENCY", "2")))
+# 동시 렌더 상한 — ffmpeg 폭주(업로드 N건=프로세스 N개) 방지. PHASE 1: 기본 1건 직렬화(디스크·CPU 안전).
+RENDER_SEM = _threading.BoundedSemaphore(int(os.environ.get("SHOPCAST_RENDER_CONCURRENCY", "1")))
+_RENDER_FLOOR_MB = int(os.environ.get("SHOPCAST_RENDER_FLOOR_MB", "300"))   # 이하면 렌더 보류(만차 502 차단)
+
+
+def _disk_free_mb(path: str = None) -> "int | None":
+    """볼륨(스토리지) 여유 공간 MB. 실패 시 None(게이트는 None을 통과로 취급)."""
+    try:
+        import shutil as _sh
+        _p = path or os.environ.get("SHOPCAST_STORAGE", "storage")
+        os.makedirs(_p, exist_ok=True)
+        return int(_sh.disk_usage(_p).free / 1e6)
+    except Exception:
+        return None
 
 W, H, FPS = 1080, 1920, 30
 XFADE = 0.25             # 씬 전환 크로스페이드(초) — 검은 플래시 제거(영상강화 PHASE 4)
@@ -1453,6 +1465,12 @@ class ShortVideoGenerator(Generator):
             from PIL import Image  # noqa: F401
         except Exception:
             return None, "Pillow 미설치", 0, None
+        # ★ PHASE 1: 디스크 하한 게이트 — 만차에서 렌더하면 무한 502·SQLite I/O. 여유 미달이면 렌더 보류(안내).
+        _free = _disk_free_mb(os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage")))
+        if _free is not None and _free < _RENDER_FLOOR_MB:
+            logging.warning("[video] 디스크 여유 %dMB < 하한 %dMB — 렌더 보류", _free, _RENDER_FLOOR_MB)
+            return (None, f"디스크 여유 부족({_free}MB) — 영상 렌더를 잠시 보류했어요. 공간 확보 후 자동 재시도됩니다.",
+                    0, None)
         out_dir = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), tenant.id)
         os.makedirs(out_dir, exist_ok=True)
         # 임시 작업은 /tmp(컨테이너 디스크)에서 — 작은 /data 볼륨(434MB) 디스크풀 방지(근본책)
