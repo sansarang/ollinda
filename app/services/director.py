@@ -77,8 +77,10 @@ def build_storyboard(body: str, catalog: list, canonical: str, channel: str = "n
     _SB_TRACE = []          # 승급 로그(Haiku 시도→실패 사유→Sonnet 성공) + 콜별 실측 토큰·원가
     valid_ids = {c.get("id") for c in catalog}
     feedback = ""
-    # Haiku 우선(원가), 2회 실패 시 Sonnet 에스컬레이션. 스키마+예산 2중 게이트라 수렴 여유로 4시도.
-    for _try, _mdl in ((1, None), (2, None), (3, "claude-sonnet-5"), (4, "claude-sonnet-5")):
+    # Haiku 우선(원가), 2회 실패 시 Sonnet 에스컬레이션. 스키마+예산 2중 게이트라 수렴 여유로 5시도
+    # (특히 쇼츠 25~35s 타이트 예산은 압축 수렴에 여러 번 필요).
+    for _try, _mdl in ((1, None), (2, None), (3, "claude-sonnet-5"),
+                       (4, "claude-sonnet-5"), (5, "claude-sonnet-5")):
         _ent = {"try": _try, "requested": _mdl or "haiku"}
         try:
             raw = _llm.call_task("spoken", base + feedback, max_tokens=1800, default_model=_mdl)
@@ -116,9 +118,15 @@ def build_storyboard(body: str, catalog: list, canonical: str, channel: str = "n
                 _ent["outcome"] = f"실패(예산): 추정 {est}s ∉ [{dmin},{dmax}]"
                 _ent["est_sec"] = est
                 _SB_TRACE.append(_ent)
+                _nsc = len(sb.get("scenes", []))
                 if est > dmax:
-                    feedback = (f"\n\n[재시도] 총 길이 추정 {est}초가 예산 {dmin}~{dmax}초를 초과했다. "
-                                "씬 수를 줄이거나 각 line을 더 짧게(핵심만) 압축해 다시 짜라. 정보는 유지하되 군더더기 제거.")
+                    # 구체적 글자수 목표 제시 — 나레이션 총량이 얼마여야 상한에 드는지 계산해서 알려줌.
+                    _char_budget = int(max(50, (dmax - _SCENE_PAD * max(1, _nsc)) / _CPS_SEC))
+                    _sc_budget = max(3, min(_nsc, int(dmax / 6)))
+                    feedback = (f"\n\n[재시도] 총 길이 추정 {est}초 > 상한 {dmax}초. 반드시 {dmax}초 안에 들어와야 한다.\n"
+                                f"→ 씬을 {_sc_budget}개 이하로 줄이고, 전체 나레이션(모든 line 글자수 합계)을 "
+                                f"{_char_budget}자 이내로 압축하라. 각 line은 한 문장·핵심만(수식어·중복·인사말 삭제). "
+                                "정보의 핵심 사실은 유지하되 문장을 짧게.")
                 else:
                     feedback = (f"\n\n[재시도] 총 길이 추정 {est}초가 예산 {dmin}~{dmax}초에 못 미친다. "
                                 "씬을 더 넣거나 line을 조금 더 충실히 채워 다시 짜라.")
