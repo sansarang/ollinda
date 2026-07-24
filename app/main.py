@@ -6791,11 +6791,14 @@ def admin_render_storyboard(asset_id: str, channel: str = "naver"):
         return JSONResponse({"ok": True, "blocked": "catalog_poor", "catalog_n": len(cat),
                              "note": "카탈로그 부실 — 어댑터 보류(기존 경로 폴백)."})
     canon = _canonical_keyword(t, blog)
+    # ★ VG3: 판매가는 딜러 명시값만(gen_source→body 순). 미명시면 ''=가격 카드 금지(서류 출고가 승격 차단).
+    _gsrc = pl.get("gen_source") or ""
+    _sale = _vid._resolve_sale_price(_gsrc, body)
     try:
         from app.services import indschema as _isc
         _sch = _isc.get_schema(getattr(t, "industry", "") or "", getattr(t, "biz_type", "local") or "local")
         _dvals = _vid.ShortVideoGenerator._extract_data_points(
-            body, pl.get("gen_source") or "", _sch, getattr(t, "biz_type", "local") or "local")
+            body, _gsrc, _sch, getattr(t, "biz_type", "local") or "local", sale_price=_sale)
     except Exception:
         _dvals = []
     sb = _dir.build_storyboard(body, cat, canon, channel=channel, data_values=_dvals)
@@ -6810,7 +6813,7 @@ def admin_render_storyboard(asset_id: str, channel: str = "naver"):
     # 렌더 큐(동시성 세마포어) 경유 — 만차·중복 렌더 방지(기존 게이트 불변 재사용)
     with _vid.RENDER_SEM:
         vp, note, dur, cover, compare = gen.render_storyboard(
-            sb, img_by_id, kws, t, strat, title=(pl.get("title") or canon))
+            sb, img_by_id, kws, t, strat, title=(pl.get("title") or canon), sale_price=_sale)
     if not vp:
         return JSONResponse({"ok": True, "blocked": "render_failed", "note": note, "compare": compare})
     vurl = f"/admin/media/{t.id}/{os.path.basename(vp)}"
@@ -6818,7 +6821,8 @@ def admin_render_storyboard(asset_id: str, channel: str = "naver"):
     return JSONResponse({"ok": True, "video_url": vurl, "cover_url": curl, "note": note,
                          "duration_sec": dur, "n_scenes_directed": len(sb.get("scenes", [])),
                          "n_scenes_rendered": len([c for c in compare if c.get("dur")]),
-                         "canonical": canon, "compare": compare,
+                         "canonical": canon, "sale_price": _sale or "(미명시 — 가격 카드 없음)",
+                         "compare": compare,
                          "escalation_trace": getattr(_dir, "_SB_TRACE", [])})
 
 

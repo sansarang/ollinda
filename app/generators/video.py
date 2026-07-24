@@ -139,6 +139,51 @@ def _num_claim_check(text: str, source: str) -> str:
     return ""
 
 
+# ── 가격 의미 게이트(VG3) — 서류 판독값(출고가·취득가)이 '판매가'로 승격되는 의미오류 차단 ──
+# 업종 중립: '취득/원가' 문맥의 가격 ≠ 판매가(재판매업 일반 의미). 하드코딩 업종어 0.
+_ACQUIRE_TERMS = ("출고", "취득", "신차", "원가", "정가", "공급가", "도매", "감정", "기준가", "매입", "출고가")
+_SALE_TERMS = ("판매", "매물", "팝니", "가격은", "판매가", "실매물", "내놓", "에 나온", "특가", "할인가")
+_PRICE_RE = __import__("re").compile(r"(\d[\d,]*\s*만\s?원|\d[\d,]{2,}\s*원)")
+# VG4: 자막이 '읽어야 할 시각 증거'(수치·기록·일치·계기판 등)를 지시하는지 — 지시하면 과확대 크롭 금지.
+_EVIDENCE_REF = __import__("re").compile(
+    r"(\d[\d,]*\s*(?:km|㎞|만\s?km|만원|원|년식)|일치|기록부|점검부|성능부|계기판|주행거리|확인해)")
+
+
+def _resolve_sale_price(gen_source: str, body: str = "") -> str:
+    """딜러가 '명시'한 판매가만 반환 — 서류 유래 수치(출고가·취득가)는 절대 아님. 없으면 ''(가격 카드 금지).
+    사용자 원칙: 판매가가 명시되지 않으면 가격은 적지 않는다. 1순위 딜러노트(gen_source), 2순위 본문(판매 문맥만)."""
+    def _scan(text: str, require_sale: bool) -> str:
+        if not text:
+            return ""
+        for m in _PRICE_RE.finditer(text):
+            s, e = m.start(), m.end()
+            ctx = text[max(0, s - 24):min(len(text), e + 8)]   # 앞 절 포함(출고(취득)가격(부가세 제외): N 형태 커버)
+            if any(a in ctx for a in _ACQUIRE_TERMS):     # 출고가·취득가 문맥 → 판매가 아님
+                continue
+            if require_sale and not any(t in ctx for t in _SALE_TERMS):
+                continue
+            return m.group(0).replace(" ", "")
+        return ""
+    return _scan(gen_source or "", require_sale=False) or _scan(body or "", require_sale=True)
+
+
+def _price_semantics_violation(text: str, sale_price: str) -> str:
+    """VG3: 자막·카드에 '판매가처럼' 실린 가격이 실제 판매가와 다르고 항목 라벨(출고가 등)도 없으면 위반.
+    라벨 붙은 대비 수치('신차 출고가 3,040만원')는 허용. sale_price='' 이면 라벨 없는 가격은 전부 위반."""
+    if not text:
+        return ""
+    sp = (sale_price or "").replace(",", "").replace(" ", "")
+    for m in _PRICE_RE.finditer(text):
+        num = m.group(0).replace(",", "").replace(" ", "")
+        if sp and num == sp:
+            continue                                      # 판매가 일치 → OK
+        ctx = text[max(0, m.start() - 20):m.start()]
+        if any(a in ctx for a in _ACQUIRE_TERMS):         # 항목 라벨(출고가 등) 있음 → 대비 맥락 허용
+            continue
+        return f"라벨 없는 불일치 가격({m.group(0).strip()})"
+    return ""
+
+
 def _subtitle_gate(script: "SceneScript", source: str = "", biz_name: str = "",
                    title: str = "") -> str:
     """자막 게이트(렌더 직전) — 위반 사유 반환(통과 시 '').
@@ -1515,7 +1560,8 @@ class ShortVideoGenerator(Generator):
                 _sch = _isc.get_schema(getattr(tenant, "industry", "") or "", _biz)
                 _vtok = self._visual_tokens(_sch.get("visual_preset") or "basic")
                 _factsrc = " ".join(sentences) + "\n" + (getattr(script, "evidence", "") or "")
-                _dcards = self._extract_data_points(_factsrc, _factsrc, _sch, _biz)
+                _sp0 = _resolve_sale_price(getattr(script, "evidence", "") or "", _factsrc)
+                _dcards = self._extract_data_points(_factsrc, _factsrc, _sch, _biz, sale_price=_sp0)
             except Exception:
                 _vtok, _dcards = self._visual_tokens("basic"), []
             _dc_pos = {len(sentences) // 2} if (sentences and _dcards) else set()   # 중간 1장 삽입(색감 리셋)
@@ -1638,12 +1684,12 @@ class ShortVideoGenerator(Generator):
 
     # ───────────────── 콘티→렌더 어댑터 (2-C) — 결정권만 콘티로 ─────────────────
     def render_storyboard(self, sb: dict, img_by_id: dict, kws, tenant, strat, title="",
-                          evidence=""):
+                          evidence="", sale_price=""):
         """AI 디렉터 콘티(render_v1) → mp4. ★ 새 렌더 로직 발명 없음 — _build_scene_video 자산
         (_scene_video/_scene_card_video/_data_card_png/_audio_segment/_concat*/_post_overlay/_mux)
         을 그대로 호출하고, 씬 순서·사진·crop·길이·카드 '결정'만 콘티가 내린다.
         img_by_id = {photo_id: 실경로}(호출부가 _restore_media로 R2 포함 복원해 넘김).
-        반환: (final_path, note, total_dur, cover, compare_log). compare_log = 씬별 [콘티 지정 vs 렌더 실행]."""
+        sale_price = 명시 판매가(VG3 검증 기준). 반환: (final, note, dur, cover, compare_log)."""
         if not (isinstance(sb, dict) and isinstance(sb.get("scenes"), list) and sb["scenes"]):
             return None, "콘티 없음 — 기존 경로", 0, None, []
         if not shutil.which("ffmpeg"):
@@ -1685,15 +1731,27 @@ class ShortVideoGenerator(Generator):
                 line = (s.get("line") or "").strip()
                 sh = s.get("shot") or {}
                 w_target = weights[i] / wsum * spec_dur          # 콘티 리듬 → 목표 길이
+                spec_line = {"role": role, "line": line[:40], "weight": round(weights[i], 2)}
+                # ★ VG3(가격 날조): 자막에 판매가와 불일치하는 '라벨 없는 가격'이 실리면 씬 탈락
+                _pv = _price_semantics_violation(line, sale_price)
+                if _pv:
+                    dropped += 1
+                    compare.append({**spec_line, "shot": (sh.get("card") or sh.get("photo_id")),
+                                    "실행": f"탈락(VG3 가격: {_pv})", "dur": 0})
+                    continue
                 # line → TTS(음성) + ASS 자막(기존 스타일 토큰 그대로)
                 seg_tts, word_times = tts_lib.synthesize_timed(line, work) if line else (None, [])
                 td = _probe_dur(seg_tts) if seg_tts else 0
                 sdur = min(15.0, max(MIN_SCENE, td + 0.4, w_target)) if td > 0.3 else \
                     self._clamp(max(w_target, len(line) * 0.13 + 1.2))
-                spec_line = {"role": role, "line": line[:40], "weight": round(weights[i], 2)}
                 if "photo_id" in sh:                             # photo_id → 사진(_restore_media 경유 경로)
                     pid = sh.get("photo_id")
                     crop = sh.get("crop", "full")
+                    # ★ VG4(크롭 후 증거 소실): 자막이 수치·기록·일치 등 '읽어야 할 증거'를 지시하면
+                    #   과확대 클로즈업 금지 — 전체샷으로 폴백해 증거(계기판 숫자 등)가 프레임에 보이게.
+                    if crop == "closeup" and _EVIDENCE_REF.search(line):
+                        crop = "full"
+                        spec_line["vg4"] = "closeup→full(증거 가시성)"
                     img = img_by_id.get(pid)
                     spec_line["shot"] = f"photo#{pid}/{crop}"
                     if not (img and os.path.exists(img)):        # 사진 소실 → 씬 탈락(픽셀 생성 금지)
@@ -1711,6 +1769,13 @@ class ShortVideoGenerator(Generator):
                         dropped += 1
                         compare.append({**spec_line, "실행": "탈락(카드값 없음)", "dur": 0})
                         continue
+                    # ★ VG3: 가격류 카드는 명시 판매가와 일치하거나 항목 라벨이 있어야 — 아니면 탈락
+                    if _PRICE_RE.search(cv):
+                        _cpv = _price_semantics_violation(f"{cl} {cv}", sale_price)
+                        if _cpv:
+                            dropped += 1
+                            compare.append({**spec_line, "실행": f"탈락(VG3 가격카드: {_cpv})", "dur": 0})
+                            continue
                     _cp = os.path.join(work, f"c{i}.png")
                     self._data_card_png(_cp, cv, cl, _vtok)
                     v = self._scene_card_video(_cp, sdur, os.path.join(work, f"v{i}.mp4"),
@@ -1905,23 +1970,23 @@ class ShortVideoGenerator(Generator):
         return T.get(vpreset or "basic", T["basic"])
 
     @staticmethod
-    def _extract_data_points(body: str, gen_source: str, schema: dict, biz: str = "local") -> list:
+    def _extract_data_points(body: str, gen_source: str, schema: dict, biz: str = "local",
+                             sale_price: str = "") -> list:
         """데이터 카드 수치 추출 — 세트 실값(본문·사진분석)만, 스키마 attribute_axes 축 우선순위로.
         업종 하드코딩 0: 코드는 '수치+단위' 패턴만 인식하고, 어떤 축을 앞세울지는 스키마가 정한다.
-        반환 [(value_str, label)] 최대 3개. 없으면 []."""
+        ★ 가격(VG3): 본문에서 임의로 긁지 않는다 — 명시 판매가(sale_price)만 '판매가' 라벨로 올린다.
+        판매가 미명시면 가격 카드 없음(서류 출고가·취득가가 판매가로 승격되는 날조 차단). 반환 [(value,label)] 최대 3."""
         import re as _r
         src = (gen_source or "") + "\n" + (body or "")
-        # 축 이름 → 대표 라벨(스키마 axis명 그대로 라벨로). 수치 단위 패턴은 범용.
         axes = [a.get("axis", "") for a in (schema.get("attribute_axes") or [])]
-        # 범용 수치 유형(단위 기반) — 우선순위는 스키마 축 순서에 맞춰 정렬
+        # 범용 수치 유형(단위 기반) — 가격은 여기서 제외(명시 판매가만 별도 처리)
         UNIT = [("주행거리", r"([\d,]{2,})\s*(?:km|㎞|키로|만km)"),
-                ("가격", r"([\d,]{3,})\s*(?:만원|원)"),
                 ("연식", r"((?:19|20)\d{2})\s*년?식"),
                 ("용량", r"([\d,]{2,})\s*(?:ml|mL|㎖|g|kg|리터|L)"),
                 ("소요시간", r"([\d,]{1,})\s*(?:분|시간)"),
                 ("횟수", r"([\d,]{1,})\s*회")]
         found, seen = [], set()
-        # 스키마 축과 라벨이 겹치는 유형을 앞으로(중고차=주행거리·가격이 축에 있음)
+
         def _axis_rank(label):
             for i, ax in enumerate(axes):
                 if label[:2] in ax or ax[:2] in label:
@@ -1934,7 +1999,10 @@ class ShortVideoGenerator(Generator):
                 found.append((m.group(0).strip(), label))
             if len(found) >= 3:
                 break
-        return found
+        # 가격: 명시 판매가만(맨 앞). 없으면 가격 카드 자체를 만들지 않음.
+        if sale_price:
+            found = [(sale_price, "판매가")] + found
+        return found[:3]
 
     def _data_card_png(self, out: str, value: str, label: str, tokens: dict) -> None:
         """데이터 카드(풀스크린) — 라벨 + 큰 수치. 사진 없음·그라데 배경(디자인 토큰). 수치가 주인공."""
@@ -2158,14 +2226,21 @@ class ShortVideoGenerator(Generator):
             cmd = ["ffmpeg", "-y"]
             for c in clips:
                 cmd += ["-i", c]
-            fc, prev, off = "", "[0:v]", 0.0
+            # ★ 전환 버퍼링 근본수정: xfade 입력마다 타임베이스·fps·픽셀포맷·SAR을 통일한다.
+            #   카드(정지PNG 생성)와 사진(zoompan) 클립의 인코딩 프로파일이 달라 join 지점에서
+            #   정지→재생 스터터가 났음 — 정규화로 프레임 타이밍을 일치시켜 제거(단일 필터그래프 패스).
+            fc = ""
+            for k in range(len(clips)):
+                fc += f"[{k}:v]settb=AVTB,fps={FPS},format=yuv420p,setsar=1[n{k}];"
+            prev, off = "[n0]", 0.0
             for k in range(1, len(clips)):
                 off += durs[k - 1]
                 lab = f"[x{k}]" if k < len(clips) - 1 else "[v]"
-                fc += f"{prev}[{k}:v]xfade=transition=fade:duration={XFADE}:offset={off:.2f}{lab};"
+                fc += f"{prev}[n{k}]xfade=transition=fade:duration={XFADE}:offset={off:.2f}{lab};"
                 prev = lab
             cmd += ["-filter_complex", fc.rstrip(";"), "-map", "[v]", "-r", str(FPS),
-                    "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast",
+                    "-fps_mode", "cfr", "-pix_fmt", "yuv420p", "-c:v", "libx264",
+                    "-preset", "ultrafast", "-video_track_timescale", "90000",
                     "-threads", "1", "-an", out]
             if _run_ff(cmd, 420, "xfade") and os.path.exists(out):
                 return out

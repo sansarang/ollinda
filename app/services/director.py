@@ -66,6 +66,9 @@ def build_storyboard(body: str, catalog: list, canonical: str, channel: str = "n
         "duration_weight 균일 금지 — 훅·정직고지·카드 길게(1.5~3), 나열 짧게(0.5~1).\n"
         "5. 품질 플래그(흐림·표식·저해상) 사진은 hook·reveal 등 대표 씬에 쓰지 마라.\n"
         "6. line은 본문에 있는 사실만(새 수치·차종·이력 추가 금지). data_card value는 아래 실값 목록에서만.\n"
+        "   ★ 가격: '판매가'로 말할 수 있는 건 아래 실값의 판매가뿐이다. 서류의 출고가·취득가를 판매가처럼 쓰지 마라. "
+        "출고가를 굳이 쓰려면 반드시 '신차 출고가 N' 처럼 항목명을 붙여 대비로만. 판매가 실값이 없으면 가격은 아예 말하지 마라.\n"
+        "   ★ 자막이 계기판 숫자·기록부 수치 등 '사진에서 읽어야 할 증거'를 지목하면, 그 사진 shot의 crop은 full로 둬라(과확대로 증거를 자르지 마라).\n"
         f"\n[채널] {channel} ({spec['aspect']}, 예산 {spec.get('dmin',20)}~{spec.get('dmax',60)}초)\n[canonical] {canonical}\n"
         f"[세트 실값(data_card 전용)] {dv}\n[사진 카탈로그]\n{_catalog_block(catalog)}\n\n[본문]\n{body[:3500]}")
     global _SB_LAST_FAIL, _SB_TRACE
