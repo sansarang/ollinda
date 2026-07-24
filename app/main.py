@@ -6622,6 +6622,43 @@ def _regen_piece_common(asset_id: str, kind_val: str, channel_val: str = "", dry
     return {"ok": True, "action": "regenerated", "kind": kind_val, "new_title": _new_title}
 
 
+@app.get("/admin/tenant-photos")
+def admin_tenant_photos(tid: str = "", check_r2: str = "1"):
+    """(진단·vision 불필요) tenant 전 세트의 사진 정합 — 세트별 [asset_id / 사진 수 / 디스크 존재 / R2 존재].
+    16장 그랜저·14장 모닝 세트 행방 확정용. check_r2=1이면 각 사진 R2 HEAD(캡 20/세트)."""
+    from app.domain.models import ContentKind as _CK
+    if not tid:
+        return JSONResponse({"ok": False, "error": "tid 필요"}, status_code=400)
+    import requests as _rq
+    from app import storage as _st
+    rows, _seen = [], set()
+    for s in db.list_sets(tenant_id=tid, limit=300):
+        aid = s.get("asset_id")
+        if not aid or aid in _seen:
+            continue
+        _seen.add(aid)
+        blog = next((p for p in db.get_set_pieces(aid) if p.kind == _CK.BLOG), None)
+        if not blog:
+            continue
+        imgs = (blog.payload or {}).get("image_paths") or []
+        on_disk = sum(1 for x in imgs if x and os.path.exists(x))
+        in_r2 = None
+        if check_r2 == "1" and imgs:
+            in_r2 = 0
+            for x in imgs[:20]:
+                try:
+                    url = _st.r2_media_url(blog.tenant_id, os.path.basename(x))
+                    if url and _rq.head(url, timeout=8).status_code == 200:
+                        in_r2 += 1
+                except Exception:
+                    pass
+        _title = (blog.payload or {}).get("selected_title") or (blog.payload or {}).get("title") or ""
+        rows.append({"asset_id": aid, "photos": len(imgs), "on_disk": on_disk, "in_r2": in_r2,
+                     "title": _title[:40]})
+    rows.sort(key=lambda r: -r["photos"])
+    return JSONResponse({"ok": True, "tid": tid, "sets": rows})
+
+
 @app.get("/admin/set/{asset_id}/catalog")
 def admin_set_catalog(asset_id: str):
     """PHASE 2-A: 사진 카탈로그(디렉터의 눈) — 세트 사진 R2 복원 → vision.build_catalog. V3 검증용.
