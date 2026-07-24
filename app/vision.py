@@ -12,7 +12,8 @@ import base64
 import os
 
 MODEL = os.environ.get("SHOPCAST_VISION_MODEL", "claude-sonnet-5")
-_CATALOG_LAST_RAW = ""   # 진단: build_catalog 첫 청크 원시 응답(catalog_n=0 원인 추적)
+_CATALOG_LAST_RAW = ""            # 진단: build_catalog 첫 청크 원시 응답
+_CATALOG_CREDIT_EXHAUSTED = False  # vision 콜 전부 빈반환 = 크레딧 고갈 의심(엔드포인트가 사용자 안내)
 
 
 def configured() -> bool:
@@ -161,17 +162,45 @@ def build_catalog(image_paths: list[str], industry_name: str = "", max_imgs: int
         return []
     import json as _j
     import re as _r
-    from app import llm as _llm
-    global _CATALOG_LAST_RAW
-    _CATALOG_LAST_RAW = ""
-    out = []
+    import hashlib as _h
     import time as _tq
-    for ci in range(0, len(paths), 6):                       # 6장 청크(rate limit·토큰 관리)
-        if ci > 0:
-            _tq.sleep(float(os.environ.get("SHOPCAST_VISION_GAP", "6")))   # ★ vision 큐: 청크 간 간격(레이트 회복·쿼터 소진 방지)
-        chunk = paths[ci:ci + 6]
+    import logging as _lgc
+    from app import llm as _llm
+    from app import db as _db
+    global _CATALOG_LAST_RAW, _CATALOG_CREDIT_EXHAUSTED
+    _CATALOG_LAST_RAW = ""
+    _CATALOG_CREDIT_EXHAUSTED = False
+
+    def _phash(p):
         try:
-            imgs64 = [_b64_for_vision(p) for p in chunk]
+            with open(p, "rb") as _f:
+                return _h.sha256(_f.read()).hexdigest()[:24]
+        except Exception:
+            return ""
+
+    def _norm(e):
+        return {"subject": str(e.get("subject", ""))[:80], "part": str(e.get("part", ""))[:40],
+                "text": str(e.get("text", ""))[:120],
+                "shot": ("클로즈업" if "클로즈" in str(e.get("shot", "")) else "전체"),
+                "flags": [f for f in (e.get("flags") or []) if f in ("흐림", "표식", "저해상")]}
+
+    # ① 사진 해시 캐시 조회 — 동일 사진 재분석 콜 0(크레딧 절약, regen 재분석 주범 차단)
+    entries, uncached = {}, []
+    for p in paths:
+        _hh = _phash(p)
+        _c = _db.get_catalog_cache(_hh) if _hh else None
+        if _c:
+            entries[p] = _c
+        else:
+            uncached.append((p, _hh))
+    # ② 미캐시만 vision(6장 청크 + 6초 큐)
+    _calls, _oks = 0, 0
+    for ci in range(0, len(uncached), 6):
+        if ci > 0:
+            _tq.sleep(float(os.environ.get("SHOPCAST_VISION_GAP", "6")))
+        chunk = uncached[ci:ci + 6]
+        try:
+            imgs64 = [_b64_for_vision(p) for p, _ in chunk]
             prompt = (
                 f"이미지들은 순서대로 [사진1]..[사진{len(chunk)}]이다. 업종: {industry_name or '일반'}.\n"
                 "각 사진을 마케팅 영상 편집자 관점에서 구조화 분석하라. 사진에 실제 보이는 것만(추측 금지).\n"
@@ -182,38 +211,48 @@ def build_catalog(image_paths: list[str], industry_name: str = "", max_imgs: int
                 '"flags":["흐림"|"표식"|"저해상" 중 해당되는 것만, 없으면 빈 배열]}\n'
                 "part는 '이 사진이 무엇을 보여주는 컷인지'다 — 서류 사진은 '서류', 엔진룸 사진은 '엔진룸'으로 정확히.")
             resp = ""
-            for _try in (1, 2):                              # 빈 반환(과부하) 재시도 — analyze_all과 동일 원칙
+            for _try in (1, 2):
                 resp = (_llm.call_task("vision", prompt, 1400, default_model=MODEL, images=imgs64) or "").strip()
+                _calls += 1
                 if resp:
                     break
-                import time as _tv
-                _tv.sleep(2)
+                _tq.sleep(2)
             if not _CATALOG_LAST_RAW:
-                _CATALOG_LAST_RAW = resp[:600]               # 진단: 첫 청크 원시 응답
+                _CATALOG_LAST_RAW = resp[:600]
             m = _r.search(r"\[.*\]", resp, _r.S)
             arr = []
             if m:
                 try:
                     arr = _j.loads(m.group(0))
-                except Exception:                            # 배열 파싱 실패 → 개별 {객체} 견고 파싱
+                except Exception:
                     for mm in _r.finditer(r"\{[^{}]*\}", m.group(0)):
                         try:
                             arr.append(_j.loads(mm.group(0)))
                         except Exception:
                             pass
-            if not arr:
-                import logging as _lgc
-                _lgc.getLogger("shopcast.vision").warning("[catalog] 청크 파싱 0 — resp[:120]=%r", resp[:120])
+            if arr:
+                _oks += 1
             for i, e in enumerate(arr):
-                if isinstance(e, dict):
-                    out.append({"id": ci + i + 1,
-                                "subject": str(e.get("subject", ""))[:80],
-                                "part": str(e.get("part", ""))[:40],
-                                "text": str(e.get("text", ""))[:120],
-                                "shot": ("클로즈업" if "클로즈" in str(e.get("shot", "")) else "전체"),
-                                "flags": [f for f in (e.get("flags") or []) if f in ("흐림", "표식", "저해상")]})
+                if isinstance(e, dict) and i < len(chunk):
+                    p, _hh = chunk[i]
+                    ent = _norm(e)
+                    entries[p] = ent
+                    if _hh:
+                        _db.save_catalog_cache(_hh, ent)     # 캐시 적재 → 다음 regen 재분석 0
         except Exception:
             continue
+    # ③ 크레딧 고갈 감지 — 미캐시가 있었는데 vision 콜이 전부 빈반환 = 크레딧 고갈 의심(조용한 실패 금지)
+    if uncached and _calls > 0 and _oks == 0:
+        _CATALOG_CREDIT_EXHAUSTED = True
+        _lgc.getLogger("shopcast.vision").error(
+            "[catalog] vision %d콜 전부 빈반환 — 크레딧 고갈 의심(레이트 아님). 사용자 안내 필요.", _calls)
+    # ④ paths 순서로 id 할당
+    out = []
+    for idx, p in enumerate(paths, 1):
+        if p in entries:
+            _e = dict(entries[p])
+            _e["id"] = idx
+            out.append(_e)
     return out
 
 

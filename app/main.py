@@ -6625,7 +6625,7 @@ def _regen_piece_common(asset_id: str, kind_val: str, channel_val: str = "", dry
 @app.get("/admin/tenant-photos")
 def admin_tenant_photos(tid: str = "", check_r2: str = "1"):
     """(진단·vision 불필요) tenant 전 세트의 사진 정합 — 세트별 [asset_id / 사진 수 / 디스크 존재 / R2 존재].
-    16장 그랜저·14장 모닝 세트 행방 확정용. check_r2=1이면 각 사진 R2 HEAD(캡 20/세트)."""
+    그랜저·모닝 세트(실측 각 14장) 행방·R2 정합 확정용. check_r2=1이면 각 사진 R2 HEAD(캡 20/세트)."""
     from app.domain.models import ContentKind as _CK
     if not tid:
         return JSONResponse({"ok": False, "error": "tid 필요"}, status_code=400)
@@ -6678,6 +6678,10 @@ def admin_set_catalog(asset_id: str):
                              "note": "사진 소실 — 재업로드 후 재시도(대체 이미지 금지)."})
     from app import vision as _vzc0
     cat = _vzc0.build_catalog(paths, getattr(t, "industry", "") or "")
+    if getattr(_vzc0, "_CATALOG_CREDIT_EXHAUSTED", False):    # 크레딧 고갈 → 사용자 안내(조용한 실패 금지)
+        return JSONResponse({"ok": False, "blocked": "vision_credit",
+                             "note": "사진 분석 API 크레딧이 소진된 것 같아요 — 크레딧을 확인/충전한 뒤 다시 시도해 주세요.",
+                             "n_photos": len(paths), "catalog_n": len(cat)}, status_code=402)
     if not cat or len(cat) < max(1, len(paths) // 2):        # 카탈로그 부실 → 디렉터 콜 금지(앵커 게이트 원칙)
         return JSONResponse({"ok": True, "blocked": "catalog_poor", "n_photos": len(paths),
                              "catalog_n": len(cat), "note": "카탈로그 부실 — 영상 보류(재분석 필요).",
@@ -6710,6 +6714,10 @@ def admin_set_storyboard(asset_id: str, channel: str = "naver"):
     except Exception:
         import traceback
         return JSONResponse({"ok": False, "error": "catalog: " + traceback.format_exc()[-400:]}, status_code=500)
+    if getattr(_vzc, "_CATALOG_CREDIT_EXHAUSTED", False):
+        return JSONResponse({"ok": False, "blocked": "vision_credit",
+                             "note": "사진 분석 API 크레딧이 소진된 것 같아요 — 확인/충전 후 다시 시도해 주세요."},
+                            status_code=402)
     if not cat or len(cat) < max(1, len(paths) // 2):
         return JSONResponse({"ok": True, "blocked": "catalog_poor", "catalog_n": len(cat),
                              "note": "카탈로그 부실 — 영상 보류."})

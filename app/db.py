@@ -87,6 +87,8 @@ def init_db() -> None:
         # 업종 스키마 캐시(추론 검증된 캐시) — 업종명별 스키마 JSON(전 업종 동적 적응)
         c.execute("CREATE TABLE IF NOT EXISTS industry_schema_cache("
                   "industry_key TEXT PRIMARY KEY, data TEXT, source TEXT, created_at TEXT)")
+        c.execute("CREATE TABLE IF NOT EXISTS catalog_cache("      # 사진 해시→카탈로그 엔트리(재분석 콜 0)
+                  "photo_hash TEXT PRIMARY KEY, data TEXT, created_at TEXT)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_invctx_t ON inventory_context(tenant_id, created_at)")
         c.execute("CREATE TABLE IF NOT EXISTS place_news("
                   "id TEXT PRIMARY KEY, tenant_id TEXT, text TEXT, created_at TEXT)")
@@ -997,6 +999,29 @@ def save_kw_pattern(keyword: str, data: dict) -> None:
     except Exception:
         import logging
         logging.getLogger("shopcast.db").exception("[db] kw_pattern 저장 실패")
+
+
+def get_catalog_cache(photo_hash: str) -> "dict | None":
+    """사진 해시 → 카탈로그 엔트리(동일 사진 재분석 콜 0 — 크레딧 절약). 없으면 None."""
+    import json as _j
+    try:
+        with _conn() as c:
+            r = c.execute("SELECT data FROM catalog_cache WHERE photo_hash=?", (photo_hash,)).fetchone()
+        return _j.loads(r[0]) if r and r[0] else None
+    except Exception:
+        return None
+
+
+def save_catalog_cache(photo_hash: str, data: dict) -> None:
+    import json as _j
+    from datetime import datetime as _dt
+    try:
+        with _conn() as c:
+            c.execute("INSERT OR REPLACE INTO catalog_cache(photo_hash, data, created_at) VALUES(?,?,?)",
+                      (photo_hash, _j.dumps(data, ensure_ascii=False), _dt.utcnow().isoformat()))
+    except Exception:
+        import logging
+        logging.getLogger("shopcast.db").exception("[db] catalog_cache 저장 실패")
 
 
 def recent_asset_rows(hours: int = 24, limit: int = 50) -> list[dict]:
