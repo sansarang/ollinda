@@ -6759,7 +6759,7 @@ def admin_set_storyboard(asset_id: str, channel: str = "naver"):
 
 @app.get("/admin/set/{asset_id}/render-storyboard")
 def admin_render_storyboard(asset_id: str, channel: str = "naver", price: str = "", mileage: str = "",
-                            backend: str = ""):
+                            backend: str = "", gorender_url: str = ""):
     """2-C 콘티→렌더 어댑터 실행 — catalog→director→ShortVideoGenerator.render_storyboard.
     콘티 존재 시에만 어댑터, 없으면 blocked(호출부가 기존 경로 폴백). 렌더 큐(RENDER_SEM)·디스크 하한 게이트 경유.
     반환: 디렉터판 영상 URL + 씬별 [콘티 지정 vs 렌더 실행] 대조 로그."""
@@ -6816,7 +6816,7 @@ def admin_render_storyboard(asset_id: str, channel: str = "naver", price: str = 
     from app.services import render_backend as _rb
     vp, note, dur, cover, compare, _bmeta = _rb.render(
         sb, img_by_id, kws, t, strat, title=(pl.get("title") or canon),
-        sale_price=_sale, mileage=_mile, mode_override=backend)
+        sale_price=_sale, mileage=_mile, mode_override=backend, url_override=gorender_url)
     if not vp:
         return JSONResponse({"ok": True, "blocked": "render_failed", "note": note, "compare": compare,
                              "backend": _bmeta})

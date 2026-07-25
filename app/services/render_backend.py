@@ -28,10 +28,13 @@ def backend() -> str:
     return (os.environ.get("RENDER_BACKEND", "python") or "python").strip().lower()
 
 
-def render(sb, img_by_id, kws, tenant, strat, title="", sale_price="", mileage="", mode_override=""):
-    """단일 진입 어댑터. 반환 (vp, note, dur, cover, compare, meta). mode_override로 요청별 백엔드 지정 가능."""
+def render(sb, img_by_id, kws, tenant, strat, title="", sale_price="", mileage="",
+           mode_override="", url_override=""):
+    """단일 진입 어댑터. 반환 (vp, note, dur, cover, compare, meta).
+    mode_override=요청별 백엔드. url_override=요청별 gorender URL(V5 폴백 테스트용 — 불통 주소 주입)."""
     gen = _vid.ShortVideoGenerator()
     mode = (mode_override or "").strip().lower() or backend()
+    gurl = (url_override or "").strip() or GORENDER_URL
 
     def _python():
         with _vid.RENDER_SEM:
@@ -40,7 +43,7 @@ def render(sb, img_by_id, kws, tenant, strat, title="", sale_price="", mileage="
 
     if mode == "go":
         try:
-            vp, note, dur, cover, compare = _go(sb, img_by_id, kws, tenant, strat, title, sale_price, mileage)
+            vp, note, dur, cover, compare = _go(sb, img_by_id, kws, tenant, strat, title, sale_price, mileage, gurl)
             return vp, note, dur, cover, compare, {"backend": "go"}
         except Exception as e:
             import logging
@@ -54,7 +57,7 @@ def render(sb, img_by_id, kws, tenant, strat, title="", sale_price="", mileage="
         try:
             shadow = _go_shadow(sb, img_by_id, kws, tenant, strat, title, sale_price, mileage,
                                 py_dur=dur, py_scenes=len([c for c in compare if c.get("dur")]),
-                                py_path=vp)
+                                py_path=vp, gurl=gurl)
         except Exception as e:
             shadow = {"attempted": True, "error": repr(e)[:150]}
         return vp, note, dur, cover, compare, {"backend": "shadow", "shadow": shadow}
@@ -107,15 +110,16 @@ def _http_json(method, url, body=None, timeout=30):
         return r.status, json.loads(r.read().decode() or "{}")
 
 
-def _gorender_render(job, poll_timeout=540):
+def _gorender_render(job, gurl=None, poll_timeout=540):
     """gorender에 잡 제출 + 완료 폴링 → result dict(video_r2_key 등)."""
-    st, resp = _http_json("POST", f"{GORENDER_URL}/render", job, timeout=30)
+    base = (gurl or GORENDER_URL).rstrip("/")
+    st, resp = _http_json("POST", f"{base}/render", job, timeout=30)
     gjid = resp.get("id")
     if not gjid:
         raise RuntimeError(f"render 제출 실패: {st} {resp}")
     deadline = time.time() + poll_timeout
     while time.time() < deadline:
-        _st, jr = _http_json("GET", f"{GORENDER_URL}/job/{gjid}", timeout=20)
+        _st, jr = _http_json("GET", f"{base}/job/{gjid}", timeout=20)
         status = jr.get("status")
         if status == "done":
             return jr.get("result") or {}
@@ -144,9 +148,9 @@ def _fetch_result(result, tenant, tag):
     return vp, cover
 
 
-def _go(sb, img_by_id, kws, tenant, strat, title, sale_price, mileage):
+def _go(sb, img_by_id, kws, tenant, strat, title, sale_price, mileage, gurl=None):
     job, _jid = _build_and_upload(sb, img_by_id, kws, tenant, strat, title, sale_price, mileage)
-    result = _gorender_render(job)
+    result = _gorender_render(job, gurl=gurl)
     vp, cover = _fetch_result(result, tenant, "goshort")
     dur = result.get("duration_sec") or 0
     compare = [{"role": s["role"], "shot": (s.get("photo") or s.get("card")), "dur": s["duration_sec"],
@@ -155,11 +159,11 @@ def _go(sb, img_by_id, kws, tenant, strat, title, sale_price, mileage):
     return vp, note, dur, cover, compare
 
 
-def _go_shadow(sb, img_by_id, kws, tenant, strat, title, sale_price, mileage, py_dur, py_scenes, py_path):
+def _go_shadow(sb, img_by_id, kws, tenant, strat, title, sale_price, mileage, py_dur, py_scenes, py_path, gurl=None):
     """실산출은 python — Go는 병행(best-effort). 결과 별도 저장 + 비교 로그 append."""
     t0 = time.time()
     job, jid = _build_and_upload(sb, img_by_id, kws, tenant, strat, title, sale_price, mileage)
-    result = _gorender_render(job)
+    result = _gorender_render(job, gurl=gurl)
     go_ms = int((time.time() - t0) * 1000)
     vp, _cover = _fetch_result(result, tenant, "shadow")
     # 비교 지표
