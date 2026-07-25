@@ -71,6 +71,12 @@ def build_storyboard(body: str, catalog: list, canonical: str, channel: str = "n
         "출고가를 굳이 쓰려면 반드시 '신차 출고가 N' 처럼 항목명을 붙여 대비로만. 판매가 실값이 없으면 가격은 아예 말하지 마라.\n"
         "   ★ 자막이 계기판 숫자·기록부 수치 등 '사진에서 읽어야 할 증거'를 지목하면, 그 사진 shot의 crop은 full로 둬라(과확대로 증거를 자르지 마라).\n"
         "   ★ 같은 항목(주행거리 등)의 수치는 '하나'만 써라 — 서류값과 계기판값을 나란히 대조하거나 '일치/불일치' 연출 금지. 딱 한 번만 언급.\n"
+        "7. ★ 구조 필수 — '정보 제공 → 판매 유도'를 한 편에 담아라(업종 무관 마케팅 영상 공통):\n"
+        "   (a) 정보: 이 매물/상품/서비스가 '무엇이고 왜 좋은지'를 본문의 실측 사실(핵심 사양·상태·점검·강점)로 "
+        "분명히 보여주는 씬을 반드시 포함하라(reveal·inspect·data_card 등). 분위기·감성만으로 채우지 마라.\n"
+        "   (b) 판매 유도: 반드시 마지막 씬을 role='cta'로 맺어, 보는 사람이 다음 행동(문의·연락·방문·구매)을 하게 "
+        "이끌어라. 정보만 나열하고 끝내지 마라.\n"
+        "   (c) 단 '사실 그대로' — 없는 사양·수치·이력을 지어내 유도하는 것은 절대 금지(위 6번 사실 규칙 우선).\n"
         f"\n[채널] {channel} ({spec['aspect']}, 예산 {spec.get('dmin',20)}~{spec.get('dmax',60)}초)\n[canonical] {canonical}\n"
         f"[세트 실값(data_card 전용)] {dv}\n[사진 카탈로그]\n{_catalog_block(catalog)}\n\n[본문]\n{body[:3500]}")
     global _SB_LAST_FAIL, _SB_TRACE
@@ -131,6 +137,15 @@ def build_storyboard(body: str, catalog: list, canonical: str, channel: str = "n
                 else:
                     feedback = (f"\n\n[재시도] 총 길이 추정 {est}초가 예산 {dmin}~{dmax}초에 못 미친다. "
                                 "씬을 더 넣거나 line을 조금 더 충실히 채워 다시 짜라.")
+                continue
+            # ★ 구조 게이트 — 판매 유도(cta) 씬 필수. 없으면 재시도로 넛지(단 마지막 시도는 통과시켜 렌더 보존).
+            _has_cta = any(s.get("role") == "cta" for s in sb.get("scenes", []))
+            if not _has_cta and _try < 5:
+                _SB_LAST_FAIL = f"구조: cta 없음(모델={_mdl or 'haiku'})"
+                _ent["outcome"] = "실패(구조): cta 없음"
+                _SB_TRACE.append(_ent)
+                feedback = ("\n\n[재시도] 마지막 씬을 판매·문의 유도(role='cta')로 반드시 맺어라 — "
+                            "정보만 나열하고 끝내지 마라(사실 그대로, 없는 내용 지어내기 금지).")
                 continue
             sb.setdefault("meta", {})["channel"] = channel
             sb["meta"]["aspect"] = spec["aspect"]
