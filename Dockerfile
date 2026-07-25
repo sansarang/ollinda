@@ -1,8 +1,8 @@
 FROM python:3.12-slim
 
-# 숏 영상 자막조립용 ffmpeg + 한글 폰트(NanumGothic)
+# 숏 영상 자막조립용 ffmpeg + 한글 폰트(NanumGothic) + 문서 PII OCR(tesseract kor+eng)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg fonts-nanum \
+    ffmpeg fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /srv

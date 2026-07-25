@@ -263,54 +263,75 @@ def build_catalog(image_paths: list[str], industry_name: str = "", max_imgs: int
     return out
 
 
-def detect_document_pii(image_path: str, cols: int = 6, rows: int = 8) -> list[dict]:
-    """문서 식별번호를 '격자 칸'으로 국소화 → 칸을 bbox로 마스킹. 정밀 bbox 대신 격자 지정이라
-    vision이 안정적으로 답한다(정밀좌표 회피, 문서 표 안 등록번호·VIN·문서번호 누락 근본해결).
-    업종 중립: 모든 식별번호 유형. 날짜·주행거리·상태체크는 제외(트러스트 수치 보존). 실패 시 []."""
-    if not (configured() and image_path and os.path.exists(image_path)):
+# 문서 식별번호 정규식(업종 중립) — OCR 텍스트에서 매칭. 날짜·주행거리·금액은 형식이 달라 자동 제외.
+_DOC_ID_PATTERNS = [
+    ("plate",   r"\d{2,3}[가-힣]\d{4}"),               # 차량 등록번호 370다4358
+    ("vin",     r"[A-HJ-NPR-Z0-9]{16,17}"),            # 차대번호 VIN(17자리)
+    ("rrn",     r"\d{6}-?\d{7}"),                      # 주민/법인 등록번호
+    ("bizno",   r"\d{3}-?\d{2}-?\d{5}"),               # 사업자등록번호
+    ("docno",   r"\d{2,3}-\d{2,3}-\d{5,6}"),           # 문서발급/확인번호 98-90-061766
+    ("phone",   r"01[016-9]-?\d{3,4}-?\d{4}"),         # 휴대전화
+    ("account", r"\d{11,16}"),                          # 계좌·카드(연속 장문 숫자)
+]
+
+
+def detect_document_pii(image_path: str) -> list[dict]:
+    """문서 식별번호를 OCR+정규식으로 국소화 → 정확한 단어 bbox 반환(vision bbox 실패 근본해결).
+    tesseract(kor+eng)로 단어·좌표 추출 → 식별번호 패턴 매칭 → 그 단어들의 bbox. 업종 중립.
+    날짜·주행거리·금액은 패턴이 달라 자동 제외(트러스트 수치 보존). tesseract 없으면 [](배포 전 graceful)."""
+    import shutil as _sh
+    if not (image_path and os.path.exists(image_path) and _sh.which("tesseract")):
         return []
     try:
-        import json
         import re as _re
-        _mt, data = _b64_for_vision(image_path, max_px=int(os.environ.get("SHOPCAST_PII_MAX_PX", "2048")))
-        import anthropic
-        client = anthropic.Anthropic()
-        prompt = (
-            f"이 이미지를 가로 {cols}칸·세로 {rows}칸 격자로 나눴다(왼쪽위=행1 열1, 오른쪽아래=행{rows} 열{cols}).\n"
-            "문서(자동차등록증·성능점검부·신분증·사업자등록증·계약서 등)라면, '가려야 할 식별번호'가 적힌 칸을 "
-            "모두 찾아라. 유형: 차량등록번호(예 370다4358)·차대번호 VIN(17자리)·주민등록번호·사업자등록번호·"
-            "법인등록번호·계좌번호·카드번호·전화번호·여권번호·운전면허번호·문서발급/확인번호.\n"
-            "★ 날짜·검사기간·주행거리(km)·상태 체크(양호/없음)·금액 같은 '가려선 안 되는 정보'는 제외.\n"
-            "번호가 두 칸에 걸치면 두 칸 모두. JSON 배열만(설명 없이): "
-            '[{"row":정수,"col":정수,"type":"유형","value":"읽은 값"}]. 식별번호 없으면 [] 만.'
-        )
-        resp = client.messages.create(
-            model=MODEL, max_tokens=900,
-            messages=[{"role": "user", "content": [
-                {"type": "image", "source": {"type": "base64", "media_type": _mt, "data": data}},
-                {"type": "text", "text": prompt}]}])
-        txt = next((b.text for b in resp.content if b.type == "text"), "")
-        m = _re.search(r"\[.*\]", txt, _re.S)
-        cells = json.loads(m.group(0)) if m else []
-        boxes, seen = [], set()
-        padx, pady = 0.30 / cols, 0.25 / rows          # 칸 경계 오차·번호 넘침 대비 패딩
-        for c in cells:
-            try:
-                r0 = int(c["row"]) - 1
-                c0 = int(c["col"]) - 1
-            except Exception:
-                continue
-            if not (0 <= r0 < rows and 0 <= c0 < cols):
-                continue
-            key = (r0, c0)
-            if key in seen:
-                continue
-            seen.add(key)
-            boxes.append({"type": "doc:" + str(c.get("type", "id"))[:12],
-                          "value": str(c.get("value", ""))[:40],
-                          "x0": max(0.0, c0 / cols - padx), "y0": max(0.0, r0 / rows - pady),
-                          "x1": min(1.0, (c0 + 1) / cols + padx), "y1": min(1.0, (r0 + 1) / rows + pady),
-                          "conf": 0.9})
+        import subprocess as _sp
+        import tempfile as _tf
+        from collections import defaultdict
+        from PIL import Image
+        W, H = Image.open(image_path).size
+        with _tf.TemporaryDirectory(prefix="ocr_") as td:
+            out = os.path.join(td, "o")
+            _sp.run(["tesseract", image_path, out, "-l", "kor+eng", "tsv"],
+                    capture_output=True, timeout=90)
+            tsv = ""
+            if os.path.exists(out + ".tsv"):
+                with open(out + ".tsv", encoding="utf-8") as f:
+                    tsv = f.read()
+        words = []                                        # (text,x,y,w,h,line_key)
+        for line in tsv.splitlines()[1:]:
+            c = line.split("\t")
+            if len(c) >= 12 and c[11].strip():
+                try:
+                    if float(c[10]) < 30:                 # 저신뢰 OCR 단어 제외
+                        continue
+                    words.append((c[11].strip(), int(c[6]), int(c[7]), int(c[8]), int(c[9]),
+                                  (c[2], c[3], c[4])))     # block,par,line
+                except Exception:
+                    continue
+        lines = defaultdict(list)
+        for w in words:
+            lines[w[5]].append(w)
+        boxes = []
+        for lk, ws in lines.items():
+            ws.sort(key=lambda w: w[1])                   # x 순
+            s, owner = "", []
+            for wi, w in enumerate(ws):
+                for _ in w[0]:
+                    owner.append(wi)
+                s += w[0]
+            for name, pat in _DOC_ID_PATTERNS:
+                for m in _re.finditer(pat, s):
+                    idx = set(owner[m.start():m.end()])
+                    xs = [ws[i] for i in idx]
+                    if not xs:
+                        continue
+                    x0 = min(w[1] for w in xs); y0 = min(w[2] for w in xs)
+                    x1 = max(w[1] + w[3] for w in xs); y1 = max(w[2] + w[4] for w in xs)
+                    px = (x1 - x0) * 0.12; py = (y1 - y0) * 0.35   # 번호 넘침 대비 패딩(특히 세로)
+                    boxes.append({"type": "doc:" + name, "value": m.group()[:40],
+                                  "x0": max(0.0, (x0 - px) / W), "y0": max(0.0, (y0 - py) / H),
+                                  "x1": min(1.0, (x1 + px) / W), "y1": min(1.0, (y1 + py) / H),
+                                  "conf": 0.95})
         return boxes
     except Exception:
         return []
