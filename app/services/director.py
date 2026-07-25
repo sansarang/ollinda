@@ -77,6 +77,10 @@ def build_storyboard(body: str, catalog: list, canonical: str, channel: str = "n
         "   (b) 판매 유도: 반드시 마지막 씬을 role='cta'로 맺어, 보는 사람이 다음 행동(문의·연락·방문·구매)을 하게 "
         "이끌어라. 정보만 나열하고 끝내지 마라.\n"
         "   (c) 단 '사실 그대로' — 없는 사양·수치·이력을 지어내 유도하는 것은 절대 금지(위 6번 사실 규칙 우선).\n"
+        "8. ★ 후크 강화(첫 3초 = 이탈 좌우, 가장 중요): 첫 씬(role='hook')은 세트 실값·본문 사실 중 "
+        "'가장 강한 강점 하나'로 즉시 열어라 — 예: 무사고·낮은 실주행·점검 완료·급매/한정 등(업종 불문 '이걸 왜 봐야 하나'를 "
+        "한 방에). ★인사·상호 소개·분위기·배경 설명으로 시작하지 마라(첫 씬에서 스크롤 멈추게). "
+        "hook의 shot은 그 강점을 보여주는 실물 클로즈업, line은 짧고 강하게(큰 자막용). 없는 강점 지어내기 금지.\n"
         f"\n[채널] {channel} ({spec['aspect']}, 예산 {spec.get('dmin',20)}~{spec.get('dmax',60)}초)\n[canonical] {canonical}\n"
         f"[세트 실값(data_card 전용)] {dv}\n[사진 카탈로그]\n{_catalog_block(catalog)}\n\n[본문]\n{body[:3500]}")
     global _SB_LAST_FAIL, _SB_TRACE
