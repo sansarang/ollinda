@@ -62,3 +62,24 @@ def test_vision_detectors_emit_conf():
 def test_mask_trace_endpoint_wired():
     src = open(os.path.join(os.path.dirname(__file__), "..", "app", "main.py"), encoding="utf-8").read()
     assert "def admin_mask_trace" in src and "would_process" in src and "attached_warning" in src
+
+
+def test_doc_id_patterns():
+    """문서 식별번호 정규식 — 번호판·VIN·문서번호 잡고, 주행거리·날짜·제원은 제외(트러스트 보존)."""
+    import re
+    from app import vision as v
+    pats = v._DOC_ID_PATTERNS
+    def hits(s): return [n for n, p in pats for _ in re.finditer(p, s)]
+    assert "plate" in hits("3704358") and "plate" in hits("370다4358")   # 한글 미판독에도
+    assert "vin" in hits("KMHF141DBNA491923")
+    assert "docno" in hits("90-061766")
+    # 제외(가려선 안 되는 정보): 주행거리·날짜
+    assert hits("12269") == [] and hits("12,269") == []
+    assert hits("2022-04-11") == []
+
+
+def test_detect_document_pii_graceful_without_tesseract(monkeypatch):
+    """tesseract 없으면 [](배포 전 graceful — 크래시 금지)."""
+    from app import vision as v
+    monkeypatch.setattr("shutil.which", lambda x: None)
+    assert v.detect_document_pii("/nonexistent.jpg") == []
