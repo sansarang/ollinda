@@ -6867,6 +6867,14 @@ async def admin_pii_test(request: Request, photo: UploadFile = File(...)):
                 _dbg["ocr_words"] = sum(1 for ln in _tsv.splitlines()[1:]
                                         if len(ln.split("\t")) >= 12 and ln.split("\t")[11].strip())
                 _dbg["stderr"] = _rr.stderr.decode("utf-8", "ignore")[-200:]
+                # 등록번호 누락 원인 규명: '370'/'4358' 포함 토큰과 같은 줄 이웃 토큰 원시 샘플
+                _samp = []
+                for ln in _tsv.splitlines()[1:]:
+                    c = ln.split("\t")
+                    if len(c) >= 12 and c[11].strip() and ("370" in c[11] or "4358" in c[11] or "다" in c[11]):
+                        _samp.append({"t": c[11].strip(), "line": (c[2], c[3], c[4]),
+                                      "x": c[6], "w": c[8], "conf": c[10]})
+                _dbg["tok_sample"] = _samp[:12]
             except Exception as _e:
                 _dbg["ocr_error"] = repr(_e)[:150]
             boxes = list(_vz.detect_personal_info(orig)) + list(_vz.detect_document_pii(orig))

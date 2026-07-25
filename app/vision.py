@@ -313,33 +313,44 @@ def detect_document_pii(image_path: str) -> list[dict]:
         for w in words:
             lines[w[5]].append(w)
         boxes = []
+        seen = set()
         for lk, ws in lines.items():
             ws.sort(key=lambda w: w[1])
+            # 두 문자열로 매칭: (1) s=셀경계 분리자 삽입판(오병합 방지), (2) s_c=분리자 없는 컴팩트판.
+            #   표 셀 간격 때문에 '370  다4358'처럼 끊겨도 컴팩트판이 등록번호를 잡는다(누락 근본해결).
             s, owner = "", []
             prev_x1 = None
             avg_h = (sum(w[4] for w in ws) / len(ws)) if ws else 10
+            s_c, owner_c = "", []
             for wi, w in enumerate(ws):
                 if prev_x1 is not None and (w[1] - prev_x1) > 1.2 * avg_h:  # 큰 x간격 = 셀 경계 → 분리
                     s += "  "; owner.append(-1); owner.append(-1)
                 for _ in w[0]:
-                    owner.append(wi)
-                s += w[0]
+                    owner.append(wi); owner_c.append(wi)
+                s += w[0]; s_c += w[0]
                 prev_x1 = w[1] + w[3]
-            for name, pat in _DOC_ID_PATTERNS:
-                for m in _re.finditer(pat, s):
-                    idx = {i for i in owner[m.start():m.end()] if i >= 0}
-                    xs = [ws[i] for i in idx]
-                    if not xs:
-                        continue
-                    x0 = min(w[1] for w in xs); y0 = min(w[2] for w in xs)
-                    x1 = max(w[1] + w[3] for w in xs); y1 = max(w[2] + w[4] for w in xs)
-                    if (x1 - x0) > 0.5 * W:                # 과폭 = 오병합 방어
-                        continue
-                    px = (x1 - x0) * 0.12; py = (y1 - y0) * 0.4
-                    boxes.append({"type": "doc:" + name, "value": m.group()[:40],
-                                  "x0": max(0.0, (x0 - px) / W), "y0": max(0.0, (y0 - py) / H),
-                                  "x1": min(1.0, (x1 + px) / W), "y1": min(1.0, (y1 + py) / H),
-                                  "conf": 0.95})
+            for src, own in ((s, owner), (s_c, owner_c)):
+                for name, pat in _DOC_ID_PATTERNS:
+                    for m in _re.finditer(pat, src):
+                        if name == "plate" and any(ch in "원년월일만천억개명회" for ch in m.group()):
+                            continue                           # '100원0041' 등 단위/통화·날짜 오매칭 배제(호=구형번호판은 유지)
+                        idx = {i for i in own[m.start():m.end()] if i >= 0}
+                        xs = [ws[i] for i in idx]
+                        if not xs:
+                            continue
+                        x0 = min(w[1] for w in xs); y0 = min(w[2] for w in xs)
+                        x1 = max(w[1] + w[3] for w in xs); y1 = max(w[2] + w[4] for w in xs)
+                        if (x1 - x0) > 0.5 * W:                # 과폭 = 오병합 방어
+                            continue
+                        key = (name, round(x0 / max(W, 1), 3), round(y0 / max(H, 1), 3))
+                        if key in seen:                        # 두 문자열 매칭 중복 제거
+                            continue
+                        seen.add(key)
+                        px = (x1 - x0) * 0.12; py = (y1 - y0) * 0.4
+                        boxes.append({"type": "doc:" + name, "value": m.group()[:40],
+                                      "x0": max(0.0, (x0 - px) / W), "y0": max(0.0, (y0 - py) / H),
+                                      "x1": min(1.0, (x1 + px) / W), "y1": min(1.0, (y1 + py) / H),
+                                      "conf": 0.95})
         return boxes
     except Exception:
         return []
