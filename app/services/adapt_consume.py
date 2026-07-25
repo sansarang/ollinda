@@ -60,8 +60,11 @@ def consume_all(limit: int = 50) -> dict:
                 continue
         try:
             card, piece_id = _dispatch(a)
-        except Exception:
+        except Exception as _e:
+            import traceback
             _log.exception("[adapt] 소비 실패 id=%s kind=%s", aid, kind)
+            out.setdefault("errors", []).append({"id": aid, "kind": kind,
+                                                  "err": traceback.format_exc()[-300:]})
             continue
         if not card:
             continue
