@@ -373,6 +373,85 @@ def detect_document_pii(image_path: str) -> list[dict]:
         return []
 
 
+_LAST_VISION_RAW = ""   # 진단용: 마지막 detect_personal_info vision 원문(pii-test에서 노출)
+
+
+def detect_plates_vision(image_path: str) -> list[dict]:
+    """번호판 전용 집중 패스. Anthropic vision이 긴변 ~1568px로 리사이즈 → 큰 페이지의 작은 촬영
+    번호판은 통째로 놓친다. 이미지를 2x2 타일(겹침)로 나눠 각 타일에 번호판만 묻고 좌표를 전체로
+    환산·union → 촬영 실물 번호판(점검부·매물 사진의 앞뒤 번호판) 국소화. 무키/실패 시 []."""
+    global _LAST_VISION_RAW
+    if not (configured() and image_path and os.path.exists(image_path)):
+        return []
+    try:
+        import json
+        import re as _re
+        import anthropic
+        from PIL import Image
+        W, H = Image.open(image_path).size
+        client = anthropic.Anthropic()
+        prompt = (
+            "이 이미지에서 '자동차 번호판'만 찾아라(한국 번호판 예: '370다4358', '12가3456'). "
+            "인쇄된 번호판, 그리고 ★사진 속 실제 차량 앞·뒤·측면에 부착된 번호판★ 모두 포함. "
+            "번호판이 아닌 것(일반 숫자·차체·배경)은 넣지 마라. 각 번호판을 0~1 정규화 사각형으로.\n"
+            'JSON 배열만: [{"x0":0.00,"y0":0.00,"x1":0.00,"y1":0.00,"conf":0.00}]  없으면 [].'
+        )
+        # 2x2 타일(0.12 겹침) — 작은 촬영 번호판을 vision 유효해상도 내로 확대
+        ov = 0.12
+        tiles = [(0.0, 0.0, 0.5 + ov, 0.5 + ov), (0.5 - ov, 0.0, 1.0, 0.5 + ov),
+                 (0.0, 0.5 - ov, 0.5 + ov, 1.0), (0.5 - ov, 0.5 - ov, 1.0, 1.0)]
+        out = []
+        raws = []
+        import tempfile as _tf
+        for (fx0, fy0, fx1, fy1) in tiles:
+            px0, py0, px1, py1 = int(fx0 * W), int(fy0 * H), int(fx1 * W), int(fy1 * H)
+            with _tf.TemporaryDirectory(prefix="tile_") as td:
+                tp = os.path.join(td, "t.jpg")
+                Image.open(image_path).convert("RGB").crop((px0, py0, px1, py1)).save(tp, quality=92)
+                _mt, data = _b64_for_vision(tp, max_px=1568)
+            resp = client.messages.create(
+                model=MODEL, max_tokens=600,
+                messages=[{"role": "user", "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": _mt, "data": data}},
+                    {"type": "text", "text": prompt}]}])
+            txt = next((b.text for b in resp.content if b.type == "text"), "")
+            raws.append(txt[:200])
+            m = _re.search(r"\[.*\]", txt, _re.S)
+            if not m:
+                continue
+            try:
+                arr = json.loads(m.group(0))
+            except Exception:
+                continue
+            tw, th = (px1 - px0), (py1 - py0)
+            for b in arr:
+                if not (isinstance(b, dict) and all(k in b for k in ("x0", "y0", "x1", "y1"))):
+                    continue
+                try:
+                    # 타일 정규화 좌표 → 전체 이미지 정규화 좌표
+                    gx0 = (px0 + float(b["x0"]) * tw) / W; gy0 = (py0 + float(b["y0"]) * th) / H
+                    gx1 = (px0 + float(b["x1"]) * tw) / W; gy1 = (py0 + float(b["y1"]) * th) / H
+                    conf = float(b.get("conf", 0.7))
+                except Exception:
+                    continue
+                if gx1 <= gx0 or gy1 <= gy0 or (gx1 - gx0) > 0.6 or (gy1 - gy0) > 0.4:
+                    continue                          # 과대 박스 = 오탐 방어
+                out.append({"type": "plate", "x0": max(0.0, gx0), "y0": max(0.0, gy0),
+                            "x1": min(1.0, gx1), "y1": min(1.0, gy1), "conf": conf})
+        # 타일 겹침 중복 제거(중심 근접)
+        dedup = []
+        for b in out:
+            cx, cy = (b["x0"] + b["x1"]) / 2, (b["y0"] + b["y1"]) / 2
+            if any(abs(cx - (d["x0"] + d["x1"]) / 2) < 0.05 and abs(cy - (d["y0"] + d["y1"]) / 2) < 0.05
+                   for d in dedup):
+                continue
+            dedup.append(b)
+        _LAST_VISION_RAW = (_LAST_VISION_RAW + " || plates:" + " ; ".join(raws))[-1500:]
+        return dedup
+    except Exception:
+        return []
+
+
 def detect_personal_info(image_path: str) -> list[dict]:
     """사진 속 개인정보 위치를 정규화 bbox로 반환 → 모자이크용. 실패/무키 시 []."""
     if not (configured() and image_path and os.path.exists(image_path)):
@@ -411,6 +490,8 @@ def detect_personal_info(image_path: str) -> list[dict]:
                 {"type": "text", "text": prompt},
             ]}])
         txt = next((b.text for b in resp.content if b.type == "text"), "")
+        global _LAST_VISION_RAW
+        _LAST_VISION_RAW = ("main:" + txt[:400])
         m = _re.search(r"\[.*\]", txt, _re.S)
         boxes = json.loads(m.group(0)) if m else []
         out = []

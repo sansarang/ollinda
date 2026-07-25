@@ -156,6 +156,12 @@ def mask_personal_info(path: str) -> int:
                 boxes += vision.detect_document_pii(path)
             except Exception:
                 pass
+        # ③ 번호판 전용 타일 패스 — 큰 페이지/사진 속 촬영 실물 번호판(점검부·매물 사진) 국소화.
+        if os.environ.get("SHOPCAST_PLATE_TILE", "1") != "0":
+            try:
+                boxes += vision.detect_plates_vision(path)
+            except Exception:
+                pass
         if not boxes:
             return 0
         from PIL import Image
