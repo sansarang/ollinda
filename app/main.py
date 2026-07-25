@@ -6855,6 +6855,20 @@ async def admin_pii_test(request: Request, photo: UploadFile = File(...)):
             orig = os.path.join(work, "orig.jpg")
             with open(orig, "wb") as f:
                 f.write(data)
+            # OCR 진단(문서 PII 검출 0 원인 규명)
+            import subprocess as _sp2
+            _tp = os.environ.get("TESSDATA_PREFIX", "")
+            _dbg = {"tesseract": bool(_sh.which("tesseract")), "tessdata_prefix": _tp,
+                    "kor_exists": os.path.exists(os.path.join(_tp, "kor.traineddata")) if _tp else None}
+            try:
+                _oc = os.path.join(work, "ocrdbg")
+                _rr = _sp2.run(["tesseract", orig, _oc, "-l", "kor+eng", "tsv"], capture_output=True, timeout=90)
+                _tsv = open(_oc + ".tsv", encoding="utf-8").read() if os.path.exists(_oc + ".tsv") else ""
+                _dbg["ocr_words"] = sum(1 for ln in _tsv.splitlines()[1:]
+                                        if len(ln.split("\t")) >= 12 and ln.split("\t")[11].strip())
+                _dbg["stderr"] = _rr.stderr.decode("utf-8", "ignore")[-200:]
+            except Exception as _e:
+                _dbg["ocr_error"] = repr(_e)[:150]
             boxes = list(_vz.detect_personal_info(orig)) + list(_vz.detect_document_pii(orig))
             masked = os.path.join(work, "masked.jpg")
             _sh.copy(orig, masked)
@@ -6867,7 +6881,7 @@ async def admin_pii_test(request: Request, photo: UploadFile = File(...)):
                  "box": [round(float(b.get(k, 0)), 3) for k in ("x0", "y0", "x1", "y1")],
                  "masked": float(b.get("conf", 0.5)) >= _pb.PII_CONF_MIN} for b in boxes]
         return JSONResponse({"ok": True, "detected": len(boxes), "masked_count": n,
-                             "gate_conf_min": _pb.PII_CONF_MIN, "boxes": rows,
+                             "gate_conf_min": _pb.PII_CONF_MIN, "boxes": rows, "ocr_debug": _dbg,
                              "mask_log": _pb._MASK_LAST_LOG[-20:],
                              "masked_b64": _b64.b64encode(mbytes).decode()})   # 마스킹본(전후 대조용)
     except Exception:
