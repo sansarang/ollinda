@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "gorender 렌더-잡 계약 v1 (동결) — 어댑터 해석 결과 = 렌더러 입력",
+  "description": "render_v1(디렉터 콘티)은 동결. 이 계약은 shopcast 어댑터가 콘티 이후 모든 게이트/해석/자산생성을 '전부 적용한' 자체완결 렌더-잡이다. ★ Go는 순수 집행자다: [R2에서 자산 받기 → 동일 ffmpeg 파이프라인 → R2에 결과 올리기]. Go는 TTS를 호출하지 않고, ASS를 생성하지 않고, 카드를 렌더하지 않고, 타이밍을 산출하지 않는다(전부 어댑터가 결정·R2 키로 전달). 이관 라운드 파리티 원천 보장 — ASS·TTS·카드의 Go 이식은 안정화 후 B-1 후속 라운드. 본체 내부 상태 접근 금지.",
+  "type": "object",
+  "required": ["version", "meta", "ass_r2_key", "scenes"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "render_job_v1" },
+    "meta": {
+      "type": "object",
+      "required": ["set_id", "channel", "aspect", "width", "height", "fps", "xfade_sec", "accent_hex"],
+      "additionalProperties": false,
+      "properties": {
+        "set_id": { "type": "string", "description": "asset id(로그·상관·출력 파일 상관용)" },
+        "tenant_id": { "type": "string" },
+        "channel": { "enum": ["naver", "shorts", "reels"] },
+        "aspect": { "enum": ["9:16", "1:1", "16:9"] },
+        "width": { "type": "integer", "description": "출력 픽셀 폭(현행 1080)" },
+        "height": { "type": "integer", "description": "출력 픽셀 높이(현행 1920)" },
+        "fps": { "type": "integer", "description": "현행 렌더 FPS" },
+        "xfade_sec": { "type": "number", "description": "씬 전환 크로스페이드 초(현행 XFADE=0.25)" },
+        "canonical": { "type": "string", "description": "canonical 키워드(참조·로그)" },
+        "accent_hex": { "type": "string", "description": "진행바 색(_theme_rgb(theme_key) 해석값, 0xRRGGBB). Go는 계산 안 함." },
+        "bgm_r2_key": { "type": ["string", "null"], "description": "믹스할 BGM 파일 R2 키(bgm_lib.pick(mood) 해석값). null이면 BGM 없음. Go는 선택 안 함." },
+        "sale_price": { "type": "string", "description": "딜러 명시 판매가(참조·로그)" },
+        "mileage": { "type": "string", "description": "canonical 주행거리(참조·로그)" }
+      }
+    },
+    "ass_r2_key": {
+      "type": "string",
+      "description": "★ 어댑터가 사전 생성한 ASS 자막 파일 R2 키(_build_ass 결과 — 카라오케 타이밍·키워드 강조·스타일 전부 baked). Go는 _post_overlay의 subtitles 필터에 그대로 적용만. TTS word_times 의존 로직이 Go에 없음 = 타이밍 결정 제거."
+    },
+    "scenes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "description": "어댑터가 게이트 통과·해석 완료한 최종 씬(탈락 씬 이미 제거). 순서=재생 순서. index=zoompan 줌 방향 결정에 사용(idx%2, 현행 파리티).",
+      "items": {
+        "type": "object",
+        "required": ["index", "role", "kind", "tts_audio_r2_key", "duration_sec", "subtitle_text", "speech_text"],
+        "additionalProperties": false,
+        "properties": {
+          "index": { "type": "integer", "description": "씬 순번(0-based) — zoompan 줌인/줌아웃 교대(현행 idx%2)" },
+          "role": { "enum": ["hook", "empathy", "reveal", "inspect", "docs", "data_card", "honesty", "cta"] },
+          "kind": { "enum": ["photo", "card"] },
+          "photo": {
+            "type": ["object", "null"],
+            "description": "kind=photo. r2_key=원본 사진(읽기전용 R2 캐시), crop=VG4 적용된 최종값.",
+            "required": ["r2_key", "crop"],
+            "additionalProperties": false,
+            "properties": {
+              "r2_key": { "type": "string" },
+              "crop": { "enum": ["full", "closeup"] }
+            }
+          },
+          "card": {
+            "type": ["object", "null"],
+            "description": "kind=card. B-2: png_r2_key=어댑터 사전렌더 카드 PNG(파리티 보장). value/label은 로그·검증용.",
+            "required": ["png_r2_key"],
+            "additionalProperties": false,
+            "properties": {
+              "png_r2_key": { "type": "string" },
+              "value": { "type": "string" },
+              "label": { "type": "string" }
+            }
+          },
+          "tts_audio_r2_key": {
+            "type": ["string", "null"],
+            "description": "★ 어댑터가 사전 합성한 이 씬 TTS 오디오 R2 키(speech_text 발화). null이면 무음 씬. Go는 TTS 호출 안 함 — 받아서 정확히 duration_sec로 pad/trim만."
+          },
+          "duration_sec": {
+            "type": "number",
+            "description": "★ 어댑터가 확정한 이 씬 길이(초). max(MIN_SCENE, tts_td+0.4) 해석값. Go는 probe·산출 안 하고 이 값을 그대로 집행(ASS 타이밍과 정합)."
+          },
+          "subtitle_text": { "type": "string", "description": "검증·로그 전용(화면 자막 원문). 렌더는 ass_r2_key가 담당 — Go는 이 필드로 렌더하지 않는다." },
+          "speech_text": { "type": "string", "description": "검증·로그 전용(발화 정규화본). [자막 vs 발화] 대조표용." }
+        }
+      }
+    }
+  }
+}

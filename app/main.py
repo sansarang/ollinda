@@ -6830,6 +6830,72 @@ def admin_render_storyboard(asset_id: str, channel: str = "naver", price: str = 
                          "escalation_trace": getattr(_dir, "_SB_TRACE", [])})
 
 
+@app.get("/admin/set/{asset_id}/render-job")
+def admin_render_job(asset_id: str, channel: str = "naver", price: str = "", mileage: str = ""):
+    """gorender 이관 — render_job_v1 + 자산(카드·TTS·ASS·BGM·사진) 사전생성 → zip 다운로드.
+    Go 워커 파리티 검증(V2)용. render_storyboard와 '동일 해석'을 build_render_job이 재현(로직 수정 0)."""
+    import io as _io
+    import shutil as _sh
+    import tempfile as _tf
+    import zipfile as _zf
+    from app.domain.models import ContentKind as _CK
+    from app.services.ingest import _restore_media
+    from app.services import director as _dir
+    from app.generators import video as _vid
+    from app.services import render_job as _rj
+    from app.strategies import resolve_strategy
+    pieces = db.get_set_pieces(asset_id)
+    blog = next((p for p in pieces if p.kind == _CK.BLOG), None)
+    if not blog:
+        return JSONResponse({"ok": False, "error": "블로그 피스 없음"}, status_code=404)
+    t = db.get_tenant(blog.tenant_id)
+    pl = blog.payload or {}
+    body = pl.get("body") or ""
+    paths = _restore_media(blog.tenant_id, pl.get("image_paths") or [])
+    if not paths:
+        return JSONResponse({"ok": True, "blocked": "photo_lost"})
+    from app import vision as _vzc
+    cat = _vzc.build_catalog(paths, getattr(t, "industry", "") or "")
+    if getattr(_vzc, "_CATALOG_CREDIT_EXHAUSTED", False):
+        return JSONResponse({"ok": False, "blocked": "vision_credit"}, status_code=402)
+    if not cat or len(cat) < max(1, len(paths) // 2):
+        return JSONResponse({"ok": True, "blocked": "catalog_poor", "catalog_n": len(cat)})
+    canon = _canonical_keyword(t, blog)
+    _gsrc = pl.get("gen_source") or ""
+    _sale = (price or "").strip() or _vid._resolve_sale_price(_gsrc, body)
+    _mile = (mileage or "").strip()
+    try:
+        from app.services import indschema as _isc
+        _sch = _isc.get_schema(getattr(t, "industry", "") or "", getattr(t, "biz_type", "local") or "local")
+        _dvals = _vid.ShortVideoGenerator._extract_data_points(
+            body, _gsrc, _sch, getattr(t, "biz_type", "local") or "local", sale_price=_sale)
+    except Exception:
+        _dvals = []
+    sb = _dir.build_storyboard(body, cat, canon, channel=channel, data_values=_dvals)
+    if not sb:
+        return JSONResponse({"ok": True, "blocked": "no_storyboard", "_fail": getattr(_dir, "_SB_LAST_FAIL", "")})
+    img_by_id = {c["id"]: paths[c["id"] - 1] for c in cat if 1 <= c.get("id", 0) <= len(paths)}
+    strat = resolve_strategy(t)
+    kws = [canon] if canon else []
+    work = _tf.mkdtemp(prefix="renderjob_")
+    try:
+        job = _rj.build_render_job(sb, img_by_id, kws, t, strat, work, sale_price=_sale, mileage=_mile)
+        if not job:
+            return JSONResponse({"ok": True, "blocked": "empty_job"})
+        buf = _io.BytesIO()
+        with _zf.ZipFile(buf, "w", _zf.ZIP_STORED) as z:   # 이미 압축된 자산 — STORED(무압축, 빠름)
+            for fn in sorted(os.listdir(work)):
+                z.write(os.path.join(work, fn), fn)
+        buf.seek(0)
+        from fastapi.responses import Response as _Resp
+        return _Resp(content=buf.read(), media_type="application/zip",
+                     headers={"Content-Disposition": f'attachment; filename="renderjob_{asset_id[:8]}_{channel}.zip"',
+                              "X-Job-Scenes": str(len(job.get("scenes", []))),
+                              "X-Sale-Price": _sale or "", "X-Mileage": _mile or ""})
+    finally:
+        _sh.rmtree(work, ignore_errors=True)
+
+
 @app.get("/admin/set/{asset_id}/mask-trace")
 def admin_mask_trace(asset_id: str):
     """워터마크·개인정보 오폭 원인 확정 — 세트 사진마다 detect_personal_info/detect_overlay를 dry-run,
