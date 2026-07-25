@@ -6856,23 +6856,24 @@ async def admin_pii_test(request: Request, photo: UploadFile = File(...)):
         f.write(data)
     try:
         boxes = list(_vz.detect_personal_info(orig)) + list(_vz.detect_document_pii(orig))
+        # 마스킹본 생성(원본 복사 → mask 적용) — 게이트(PII_CONF_MIN) 적용. jpg로(안전한 저장)
+        masked = os.path.join(d, f"masked_{_uu.uuid4().hex}.jpg")
+        import shutil as _sh
+        _sh.copy(orig, masked)
+        _pb._MASK_LAST_LOG = []
+        n = _pb.mask_personal_info(masked)
+        rows = [{"type": b.get("type"), "value": b.get("value", ""),
+                 "conf": round(float(b.get("conf", 0.5)), 2),
+                 "box": [round(float(b.get(k, 0)), 3) for k in ("x0", "y0", "x1", "y1")],
+                 "masked": float(b.get("conf", 0.5)) >= _pb.PII_CONF_MIN} for b in boxes]
+        return JSONResponse({"ok": True, "detected": len(boxes), "masked_count": n,
+                             "gate_conf_min": _pb.PII_CONF_MIN,
+                             "orig_url": f"/admin/media/_piitest/{os.path.basename(orig)}",
+                             "masked_url": f"/admin/media/_piitest/{os.path.basename(masked)}",
+                             "boxes": rows, "mask_log": _pb._MASK_LAST_LOG[-20:]})
     except Exception:
         import traceback
-        return JSONResponse({"ok": False, "error": "detect: " + traceback.format_exc()[-400:]}, status_code=500)
-    # 마스킹본 생성(원본 복사 → mask 적용) — 게이트(PII_CONF_MIN) 적용
-    masked = os.path.join(d, f"masked_{_uu.uuid4().hex}.png")
-    import shutil as _sh
-    _sh.copy(orig, masked)
-    _pb._MASK_LAST_LOG = []
-    n = _pb.mask_personal_info(masked)
-    rows = [{"type": b.get("type"), "conf": round(float(b.get("conf", 0.5)), 2),
-             "box": [round(float(b.get(k, 0)), 3) for k in ("x0", "y0", "x1", "y1")],
-             "masked": float(b.get("conf", 0.5)) >= _pb.PII_CONF_MIN} for b in boxes]
-    return JSONResponse({"ok": True, "detected": len(boxes), "masked_count": n,
-                         "gate_conf_min": _pb.PII_CONF_MIN,
-                         "orig_url": f"/admin/media/_piitest/{os.path.basename(orig)}",
-                         "masked_url": f"/admin/media/_piitest/{os.path.basename(masked)}",
-                         "boxes": rows, "mask_log": _pb._MASK_LAST_LOG[-20:]})
+        return JSONResponse({"ok": False, "error": "pii-test: " + traceback.format_exc()[-500:]}, status_code=500)
 
 
 @app.get("/admin/set/{asset_id}/render-job")
