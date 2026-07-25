@@ -278,8 +278,9 @@ _DOC_ID_PATTERNS = [
 
 def detect_document_pii(image_path: str) -> list[dict]:
     """문서 식별번호를 OCR+strict 정규식으로 국소화 → 정확한 단어 bbox(vision bbox 실패 근본해결).
-    번호판은 한글 중간자 필수라 주행거리·날짜·제원 과매칭 없음. 인접 셀 오병합 방지 위해 x간격이 크면
-    분리자 삽입. tesseract(tessdata_best kor+eng) 없으면 [](graceful). 업종 중립."""
+    OCR은 psm 3(기본)+psm 11(sparse) 이중 패스 — 조밀한 표의 작은 등록번호를 기본 세그가 누락하는
+    문제 근본해결. 번호판은 한글 중간자 필수라 주행거리·날짜·제원 과매칭 없음. 인접 셀 오병합 방지 위해
+    x간격 크면 분리자 삽입 + 컴팩트 병행. tesseract 없으면 [](graceful). 업종 중립."""
     import shutil as _sh
     if not (image_path and os.path.exists(image_path) and _sh.which("tesseract")):
         return []
@@ -290,25 +291,33 @@ def detect_document_pii(image_path: str) -> list[dict]:
         from collections import defaultdict
         from PIL import Image
         W, H = Image.open(image_path).size
-        with _tf.TemporaryDirectory(prefix="ocr_") as td:
-            out = os.path.join(td, "o")
-            _sp.run(["tesseract", image_path, out, "-l", "kor+eng", "tsv"],
-                    capture_output=True, timeout=90)
-            tsv = ""
-            if os.path.exists(out + ".tsv"):
-                with open(out + ".tsv", encoding="utf-8") as f:
-                    tsv = f.read()
-        words = []
-        for line in tsv.splitlines()[1:]:
-            c = line.split("\t")
-            if len(c) >= 12 and c[11].strip():
-                try:
-                    if float(c[10]) < 30:
+
+        def _ocr_words(psm):
+            with _tf.TemporaryDirectory(prefix="ocr_") as td:
+                out = os.path.join(td, "o")
+                _sp.run(["tesseract", image_path, out, "-l", "kor+eng", "--psm", psm, "tsv"],
+                        capture_output=True, timeout=90)
+                tsv = ""
+                if os.path.exists(out + ".tsv"):
+                    with open(out + ".tsv", encoding="utf-8") as f:
+                        tsv = f.read()
+            ws = []
+            for line in tsv.splitlines()[1:]:
+                c = line.split("\t")
+                if len(c) >= 12 and c[11].strip():
+                    try:
+                        if float(c[10]) < 30:
+                            continue
+                        # psm 접두로 줄키 분리(패스 간 블록/문단 번호 충돌 방지)
+                        ws.append((c[11].strip(), int(c[6]), int(c[7]), int(c[8]), int(c[9]),
+                                   (psm, c[2], c[3], c[4])))
+                    except Exception:
                         continue
-                    words.append((c[11].strip(), int(c[6]), int(c[7]), int(c[8]), int(c[9]),
-                                  (c[2], c[3], c[4])))
-                except Exception:
-                    continue
+            return ws
+
+        # psm 3(기본 레이아웃): 대부분 검출. psm 11(sparse text): 조밀한 표의 작은 식별번호 추가 검출
+        #   (등록증 ①번 등록번호는 기본 세그멘테이션이 통째로 누락 → psm 11이 근본해결). 박스는 dedup.
+        words = _ocr_words("3") + _ocr_words("11")
         lines = defaultdict(list)
         for w in words:
             lines[w[5]].append(w)
