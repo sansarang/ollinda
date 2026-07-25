@@ -6844,17 +6844,17 @@ def admin_render_shadow_log(limit: int = 50):
 async def admin_pii_test(request: Request, photo: UploadFile = File(...)):
     """문서 PII 마스킹 검증 — 이미지 업로드 → detect_personal_info(고해상·식별번호) + mask_personal_info →
     검출 박스 + 마스킹본 URL 반환(전후 대조). 발행 전 '누락 0' 실증용."""
-    import uuid as _uu
-    from app import vision as _vz
-    from app.media import photo_boost as _pb
     data = await photo.read()
-    d = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), "_piitest")
-    os.makedirs(d, exist_ok=True)
-    ext = (os.path.splitext(photo.filename or "")[1] or ".jpg").lower()
-    orig = os.path.join(d, f"orig_{_uu.uuid4().hex}{ext}")
-    with open(orig, "wb") as f:
-        f.write(data)
     try:
+        import uuid as _uu
+        from app import vision as _vz
+        from app.media import photo_boost as _pb
+        d = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), "_piitest")
+        os.makedirs(d, exist_ok=True)
+        ext = (os.path.splitext(photo.filename or "")[1] or ".jpg").lower()
+        orig = os.path.join(d, f"orig_{_uu.uuid4().hex}{ext}")
+        with open(orig, "wb") as f:
+            f.write(data)
         boxes = list(_vz.detect_personal_info(orig)) + list(_vz.detect_document_pii(orig))
         # 마스킹본 생성(원본 복사 → mask 적용) — 게이트(PII_CONF_MIN) 적용. jpg로(안전한 저장)
         masked = os.path.join(d, f"masked_{_uu.uuid4().hex}.jpg")
