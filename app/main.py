@@ -6890,8 +6890,7 @@ def admin_render_job(asset_id: str, channel: str = "naver", price: str = "", mil
         from fastapi.responses import Response as _Resp
         return _Resp(content=buf.read(), media_type="application/zip",
                      headers={"Content-Disposition": f'attachment; filename="renderjob_{asset_id[:8]}_{channel}.zip"',
-                              "X-Job-Scenes": str(len(job.get("scenes", []))),
-                              "X-Sale-Price": _sale or "", "X-Mileage": _mile or ""})
+                              "X-Job-Scenes": str(len(job.get("scenes", [])))})   # 한글 헤더 금지(latin-1) — 값은 job.json 내
     except Exception:
         import traceback
         return JSONResponse({"ok": False, "error": "render-job: " + traceback.format_exc()[-700:]},
