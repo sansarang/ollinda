@@ -33,3 +33,29 @@ def test_render_storyboard_unchanged_signature():
     p = list(inspect.signature(v.ShortVideoGenerator.render_storyboard).parameters)
     assert p[:6] == ["self", "sb", "img_by_id", "kws", "tenant", "strat"]
     assert "sale_price" in p and "mileage" in p
+
+
+def test_render_backend_single_adapter():
+    """어댑터 원칙 — 분기(python|go|shadow)는 render_backend '안에만', 기본 python(무변경), 폴백 존재."""
+    from app.services import render_backend as rb
+    src = (_BASE / "app" / "services" / "render_backend.py").read_text(encoding="utf-8")
+    assert rb.backend() in ("python", "go", "shadow")
+    # 폴백: go 실패 시 python
+    assert "python(fallback)" in src
+    # shadow: 실산출 python + 병행 go + 비교로그
+    assert "_go_shadow" in src and "shadow_log" in src
+    # render_storyboard/build_render_job은 '호출'만(로직 재구현 아님)
+    assert "render_storyboard(" in src and "build_render_job(" in src
+    assert "def render_storyboard" not in src and "def build_render_job" not in src
+
+
+def test_render_backend_default_python_unchanged():
+    """RENDER_BACKEND 미설정 = python = 현행 render_storyboard 그대로(사용자 무변화)."""
+    import os
+    from app.services import render_backend as rb
+    old = os.environ.pop("RENDER_BACKEND", None)
+    try:
+        assert rb.backend() == "python"
+    finally:
+        if old is not None:
+            os.environ["RENDER_BACKEND"] = old

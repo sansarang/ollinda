@@ -67,6 +67,34 @@ def mirror_to_r2(local_path: str) -> str | None:
         return None
 
 
+def put_key(local_path: str, key: str) -> str | None:
+    """임의 R2 키로 업로드(gorender 이관 어댑터용 — 렌더 자산·결과). 성공 시 키, 아니면 None."""
+    if not (r2_configured() and local_path and os.path.exists(local_path)):
+        return None
+    try:
+        _r2().upload_file(local_path, os.environ["R2_BUCKET"], key,
+                          ExtraArgs={"ContentType": _content_type(local_path)})
+        return key
+    except Exception:
+        import logging
+        logging.exception("[r2] put_key 실패 %s → %s", local_path, key)
+        return None
+
+
+def get_key(key: str, local_path: str) -> str | None:
+    """임의 R2 키를 로컬로 다운로드(gorender 결과 회수용). 성공 시 로컬 경로, 아니면 None."""
+    if not (r2_configured() and key and local_path):
+        return None
+    try:
+        os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
+        _r2().download_file(os.environ["R2_BUCKET"], key, local_path)
+        return local_path if os.path.exists(local_path) else None
+    except Exception:
+        import logging
+        logging.exception("[r2] get_key 실패 %s", key)
+        return None
+
+
 def r2_media_url(tenant_id: str, fname: str) -> str | None:
     """서빙용 — 로컬에 없을 때 R2 공개 URL(리다이렉트 대상)."""
     if not r2_configured():

@@ -6758,7 +6758,8 @@ def admin_set_storyboard(asset_id: str, channel: str = "naver"):
 
 
 @app.get("/admin/set/{asset_id}/render-storyboard")
-def admin_render_storyboard(asset_id: str, channel: str = "naver", price: str = "", mileage: str = ""):
+def admin_render_storyboard(asset_id: str, channel: str = "naver", price: str = "", mileage: str = "",
+                            backend: str = ""):
     """2-C 콘티→렌더 어댑터 실행 — catalog→director→ShortVideoGenerator.render_storyboard.
     콘티 존재 시에만 어댑터, 없으면 blocked(호출부가 기존 경로 폴백). 렌더 큐(RENDER_SEM)·디스크 하한 게이트 경유.
     반환: 디렉터판 영상 URL + 씬별 [콘티 지정 vs 렌더 실행] 대조 로그."""
@@ -6811,14 +6812,14 @@ def admin_render_storyboard(asset_id: str, channel: str = "naver", price: str = 
     img_by_id = {c["id"]: paths[c["id"] - 1] for c in cat if 1 <= c.get("id", 0) <= len(paths)}
     strat = resolve_strategy(t)
     kws = [canon] if canon else []
-    gen = _vid.ShortVideoGenerator()
-    # 렌더 큐(동시성 세마포어) 경유 — 만차·중복 렌더 방지(기존 게이트 불변 재사용)
-    with _vid.RENDER_SEM:
-        vp, note, dur, cover, compare = gen.render_storyboard(
-            sb, img_by_id, kws, t, strat, title=(pl.get("title") or canon),
-            sale_price=_sale, mileage=_mile)
+    # ★ 렌더 백엔드 어댑터(python|go|shadow) — 분기는 어댑터 안에만. RENDER_SEM은 어댑터가 관리.
+    from app.services import render_backend as _rb
+    vp, note, dur, cover, compare, _bmeta = _rb.render(
+        sb, img_by_id, kws, t, strat, title=(pl.get("title") or canon),
+        sale_price=_sale, mileage=_mile, mode_override=backend)
     if not vp:
-        return JSONResponse({"ok": True, "blocked": "render_failed", "note": note, "compare": compare})
+        return JSONResponse({"ok": True, "blocked": "render_failed", "note": note, "compare": compare,
+                             "backend": _bmeta})
     vurl = f"/admin/media/{t.id}/{os.path.basename(vp)}"
     curl = f"/admin/media/{t.id}/{os.path.basename(cover)}" if cover else ""
     return JSONResponse({"ok": True, "video_url": vurl, "cover_url": curl, "note": note,
@@ -6826,8 +6827,17 @@ def admin_render_storyboard(asset_id: str, channel: str = "naver", price: str = 
                          "n_scenes_rendered": len([c for c in compare if c.get("dur")]),
                          "canonical": canon, "sale_price": _sale or "(미명시 — 가격 카드 없음)",
                          "mileage": _mile or "(미명시 — 단일화 안 함)",
-                         "compare": compare,
+                         "compare": compare, "backend": _bmeta,
                          "escalation_trace": getattr(_dir, "_SB_TRACE", [])})
+
+
+@app.get("/admin/render-shadow-log")
+def admin_render_shadow_log(limit: int = 50):
+    """gorender shadow 병행운전 비교 로그(V6) — 세트별 [py vs go] 해상도·길이·씬수·크기·렌더시간."""
+    from app.services import render_backend as _rb
+    rows = _rb.shadow_log(limit=limit)
+    return JSONResponse({"ok": True, "backend": _rb.backend(), "gorender_url": _rb.GORENDER_URL,
+                         "n": len(rows), "rows": rows})
 
 
 @app.get("/admin/set/{asset_id}/render-job")
