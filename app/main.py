@@ -209,6 +209,19 @@ def health() -> dict:
     return {"ok": True, "service": "shopcast", "version": app.version, "commit": _sha}
 
 
+@app.get("/internal/published-posts")
+def internal_published_posts(request: Request):
+    """readview_v1 제공 — gowatch(별도 서비스)가 읽는 유일한 본체 뷰(발행 글 전수, 읽기 전용).
+    GOWATCH_TOKEN 베어러 인증(미설정 시 fail-closed). 본체는 이 뷰만 노출, gowatch는 SELECT만."""
+    tok = os.environ.get("GOWATCH_TOKEN")
+    auth_h = request.headers.get("authorization", "")
+    if not tok or auth_h != f"Bearer {tok}":
+        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    from app import db as _db
+    rows = _db.published_posts_view()
+    return JSONResponse({"ok": True, "contract": "readview_v1", "count": len(rows), "posts": rows})
+
+
 @app.get("/", response_class=HTMLResponse)
 def root(request: Request):
     # 로그인 상태면 첫 화면 = 사용자 대시보드(작업실), 비로그인이면 마케팅 랜딩

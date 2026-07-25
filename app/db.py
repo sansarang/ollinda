@@ -1079,6 +1079,38 @@ def list_blog_publishes(tenant_id: str, limit: int = 30) -> list[dict]:
         return []
 
 
+def published_posts_view() -> list[dict]:
+    """readview_v1: gowatch가 읽는 유일한 본체 뷰 — 발행 글 전수(전 tenant). 하드코딩 0(발행 시 자동 편입,
+    삭제 시 제외). 컬럼: publish_id·tenant_id·keyword(canonical)·post_url·published_at·region·industry.
+    keyword는 blog_publishes.target_kw 우선, 없으면 content_pieces.payload의 target_keywords[0] 폴백."""
+    out = []
+    try:
+        with _conn() as c:
+            rows = c.execute(
+                "SELECT b.piece_id AS publish_id, b.tenant_id AS tenant_id, "
+                "       b.published_url AS post_url, b.published_at AS published_at, "
+                "       b.target_kw AS target_kw, cp.payload AS payload, "
+                "       t.region AS region, t.industry AS industry "
+                "FROM blog_publishes b "
+                "LEFT JOIN tenants t ON t.id = b.tenant_id "
+                "LEFT JOIN content_pieces cp ON cp.id = b.piece_id "
+                "WHERE b.published_url IS NOT NULL AND b.published_url <> '' "
+                "ORDER BY b.published_at DESC").fetchall()
+        for r in rows:
+            kw = (r["target_kw"] or "").strip()
+            if not kw and r["payload"]:
+                try:
+                    kw = ((json.loads(r["payload"]).get("target_keywords") or [""])[0] or "").strip()
+                except Exception:
+                    kw = ""
+            out.append({"publish_id": r["publish_id"], "tenant_id": r["tenant_id"],
+                        "keyword": kw, "post_url": r["post_url"], "published_at": r["published_at"],
+                        "region": r["region"] or "", "industry": r["industry"] or ""})
+    except sqlite3.OperationalError:
+        return []
+    return out
+
+
 # ── 주간 리포트(블로그등록 PHASE 4) ──
 def save_weekly_report(tenant_id: str, week: str, data: dict, sent_email: bool = False) -> None:
     """주간 리포트 저장(같은 주 재실행은 갱신)."""
