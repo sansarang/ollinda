@@ -6848,7 +6848,7 @@ async def admin_pii_test(request: Request, photo: UploadFile = File(...)):
     from app import vision as _vz
     from app.media import photo_boost as _pb
     data = await photo.read()
-    d = os.path.join(STORAGE_DIR, "_piitest")
+    d = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), "_piitest")
     os.makedirs(d, exist_ok=True)
     ext = (os.path.splitext(photo.filename or "")[1] or ".jpg").lower()
     orig = os.path.join(d, f"orig_{_uu.uuid4().hex}{ext}")
@@ -6856,8 +6856,9 @@ async def admin_pii_test(request: Request, photo: UploadFile = File(...)):
         f.write(data)
     try:
         boxes = _vz.detect_personal_info(orig)
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": "detect: " + repr(e)[:150]}, status_code=500)
+    except Exception:
+        import traceback
+        return JSONResponse({"ok": False, "error": "detect: " + traceback.format_exc()[-400:]}, status_code=500)
     # 마스킹본 생성(원본 복사 → mask 적용) — 게이트(PII_CONF_MIN) 적용
     masked = os.path.join(d, f"masked_{_uu.uuid4().hex}.png")
     import shutil as _sh
