@@ -49,6 +49,32 @@ def _b64_for_vision(image_path: str, max_px: int = 1568) -> tuple[str, str]:
             return _media_type(image_path), base64.standard_b64encode(f.read()).decode()
 
 
+def _resized_dims(w: int, h: int, max_px: int) -> tuple[float, float]:
+    """_b64_for_vision가 긴 변을 max_px로 축소한 뒤의 (w,h) — vision이 픽셀좌표를 반환할 때 정규화 기준."""
+    long = max(w, h)
+    if long <= max_px:
+        return float(w), float(h)
+    s = max_px / long
+    return w * s, h * s
+
+
+def _norm_box(b: dict, rw: float, rh: float) -> dict | None:
+    """vision 박스를 0~1 정규화로 통일. 모델이 0~1 또는 (리사이즈)픽셀좌표를 섞어 반환 →
+    좌표 중 하나라도 1.5 초과면 픽셀로 보고 리사이즈 dims로 나눈다. 좌표계 혼용 버그 방어."""
+    try:
+        x0, y0, x1, y1 = float(b["x0"]), float(b["y0"]), float(b["x1"]), float(b["y1"])
+    except Exception:
+        return None
+    if max(abs(x0), abs(y0), abs(x1), abs(y1)) > 1.5:      # 픽셀좌표 → 정규화
+        x0, y0, x1, y1 = x0 / rw, y0 / rh, x1 / rw, y1 / rh
+    if x1 < x0:
+        x0, x1 = x1, x0
+    if y1 < y0:
+        y0, y1 = y1, y0
+    return {"x0": max(0.0, min(1.0, x0)), "y0": max(0.0, min(1.0, y0)),
+            "x1": max(0.0, min(1.0, x1)), "y1": max(0.0, min(1.0, y1))}
+
+
 def _media_type(path: str) -> str:
     p = path.lower()
     if p.endswith(".png"):
@@ -424,20 +450,25 @@ def detect_plates_vision(image_path: str) -> list[dict]:
             except Exception:
                 continue
             tw, th = (px1 - px0), (py1 - py0)
+            trw, trh = _resized_dims(tw, th, 1568)        # 타일 리사이즈 dims(픽셀좌표 정규화 기준)
             for b in arr:
                 if not (isinstance(b, dict) and all(k in b for k in ("x0", "y0", "x1", "y1"))):
                     continue
+                nb = _norm_box(b, trw, trh)               # 타일 내 0~1로 통일(픽셀/정규화 혼용 방어)
+                if nb is None:
+                    continue
                 try:
                     # 타일 정규화 좌표 → 전체 이미지 정규화 좌표
-                    gx0 = (px0 + float(b["x0"]) * tw) / W; gy0 = (py0 + float(b["y0"]) * th) / H
-                    gx1 = (px0 + float(b["x1"]) * tw) / W; gy1 = (py0 + float(b["y1"]) * th) / H
+                    gx0 = (px0 + nb["x0"] * tw) / W; gy0 = (py0 + nb["y0"] * th) / H
+                    gx1 = (px0 + nb["x1"] * tw) / W; gy1 = (py0 + nb["y1"] * th) / H
                     conf = float(b.get("conf", 0.7))
                 except Exception:
                     continue
                 if gx1 <= gx0 or gy1 <= gy0 or (gx1 - gx0) > 0.6 or (gy1 - gy0) > 0.4:
                     continue                          # 과대 박스 = 오탐 방어
-                out.append({"type": "plate", "x0": max(0.0, gx0), "y0": max(0.0, gy0),
-                            "x1": min(1.0, gx1), "y1": min(1.0, gy1), "conf": conf})
+                pxp = (gx1 - gx0) * 0.10; pyp = (gy1 - gy0) * 0.18   # 위치 미세오차 대비 여유 패딩
+                out.append({"type": "plate", "x0": max(0.0, gx0 - pxp), "y0": max(0.0, gy0 - pyp),
+                            "x1": min(1.0, gx1 + pxp), "y1": min(1.0, gy1 + pyp), "conf": conf})
         # 타일 겹침 중복 제거(중심 근접)
         dedup = []
         for b in out:
@@ -461,8 +492,12 @@ def detect_personal_info(image_path: str) -> list[dict]:
     try:
         import json
         import re as _re
+        from PIL import Image as _Im
+        _ow, _oh = _Im.open(image_path).size
+        _mx = int(os.environ.get("SHOPCAST_PII_MAX_PX", "2048"))
+        _rw, _rh = _resized_dims(_ow, _oh, _mx)
         # ★ 고해상(2048)으로 문서 표 안 작은 식별번호도 판독 가능하게(1568에선 등록번호·VIN 누락)
-        _mt3, data = _b64_for_vision(image_path, max_px=int(os.environ.get("SHOPCAST_PII_MAX_PX", "2048")))
+        _mt3, data = _b64_for_vision(image_path, max_px=_mx)
         import anthropic
         client = anthropic.Anthropic()
         # 업종 중립 — '가려야 할 식별번호/개인정보' 범주를 전수 열거(자동차·부동산·의료·일반 동일 틀).
@@ -499,11 +534,15 @@ def detect_personal_info(image_path: str) -> list[dict]:
         out = []
         for b in boxes:
             if isinstance(b, dict) and all(k in b for k in ("x0", "y0", "x1", "y1")):
+                nb = _norm_box(b, _rw, _rh)               # 픽셀/정규화 혼용 통일(좌표 스케일 버그 방어)
+                if nb is None:
+                    continue
+                nb["type"] = b.get("type", "pii")
                 try:
-                    b["conf"] = float(b.get("conf", 0.5))     # 미제공 시 중립(0.5) — 게이트가 판단
+                    nb["conf"] = float(b.get("conf", 0.5))    # 미제공 시 중립(0.5) — 게이트가 판단
                 except Exception:
-                    b["conf"] = 0.5
-                out.append(b)
+                    nb["conf"] = 0.5
+                out.append(nb)
         return out
     except Exception:
         import traceback as _tb
