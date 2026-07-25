@@ -449,6 +449,8 @@ def detect_plates_vision(image_path: str) -> list[dict]:
         _LAST_VISION_RAW = (_LAST_VISION_RAW + " || plates:" + " ; ".join(raws))[-1500:]
         return dedup
     except Exception:
+        import traceback as _tb
+        _LAST_VISION_RAW = "plate_EXC: " + _tb.format_exc()[-400:]
         return []
 
 
@@ -504,6 +506,8 @@ def detect_personal_info(image_path: str) -> list[dict]:
                 out.append(b)
         return out
     except Exception:
+        import traceback as _tb
+        _LAST_VISION_RAW = "main_EXC: " + _tb.format_exc()[-400:]
         return []
 
 
