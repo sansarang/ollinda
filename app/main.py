@@ -6879,7 +6879,12 @@ def admin_render_job(asset_id: str, channel: str = "naver", price: str = "", mil
     kws = [canon] if canon else []
     work = _tf.mkdtemp(prefix="renderjob_")
     try:
-        job = _rj.build_render_job(sb, img_by_id, kws, t, strat, work, sale_price=_sale, mileage=_mile)
+        try:
+            job = _rj.build_render_job(sb, img_by_id, kws, t, strat, work, sale_price=_sale, mileage=_mile)
+        except Exception:
+            import traceback
+            return JSONResponse({"ok": False, "error": "build_render_job: " + traceback.format_exc()[-600:]},
+                                status_code=500)
         if not job:
             return JSONResponse({"ok": True, "blocked": "empty_job"})
         buf = _io.BytesIO()
