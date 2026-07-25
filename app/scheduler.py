@@ -128,6 +128,13 @@ def _rank_track() -> None:
         race.track_all_publishes()
     except Exception:
         logging.exception("[scheduler] 발행 글 실황 추적 실패")
+    try:      # 트랙2 — gowatch 적응 큐 소비(관측 변화 → 개선 제안 카드). 자동 발행 0.
+        from app.services import adapt_consume, gowatch_client
+        if gowatch_client.configured():
+            r = adapt_consume.consume_all()
+            logging.info("[scheduler] gowatch 소비: %s", r)
+    except Exception:
+        logging.exception("[scheduler] gowatch 적응 소비 실패")
     try:      # 자동 글감 큐 적재(auto) — 스냅샷 갱신 직후 P1~P4 소스로 채움
         from app.services import autoqueue
         autoqueue.refill_all()

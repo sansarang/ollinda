@@ -222,6 +222,84 @@ def internal_published_posts(request: Request):
     return JSONResponse({"ok": True, "contract": "readview_v1", "count": len(rows), "posts": rows})
 
 
+@app.post("/admin/gowatch/consume")
+def admin_gowatch_consume(request: Request):
+    """gowatch 적응 큐 소비 1회 트리거(운영자/스케줄러/W3 E2E). 자동 발행 0 — 제안 카드만 생성."""
+    from app.services import adapt_consume
+    res = adapt_consume.consume_all()
+    return JSONResponse({"ok": True, **res})
+
+
+@app.get("/me/observations", response_class=HTMLResponse)
+def me_observations(request: Request):
+    """D3 관측 현황 탭(리포트 하위) — 발행 글별 순위·지면·색인 표. null=측정 준비 중."""
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    t = _ensure_user_tenant(u)
+    from app.services import dashboard_gowatch as _dg
+    body = _dg.render_d3(t.id)
+    page = (
+        "<div class='max-w-2xl mx-auto px-4 py-6'>"
+        "<div class='flex items-center gap-2 mb-4'><a href='/me' class='text-slate-400 text-sm'>← 작업실</a>"
+        "<h1 class='font-bold text-lg'>관측 현황</h1></div>"
+        f"<div class='bg-white rounded-2xl border border-slate-100 p-4'>{body}</div></div>")
+    return HTMLResponse(page)
+
+
+@app.get("/me/proposal/{aid}", response_class=HTMLResponse)
+def me_proposal(request: Request, aid: str):
+    """D1 카드 '개선 글 보기' — 개선판 미리보기 + 복붙 키트 + 발행 완료(consumed)."""
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    t = _ensure_user_tenant(u)
+    p = db.get_proposal(aid)
+    if not p or p.get("tenant_id") != t.id:
+        return HTMLResponse("<div class='p-6 text-slate-500'>제안을 찾을 수 없어요. <a href='/me' class='text-indigo-600'>작업실로</a></div>", status_code=404)
+    card = p.get("card") or {}
+    piece = db.get_piece(p.get("piece_id") or "") if p.get("piece_id") else None
+    kit = ""
+    if piece:
+        pl = piece.payload or {}
+        title = esc(pl.get("title") or "")
+        bodytext = pl.get("body") or ""
+        kit = (
+            "<div class='mb-2 text-xs font-bold text-slate-500'>보강한 글 (수정 발행용 — 원 글 이력은 보존돼요)</div>"
+            f"<input class='w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold mb-2' value=\"{title}\" readonly onclick='this.select()'>"
+            f"<textarea class='w-full border border-slate-200 rounded-xl px-3 py-2 text-sm h-72' readonly onclick='this.select()'>{esc(bodytext)}</textarea>"
+            "<div class='text-xs text-slate-400 mt-1'>탭해서 전체 선택 → 복사해서 블로그에 붙여넣고 발행하세요. (자동 발행은 하지 않아요)</div>")
+    else:
+        kit = "<div class='text-sm text-slate-600'>이 글을 보강해 다시 올리면 회복에 도움이 돼요.</div>"
+    page = (
+        "<div class='max-w-2xl mx-auto px-4 py-6'>"
+        "<a href='/me' class='text-slate-400 text-sm'>← 작업실</a>"
+        f"<h1 class='font-bold text-lg mt-2 mb-1'>{esc(card.get('headline') or '개선 제안')}</h1>"
+        f"<div class='text-sm text-slate-500 mb-4'>{esc(card.get('sub') or '')}</div>"
+        f"<div class='bg-white rounded-2xl border border-slate-100 p-4'>{kit}</div>"
+        f"<form method=post action='/me/proposal/{esc(aid)}/done' class='mt-4'>"
+        "<button class='w-full bg-emerald-600 text-white font-bold py-3 rounded-xl'>발행 완료 — 이 제안 닫기</button></form></div>")
+    return HTMLResponse(page)
+
+
+@app.post("/me/proposal/{aid}/done")
+def me_proposal_done(request: Request, aid: str):
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    t = _ensure_user_tenant(u)
+    from urllib.parse import quote as _q
+    p = db.get_proposal(aid)
+    if p and p.get("tenant_id") == t.id:
+        db.mark_proposal(aid, "consumed")
+        try:      # gowatch에 소비 확정 통지(gowatch가 자기 테이블에 기록 → PHASE3 회복 추적 대상)
+            from app.services import gowatch_client
+            gowatch_client.set_status(aid, "consumed")
+        except Exception:
+            pass
+    return RedirectResponse("/me?ok=" + _q("제안을 닫았어요. 발행하신 글의 회복은 계속 지켜볼게요."), status_code=303)
+
+
 @app.get("/", response_class=HTMLResponse)
 def root(request: Request):
     # 로그인 상태면 첫 화면 = 사용자 대시보드(작업실), 비로그인이면 마케팅 랜딩
@@ -1510,6 +1588,12 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                   f"<script>(function(){{var base={_base_n},n=0;var iv=setInterval(async function(){{n++;if(n>40){{clearInterval(iv);location.reload();return;}}"
                   "try{var r=await fetch('/me/sets/count');var d=await r.json();if(d.n>base){clearInterval(iv);location.href='/me?ok='+encodeURIComponent('콘텐츠가 완성됐어요! 아래에서 확인하세요');}}catch(e){}"
                   "}},3000);})();</script>")
+    # 트랙2 대시보드 — D2 상태 배너(이상 시만) + D1 개선 제안 카드(이벤트 시만)를 최상단에.
+    try:
+        from app.services import dashboard_gowatch as _dg
+        banner = _dg.render_d2(t.id) + _dg.render_d1(t.id) + banner
+    except Exception:
+        pass
     # ① 가게/스토어 설정
     bopts = "".join(f"<option value='{k}'{' selected' if (t.biz_type or 'local') == k else ''}>{lab}</option>"
                     for k, lab in [("local", "동네 매장(방문 유도)"), ("seller", "온라인 셀러(구매 유도)"),

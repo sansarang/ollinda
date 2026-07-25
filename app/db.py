@@ -396,6 +396,93 @@ def set_briefing_pref(tid: str, hour: int, on: bool) -> None:
 
 
 # ── 앱내 알림(상위노출 PHASE 2) ──
+# ── gowatch 적응 제안(트랙2 PHASE2) — gowatch 큐를 본체가 소비해 만든 '개선 제안 카드' 저장 ──
+#   본체 자기 테이블(SQLite). gowatch DB 아님. adaptation_id로 멱등(같은 이벤트 재소비 방지).
+def _ensure_proposals_table(c) -> None:
+    c.execute("CREATE TABLE IF NOT EXISTS adapt_proposals("
+              "adaptation_id TEXT PRIMARY KEY, tenant_id TEXT, kind TEXT, publish_id TEXT, "
+              "piece_id TEXT, card TEXT, status TEXT DEFAULT 'proposed', created_at TEXT)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_proposals_t ON adapt_proposals(tenant_id, status)")
+
+
+def save_proposal(adaptation_id: str, tenant_id: str, kind: str, publish_id: str,
+                  piece_id: str, card: dict) -> bool:
+    """개선 제안 1건 저장(멱등 — 이미 있으면 무시). 반환=신규 저장 여부."""
+    try:
+        with _conn() as c:
+            _ensure_proposals_table(c)
+            ex = c.execute("SELECT 1 FROM adapt_proposals WHERE adaptation_id=?", (adaptation_id,)).fetchone()
+            if ex:
+                return False
+            c.execute("INSERT INTO adapt_proposals(adaptation_id, tenant_id, kind, publish_id, "
+                      "piece_id, card, status, created_at) VALUES(?,?,?,?,?,?,?,?)",
+                      (adaptation_id, tenant_id, kind, publish_id, piece_id or "",
+                       json.dumps(card, ensure_ascii=False), "proposed", _now()))
+            return True
+    except sqlite3.OperationalError:
+        return False
+
+
+def list_proposals(tenant_id: str, status: str = "proposed", limit: int = 10) -> list[dict]:
+    """대시보드 D1 카드용 — tenant의 제안 목록(최신순)."""
+    try:
+        with _conn() as c:
+            _ensure_proposals_table(c)
+            rows = c.execute("SELECT * FROM adapt_proposals WHERE tenant_id=? AND status=? "
+                             "ORDER BY created_at DESC LIMIT ?", (tenant_id, status, limit)).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["card"] = json.loads(d.get("card") or "{}")
+            except Exception:
+                d["card"] = {}
+            out.append(d)
+        return out
+    except sqlite3.OperationalError:
+        return []
+
+
+def get_proposal(adaptation_id: str) -> Optional[dict]:
+    try:
+        with _conn() as c:
+            _ensure_proposals_table(c)
+            r = c.execute("SELECT * FROM adapt_proposals WHERE adaptation_id=?", (adaptation_id,)).fetchone()
+        if not r:
+            return None
+        d = dict(r)
+        try:
+            d["card"] = json.loads(d.get("card") or "{}")
+        except Exception:
+            d["card"] = {}
+        return d
+    except sqlite3.OperationalError:
+        return None
+
+
+def mark_proposal(adaptation_id: str, status: str) -> None:
+    try:
+        with _conn() as c:
+            _ensure_proposals_table(c)
+            c.execute("UPDATE adapt_proposals SET status=? WHERE adaptation_id=?", (status, adaptation_id))
+    except sqlite3.OperationalError:
+        pass
+
+
+def proposals_this_week(tenant_id: str) -> int:
+    """이번 주(최근 7일) 제안 건수 — 가게당 주 N건 상한(트랙A 우선 불변)용."""
+    try:
+        from datetime import datetime, timedelta
+        cutoff = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        with _conn() as c:
+            _ensure_proposals_table(c)
+            n = c.execute("SELECT count(*) FROM adapt_proposals WHERE tenant_id=? AND created_at>=?",
+                          (tenant_id, cutoff)).fetchone()
+        return int(n[0]) if n else 0
+    except sqlite3.OperationalError:
+        return 0
+
+
 def add_notice(tenant_id: str, kind: str, text: str) -> None:
     """같은 종류의 미읽음 알림이 있으면 중복 생성하지 않음(리마인더 도배 방지)."""
     try:
