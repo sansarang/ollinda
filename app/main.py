@@ -222,6 +222,22 @@ def internal_published_posts(request: Request):
     return JSONResponse({"ok": True, "contract": "readview_v1", "count": len(rows), "posts": rows})
 
 
+@app.get("/admin/gowatch/preview/{tenant_id}", response_class=HTMLResponse)
+def admin_gowatch_preview(request: Request, tenant_id: str):
+    """W3/D1~D3 실물 캡처용 — 로그인 없이 특정 tenant의 D2 배너·D1 카드·D3 관측표 렌더(운영자 전용)."""
+    from app.services import dashboard_gowatch as _dg
+    d2 = _dg.render_d2(tenant_id) or "<div class='text-xs text-slate-400 mb-4'>(D2 배너: 이상 없음 — 정상이면 배너 0)</div>"
+    d1 = _dg.render_d1(tenant_id) or "<div class='text-xs text-slate-400 mb-4'>(D1 카드: 제안 없음)</div>"
+    d3 = _dg.render_d3(tenant_id)
+    page = ("<div class='max-w-2xl mx-auto px-4 py-6' style='font-family:system-ui'>"
+            f"<div class='text-xs text-slate-400 mb-2'>gowatch 대시보드 프리뷰 · tenant={esc(tenant_id)}</div>"
+            "<div class='text-sm font-bold text-slate-500 mb-1'>D2 상태 배너</div>" + d2 +
+            "<div class='text-sm font-bold text-slate-500 mb-1'>D1 개선 제안 카드</div>" + d1 +
+            "<div class='text-sm font-bold text-slate-500 mb-1 mt-4'>D3 관측 현황</div>"
+            f"<div class='bg-white rounded-2xl border border-slate-100 p-4'>{d3}</div></div>")
+    return HTMLResponse(page)
+
+
 @app.post("/admin/gowatch/consume")
 def admin_gowatch_consume(request: Request):
     """gowatch 적응 큐 소비 1회 트리거(운영자/스케줄러/W3 E2E). 자동 발행 0 — 제안 카드만 생성."""
