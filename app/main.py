@@ -255,6 +255,35 @@ def admin_gowatch_consume(request: Request):
     return JSONResponse({"ok": True, **res})
 
 
+@app.post("/admin/gowatch/seed-demo")
+def admin_gowatch_seed_demo(request: Request, industry: str = "꽃집", keyword: str = "", region: str = ""):
+    """W6 검증용 — 시드 아닌 업종의 모의 발행 데이터 생성(tenant+블로그 조각+발행기록). 동일 코드 경로 증명용.
+    업종/키워드/지역은 파라미터(데이터) — 업종별 코드 분기 없음. 반환: publish_id·tenant_id."""
+    from app.domain.models import Channel, ContentKind, ContentPiece, ContentStatus
+    import uuid as _uuid
+    kw = keyword or (industry + " " + (region or "")).strip()
+    t = db.create_tenant(name=f"[데모]{industry}", industry=industry, region=region or "")
+    pid = "demo_" + _uuid.uuid4().hex[:12]
+    body = ("\n\n".join([
+        f"{industry} 이용을 고민하는 분들이 가장 많이 묻는 것부터 정리했어요.",
+        "첫째, 무엇을 준비해야 하는지. 처음이면 순서를 몰라 막막하실 텐데 단계별로 짚어드릴게요.",
+        "둘째, 비용과 기간. 케이스마다 다르지만 대략의 기준을 알면 계획을 세우기 쉬워요.",
+        "셋째, 자주 하는 실수. 미리 알면 피할 수 있는 부분을 사례로 담았어요.",
+        "궁금한 점이 있으면 편하게 문의 주세요. 상황에 맞게 안내해 드릴게요.",
+    ]))
+    piece = ContentPiece(id=pid, tenant_id=t.id, asset_id="", channel=Channel.NAVER_BLOG,
+                         kind=ContentKind.BLOG,
+                         payload={"title": f"{kw} 준비할 때 꼭 알아야 할 것 3가지",
+                                  "meta_description": f"{kw} 처음이라면 이 글부터",
+                                  "body": body, "target_keywords": [kw]},
+                         status=ContentStatus.PUBLISHED)
+    db.save_piece(piece)
+    url = f"https://blog.naver.com/demo_{industry}/{_uuid.uuid4().hex[:11]}"
+    db.record_blog_publish(t.id, pid, url=url, matched_by="manual",
+                           post_title=piece.payload["title"], target_kw=kw)
+    return JSONResponse({"ok": True, "publish_id": pid, "tenant_id": t.id, "keyword": kw, "industry": industry})
+
+
 @app.get("/me/observations", response_class=HTMLResponse)
 def me_observations(request: Request):
     """D3 관측 현황 탭(리포트 하위) — 발행 글별 순위·지면·색인 표. null=측정 준비 중."""
