@@ -101,7 +101,7 @@ def _post_label(a: dict, piece) -> str:
 
 
 def _handle_rank_drop(a: dict) -> "tuple[dict | None, str]":
-    from app.models import ContentKind
+    from app.domain.models import ContentKind
     from app.services import revise
     ev = a.get("evidence") or {}
     pub = a.get("publish_id") or ""
