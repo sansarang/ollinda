@@ -6877,11 +6877,20 @@ async def admin_pii_test(request: Request, photo: UploadFile = File(...)):
                 _dbg["tok_sample"] = _samp[:12]
             except Exception as _e:
                 _dbg["ocr_error"] = repr(_e)[:150]
-            boxes = list(_vz.detect_personal_info(orig)) + list(_vz.detect_document_pii(orig))
+            _dbg["vision_configured"] = _vz.configured()
+            _dbg["has_anthropic_key"] = bool(os.environ.get("ANTHROPIC_API_KEY"))
             try:
-                boxes += list(_vz.detect_plates_vision(orig))
+                _pi = list(_vz.detect_personal_info(orig))
+            except Exception as _ve:
+                _pi = []; _dbg["personal_info_error"] = repr(_ve)[:200]
+            _dbg["personal_info_n"] = len(_pi)
+            boxes = _pi + list(_vz.detect_document_pii(orig))
+            try:
+                _pl = list(_vz.detect_plates_vision(orig))
+                _dbg["plate_tile_n"] = len(_pl)
+                boxes += _pl
             except Exception as _pe:
-                _dbg["plate_tile_error"] = repr(_pe)[:150]
+                _dbg["plate_tile_error"] = repr(_pe)[:200]
             _dbg["vision_raw"] = getattr(_vz, "_LAST_VISION_RAW", "")[-900:]
             masked = os.path.join(work, "masked.jpg")
             _sh.copy(orig, masked)
