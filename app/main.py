@@ -219,7 +219,16 @@ def internal_published_posts(request: Request):
         return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
     from app import db as _db
     rows = _db.published_posts_view()
-    return JSONResponse({"ok": True, "contract": "readview_v1", "count": len(rows), "posts": rows})
+    dbg = {}
+    if request.query_params.get("debug"):
+        try:
+            with _db._conn() as _c:
+                dbg["blog_publishes_total"] = _c.execute("SELECT count(*) FROM blog_publishes").fetchone()[0]
+                dbg["with_url"] = _c.execute("SELECT count(*) FROM blog_publishes WHERE published_url IS NOT NULL AND published_url<>''").fetchone()[0]
+                dbg["sample"] = [dict(r) for r in _c.execute("SELECT piece_id,tenant_id,published_url,target_kw FROM blog_publishes LIMIT 5").fetchall()]
+        except Exception as _e:
+            dbg["err"] = repr(_e)[:200]
+    return JSONResponse({"ok": True, "contract": "readview_v1", "count": len(rows), "posts": rows, "debug": dbg})
 
 
 @app.get("/admin/gowatch/preview/{tenant_id}", response_class=HTMLResponse)
