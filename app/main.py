@@ -6879,12 +6879,7 @@ def admin_render_job(asset_id: str, channel: str = "naver", price: str = "", mil
     kws = [canon] if canon else []
     work = _tf.mkdtemp(prefix="renderjob_")
     try:
-        try:
-            job = _rj.build_render_job(sb, img_by_id, kws, t, strat, work, sale_price=_sale, mileage=_mile)
-        except Exception:
-            import traceback
-            return JSONResponse({"ok": False, "error": "build_render_job: " + traceback.format_exc()[-600:]},
-                                status_code=500)
+        job = _rj.build_render_job(sb, img_by_id, kws, t, strat, work, sale_price=_sale, mileage=_mile)
         if not job:
             return JSONResponse({"ok": True, "blocked": "empty_job"})
         buf = _io.BytesIO()
@@ -6897,6 +6892,10 @@ def admin_render_job(asset_id: str, channel: str = "naver", price: str = "", mil
                      headers={"Content-Disposition": f'attachment; filename="renderjob_{asset_id[:8]}_{channel}.zip"',
                               "X-Job-Scenes": str(len(job.get("scenes", []))),
                               "X-Sale-Price": _sale or "", "X-Mileage": _mile or ""})
+    except Exception:
+        import traceback
+        return JSONResponse({"ok": False, "error": "render-job: " + traceback.format_exc()[-700:]},
+                            status_code=500)
     finally:
         _sh.rmtree(work, ignore_errors=True)
 
