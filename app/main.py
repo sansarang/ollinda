@@ -6840,6 +6840,40 @@ def admin_render_shadow_log(limit: int = 50):
                          "n": len(rows), "rows": rows})
 
 
+@app.post("/admin/pii-test")
+async def admin_pii_test(request: Request, photo: UploadFile = File(...)):
+    """문서 PII 마스킹 검증 — 이미지 업로드 → detect_personal_info(고해상·식별번호) + mask_personal_info →
+    검출 박스 + 마스킹본 URL 반환(전후 대조). 발행 전 '누락 0' 실증용."""
+    import uuid as _uu
+    from app import vision as _vz
+    from app.media import photo_boost as _pb
+    data = await photo.read()
+    d = os.path.join(STORAGE_DIR, "_piitest")
+    os.makedirs(d, exist_ok=True)
+    ext = (os.path.splitext(photo.filename or "")[1] or ".jpg").lower()
+    orig = os.path.join(d, f"orig_{_uu.uuid4().hex}{ext}")
+    with open(orig, "wb") as f:
+        f.write(data)
+    try:
+        boxes = _vz.detect_personal_info(orig)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": "detect: " + repr(e)[:150]}, status_code=500)
+    # 마스킹본 생성(원본 복사 → mask 적용) — 게이트(PII_CONF_MIN) 적용
+    masked = os.path.join(d, f"masked_{_uu.uuid4().hex}.png")
+    import shutil as _sh
+    _sh.copy(orig, masked)
+    _pb._MASK_LAST_LOG = []
+    n = _pb.mask_personal_info(masked)
+    rows = [{"type": b.get("type"), "conf": round(float(b.get("conf", 0.5)), 2),
+             "box": [round(float(b.get(k, 0)), 3) for k in ("x0", "y0", "x1", "y1")],
+             "masked": float(b.get("conf", 0.5)) >= _pb.PII_CONF_MIN} for b in boxes]
+    return JSONResponse({"ok": True, "detected": len(boxes), "masked_count": n,
+                         "gate_conf_min": _pb.PII_CONF_MIN,
+                         "orig_url": f"/admin/media/_piitest/{os.path.basename(orig)}",
+                         "masked_url": f"/admin/media/_piitest/{os.path.basename(masked)}",
+                         "boxes": rows, "mask_log": _pb._MASK_LAST_LOG[-20:]})
+
+
 @app.get("/admin/set/{asset_id}/render-job")
 def admin_render_job(asset_id: str, channel: str = "naver", price: str = "", mileage: str = ""):
     """gorender 이관 — render_job_v1 + 자산(카드·TTS·ASS·BGM·사진) 사전생성 → zip 다운로드.

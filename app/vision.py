@@ -24,20 +24,26 @@ def configured() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
-def _b64_for_vision(image_path: str) -> tuple[str, str]:
-    """전송용 (media_type, b64) — 긴 변 1568px·JPEG 재인코딩.
+def _b64_for_vision(image_path: str, max_px: int = 1568) -> tuple[str, str]:
+    """전송용 (media_type, b64) — 긴 변 max_px·JPEG 재인코딩.
     원본 대용량(스마트폰 4~8MB)은 Anthropic 이미지 제한(5MB/장)에 걸려 폴백 vision이
-    침묵 실패(주안 캡션 재분석 청크 1·2 실증). gemini도 작은 페이로드가 안전·저비용."""
+    침묵 실패(주안 캡션 재분석 청크 1·2 실증). gemini도 작은 페이로드가 안전·저비용.
+    ★ max_px 상향(문서 PII 검출) — 표 안 작은 식별번호가 1568px에선 판독 불가(등록번호·VIN 누락 주범)."""
     try:
         import io
         from PIL import Image, ImageOps
         im = Image.open(image_path)
         im = ImageOps.exif_transpose(im).convert("RGB")
-        if max(im.size) > 1568:
-            im.thumbnail((1568, 1568))
+        if max(im.size) > max_px:
+            im.thumbnail((max_px, max_px))
         buf = io.BytesIO()
-        im.save(buf, "JPEG", quality=85)
-        return "image/jpeg", base64.standard_b64encode(buf.getvalue()).decode()
+        # 고해상 문서는 q80로 5MB 이내 유지(작은 글씨 가독은 해상도가 좌우)
+        q = 80 if max_px > 1568 else 85
+        im.save(buf, "JPEG", quality=q)
+        data = buf.getvalue()
+        if len(data) > 4_900_000 and max_px > 1568:      # 5MB 제한 방어 — 초과 시 1568로 재축소
+            return _b64_for_vision(image_path, 1568)
+        return "image/jpeg", base64.standard_b64encode(data).decode()
     except Exception:
         with open(image_path, "rb") as f:
             return _media_type(image_path), base64.standard_b64encode(f.read()).decode()
@@ -264,19 +270,28 @@ def detect_personal_info(image_path: str) -> list[dict]:
     try:
         import json
         import re as _re
-        _mt3, data = _b64_for_vision(image_path)
+        # ★ 고해상(2048)으로 문서 표 안 작은 식별번호도 판독 가능하게(1568에선 등록번호·VIN 누락)
+        _mt3, data = _b64_for_vision(image_path, max_px=int(os.environ.get("SHOPCAST_PII_MAX_PX", "2048")))
         import anthropic
         client = anthropic.Anthropic()
+        # 업종 중립 — '가려야 할 식별번호/개인정보' 범주를 전수 열거(자동차·부동산·의료·일반 동일 틀).
         prompt = (
-            "이 사진에서 '가려야 할 개인정보'의 위치를 모두 찾아라: "
-            "차량 번호판, 사람 얼굴, 전화번호, 이름표·차량정보 라벨·차대번호(VIN), 주소·명함.\n"
-            "각 항목을 이미지 기준 0~1로 정규화한 사각형으로, JSON 배열만 출력(설명·코드블록 없이):\n"
-            '[{"type":"plate|face|phone|label|address","x0":0.00,"y0":0.00,"x1":0.00,"y1":0.00,"conf":0.00}]\n'
-            "x0,y0=왼쪽위, x1,y1=오른쪽아래. conf=이게 정말 그 개인정보라는 확신도(0~1, 애매하면 낮게).\n"
-            "없으면 [] 만 출력. ★ 정상 차체·배경을 개인정보로 착각하지 마라 — 확신 없으면 아예 넣지 마라(오탐 금지)."
+            "이 이미지에서 '가려야 할 개인정보·식별번호'를 하나도 빠짐없이 찾아라. 문서(등록증·점검부·계약서·"
+            "신분증·명함 등)라면 표·작은 글씨 칸 안까지 반드시 훑어라. 유형:\n"
+            "  · 차량 번호판(예 '370다4358'), 차대번호 VIN(17자리 영숫자, 예 KMHF141DBNA491921)\n"
+            "  · 주민등록번호(000000-0000000), 사업자등록번호(000-00-00000), 법인등록번호(000000-0000000)\n"
+            "  · 계좌번호, 카드번호, 전화번호, 여권번호, 운전면허번호, 문서확인·발급번호\n"
+            "  · 사람 얼굴, 주소, 이름·상호가 적힌 이름표\n"
+            "각 항목을 이미지 기준 0~1 정규화 사각형으로. JSON 배열만 출력(설명·코드블록 없이):\n"
+            '[{"type":"plate|vin|rrn|bizno|corpno|account|card|phone|passport|license|docno|face|address|label",'
+            '"x0":0.00,"y0":0.00,"x1":0.00,"y1":0.00,"conf":0.00}]\n'
+            "x0,y0=왼쪽위, x1,y1=오른쪽아래. 박스는 그 번호/정보에 딱 맞게(주변 여백 최소).\n"
+            "conf=이게 정말 그 식별정보라는 확신도(0~1). 문서의 번호칸은 확실하면 0.85 이상.\n"
+            "★ 문서라면 번호가 여러 칸에 흩어져 있다 — 등록번호·차대번호·법인번호를 각각 별도 박스로 빠짐없이. "
+            "정상 차체·배경·일반 텍스트(설명문·날짜·주행거리 수치)는 넣지 마라(오탐 금지). 없으면 [] 만."
         )
         resp = client.messages.create(
-            model=MODEL, max_tokens=700,
+            model=MODEL, max_tokens=1200,
             messages=[{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64",
                  "media_type": _mt3, "data": data}},
