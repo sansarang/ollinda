@@ -247,6 +247,12 @@ def admin_gowatch_preview(request: Request, tenant_id: str):
     return HTMLResponse(page)
 
 
+@app.get("/admin/sets-list")
+def admin_sets_list(request: Request, tenant: str = "", limit: int = 20):
+    """운영/검증용 — 최신 세트(asset_id·tenant·글수·생성) JSON. 콘티 검증 대상 선택용."""
+    return JSONResponse({"ok": True, "sets": db.list_sets(tenant_id=tenant or None, limit=limit)})
+
+
 @app.post("/admin/gowatch/consume")
 def admin_gowatch_consume(request: Request):
     """gowatch 적응 큐 소비 1회 트리거(운영자/스케줄러/W3 E2E). 자동 발행 0 — 제안 카드만 생성."""
