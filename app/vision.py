@@ -321,6 +321,9 @@ def detect_document_pii(image_path: str) -> list[dict]:
         lines = defaultdict(list)
         for w in words:
             lines[w[5]].append(w)
+        # 페이지 대표 글자높이(중앙값) — 셀 경계선(|)이 병합돼 부풀려진 토큰의 세로범위 클램프 기준
+        _hs = sorted(w[4] for w in words) if words else []
+        med_h = _hs[len(_hs) // 2] if _hs else 10
         boxes = []
         seen = set()
         for lk, ws in lines.items():
@@ -347,15 +350,20 @@ def detect_document_pii(image_path: str) -> list[dict]:
                         xs = [ws[i] for i in idx]
                         if not xs:
                             continue
-                        x0 = min(w[1] for w in xs); y0 = min(w[2] for w in xs)
-                        x1 = max(w[1] + w[3] for w in xs); y1 = max(w[2] + w[4] for w in xs)
+                        # 각 토큰 세로범위를 대표 글자높이로 클램프(중심 기준) → 셀 경계선(|)이 병합돼
+                        #   높이 부풀려진 토큰이 박스를 인접 행까지 확장하는 문제 근본해결(차명 등 오마스킹 방지).
+                        cap = 1.8 * med_h
+                        def _top(w): return (w[2] + w[4] / 2) - min(w[4], cap) / 2
+                        def _bot(w): return (w[2] + w[4] / 2) + min(w[4], cap) / 2
+                        x0 = min(w[1] for w in xs); y0 = min(_top(w) for w in xs)
+                        x1 = max(w[1] + w[3] for w in xs); y1 = max(_bot(w) for w in xs)
                         if (x1 - x0) > 0.5 * W:                # 과폭 = 오병합 방어
                             continue
                         key = (name, round(x0 / max(W, 1), 3), round(y0 / max(H, 1), 3))
                         if key in seen:                        # 두 문자열 매칭 중복 제거
                             continue
                         seen.add(key)
-                        px = (x1 - x0) * 0.12; py = (y1 - y0) * 0.4
+                        px = (x1 - x0) * 0.12; py = (y1 - y0) * 0.3
                         boxes.append({"type": "doc:" + name, "value": m.group()[:40],
                                       "x0": max(0.0, (x0 - px) / W), "y0": max(0.0, (y0 - py) / H),
                                       "x1": min(1.0, (x1 + px) / W), "y1": min(1.0, (y1 + py) / H),
