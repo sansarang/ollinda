@@ -6846,31 +6846,30 @@ async def admin_pii_test(request: Request, photo: UploadFile = File(...)):
     검출 박스 + 마스킹본 URL 반환(전후 대조). 발행 전 '누락 0' 실증용."""
     data = await photo.read()
     try:
-        import uuid as _uu
+        import base64 as _b64
+        import shutil as _sh
+        import tempfile as _tf
         from app import vision as _vz
         from app.media import photo_boost as _pb
-        d = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), "_piitest")
-        os.makedirs(d, exist_ok=True)
-        ext = (os.path.splitext(photo.filename or "")[1] or ".jpg").lower()
-        orig = os.path.join(d, f"orig_{_uu.uuid4().hex}{ext}")
-        with open(orig, "wb") as f:
-            f.write(data)
-        boxes = list(_vz.detect_personal_info(orig)) + list(_vz.detect_document_pii(orig))
-        # 마스킹본 생성(원본 복사 → mask 적용) — 게이트(PII_CONF_MIN) 적용. jpg로(안전한 저장)
-        masked = os.path.join(d, f"masked_{_uu.uuid4().hex}.jpg")
-        import shutil as _sh
-        _sh.copy(orig, masked)
-        _pb._MASK_LAST_LOG = []
-        n = _pb.mask_personal_info(masked)
+        with _tf.TemporaryDirectory(prefix="piitest_") as work:   # /tmp — 만차 /data 볼륨 회피
+            orig = os.path.join(work, "orig.jpg")
+            with open(orig, "wb") as f:
+                f.write(data)
+            boxes = list(_vz.detect_personal_info(orig)) + list(_vz.detect_document_pii(orig))
+            masked = os.path.join(work, "masked.jpg")
+            _sh.copy(orig, masked)
+            _pb._MASK_LAST_LOG = []
+            n = _pb.mask_personal_info(masked)
+            with open(masked, "rb") as f:
+                mbytes = f.read()
         rows = [{"type": b.get("type"), "value": b.get("value", ""),
                  "conf": round(float(b.get("conf", 0.5)), 2),
                  "box": [round(float(b.get(k, 0)), 3) for k in ("x0", "y0", "x1", "y1")],
                  "masked": float(b.get("conf", 0.5)) >= _pb.PII_CONF_MIN} for b in boxes]
         return JSONResponse({"ok": True, "detected": len(boxes), "masked_count": n,
-                             "gate_conf_min": _pb.PII_CONF_MIN,
-                             "orig_url": f"/admin/media/_piitest/{os.path.basename(orig)}",
-                             "masked_url": f"/admin/media/_piitest/{os.path.basename(masked)}",
-                             "boxes": rows, "mask_log": _pb._MASK_LAST_LOG[-20:]})
+                             "gate_conf_min": _pb.PII_CONF_MIN, "boxes": rows,
+                             "mask_log": _pb._MASK_LAST_LOG[-20:],
+                             "masked_b64": _b64.b64encode(mbytes).decode()})   # 마스킹본(전후 대조용)
     except Exception:
         import traceback
         return JSONResponse({"ok": False, "error": "pii-test: " + traceback.format_exc()[-500:]}, status_code=500)
