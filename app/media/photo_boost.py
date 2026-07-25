@@ -149,7 +149,13 @@ def mask_personal_info(path: str) -> int:
         return 0
     try:
         from app import vision
-        boxes = vision.detect_personal_info(path)
+        # ① 사진 PII(얼굴·번호판·라벨) + ② 문서 식별번호(격자 국소화 — 등록번호·VIN·문서번호). 합집합.
+        boxes = list(vision.detect_personal_info(path))
+        if os.environ.get("SHOPCAST_DOC_PII", "1") != "0":
+            try:
+                boxes += vision.detect_document_pii(path)
+            except Exception:
+                pass
         if not boxes:
             return 0
         from PIL import Image

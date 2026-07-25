@@ -263,6 +263,59 @@ def build_catalog(image_paths: list[str], industry_name: str = "", max_imgs: int
     return out
 
 
+def detect_document_pii(image_path: str, cols: int = 6, rows: int = 8) -> list[dict]:
+    """문서 식별번호를 '격자 칸'으로 국소화 → 칸을 bbox로 마스킹. 정밀 bbox 대신 격자 지정이라
+    vision이 안정적으로 답한다(정밀좌표 회피, 문서 표 안 등록번호·VIN·문서번호 누락 근본해결).
+    업종 중립: 모든 식별번호 유형. 날짜·주행거리·상태체크는 제외(트러스트 수치 보존). 실패 시 []."""
+    if not (configured() and image_path and os.path.exists(image_path)):
+        return []
+    try:
+        import json
+        import re as _re
+        _mt, data = _b64_for_vision(image_path, max_px=int(os.environ.get("SHOPCAST_PII_MAX_PX", "2048")))
+        import anthropic
+        client = anthropic.Anthropic()
+        prompt = (
+            f"이 이미지를 가로 {cols}칸·세로 {rows}칸 격자로 나눴다(왼쪽위=행1 열1, 오른쪽아래=행{rows} 열{cols}).\n"
+            "문서(자동차등록증·성능점검부·신분증·사업자등록증·계약서 등)라면, '가려야 할 식별번호'가 적힌 칸을 "
+            "모두 찾아라. 유형: 차량등록번호(예 370다4358)·차대번호 VIN(17자리)·주민등록번호·사업자등록번호·"
+            "법인등록번호·계좌번호·카드번호·전화번호·여권번호·운전면허번호·문서발급/확인번호.\n"
+            "★ 날짜·검사기간·주행거리(km)·상태 체크(양호/없음)·금액 같은 '가려선 안 되는 정보'는 제외.\n"
+            "번호가 두 칸에 걸치면 두 칸 모두. JSON 배열만(설명 없이): "
+            '[{"row":정수,"col":정수,"type":"유형","value":"읽은 값"}]. 식별번호 없으면 [] 만.'
+        )
+        resp = client.messages.create(
+            model=MODEL, max_tokens=900,
+            messages=[{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": _mt, "data": data}},
+                {"type": "text", "text": prompt}]}])
+        txt = next((b.text for b in resp.content if b.type == "text"), "")
+        m = _re.search(r"\[.*\]", txt, _re.S)
+        cells = json.loads(m.group(0)) if m else []
+        boxes, seen = [], set()
+        padx, pady = 0.30 / cols, 0.25 / rows          # 칸 경계 오차·번호 넘침 대비 패딩
+        for c in cells:
+            try:
+                r0 = int(c["row"]) - 1
+                c0 = int(c["col"]) - 1
+            except Exception:
+                continue
+            if not (0 <= r0 < rows and 0 <= c0 < cols):
+                continue
+            key = (r0, c0)
+            if key in seen:
+                continue
+            seen.add(key)
+            boxes.append({"type": "doc:" + str(c.get("type", "id"))[:12],
+                          "value": str(c.get("value", ""))[:40],
+                          "x0": max(0.0, c0 / cols - padx), "y0": max(0.0, r0 / rows - pady),
+                          "x1": min(1.0, (c0 + 1) / cols + padx), "y1": min(1.0, (r0 + 1) / rows + pady),
+                          "conf": 0.9})
+        return boxes
+    except Exception:
+        return []
+
+
 def detect_personal_info(image_path: str) -> list[dict]:
     """사진 속 개인정보 위치를 정규화 bbox로 반환 → 모자이크용. 실패/무키 시 []."""
     if not (configured() and image_path and os.path.exists(image_path)):

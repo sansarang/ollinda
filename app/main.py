@@ -6855,7 +6855,7 @@ async def admin_pii_test(request: Request, photo: UploadFile = File(...)):
     with open(orig, "wb") as f:
         f.write(data)
     try:
-        boxes = _vz.detect_personal_info(orig)
+        boxes = list(_vz.detect_personal_info(orig)) + list(_vz.detect_document_pii(orig))
     except Exception:
         import traceback
         return JSONResponse({"ok": False, "error": "detect: " + traceback.format_exc()[-400:]}, status_code=500)
