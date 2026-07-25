@@ -1,14 +1,14 @@
 FROM python:3.12-slim
 
-# 숏 영상 자막조립용 ffmpeg + 한글 폰트 + 문서 PII OCR(tesseract). 한글 정확도용 tessdata_best kor/eng.
+# 숏 영상 자막조립용 ffmpeg + 한글 폰트 + 문서 PII OCR(tesseract kor+eng, configs 포함).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg fonts-nanum tesseract-ocr curl \
+    ffmpeg fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng curl \
     && rm -rf /var/lib/apt/lists/*
-# tessdata_best(고정확) kor+eng — Debian 기본(fast)은 한글 번호판 판독이 약해 문서 식별번호 누락.
-RUN mkdir -p /usr/share/tesseract-best && \
-    curl -sL -o /usr/share/tesseract-best/kor.traineddata https://github.com/tesseract-ocr/tessdata_best/raw/main/kor.traineddata && \
-    curl -sL -o /usr/share/tesseract-best/eng.traineddata https://github.com/tesseract-ocr/tessdata_best/raw/main/eng.traineddata
-ENV TESSDATA_PREFIX=/usr/share/tesseract-best
+# ★ 기본 tessdata 폴더(configs·tsv 포함)에 tessdata_best kor를 '덮어쓴다' — Debian 기본(fast)은 한글
+#   번호판 판독이 약해 식별번호 누락. TESSDATA_PREFIX는 설정하지 않는다(그러면 configs를 못 찾아 tsv 실패).
+RUN TDIR="$(dirname "$(find /usr/share -name eng.traineddata 2>/dev/null | head -1)")" && \
+    curl -fsL -o "$TDIR/kor.traineddata" https://github.com/tesseract-ocr/tessdata_best/raw/main/kor.traineddata && \
+    echo "tessdata_best kor → $TDIR"
 
 WORKDIR /srv
 COPY requirements.txt .
