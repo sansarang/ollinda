@@ -1,9 +1,14 @@
 FROM python:3.12-slim
 
-# 숏 영상 자막조립용 ffmpeg + 한글 폰트(NanumGothic) + 문서 PII OCR(tesseract kor+eng)
+# 숏 영상 자막조립용 ffmpeg + 한글 폰트 + 문서 PII OCR(tesseract). 한글 정확도용 tessdata_best kor/eng.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng \
+    ffmpeg fonts-nanum tesseract-ocr curl \
     && rm -rf /var/lib/apt/lists/*
+# tessdata_best(고정확) kor+eng — Debian 기본(fast)은 한글 번호판 판독이 약해 문서 식별번호 누락.
+RUN mkdir -p /usr/share/tesseract-best && \
+    curl -sL -o /usr/share/tesseract-best/kor.traineddata https://github.com/tesseract-ocr/tessdata_best/raw/main/kor.traineddata && \
+    curl -sL -o /usr/share/tesseract-best/eng.traineddata https://github.com/tesseract-ocr/tessdata_best/raw/main/eng.traineddata
+ENV TESSDATA_PREFIX=/usr/share/tesseract-best
 
 WORKDIR /srv
 COPY requirements.txt .

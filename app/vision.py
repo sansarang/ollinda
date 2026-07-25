@@ -264,41 +264,22 @@ def build_catalog(image_paths: list[str], industry_name: str = "", max_imgs: int
 
 
 # 문서 식별번호 정규식(업종 중립) — OCR 텍스트에서 매칭. 날짜·주행거리·금액은 형식이 달라 자동 제외.
-def _read_document_ids(image_path: str) -> list[dict]:
-    """Anthropic vision으로 '가려야 할 식별번호 값'만 읽는다(위치 아님 — vision이 잘하는 판독·분류).
-    반환 [{type, value}]. 날짜·주행거리·금액·상태는 제외(트러스트 보존). 무키/실패 시 []."""
-    if not (configured() and image_path and os.path.exists(image_path)):
-        return []
-    try:
-        import json
-        import re as _re
-        _mt, data = _b64_for_vision(image_path, max_px=int(os.environ.get("SHOPCAST_PII_MAX_PX", "2048")))
-        import anthropic
-        client = anthropic.Anthropic()
-        prompt = (
-            "이 이미지가 문서(등록증·성능점검부·신분증·사업자등록증·계약서 등)라면, '가려야 할 식별번호'의 "
-            "값을 그대로 읽어라(위치 말고 값만). 유형: 차량등록번호(예 370다4358)·차대번호 VIN(17자리)·주민등록번호·"
-            "사업자등록번호·법인등록번호·계좌번호·카드번호·전화번호·여권번호·운전면허번호·문서발급/확인번호.\n"
-            "★ 날짜·검사기간·주행거리(km)·금액·상태체크(양호/없음)는 '가리면 안 되는 정보'다 — 넣지 마라.\n"
-            'JSON 배열만(설명 없이): [{"type":"유형","value":"읽은 값 그대로"}]. 식별번호 없으면 [] 만.')
-        resp = client.messages.create(
-            model=MODEL, max_tokens=800,
-            messages=[{"role": "user", "content": [
-                {"type": "image", "source": {"type": "base64", "media_type": _mt, "data": data}},
-                {"type": "text", "text": prompt}]}])
-        txt = next((b.text for b in resp.content if b.type == "text"), "")
-        m = _re.search(r"\[.*\]", txt, _re.S)
-        arr = json.loads(m.group(0)) if m else []
-        return [{"type": str(e.get("type", "id"))[:16], "value": str(e.get("value", "")).strip()}
-                for e in arr if isinstance(e, dict) and e.get("value")]
-    except Exception:
-        return []
+# 문서 식별번호 정규식(업종 중립·strict). 번호판은 한글 중간자 필수 → 주행거리·날짜·제원 과매칭 0.
+#   (서버에 tessdata_best kor 탑재로 한글 '다' 판독 보장 — Dockerfile.)
+_DOC_ID_PATTERNS = [
+    ("plate",   r"\d{2,3}[가-힣]\d{4}"),               # 차량 등록번호 370다4358 (한글 필수 = 과매칭 없음)
+    ("vin",     r"[A-HJ-NPR-Z0-9]{16,17}"),            # 차대번호 VIN(17자리)
+    ("rrn",     r"\d{6}-\d{7}"),                       # 주민/법인 등록번호(하이픈)
+    ("bizno",   r"\d{3}-\d{2}-\d{5}"),                 # 사업자등록번호
+    ("docno",   r"\d{2,3}-\d{2,3}-\d{5,6}|\d{2,3}-\d{5,6}"),  # 문서발급/확인번호 98-90-061766
+    ("phone",   r"01[016-9]-?\d{3,4}-?\d{4}"),         # 휴대전화
+]
 
 
 def detect_document_pii(image_path: str) -> list[dict]:
-    """문서 식별번호 국소화 = vision(값 판독) + OCR(좌표). vision이 읽은 값의 유의미 토큰(≥3자)을
-    tesseract OCR 단어에서 찾아 그 단어 bbox를 마스킹. 정밀 bbox 실패·정규식 과매칭 둘 다 회피.
-    업종 중립. 날짜·주행거리는 vision이 애초에 안 읽어 마스킹 안 됨(트러스트 보존). tesseract 없으면 []."""
+    """문서 식별번호를 OCR+strict 정규식으로 국소화 → 정확한 단어 bbox(vision bbox 실패 근본해결).
+    번호판은 한글 중간자 필수라 주행거리·날짜·제원 과매칭 없음. 인접 셀 오병합 방지 위해 x간격이 크면
+    분리자 삽입. tesseract(tessdata_best kor+eng) 없으면 [](graceful). 업종 중립."""
     import shutil as _sh
     if not (image_path and os.path.exists(image_path) and _sh.which("tesseract")):
         return []
@@ -306,10 +287,8 @@ def detect_document_pii(image_path: str) -> list[dict]:
         import re as _re
         import subprocess as _sp
         import tempfile as _tf
+        from collections import defaultdict
         from PIL import Image
-        vals = _read_document_ids(image_path)
-        if not vals:
-            return []
         W, H = Image.open(image_path).size
         with _tf.TemporaryDirectory(prefix="ocr_") as td:
             out = os.path.join(td, "o")
@@ -324,39 +303,43 @@ def detect_document_pii(image_path: str) -> list[dict]:
             c = line.split("\t")
             if len(c) >= 12 and c[11].strip():
                 try:
-                    if float(c[10]) < 25:
+                    if float(c[10]) < 30:
                         continue
-                    words.append((c[11].strip(), int(c[6]), int(c[7]), int(c[8]), int(c[9])))
+                    words.append((c[11].strip(), int(c[6]), int(c[7]), int(c[8]), int(c[9]),
+                                  (c[2], c[3], c[4])))
                 except Exception:
                     continue
+        lines = defaultdict(list)
+        for w in words:
+            lines[w[5]].append(w)
         boxes = []
-        for v in vals:
-            value = v["value"]
-            # 값에서 유의미 토큰(숫자·영숫자 3자+) — OCR이 안정적으로 읽는 부분으로 위치를 찾는다.
-            toks = [t for t in _re.findall(r"[A-Za-z0-9]{3,}", value)]
-            if not toks:
-                continue
-            matched = []
-            for (wt, x, y, w, h) in words:
-                wclean = _re.sub(r"[^A-Za-z0-9]", "", wt)
-                if len(wclean) < 3:
-                    continue
-                # OCR 단어가 값 토큰과 일치/포함되면 그 번호 조각으로 간주
-                if any(wclean == t or (len(t) >= 5 and t in wclean) or (len(wclean) >= 5 and wclean in t)
-                       for t in toks):
-                    matched.append((x, y, w, h))
-            if not matched:
-                continue
-            x0 = min(m[0] for m in matched); y0 = min(m[1] for m in matched)
-            x1 = max(m[0] + m[2] for m in matched); y1 = max(m[1] + m[3] for m in matched)
-            # 가로로 멀리 떨어진 조각이 한 박스로 뭉치는 것 방지 — 폭이 이미지 60% 넘으면 스킵(오국소화 방어)
-            if (x1 - x0) > 0.6 * W:
-                continue
-            px = (x1 - x0) * 0.12; py = (y1 - y0) * 0.4
-            boxes.append({"type": "doc:" + v["type"], "value": value[:40],
-                          "x0": max(0.0, (x0 - px) / W), "y0": max(0.0, (y0 - py) / H),
-                          "x1": min(1.0, (x1 + px) / W), "y1": min(1.0, (y1 + py) / H),
-                          "conf": 0.95})
+        for lk, ws in lines.items():
+            ws.sort(key=lambda w: w[1])
+            s, owner = "", []
+            prev_x1 = None
+            avg_h = (sum(w[4] for w in ws) / len(ws)) if ws else 10
+            for wi, w in enumerate(ws):
+                if prev_x1 is not None and (w[1] - prev_x1) > 1.2 * avg_h:  # 큰 x간격 = 셀 경계 → 분리
+                    s += "  "; owner.append(-1); owner.append(-1)
+                for _ in w[0]:
+                    owner.append(wi)
+                s += w[0]
+                prev_x1 = w[1] + w[3]
+            for name, pat in _DOC_ID_PATTERNS:
+                for m in _re.finditer(pat, s):
+                    idx = {i for i in owner[m.start():m.end()] if i >= 0}
+                    xs = [ws[i] for i in idx]
+                    if not xs:
+                        continue
+                    x0 = min(w[1] for w in xs); y0 = min(w[2] for w in xs)
+                    x1 = max(w[1] + w[3] for w in xs); y1 = max(w[2] + w[4] for w in xs)
+                    if (x1 - x0) > 0.5 * W:                # 과폭 = 오병합 방어
+                        continue
+                    px = (x1 - x0) * 0.12; py = (y1 - y0) * 0.4
+                    boxes.append({"type": "doc:" + name, "value": m.group()[:40],
+                                  "x0": max(0.0, (x0 - px) / W), "y0": max(0.0, (y0 - py) / H),
+                                  "x1": min(1.0, (x1 + px) / W), "y1": min(1.0, (y1 + py) / H),
+                                  "conf": 0.95})
         return boxes
     except Exception:
         return []

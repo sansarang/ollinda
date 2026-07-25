@@ -64,13 +64,19 @@ def test_mask_trace_endpoint_wired():
     assert "def admin_mask_trace" in src and "would_process" in src and "attached_warning" in src
 
 
-def test_document_pii_hybrid_wired():
-    """문서 PII = vision(값 판독) + OCR(좌표) 하이브리드 — 정규식 과매칭·정밀bbox 실패 둘 다 회피."""
+def test_doc_id_patterns_strict():
+    """strict 문서 식별번호 정규식 — 번호판(한글 필수)·VIN·문서번호 잡고, 주행거리·날짜·제원 과매칭 0."""
+    import re
     from app import vision as v
-    assert hasattr(v, "_read_document_ids") and hasattr(v, "detect_document_pii")
-    src = open(os.path.join(os.path.dirname(__file__), "..", "app", "vision.py"), encoding="utf-8").read()
-    seg = src.split("def detect_document_pii", 1)[1]
-    assert "_read_document_ids" in seg and "tesseract" in seg   # 값=vision, 좌표=OCR
+    pats = v._DOC_ID_PATTERNS
+    def hits(s): return [n for n, p in pats for _ in re.finditer(p, s)]
+    assert "plate" in hits("370다4358")               # 한글 중간자
+    assert "vin" in hits("KMHF141DBNA491923")
+    assert "docno" in hits("98-90-061766")
+    # ★ 과매칭 0: 한글 없는 숫자열(주행거리·날짜·제원)은 번호판으로 안 잡힘(트러스트 보존)
+    assert "plate" not in hits("3704358")             # 한글 없으면 번호판 아님
+    assert hits("12269") == [] and hits("12,269") == []
+    assert hits("2022-04-11") == [] and hits("2497") == []
 
 
 def test_detect_document_pii_graceful_without_tesseract(monkeypatch):
