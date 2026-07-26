@@ -261,6 +261,21 @@ def admin_gowatch_consume(request: Request):
     return JSONResponse({"ok": True, **res})
 
 
+@app.post("/admin/gen-test/{tenant_id}")
+async def admin_gen_test(request: Request, tenant_id: str, photos: list[UploadFile] = File(...)):
+    """생성 다운 진단 — ingest_upload를 동기 실행해 예외를 즉시 반환(bg 스레드 삼킴 우회). 실물 재현."""
+    t = db.get_tenant(tenant_id)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    files = await _read_image_uploads(photos)
+    try:
+        made = ingest_upload(t, files, "[진단 테스트]", intake={})
+        return JSONResponse({"ok": True, "pieces": [p.kind.value for p in made], "n": len(made)})
+    except Exception:
+        import traceback
+        return JSONResponse({"ok": False, "traceback": traceback.format_exc()[-1500:]}, status_code=500)
+
+
 @app.get("/admin/gen-progress/{tenant_id}")
 def admin_gen_progress(request: Request, tenant_id: str):
     """생성 진행/실패 진단 — 해당 tenant의 최신 생성 단계·에러(traceback 포함)."""
