@@ -24,12 +24,21 @@ PUBLISHERS: dict[Channel, Publisher] = {
     Channel.KAKAO_ALIMTALK: KakaoAlimtalkPublisher(),
 }
 
+# ★ 모델 하이브리드(속도) — 짧은 채널(캡션·X·마켓)은 Haiku(빠름·저렴, 품질 충분),
+#   블로그는 Sonnet(Opus 4.8→Sonnet 5: 훨씬 빠르고 SEO 품질 유지). 저점수 시 SEO 편집장(polish)이 마감.
+#   env로 조정 가능(문제 시 복귀). 채널 병렬화(generate_for)와 결합해 체감 속도 대폭↑.
+import os as _os
+from app.llm import HAIKU as _HAIKU
+
+_SHORT_MODEL = _os.environ.get("SHOPCAST_SHORT_MODEL", _HAIKU)
+_BLOG_MODEL = _os.environ.get("SHOPCAST_BLOG_MODEL", "claude-sonnet-5")
+
 GENERATORS: dict[ContentKind, Generator] = {
-    ContentKind.CAPTION: CaptionGenerator(),     # 인스타(피드/릴스)
-    ContentKind.BLOG: BlogDraftGenerator(),      # 네이버
+    ContentKind.CAPTION: CaptionGenerator(model=_SHORT_MODEL),     # 인스타(피드/릴스) — Haiku
+    ContentKind.BLOG: BlogDraftGenerator(model=_BLOG_MODEL),       # 네이버 — Sonnet(품질 보호)
     ContentKind.SHORT: ShortVideoGenerator(),    # 유튜브 숏/인스타 릴스
-    ContentKind.X_POST: XPostGenerator(),        # X(트위터)
-    ContentKind.MARKETPLACE: MarketplaceGenerator(),  # 셀러 판매 플랫폼(상품명·상세페이지·태그)
+    ContentKind.X_POST: XPostGenerator(model=_SHORT_MODEL),        # X(트위터) — Haiku
+    ContentKind.MARKETPLACE: MarketplaceGenerator(model=_SHORT_MODEL),  # 셀러 판매 플랫폼 — Haiku
     # ContentKind.ALIMTALK: AlimtalkGenerator(),   # Phase 3
 }
 
