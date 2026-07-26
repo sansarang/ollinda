@@ -294,14 +294,15 @@ def remove_overlay(path: str, out: str | None = None) -> dict:
         rep["action"] = "skip_type_b"
         return rep
     overlays = det.get("overlays") or []
-    removed, kinds, skipped_large, skipped_lowconf = 0, [], 0, 0
+    kinds, skipped_large, skipped_lowconf = [], 0, 0
+    gated = []                                                    # 게이트 통과 박스 [(box, entry, kind)]
     for ov in overlays:
         conf = float(ov.get("conf", 0.5))
         cov = ov.get("coverage") or 1.0
         entry = {"photo": os.path.basename(path), "src": "overlay", "type": "a",
                  "kind": ov.get("kind"), "conf": round(conf, 2), "coverage": cov,
                  "box": [round(float(ov.get(k, 0)), 3) for k in ("x0", "y0", "x1", "y1")]}
-        if conf < OVERLAY_CONF_MIN:                              # ★ 신뢰도 미달 → telea 오폭 금지, 스킵+로그
+        if conf < OVERLAY_CONF_MIN:                              # ★ 신뢰도 미달 → 오폭 금지, 스킵+로그
             skipped_lowconf += 1
             entry.update(processed=False, reason=f"conf<{OVERLAY_CONF_MIN}")
             _MASK_LAST_LOG.append(entry)
@@ -322,22 +323,40 @@ def remove_overlay(path: str, out: str | None = None) -> dict:
             box["y1"] = 1.0; box["y0"] = min(box["y0"], 0.90)
         if box["y0"] <= 0.10:                                     # 상단 → 위 끝까지
             box["y0"] = 0.0; box["y1"] = max(box["y1"], 0.10)
-        fixed = _cv_inpaint(cur, box, "telea")
-        if fixed is None:
-            rep["action"] = "no_cv2"                              # cv2 미설치 → 원본 그대로
-            return rep
-        cur = fixed
-        removed += 1
-        entry["processed"] = True
-        _MASK_LAST_LOG.append(entry)
-        if ov.get("kind"):
-            kinds.append(ov["kind"])
-    rep["removed"] = removed
-    rep["kinds"] = kinds
-    if removed == 0:
+        gated.append((box, entry, ov.get("kind")))
+    if not gated:
         rep["action"] = ("skip_lowconf" if skipped_lowconf else
                          "skip_large" if skipped_large else "none")
         return rep
+    # ── 인페인트: LaMa(blurworker, 딥 인페인트) 우선 → 불통이면 telea(cv2) 폴백 ──
+    #    telea는 로고 자리에 얼룩을 남김 → LaMa로 자연 복원(워터마크 제거 품질↑). LaMa 없으면 무중단 telea.
+    method = None
+    try:
+        from app.services import blur_client
+        png = blur_client.inpaint(path, [b for b, _, _ in gated]) if blur_client.configured() else None
+    except Exception:
+        png = None
+    if png:
+        try:
+            import io as _io
+            cur = ImageOps.exif_transpose(Image.open(_io.BytesIO(png))).convert("RGB")
+            method = "lama"
+        except Exception:
+            method = None
+    if method != "lama":                                         # telea 폴백(박스별)
+        for box, _e, _k in gated:
+            fixed = _cv_inpaint(cur, box, "telea")
+            if fixed is None:
+                rep["action"] = "no_cv2"                          # cv2도 없음 → 원본 그대로
+                return rep
+            cur = fixed
+        method = "telea"
+    for box, entry, kind in gated:
+        entry.update(processed=True, method=method)
+        _MASK_LAST_LOG.append(entry)
+        if kind:
+            kinds.append(kind)
+    rep.update(removed=len(gated), kinds=kinds, method=method)
     try:
         cur.save(tmp, "JPEG", quality=92)                         # 제거 결과 저장
     except Exception:

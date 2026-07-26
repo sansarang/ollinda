@@ -31,6 +31,43 @@ def _multipart(field: str, filename: str, data: bytes) -> tuple[bytes, str]:
     return body, boundary
 
 
+def _multipart_file_field(file_field: str, filename: str, data: bytes,
+                          text_field: str, text_val: str) -> tuple[bytes, str]:
+    """파일 1개 + 텍스트 필드 1개 멀티파트(/, inpaint용 — 이미지 + boxes JSON)."""
+    boundary = "----blur" + uuid.uuid4().hex
+    body = (
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"{text_field}\"\r\n\r\n"
+        f"{text_val}\r\n"
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; "
+        f"filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+    ).encode() + data + f"\r\n--{boundary}--\r\n".encode()
+    return body, boundary
+
+
+def inpaint(image_path: str, boxes: "list[dict]", timeout: int = 60) -> "bytes | None":
+    """이미지 + 정규화 박스 → LaMa로 복원한 PNG 바이트. 워커 미구성/불통/미가용이면 None(호출부 telea 폴백).
+    boxes: [{x0,y0,x1,y1}] (정규화). telea 얼룩 대신 자연 복원 — 워터마크·오버레이 제거 품질↑."""
+    if not (configured() and image_path and os.path.exists(image_path) and boxes):
+        return None
+    try:
+        with open(image_path, "rb") as f:
+            data = f.read()
+        payload = json.dumps([{k: float(b.get(k, 0)) for k in ("x0", "y0", "x1", "y1")} for b in boxes])
+        body, boundary = _multipart_file_field("photo", os.path.basename(image_path), data,
+                                               "boxes", payload)
+        req = urllib.request.Request(
+            _url() + "/inpaint", data=body, method="POST",
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            ct = r.headers.get("Content-Type", "")
+            out = r.read()
+        if "image" not in ct:            # 503/500 등 → JSON 에러 → None(폴백)
+            return None
+        return out
+    except Exception:
+        return None       # 불통 → None → telea 폴백
+
+
 def detect(image_path: str) -> "list[dict] | None":
     """이미지 → 번호판·얼굴 마스킹 박스(정규화). 워커 미구성/불통이면 None(호출부 폴백).
     반환 박스 conf는 마스킹 통과하도록 높게 설정(워커가 이미 자체 임계로 필터)."""
