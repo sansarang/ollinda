@@ -311,7 +311,17 @@ def remove_overlay(path: str, out: str | None = None) -> dict:
             entry.update(processed=False, reason=f"coverage>{_REMOVE_MAX_COV}")
             _MASK_LAST_LOG.append(entry)
             continue
-        box = {k: ov.get(k, 0) for k in ("x0", "y0", "x1", "y1")}
+        box = {k: float(ov.get(k, 0)) for k in ("x0", "y0", "x1", "y1")}
+        # ★ 코너/가장자리 UI(엔카 뷰어 19/30·화살표 등)는 LLM 좌표가 부정확 → 해당 가장자리로 확장해 확실히 덮음.
+        #   (커버리지 게이트 통과분만 여기 옴 = 이미 작은 국소 오버레이라 확장해도 과대 아님)
+        if box["x1"] >= 0.86:                                     # 우측 코너 → 오른쪽 끝까지
+            box["x1"] = 1.0; box["x0"] = min(box["x0"], 0.85)
+        if box["x0"] <= 0.14:                                     # 좌측 코너 → 왼쪽 끝까지
+            box["x0"] = 0.0; box["x1"] = max(box["x1"], 0.15)
+        if box["y1"] >= 0.90:                                     # 하단 → 아래 끝까지
+            box["y1"] = 1.0; box["y0"] = min(box["y0"], 0.90)
+        if box["y0"] <= 0.10:                                     # 상단 → 위 끝까지
+            box["y0"] = 0.0; box["y1"] = max(box["y1"], 0.10)
         fixed = _cv_inpaint(cur, box, "telea")
         if fixed is None:
             rep["action"] = "no_cv2"                              # cv2 미설치 → 원본 그대로
