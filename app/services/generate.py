@@ -16,7 +16,9 @@ def generate_for(tenant: Tenant, asset: Asset, kinds: list[ContentKind],
     """요청된 종류(kinds)별로 콘텐츠 초안을 생성한다. images=업로드된 사진 경로들(여러 장).
     ★ 채널 병렬 생성(순차→동시) — 채널마다 독립 LLM 호출이라 최대 채널 수만큼 빨라짐. asset은 읽기 공유."""
     import os
-    if len(kinds) <= 1 or os.environ.get("SHOPCAST_GEN_PARALLEL", "1") == "0":
+    # ★ 병렬화 기본 OFF(긴급 롤백) — 채널 병렬 생성이 행(hang) 유발 실측(타임아웃 없는 LLM 호출이 블록).
+    #   순차로 복귀(모델 하이브리드 Haiku/Sonnet는 유지 → 속도 이득 대부분 보존). 타임아웃 보강 후 재활성.
+    if len(kinds) <= 1 or os.environ.get("SHOPCAST_GEN_PARALLEL", "0") == "0":
         return _generate_sequential(tenant, asset, kinds, images)
 
     from concurrent.futures import ThreadPoolExecutor
