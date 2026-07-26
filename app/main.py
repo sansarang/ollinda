@@ -2798,26 +2798,26 @@ def _photo_captions(tenant, blog, n: int) -> list[str]:
 
 def _content_photo_layout(tenant, blog):
     """글 내용에 맞춰 사진 재배치·재정렬(글 텍스트 불변 — 마커 위치·번호와 사진 순서만).
-    반환 (new_body, order): order=콘텐츠 흐름순 원본 사진 인덱스. 다운로드·그리드가 이 순서를 따르면
-    '아무 순서로 올려도 글 순서대로' 정렬됨. per-photo 설명은 _photo_captions(정합 보장·kit서 재분석).
-    매칭=캡션↔문단 어절 겹침(결정적·레이트리밋 무관). 캐시: 결과를 blog.payload에 저장해 pack이 재사용."""
+    반환 (new_body, order, caps): order=콘텐츠 흐름순 원본 사진 인덱스, caps=per-photo 캡션(원순서).
+    다운로드·그리드·캡션이 이 order를 따르면 '아무 순서로 올려도 글 순서대로' 정렬됨.
+    매칭=캡션↔문단 어절 겹침(결정적·레이트리밋 무관). per-photo 설명은 _photo_captions(정합·kit서 재분석)."""
     import re as _rl
     pl = blog.payload or {}
     imgs = pl.get("image_paths") or []
     n = len(imgs)
     body = pl.get("body") or ""
     if n <= 1:
-        return body, list(range(n))
+        return body, list(range(n)), []
     try:
         caps = _photo_captions(tenant, blog, n)
     except Exception:
         caps = []
     if len([c for c in caps if (c or "").strip()]) < max(2, n // 2):   # 설명 태부족 → 원순서 유지(날조·오배치 금지)
-        return body, list(range(n))
+        return body, list(range(n)), caps
     clean = _rl.sub(r"[ \t]*\[사진\d+\][ \t]*\n?", "", body).strip()
     paras = [p.strip() for p in _rl.split(r"\n\s*\n", clean) if p.strip()]
     if len(paras) < 2:
-        return body, list(range(n))
+        return body, list(range(n)), caps
 
     def _tok(s):
         return {t for t in _rl.split(r"[^가-힣A-Za-z0-9]+", s or "") if len(t) >= 2}
@@ -2842,12 +2842,14 @@ def _content_photo_layout(tenant, blog):
         out.append(para)
         for i in sorted(by_para.get(j, []), key=lambda x: newnum[x]):
             out.append(f"[사진{newnum[i]}]")
-    return "\n\n".join(out), order
+    return "\n\n".join(out), order, caps
 
 
-def _caption_box(tenant, blog, n: int) -> str:
-    """(이미지 SEO 5-2) 사진별 캡션 붙여넣기 박스 — 분석 없으면 렌더 생략."""
-    caps = _photo_captions(tenant, blog, n)
+def _caption_box(tenant, blog, n: int, caps=None) -> str:
+    """(이미지 SEO 5-2) 사진별 캡션 붙여넣기 박스 — 분석 없으면 렌더 생략.
+    caps 전달 시 그대로 사용(그리드·다운로드와 동일 순서 유지); 미전달 시 _photo_captions로 산출."""
+    if caps is None:
+        caps = _photo_captions(tenant, blog, n)
     if not caps:
         return ""
     import re as _rg
@@ -5432,6 +5434,18 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
         _lg2.getLogger("shopcast.kit").warning("[kit] 사진 수 불일치 asset=%s lists=%s → 최대 목록 채택",
                                                asset_id, sorted({len(x) for x in _lists if x}))
     tenant = db.get_tenant(pieces[0].tenant_id)
+    # ★ 화면 표시 = 다운로드와 동일하게 '글 흐름순' 재정렬(아무 순서로 올려도 글 순서대로 그리드·캡션·마커).
+    #    글 텍스트 불변(상위노출 로직 유지) — 사진 순서·마커 번호만. 설명 태부족이면 원순서 유지.
+    _cap_ordered = None
+    try:
+        _newbody, _order, _caps0 = _content_photo_layout(tenant, blog)
+        if _order and len(_order) == len(imgs) and _order != list(range(len(imgs))):
+            imgs = [imgs[i] for i in _order]
+            blog.payload["body"] = _newbody                # 재번호 마커(사진 순서와 정합) — 메모리 한정
+            if _caps0 and len(_caps0) == len(_order):
+                _cap_ordered = [_caps0[i] for i in _order]
+    except Exception:
+        pass
     sname = tenant.name if tenant else "내 가게"
     title = blog.payload.get("selected_title") or blog.payload.get("title", "")   # PHASE B: 선택 제목
     body_marked = _re.sub(r"\[사진(\d+)\]", r"\n\n[📷 사진\1 위치]\n\n", blog.payload.get("body", "")).strip()
@@ -5525,7 +5539,7 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
            "<input type=file name=photos accept='image/*' multiple required class='text-xs flex-1'>"
            f"<button class='{cbtn} bg-slate-700 hover:bg-slate-800 whitespace-nowrap'>사진 추가</button></form>"
            "<p class='text-[11px] text-slate-400 mt-1'>과정 사진(물세척·재단 등)을 더 올리면 AI가 슬롯·캡션·영상을 다시 맞춰드려요 — 글 내용은 그대로예요.</p>"
-           + _caption_box(tenant, blog, len(photos)) + "</div>" if photos else "")
+           + _caption_box(tenant, blog, len(photos), caps=_cap_ordered) + "</div>" if photos else "")
         # 네이버용 영상(통합 블록 2-4) — 구 '동영상도 본문에' 블록 흡수, 쇼츠·릴스는 채널 카드 전용
         + ((f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>4. 네이버용 영상 <span class='text-emerald-600'>(블로그 첨부 · 클립 겸용)</span></div>"
             "<p class='text-xs text-slate-500 mb-3'>이 영상을 <b>본문 첫 소제목 아래</b>에 넣으세요 — 15초+ 영상은 검색 가점(D.I.A.+). "
@@ -5892,7 +5906,7 @@ def _ordered_imgs_for_pack(pieces, imgs):
         return imgs
     try:
         tnt = db.get_tenant(blogp.tenant_id)
-        new_body, order = _content_photo_layout(tnt, blogp)
+        new_body, order, _caps = _content_photo_layout(tnt, blogp)
         if order and len(order) == len(imgs) and order != list(range(len(imgs))):
             blogp.payload["body"] = new_body          # 재번호 마커(사진 순서와 정합) — 메모리 한정
             return [imgs[i] for i in order]
