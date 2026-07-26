@@ -244,7 +244,8 @@ class BlogDraftGenerator(Generator):
         parsed = [k.strip().lstrip("#") for k in (d.get("키워드", "")).replace("\n", ",").split(",") if k.strip()]
         # 파싱된 키워드 + 타겟 키워드 병합(중복 제거)
         tags = list(dict.fromkeys(parsed + kws))[:10]
-        body = _ensure_photo_markers(d.get("본문") or raw, len(imgs))
+        # 글-사진 의미 매칭: LLM 마커 배치 대신 사진 설명↔문단 어절 겹침으로 결정적 재배치(레이트리밋 무관)
+        body = _semantic_photo_placement(d.get("본문") or raw, asset.note or "", len(imgs))
         # 셀러: 본문 끝에 구매 블록 보강(누락 대비) — 트랙 B 정보성 글은 상업 블록 제외(정보 순수성)
         if _ctype != "info" and strat.closing in ("buy", "both") and buy and buy not in body:
             body = body.rstrip() + "\n\n" + buy
@@ -379,6 +380,69 @@ def _tpl_sequence(tenant) -> str:
         return blogtpl.sequence_directive(getattr(tenant, "biz_type", "local") or "local")
     except Exception:
         return ""
+
+
+_HERO_HINT = ("외관", "전면", "전체", "정면", "측면", "앞모습", "차량 전체", "풀샷")
+
+
+def _semantic_photo_placement(body: str, note: str, n: int) -> str:
+    """글-사진 의미 매칭 — 각 사진을 '그 사진 내용과 가장 관련 깊은 문단' 뒤에 배치.
+    LLM의 마커 배치(41% 신뢰)를 폐기하고, 사진 설명(analyze_all의 [사진N] 라인)의 핵심 어절이
+    가장 많이 겹치는 문단에 결정적으로 배치한다 — API·레이트리밋 무관, 재현 가능.
+    설명이 없으면 기존 순차 배치(_ensure_photo_markers)로 폴백."""
+    import re
+    if n <= 0:
+        return re.sub(r"[ \t]*\[사진\d+\][ \t]*\n?", "", body)
+    # 1) 사진별 설명 파싱([사진N] <설명> — 다음 [사진 또는 줄바꿈까지)
+    descs: dict[int, str] = {}
+    for m in re.finditer(r"\[사진(\d+)\][:\s]*([^\[\n]{2,240})", note or ""):
+        i = int(m.group(1))
+        if 1 <= i <= n:
+            descs.setdefault(i, m.group(2).strip())
+    if len(descs) < max(2, n // 2):          # 설명 태부족 → 기존 로직(날조 대신 순차)
+        return _ensure_photo_markers(body, n)
+    # 2) 기존 마커 제거 + 문단 분할(빈줄 기준; 소제목도 개별 문단)
+    clean = re.sub(r"[ \t]*\[사진\d+\][ \t]*\n?", "", body).strip()
+    paras = [p.strip() for p in re.split(r"\n\s*\n", clean) if p.strip()]
+    if len(paras) < 2:
+        return _ensure_photo_markers(body, n)
+
+    def _toks(s: str) -> set:                # 길이2+ 한글/영숫자 토큰(핵심어)
+        return {t for t in re.split(r"[^가-힣A-Za-z0-9]+", s or "") if len(t) >= 2}
+
+    ptoks = {i: _toks(descs.get(i, "")) for i in range(1, n + 1)}
+    jtoks = [_toks(p) for p in paras]
+    used = [0] * len(paras)                   # 문단별 배정 수(과밀 방지)
+    assign: dict[int, int] = {}
+    # 정보량 많은 사진부터 배정(강한 신호 우선 선점)
+    order = sorted(range(1, n + 1), key=lambda i: -len(ptoks.get(i) or set()))
+    for i in order:
+        pt = ptoks.get(i) or set()
+        is_hero = any(h in (descs.get(i, "")) for h in _HERO_HINT)
+        best, best_score = None, -1e9
+        for j, jt in enumerate(jtoks):
+            overlap = len(pt & jt)
+            score = overlap - used[j] * 0.6           # 과밀 문단 감점 → 고르게 분산
+            if is_hero and j == 0:
+                score += 0.4                          # 대표(외관) 컷은 글 앞 문단 선호
+            if score > best_score:
+                best_score, best = score, j
+        if best is None or best_score <= 0:           # 매칭 실패 → 빈 문단 순차 폴백
+            cand = [j for j in range(len(paras)) if used[j] == 0] or list(range(len(paras)))
+            best = cand[min(len(cand) - 1, i - 1)]
+        assign[i] = best
+        used[best] += 1
+    # 3) 재조립 — 각 문단 뒤에 배정된 사진 마커(사진번호 오름차순)
+    by_para: dict[int, list] = {}
+    for i, j in assign.items():
+        by_para.setdefault(j, []).append(i)
+    out: list[str] = []
+    for j, para in enumerate(paras):
+        out.append(para)
+        for i in sorted(by_para.get(j, [])):
+            out.append(f"[사진{i}]")
+    result = "\n\n".join(out)
+    return _ensure_photo_markers(result, n)           # 최종 무결성(중복·누락) 보정
 
 
 def _ensure_photo_markers(body: str, n: int) -> str:
