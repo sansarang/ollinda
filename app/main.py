@@ -1698,15 +1698,38 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         banner = f"<div class='bg-emerald-50 text-emerald-700 p-3 rounded-xl mb-4 text-sm'>✅ {esc(ok)}</div>"
     if err:
         banner = f"<div class='bg-rose-50 text-rose-600 p-3 rounded-xl mb-4 text-sm'>⚠️ {esc(err)}</div>"
-    if gen:   # 생성 중 — 스피너 + 완료되면 자동 새로고침(폴링)
+    if gen:   # 생성 중 — 실제 단계 진행률 폴링(정직한 표시: 남은시간 숫자 금지, 단계·실측범위·지연/실패 안내)
         _base_n = len(db.list_sets(tenant_id=t.id))
-        banner = ("<div class='bg-indigo-50 border border-indigo-100 text-indigo-700 p-4 rounded-2xl mb-4 flex items-center gap-3'>"
-                  "<div class='w-6 h-6 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin flex-shrink-0'></div>"
-                  "<div><div class='font-bold text-sm'>AI 전문가팀이 콘텐츠를 만들고 있어요</div>"
-                  "<div class='text-xs text-indigo-500'>20~60초 걸려요 · 완료되면 자동으로 나타나요 (이 화면 유지)</div></div></div>"
-                  f"<script>(function(){{var base={_base_n},n=0;var iv=setInterval(async function(){{n++;if(n>40){{clearInterval(iv);location.reload();return;}}"
-                  "try{var r=await fetch('/me/sets/count');var d=await r.json();if(d.n>base){clearInterval(iv);location.href='/me?ok='+encodeURIComponent('콘텐츠가 완성됐어요! 아래에서 확인하세요');}}catch(e){}"
-                  "}},3000);})();</script>")
+        banner = (
+            "<div id='genprog' class='bg-indigo-50 border border-indigo-100 rounded-2xl p-4 mb-4'>"
+            "<div class='flex items-center gap-3'>"
+            "<div class='w-6 h-6 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin flex-shrink-0'></div>"
+            "<div class='flex-1 min-w-0'>"
+            "<div id='gp_label' class='font-bold text-sm text-slate-900'>콘텐츠를 만들고 있어요</div>"
+            "<div id='gp_detail' class='text-xs text-indigo-500'>준비 중…</div></div></div>"
+            "<div class='mt-3 h-2 bg-indigo-100 rounded-full overflow-hidden'>"
+            "<div id='gp_bar' class='h-full bg-indigo-600 rounded-full transition-all duration-500' style='width:6%'></div></div>"
+            "<div id='gp_range' class='text-[11px] text-slate-400 mt-1'></div>"
+            "<div id='gp_slow' class='text-xs text-amber-600 mt-1'></div></div>"
+            f"<script>(function(){{var base={_base_n},n=0;"
+            "function $(i){return document.getElementById(i);}"
+            "var iv=setInterval(async function(){n++;"
+            "try{"
+            "var d=await (await fetch('/me/gen-progress')).json();"
+            "if(d.label)$('gp_label').textContent=d.label;"
+            "$('gp_detail').textContent=(d.detail||'');"
+            "if(d.pct!=null)$('gp_bar').style.width=Math.max(6,Math.min(99,Math.round(d.pct*100)))+'%';"
+            "$('gp_range').textContent=(d.range_text||'');"
+            "$('gp_slow').textContent=(d.slow||'');"
+            "if(d.status==='failed'){clearInterval(iv);$('genprog').innerHTML="
+            "\"<div class='font-bold text-sm text-rose-600'>생성이 중단됐어요</div>"
+            "<div class='text-xs text-slate-500 mt-1'>사진 수를 줄이거나 잠시 후 다시 시도해 주세요.</div>"
+            "<a href='/me' class='inline-block mt-2 bg-indigo-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg'>다시 시도</a>\";return;}"
+            "var cd=await (await fetch('/me/sets/count')).json();"
+            "if(cd.n>base){clearInterval(iv);location.href='/me?ok='+encodeURIComponent('콘텐츠가 완성됐어요! 아래에서 확인하세요');return;}"
+            "}catch(e){}"
+            "if(n>160){clearInterval(iv);location.reload();return;}"   # 안전 상한(~8분) — 진짜 멈춤 방지(가짜 2분 새로고침 폐지)
+            "},3000);})();</script>")
     # 트랙2 대시보드 — D2 상태 배너(이상 시만) + D1 개선 제안 카드(이벤트 시만)를 최상단에.
     try:
         from app.services import dashboard_gowatch as _dg
