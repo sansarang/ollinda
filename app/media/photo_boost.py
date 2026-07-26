@@ -229,7 +229,7 @@ def _cv_inpaint(im, box: dict, method: str = "telea"):
     from PIL import Image
     arr = np.array(im.convert("RGB"))[:, :, ::-1].copy()          # RGB→BGR
     mask = np.zeros(arr.shape[:2], np.uint8)
-    pw = int((x1 - x0) * 0.08); ph = int((y1 - y0) * 0.08)         # LLM 박스 정밀도 보정
+    pw = max(int((x1 - x0) * 0.08), int(W * 0.012)); ph = max(int((y1 - y0) * 0.08), int(H * 0.012))         # LLM 박스 정밀도 보정
     mask[max(0, y0 - ph):min(H, y1 + ph), max(0, x0 - pw):min(W, x1 + pw)] = 255
     flag = cv2.INPAINT_NS if method == "ns" else cv2.INPAINT_TELEA
     res = cv2.inpaint(arr, mask, 3, flag)
