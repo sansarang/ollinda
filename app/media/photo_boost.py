@@ -315,6 +315,11 @@ def remove_overlay(path: str, out: str | None = None) -> dict:
             _MASK_LAST_LOG.append(entry)
             continue
         box = {k: float(ov.get(k, 0)) for k in ("x0", "y0", "x1", "y1")}
+        # ★ LLM 박스는 실제 문구보다 작게 오는 경향(실측: Trust Encar 우상단 잔해) →
+        #   변 길이 15%·최소 2% 패딩으로 넉넉히 덮는다(LaMa 경로 포함 — 기존엔 telea만 8% 패딩).
+        _pw = max((box["x1"] - box["x0"]) * 0.15, 0.02); _ph = max((box["y1"] - box["y0"]) * 0.15, 0.02)
+        box["x0"] = max(0.0, box["x0"] - _pw); box["x1"] = min(1.0, box["x1"] + _pw)
+        box["y0"] = max(0.0, box["y0"] - _ph); box["y1"] = min(1.0, box["y1"] + _ph)
         # ★ 코너/가장자리 UI(엔카 뷰어 19/30·화살표 등)는 LLM 좌표가 부정확 → 해당 가장자리로 확장해 확실히 덮음.
         #   (커버리지 게이트 통과분만 여기 옴 = 이미 작은 국소 오버레이라 확장해도 과대 아님)
         if box["x1"] >= 0.86:                                     # 우측 코너 → 오른쪽 끝까지
@@ -365,4 +370,47 @@ def remove_overlay(path: str, out: str | None = None) -> dict:
         rep.update(action="error", restored=True)
         return rep
     rep["action"] = "inpainted_partial" if skipped_large else "inpainted"
+    # 잔해 1회 재검(스파이럴 금지 — 정확히 한 번): 문구가 박스보다 커서 조각이 남는 undershoot 대응.
+    #   이전 제거 영역 부근(중심점 ±0.08)의 신규 박스만 재인페인트 — 다른 위치 신규 검출(글레어 등)은 무시.
+    try:
+        det2 = vision.detect_overlay(tmp)
+        resid = []
+        if det2.get("present") and det2.get("type") == "a":
+            prev = [b for b, _, _ in gated]
+            for o in (det2.get("overlays") or []):
+                if float(o.get("conf", 0.5)) < OVERLAY_CONF_MIN or (o.get("coverage") or 1.0) > _REMOVE_MAX_COV:
+                    continue
+                cx = (float(o.get("x0", 0)) + float(o.get("x1", 0))) / 2
+                cy = (float(o.get("y0", 0)) + float(o.get("y1", 0))) / 2
+                if not any(pb["x0"] - 0.08 <= cx <= pb["x1"] + 0.08
+                           and pb["y0"] - 0.08 <= cy <= pb["y1"] + 0.08 for pb in prev):
+                    continue
+                b2 = {k: float(o.get(k, 0)) for k in ("x0", "y0", "x1", "y1")}
+                pw2 = max((b2["x1"] - b2["x0"]) * 0.2, 0.025); ph2 = max((b2["y1"] - b2["y0"]) * 0.2, 0.025)
+                b2["x0"] = max(0.0, b2["x0"] - pw2); b2["x1"] = min(1.0, b2["x1"] + pw2)
+                b2["y0"] = max(0.0, b2["y0"] - ph2); b2["y1"] = min(1.0, b2["y1"] + ph2)
+                resid.append(b2)
+        if resid:
+            from app.services import blur_client as _bc2
+            try:
+                png2 = _bc2.inpaint(tmp, resid) if _bc2.configured() else None
+            except Exception:
+                png2 = None
+            if png2:
+                import io as _io2
+                cur = ImageOps.exif_transpose(Image.open(_io2.BytesIO(png2))).convert("RGB")
+            else:
+                for b2 in resid:
+                    fixed = _cv_inpaint(cur, b2, "telea")
+                    if fixed is None:
+                        resid = []
+                        break
+                    cur = fixed
+            if resid:
+                cur.save(tmp, "JPEG", quality=92)
+                rep["residual_pass"] = len(resid)
+                _MASK_LAST_LOG.append({"photo": os.path.basename(path), "src": "overlay", "type": "a",
+                                       "kind": "잔해 재인페인트", "n": len(resid), "processed": True})
+    except Exception:
+        pass
     return rep
