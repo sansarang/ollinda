@@ -247,6 +247,25 @@ def admin_gowatch_preview(request: Request, tenant_id: str):
     return HTMLResponse(page)
 
 
+@app.post("/admin/restore-photo/{tenant_id}")
+async def admin_restore_photo(tenant_id: str, basename: str = Form(...), photo: UploadFile = File(...)):
+    """운영 복구(재보정 사고) — 백업본 바이트를 원래 basename으로 되돌리고 R2 재미러."""
+    import re as _rn
+    if not _rn.fullmatch(r"[A-Za-z0-9]+\.(jpg|jpeg|png|webp)", basename or ""):
+        return JSONResponse({"ok": False, "error": "basename 형식"}, status_code=400)
+    data = await photo.read()
+    if not data or len(data) > MAX_UPLOAD_BYTES:
+        return JSONResponse({"ok": False, "error": "빈 파일/초과"}, status_code=400)
+    from app import storage as _st
+    d = os.path.join(_st.STORAGE_DIR, tenant_id)
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, basename)
+    with open(p, "wb") as f:
+        f.write(data)
+    key = _st.mirror_to_r2(p)
+    return JSONResponse({"ok": True, "path": p, "r2": bool(key), "bytes": len(data)})
+
+
 @app.get("/admin/resweep/{tenant_id}")
 def admin_resweep(tenant_id: str, days: int = 2):
     """[봉인 2026-07-26] 재보정이 서류 사진을 파괴한 실측 사고 — 안전한 재설계 전까지 비활성."""
