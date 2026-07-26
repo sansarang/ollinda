@@ -256,6 +256,18 @@ def mask_personal_info(path: str) -> int:
                         continue
                 except Exception:
                     pass
+            # 🔍 대형 박스 실물 검증(타입 라벨 무관 안전망 — 실측: 형태 가드를 우회한 휠 통모자이크 재발):
+            #   화면 15%+ 박스는 그 영역을 잘라 vision에 '실제 얼굴/번호판인가' 확인 — 아니면 마스킹 거부.
+            try:
+                _ba = ((float(b.get("x1", 0)) - float(b.get("x0", 0)))
+                       * (float(b.get("y1", 0)) - float(b.get("y0", 0))))
+                if _ba > 0.15 and not vision.confirm_pii_crop(path, b):
+                    entry["processed"] = False
+                    entry["reason"] = f"large-box-visual-veto(면적 {_ba:.2f})"
+                    _MASK_LAST_LOG.append(entry)
+                    continue
+            except Exception:
+                pass
             done = _pixelate_region(im, b)
             entry["processed"] = bool(done)
             if not done:
@@ -408,6 +420,8 @@ def remove_overlay(path: str, out: str | None = None) -> dict:
         rep["action"] = "skip_type_b"
         return rep
     overlays = det.get("overlays") or []
+    # 서류 사진은 기관 워터마크·도장(크고 반투명)도 제거 대상(사장님 확정 방침) → 커버리지 상한 완화
+    _cov_cap = 0.5 if det.get("is_document") else _REMOVE_MAX_COV
     kinds, skipped_large, skipped_lowconf = [], 0, 0
     gated = []                                                    # 게이트 통과 박스 [(box, entry, kind)]
     for ov in overlays:
@@ -421,9 +435,9 @@ def remove_overlay(path: str, out: str | None = None) -> dict:
             entry.update(processed=False, reason=f"conf<{OVERLAY_CONF_MIN}")
             _MASK_LAST_LOG.append(entry)
             continue
-        if cov > _REMOVE_MAX_COV:                                # 국소치고 과대 → 오탐 의심 → 이 박스만 skip
+        if cov > _cov_cap:                                       # 국소치고 과대 → 오탐 의심 → 이 박스만 skip
             skipped_large += 1
-            entry.update(processed=False, reason=f"coverage>{_REMOVE_MAX_COV}")
+            entry.update(processed=False, reason=f"coverage>{_cov_cap}")
             _MASK_LAST_LOG.append(entry)
             continue
         box = {k: float(ov.get(k, 0)) for k in ("x0", "y0", "x1", "y1")}

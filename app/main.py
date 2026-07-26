@@ -247,6 +247,45 @@ def admin_gowatch_preview(request: Request, tenant_id: str):
     return HTMLResponse(page)
 
 
+@app.get("/admin/resweep/{tenant_id}")
+def admin_resweep(tenant_id: str, days: int = 2):
+    """운영 — 기존 세트 사진을 현행 파이프라인으로 일괄 재보정(백그라운드).
+    사장님 방침: 구세트 산출물이 낡은 기준으로 돌아다니면 안 됨. 워터마크 제거 재실행 + R2 재미러.
+    (모자이크는 비가역 — 재보정으로 복구 불가. 제거 누락분만 개선됨)"""
+    import threading
+
+    def _run():
+        import logging
+        from datetime import datetime, timedelta
+        from app.services.ingest import _restore_media
+        from app.media import photo_boost
+        from app import storage as _st
+        log = logging.getLogger("shopcast.resweep")
+        n_sets = n_imgs = 0
+        try:
+            for s in db.list_sets(tenant_id=tenant_id, limit=50):
+                pieces = db.get_set_pieces(s["asset_id"])
+                blog = next((p for p in pieces if p.kind.value == "blog"), None)
+                if not blog:
+                    continue
+                paths = _restore_media(tenant_id, blog.payload.get("image_paths") or [])
+                if not paths:
+                    continue
+                n_sets += 1
+                for p in paths:
+                    try:
+                        photo_boost.remove_overlay(p)
+                        _st.mirror_to_r2(p)
+                        n_imgs += 1
+                    except Exception:
+                        log.exception("[resweep] 실패 %s", p)
+            log.warning("[resweep] 완료 t=%s sets=%d imgs=%d", tenant_id, n_sets, n_imgs)
+        except Exception:
+            log.exception("[resweep] 중단 t=%s", tenant_id)
+    threading.Thread(target=_run, daemon=True).start()
+    return JSONResponse({"ok": True, "started": True})
+
+
 @app.get("/admin/dedupe-blogs/{asset_id}")
 def admin_dedupe_blogs(asset_id: str):
     """운영 수리 — 워치독 레이스로 생긴 중복 블로그 피스 제거(channel_status·사진 수·최신 우선 보존)."""

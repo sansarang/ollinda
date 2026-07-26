@@ -612,6 +612,41 @@ def detect_personal_info(image_path: str) -> list[dict]:
         return []
 
 
+def confirm_pii_crop(image_path: str, box: dict) -> bool:
+    """대형 마스킹 박스 실물 검증(실측: 휠 클로즈업 통모자이크 재발 — 탐지 타입 라벨 우회 오폭).
+    박스 영역을 잘라 '실제 얼굴/번호판인가'를 vision에 확인 — 아니면 마스킹 거부.
+    실패·무키 시 True(마스킹 허용 — 개인정보 보호가 기본값)."""
+    if not (configured() and image_path and os.path.exists(image_path)):
+        return True
+    try:
+        import base64
+        import io
+        from PIL import Image
+        im = Image.open(image_path).convert("RGB")
+        W, H = im.size
+        x0 = max(0, int(float(box.get("x0", 0)) * W)); y0 = max(0, int(float(box.get("y0", 0)) * H))
+        x1 = min(W, int(float(box.get("x1", 1)) * W)); y1 = min(H, int(float(box.get("y1", 1)) * H))
+        if x1 - x0 < 10 or y1 - y0 < 10:
+            return True
+        crop = im.crop((x0, y0, x1, y1))
+        crop.thumbnail((512, 512))
+        buf = io.BytesIO()
+        crop.save(buf, "JPEG", quality=85)
+        import anthropic
+        client = anthropic.Anthropic()
+        resp = client.messages.create(
+            model=MODEL, max_tokens=10,
+            messages=[{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                             "data": base64.b64encode(buf.getvalue()).decode()}},
+                {"type": "text", "text": "이 이미지에 '실제 사람 얼굴' 또는 '차량 번호판'이 보이는가? "
+                                         "휠·타이어·원형 부품·그릴·엠블럼이면 NO. YES 또는 NO 한 단어만."}]}])
+        txt = next((b.text for b in resp.content if b.type == "text"), "")
+        return "NO" not in (txt or "").strip().upper()[:6]
+    except Exception:
+        return True
+
+
 def detect_overlay(image_path: str) -> dict:
     """A-1: 사진 위 '오버레이성 표식' 구조화 판별 — 업체·플랫폼명 하드코딩 0(일반 '피사체가 아닌 덧씌운 그래픽' 판별).
     한 번의 호출로 '지워야 할 불투명 로고·문자·배지'를 모두 배열로 반환(반복 재탐지 스파이럴 방지).
@@ -630,19 +665,23 @@ def detect_overlay(image_path: str) -> dict:
         client = anthropic.Anthropic()
         prompt = (
             "이 사진에서 '지워야 할 제3자 표식'을 모두 찾아라. 특정 업체·플랫폼·브랜드명과 무관하게 판단한다.\n"
-            "지울 대상 두 종류:\n"
+            "지울 대상 세 종류:\n"
             "  ① 나중에 덧씌워진 불투명 그래픽(로고·브랜드 문자·배지·라벨·페이지 카운터·재생 UI 등)\n"
             "  ② 피사체(차량·상품) '밖' 배경에 있는 플랫폼·판매채널 브랜딩 문구 — 스튜디오 벽·바닥·백드롭에 "
             "인쇄·표시된 것도 포함(디지털 오버레이인지 배경 인쇄인지 구분하지 말고 지운다). "
             "같은 문구가 여러 곳에 반복되면 하나도 빠짐없이 각각 박스로.\n"
+            "  ③ 서류·문서 사진 위에 겹쳐 찍힌 기관·협회 워터마크와 도장형 마크 — 반투명이어도 지울 대상"
+            "(서류 인쇄 내용 자체는 아님, 그 위에 덧씌워진 큰 마크만). 각 마크를 개별 박스로.\n"
             "다음은 오버레이가 '아니다'(절대 포함 금지):\n"
             "  · 유리·차체에 비친 반사/글레어, 흐릿한 얼룩·그림자\n"
             "  · 피사체 자체의 무늬·제조사 엠블럼·모델명 레터링·번호판\n"
             "  · 이미 모자이크·블러 처리된 영역(개인정보 가림 — 복원 금지)\n"
-            "  · 화면을 넓게 덮는 전면 반투명 워터마크 밴드(이건 제거 불가 유형 b)\n"
+            "  · 사진 화면 전체를 덮는 전면 반투명 워터마크 밴드(서류 위 마크는 예외 — ③으로 지운다)\n"
             "  · 피사체에 물리적으로 부착된 종이·가림막·스티커(유형 c)\n"
             "JSON 객체 하나만 출력(설명·코드블록 없이):\n"
-            '{"present":true|false,"type":"a|b|c","overlays":[{"x0":0.0,"y0":0.0,"x1":0.0,"y1":0.0,"coverage":0.0,"conf":0.0,"kind":"무엇"}]}\n'
+            '{"present":true|false,"type":"a|b|c","is_document":true|false,'
+            '"overlays":[{"x0":0.0,"y0":0.0,"x1":0.0,"y1":0.0,"coverage":0.0,"conf":0.0,"kind":"무엇"}]}\n'
+            "is_document=사진의 주 피사체가 서류·문서인가.\n"
             "overlays=지워야 할 불투명 그래픽들의 배열. x0,y0=왼쪽위 x1,y1=오른쪽아래(0~1). 박스는 그래픽 범위에 딱 맞게(여백 최소).\n"
             "conf=이게 정말 '덧씌운 인공 그래픽'이라는 확신도(0~1). 정상 차체·반사·무늬면 애초에 넣지 말고, 애매하면 conf를 낮게.\n"
             "type: 지울 국소 그래픽이 하나라도 있으면 'a', 전면 반투명뿐이면 'b', 부착물뿐이면 'c'.\n"
