@@ -89,7 +89,7 @@ class CaptionGenerator(Generator):
             f"[사업형태] {strat.label} — {strat.goal}\n"
             f"[페르소나] {prof.persona}\n[업종 톤] {prof.tone}\n"
             f"{industry_brief(prof)}"
-            f"[입력 정보] {asset.note}{carousel}\n[CTA] {strat.cta}{buy_line}\n"
+            f"{carousel}\n[CTA] {strat.cta}{buy_line}\n"   # 입력정보(asset.note)는 캐시 프리픽스로 전달
             f"{seo.speaker_frame(strat.key)}\n"
             f"[기본 해시태그] {seeds}{cautions}\n"
             f"{seo.keywords_line(kws)}\n\n"
@@ -111,7 +111,8 @@ class CaptionGenerator(Generator):
             tenant_id=tenant.id, prof_name=prof.name)
         from app import llm as _llm
         text = _llm.call_task("caption", self._prompt(tenant, asset, len(imgs), kws), 1200,
-                              default_model=self.model)   # 인스타 캡션(이원화)
+                              default_model=self.model,
+                              cache_prefix=cache_prefix_for(asset))   # 인스타 캡션(공유 컨텍스트 캐싱)
         _cap_route = dict(_llm.LAST_ROUTE.get("caption") or {})
         # 저장·공유 CTA 자동 삽입(영상강화 PHASE 5) — 저장·공유가 좋아요보다 3~5배 가중치.
         # LLM이 이미 넣었으면 중복 삽입하지 않음. 해시태그 앞에 배치.
@@ -186,7 +187,7 @@ class BlogDraftGenerator(Generator):
             f"[사업형태] {strat.label} — {strat.goal}\n"
             f"[페르소나] {prof.persona}\n[업종 톤] {prof.tone}\n"
             f"{industry_brief(prof)}"
-            f"[입력 정보(실제 사진 분석 포함)] {asset.note}\n[사진 {len(imgs)}장]\n"
+            f"[사진 {len(imgs)}장]\n"   # 입력정보(asset.note)는 캐시 프리픽스로 전달(track-A)"
             f"{seo.speaker_frame(strat.key)}\n"
             f"{seo.keywords_line(kws)}\n{closing}\n\n"
             f"{_tpl_sequence(tenant)}\n"
@@ -231,7 +232,8 @@ class BlogDraftGenerator(Generator):
                                       getattr(asset, "angle", "howto") or "howto",
                                       asset.note or "", len(imgs),
                                       trust=_trust, experiences=_exp)
-        raw = _call_llm(prompt, self.model, 5500 if _ctype == "info" else 5000)
+        raw = _call_llm(prompt, self.model, 5500 if _ctype == "info" else 5000,
+                        cache_prefix=(cache_prefix_for(asset) if _ctype != "info" else ""))
         d = _parse_sections(raw, ["제목후보", "제목", "메타설명", "본문", "이미지배치", "키워드"])
         # ① 제목 3안 → 상위노출 최적 1개 자동 선택 ([제목]으로 준 경우도 흡수)
         title_cands = [t.strip().lstrip("-*·0123456789.) ").strip()
@@ -436,11 +438,17 @@ def _parse_sections(raw: str, headers: list[str]) -> dict:
     return out
 
 
-def _call_llm(prompt: str, model: str = MODEL, max_tokens: int = 1200) -> str:
+def _call_llm(prompt: str, model: str = MODEL, max_tokens: int = 1200, cache_prefix: str = "") -> str:
     """공용 Claude 호출 — app.llm.call로 위임(리팩토링 #2, 동작 불변).
-    9개 모듈이 이 이름을 역수입하므로 시그니처·이름은 유지한다."""
+    9개 모듈이 이 이름을 역수입하므로 시그니처·이름은 유지(cache_prefix 기본값이라 하위호환)."""
     from app import llm
-    return llm.call(prompt, model, max_tokens)
+    return llm.call(prompt, model, max_tokens, cache_prefix=cache_prefix)
+
+
+def cache_prefix_for(asset) -> str:
+    """채널 공통 캐시 프리픽스 — 전 텍스트 생성기가 '동일 문자열'로 이 컨텍스트를 보내야 캐시 히트.
+    asset.note(브리프+사진분석+지시)를 표준 라벨로 감싼다. 짧으면 llm이 자동으로 캐싱 안 함(무해)."""
+    return f"[입력 정보(브리프·사진 분석 포함)]\n{asset.note or ''}\n"
 
 
 class MarketplaceGenerator(Generator):
@@ -466,8 +474,7 @@ class MarketplaceGenerator(Generator):
         }.get(mk, "상품명은 검색키워드를 맨 앞에·간결하게.")
         prompt = (
             f"[상품] {tenant.name} (브랜드: {brand}, 판매 마켓: {mk}, 카테고리: {prof.name})\n"
-            f"[정보(사진 분석 포함)] {asset.note}\n"
-            f"[{mk} 최적화 규칙] {rules}\n\n"
+            f"[{mk} 최적화 규칙] {rules}\n\n"   # 입력정보(asset.note)는 캐시 프리픽스로 전달
             f"너는 오픈마켓({mk}) 상품명·상세페이지 SEO 최적화 전문가다. 위 마켓 규칙을 지켜 만들어라.\n"
             f"{seo.COPY_PSYCH}\n{seo.FACTS_RULE}\n"
             "특히 상세페이지 스펙·가격은 입력에 있는 것만 써라. 없는 성능/치수/가격을 채워넣지 마라(빈칸 유지).\n\n"
@@ -482,7 +489,7 @@ class MarketplaceGenerator(Generator):
             "'입력된 스펙 없음' 한 줄만 — 지어내기 금지)\n"
             "[태그]\n(쉼표로 10개, 마켓 검색 노출용 키워드 — 상품종류·용도·타겟·시즌 등)"
         )
-        raw = _call_llm(prompt, self.model, 3000)
+        raw = _call_llm(prompt, self.model, 3000, cache_prefix=cache_prefix_for(asset))
         d = _parse_sections(raw, ["상품명", "상세페이지", "요약본", "스펙표", "태그"])
         names = [n.strip().lstrip("-*·0123456789.) ").strip()
                  for n in (d.get("상품명", "")).split("\n") if n.strip()][:3]

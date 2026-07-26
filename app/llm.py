@@ -191,7 +191,7 @@ def call_task(task: str, prompt: str, max_tokens: int = 1200,
     am = default_model or (model if provider == "anthropic" else MODEL)
     if provider == "anthropic" and not info.get("fallback"):
         try:
-            out = call(prompt, am, max_tokens) if not images else None
+            out = call(prompt, am, max_tokens, cache_prefix=cache_prefix) if not images else None
             if out is not None:
                 LAST_ROUTE[task] = info
                 return out
