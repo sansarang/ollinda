@@ -356,6 +356,26 @@ def admin_kw_intent(kw: str = "", industry: str = "", biz: str = "seller", note:
                          "intent_ok": _seo.keyword_intent_ok(kw, industry, biz, "sell", note)})
 
 
+@app.post("/admin/dwell-test")
+async def admin_dwell_test(request: Request):
+    """운영 진단 — 발현률 게이트 단건 실행: body 텍스트를 받아 감사(missing)+보충(fixed) 결과 반환.
+    form/body: text=본문, kw=키워드. 실제 생성 파이프라인과 동일 함수(_ensure_dwell_devices) 사용."""
+    try:
+        form = await request.form()
+        text = str(form.get("text") or "")
+        kw = str(form.get("kw") or "")
+    except Exception:
+        text, kw = "", ""
+    if not text.strip():
+        return JSONResponse({"ok": False, "error": "text 필요"}, status_code=400)
+    from app.generators.text_claude import _audit_dwell_devices, _ensure_dwell_devices
+    before_missing = _audit_dwell_devices(text)
+    fixed_body, rep = _ensure_dwell_devices(text, kw)
+    return JSONResponse({"ok": True, "before_missing": before_missing, "report": rep,
+                         "after_missing": _audit_dwell_devices(fixed_body),
+                         "body": fixed_body})
+
+
 @app.get("/admin/sets-list")
 def admin_sets_list(request: Request, tenant: str = "", limit: int = 20):
     """운영/검증용 — 최신 세트(asset_id·tenant·글수·생성) JSON. 콘티 검증 대상 선택용."""

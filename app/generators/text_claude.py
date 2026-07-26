@@ -57,6 +57,93 @@ def _pick_title(cands: list[str], kw0: str, body: str = "") -> tuple[str, str]:
     return best, f"{why} (점수 {best_score}, 후보 {len(pool)}·게이트 통과 {len(gated)})"
 
 
+_DWELL_PROMISE = ("보여드", "알려드", "공개", "정리해", "가져가", "확인하는 법", "말씀드", "펼쳐")
+_DWELL_BRIDGE = ("아래에서", "바로 아래", "이제 ", "지금부터", "궁금하실", "다음은", "이어서",
+                 "그렇다면", "여기서 ", "하나 더", "이 다음", "넘어가", "살펴보", "마지막에")
+
+
+def _audit_dwell_devices(body: str) -> list[str]:
+    """체류 3장치 기계 검사(발현률 게이트 — LLM 지시는 확률, 검사는 보장) → 누락 목록.
+    ①first_promise: 첫 문단에 답 예고 ②itemized_preview: 서두 ①②③ 예고 ③bridge: 중간 전환 이정표."""
+    import re
+    paras = [p.strip() for p in re.split(r"\n\s*\n", body or "")
+             if p.strip() and not p.strip().startswith(("[", "#", "|", "-", "📍"))]
+    missing = []
+    head = " ".join(paras[:2])[:400]
+    if not any(w in head for w in _DWELL_PROMISE):
+        missing.append("first_promise")
+    if "①" not in " ".join(paras[:3]):
+        missing.append("itemized_preview")
+    mid = " ".join(paras[2:-1]) if len(paras) > 4 else ""
+    if not any(w in mid for w in _DWELL_BRIDGE):
+        missing.append("bridge")
+    return missing
+
+
+def _ensure_dwell_devices(body: str, kw0: str) -> tuple[str, dict]:
+    """누락 장치만 소형 LLM 패치로 보충(원문 보존 — 전체 재작성 금지). 실패 시 원문 유지.
+    반환 (body, {"missing": [...], "fixed": [...]})."""
+    import re
+    missing = _audit_dwell_devices(body)
+    rep = {"missing": list(missing), "fixed": []}
+    if not missing:
+        return body, rep
+    _need = []
+    if "first_promise" in missing:
+        _need.append("[첫문단]\n(첫 문장이 '이 글이 답을 직접 보여준다'는 예고로 시작하도록 기존 첫 문단을 "
+                     "고쳐 쓴 교체본 — 내용·사실은 원문 그대로)")
+    if "itemized_preview" in missing:
+        _need.append("[예고]\n('끝까지 보시면 ①… ②… ③…을 가져가실 수 있습니다' 한 문장 — "
+                     "이 글 본문에 실제 있는 내용 3가지만)")
+    if "bridge" in missing:
+        _need.append("[이정표]\n(숫자 하나(몇 번째 문단 뒤에 넣을지) | 다음 섹션으로 넘어가는 자연스러운 "
+                     "전환 문장 1개 — 실제 뒤에 나오는 내용만 예고)")
+    try:
+        raw = _call_llm(
+            "아래 블로그 글에서 빠진 장치만 만들어라. 글을 다시 쓰지 마라 — 요청된 조각만 출력.\n"
+            f"[핵심 키워드] {kw0}\n\n[본문]\n{body[:6000]}\n\n출력 형식(요청된 항목만, 머리표 유지):\n"
+            + "\n".join(_need), max_tokens=700)
+        d = _parse_sections(raw, ["첫문단", "예고", "이정표"])
+        paras = re.split(r"(\n\s*\n)", body)               # 구분자 보존 분할(재조립 무손실)
+        texts = [p for p in paras if p.strip()]
+
+        def _para_index(n):
+            cnt = -1
+            for i, p in enumerate(paras):
+                if p.strip():
+                    cnt += 1
+                    if cnt == n:
+                        return i
+            return None
+        if "first_promise" in missing and (d.get("첫문단") or "").strip():
+            _new = d["첫문단"].strip()
+            i0 = _para_index(0)
+            if i0 is not None and 20 <= len(_new) <= 600 and "[사진" not in paras[i0]:
+                paras[i0] = _new
+                rep["fixed"].append("first_promise")
+        if "itemized_preview" in missing and "①" in (d.get("예고") or ""):
+            i0 = _para_index(0)
+            if i0 is not None:
+                paras[i0] = paras[i0].rstrip() + "\n\n" + d["예고"].strip()
+                rep["fixed"].append("itemized_preview")
+        if "bridge" in missing and "|" in (d.get("이정표") or ""):
+            _n_s, _sent = d["이정표"].split("|", 1)
+            _sent = _sent.strip()
+            try:
+                _n = max(2, min(len(texts) - 2, int(re.sub(r"\D", "", _n_s) or 3)))
+            except Exception:
+                _n = 3
+            ib = _para_index(_n)
+            if ib is not None and 10 <= len(_sent) <= 200:
+                paras[ib] = paras[ib].rstrip() + "\n\n" + _sent
+                rep["fixed"].append("bridge")
+        if rep["fixed"]:
+            body = "".join(paras)
+    except Exception:
+        pass
+    return body, rep
+
+
 def _kw_density(body: str, kw: str) -> dict:
     """핵심키워드 밀도 검증 — 네이버 최적 1~2%, 3%+는 저품질 위험."""
     import re
@@ -283,8 +370,11 @@ class BlogDraftGenerator(Generator):
         parsed = [k.strip().lstrip("#") for k in (d.get("키워드", "")).replace("\n", ",").split(",") if k.strip()]
         # 파싱된 키워드 + 타겟 키워드 병합(중복 제거)
         tags = list(dict.fromkeys(parsed + kws))[:10]
+        # 발현률 게이트: 체류 3장치(첫 문장 답 예고·①②③ 예고·이정표)를 기계 검사, 누락분만 보충
+        # — 프롬프트 지시는 확률, 게이트는 보장(제목·FAQ 보강과 동일 패턴)
+        _body_raw, _dwell_rep = _ensure_dwell_devices(d.get("본문") or raw, kw0)
         # 글-사진 의미 매칭: LLM 마커 배치 대신 사진 설명↔문단 어절 겹침으로 결정적 재배치(레이트리밋 무관)
-        body = _semantic_photo_placement(d.get("본문") or raw, asset.note or "", len(imgs))
+        body = _semantic_photo_placement(_body_raw, asset.note or "", len(imgs))
         # 셀러: 본문 끝에 구매 블록 보강(누락 대비) — 트랙 B 정보성 글은 상업 블록 제외(정보 순수성)
         if _ctype != "info" and strat.closing in ("buy", "both") and buy and buy not in body:
             body = body.rstrip() + "\n\n" + buy
@@ -360,6 +450,8 @@ class BlogDraftGenerator(Generator):
                                     "why": _pick_why},          # 제목 3안 내부 선택 로그(CTR 4-2 — 유저 비노출)
                      "gen_source": (asset.note or "")[:8000],   # 입력 스냅샷 — [사진N] 전수 보존(kit 캡션·매칭 재사용, 재분석 0)
                      "request_check": request_check,            # '꼭 반영할 요청' 셀프체크(1-3d)
+                     "dwell_gate": _dwell_rep,                  # 체류 장치 발현률 게이트 감사 기록
+
                      "fixed_info_block": fixed_block,      # 발행 화면 컴포넌트 가이드용(템플릿 PHASE 2·3)
                      "raw": raw, "image_path": imgs[0], "image_paths": imgs},
             status=ContentStatus.DRAFT)
