@@ -207,7 +207,7 @@ class BlogDraftGenerator(Generator):
                "소제목(##)으로 만들지 마라(1글 1키워드 원칙).\n" if kplan.get("longtail") else "")
             + f"[1글 1키워드] 이 글의 소제목(##)은 오직 '{kw0}'의 검색 의도만 다룬다. "
             "다른 추적 키워드를 소제목으로 세우지 마라.\n"
-            + f"사진 {min(len(imgs), SLOT_RECOMMENDED)}장 → 본문 문단 사이에 [사진1]..[사진{min(len(imgs), SLOT_RECOMMENDED)}]를 순서대로 한 번씩(한 줄 단독) 배치.\n\n"
+            + f"사진 {len(imgs)}장 → 본문 문단 사이에 [사진1]..[사진{len(imgs)}]를 순서대로 한 번씩(한 줄 단독) 배치.\n\n"
             "아래 형식 그대로(대괄호 머리표 유지) 출력:\n"
             f"[제목후보]\n(3줄. 각 줄 '{kw0}'를 맨 앞에 + 서로 다른 각도(후기형/정보형/혜택형), 22~35자 롱테일, 숫자·혜택으로 클릭 유도. {_title_reg})\n"
             "[메타설명]\n(150자 내외, 클릭 유도)\n"
@@ -226,7 +226,7 @@ class BlogDraftGenerator(Generator):
             _trust = _geo._author_trust(tenant, asset.note or "")
             prompt = _geo.info_prompt(tenant, prof.name, tenant.region or "", kw0,
                                       getattr(asset, "angle", "howto") or "howto",
-                                      asset.note or "", min(len(imgs), SLOT_RECOMMENDED),
+                                      asset.note or "", len(imgs),
                                       trust=_trust, experiences=_exp)
         raw = _call_llm(prompt, self.model, 5500 if _ctype == "info" else 5000)
         d = _parse_sections(raw, ["제목후보", "제목", "메타설명", "본문", "이미지배치", "키워드"])
@@ -239,7 +239,7 @@ class BlogDraftGenerator(Generator):
         parsed = [k.strip().lstrip("#") for k in (d.get("키워드", "")).replace("\n", ",").split(",") if k.strip()]
         # 파싱된 키워드 + 타겟 키워드 병합(중복 제거)
         tags = list(dict.fromkeys(parsed + kws))[:10]
-        body = _ensure_photo_markers(d.get("본문") or raw, min(len(imgs), SLOT_RECOMMENDED))
+        body = _ensure_photo_markers(d.get("본문") or raw, len(imgs))
         # 셀러: 본문 끝에 구매 블록 보강(누락 대비) — 트랙 B 정보성 글은 상업 블록 제외(정보 순수성)
         if _ctype != "info" and strat.closing in ("buy", "both") and buy and buy not in body:
             body = body.rstrip() + "\n\n" + buy
@@ -289,7 +289,7 @@ class BlogDraftGenerator(Generator):
             except Exception:
                 request_check = ""
         markers = [{"marker": f"[사진{i+1}]", "image_index": i, "image_path": p}
-                   for i, p in enumerate(imgs[:SLOT_RECOMMENDED])]
+                   for i, p in enumerate(imgs)]
         return ContentPiece(
             id=str(uuid.uuid4()), tenant_id=tenant.id, asset_id=asset.id,
             channel=Channel.NAVER_BLOG, kind=self.kind,

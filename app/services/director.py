@@ -81,6 +81,9 @@ def build_storyboard(body: str, catalog: list, canonical: str, channel: str = "n
         "'가장 강한 강점 하나'로 즉시 열어라 — 예: 무사고·낮은 실주행·점검 완료·급매/한정 등(업종 불문 '이걸 왜 봐야 하나'를 "
         "한 방에). ★인사·상호 소개·분위기·배경 설명으로 시작하지 마라(첫 씬에서 스크롤 멈추게). "
         "hook의 shot은 그 강점을 보여주는 실물 클로즈업, line은 짧고 강하게(큰 자막용). 없는 강점 지어내기 금지.\n"
+        "9. ★ 대표 컷 필수: 이 세트의 '메인 피사체(대표 상품·차량 등)'의 전체 외관 컷을 hook 또는 reveal에 "
+        "반드시 넣어라 — 보는 사람이 '무엇을 파는지' 한눈에 알게. 카탈로그 부위가 외관·전면·전체·측면인 사진을 "
+        "대표 컷으로 우선 배정하라(부품·서류·계기판 클로즈업만으로 시작하지 마라).\n"
         f"\n[채널] {channel} ({spec['aspect']}, 예산 {spec.get('dmin',20)}~{spec.get('dmax',60)}초)\n[canonical] {canonical}\n"
         f"[세트 실값(data_card 전용)] {dv}\n[사진 카탈로그]\n{_catalog_block(catalog)}\n\n[본문]\n{body[:3500]}")
     global _SB_LAST_FAIL, _SB_TRACE
