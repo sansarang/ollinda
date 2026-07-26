@@ -83,9 +83,9 @@ def auto_enhance(src: str, out: str | None = None, industry: str = "", meta: dic
         out = out or src
         exif_bytes = _build_exif(meta) if meta else None
         if exif_bytes:
-            im.save(out, "JPEG", quality=90, exif=exif_bytes)      # 검색노출용 메타 삽입
+            _atomic_save(im, out, format="JPEG", quality=90, exif=exif_bytes)      # 검색노출용 메타 삽입
         else:
-            im.save(out, "JPEG", quality=90)
+            _atomic_save(im, out, format="JPEG", quality=90)
         return out
     except Exception:
         return src
@@ -178,6 +178,19 @@ OVERLAY_CONF_MIN = float(os.environ.get("SHOPCAST_OVERLAY_CONF_MIN", "0.7"))
 _MASK_LAST_LOG: list = []   # 진단: 마지막 마스킹의 [사진/박스/유형/신뢰도/처리여부]
 
 
+def _atomic_save(im, path: str, **kwargs) -> None:
+    """제자리 저장의 원자화(두-트랙 실측 리스크) — 보정이 파일을 덮어쓰는 순간 브라우저가 읽으면
+    깨진 사진이 보임. 임시 파일에 쓰고 os.replace(원자 치환)로 '삽입만'을 보장.
+    포맷은 최종 경로 확장자에서 추론(.tmp~로는 PIL이 추론 불가)."""
+    tmp = path + ".tmp~"
+    if "format" not in kwargs:
+        ext = os.path.splitext(path)[1].lower().lstrip(".")
+        kwargs["format"] = {"jpg": "JPEG", "jpeg": "JPEG", "png": "PNG",
+                            "webp": "WEBP"}.get(ext, "JPEG")
+    im.save(tmp, **kwargs)
+    os.replace(tmp, path)
+
+
 def mask_personal_info(path: str) -> int:
     """사진 속 개인정보(번호판·얼굴·전화·라벨·주소) 자동 모자이크(제자리). 가린 개수 반환.
     ★ 신뢰도 게이트: conf<PII_CONF_MIN 박스는 처리 안 함(정상 차체 오폭 방지). 끄기: SHOPCAST_PII_MASK=0."""
@@ -229,7 +242,7 @@ def mask_personal_info(path: str) -> int:
             if done:
                 cnt += 1
         if cnt:
-            im.save(path, quality=90)
+            _atomic_save(im, path, quality=90)
         return cnt
     except Exception:
         return 0
@@ -442,7 +455,7 @@ def remove_overlay(path: str, out: str | None = None) -> dict:
             kinds.append(kind)
     rep.update(removed=len(gated), kinds=kinds, method=method)
     try:
-        cur.save(tmp, "JPEG", quality=92)                         # 제거 결과 저장
+        _atomic_save(cur, tmp, format="JPEG", quality=92)                         # 제거 결과 저장
     except Exception:
         rep.update(action="error", restored=True)
         return rep
@@ -474,7 +487,7 @@ def remove_overlay(path: str, out: str | None = None) -> dict:
                     cur = fixed
                 if not _cv_ok:
                     break
-            cur.save(tmp, "JPEG", quality=92)
+            _atomic_save(cur, tmp, format="JPEG", quality=92)
             rep["residual_pass"] = rep.get("residual_pass", 0) + len(resid)
             _MASK_LAST_LOG.append({"photo": os.path.basename(path), "src": "overlay", "type": "a",
                                    "kind": "잔해 재인페인트", "pass": _rpass + 1, "n": len(resid),
