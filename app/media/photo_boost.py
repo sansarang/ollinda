@@ -370,27 +370,30 @@ def remove_overlay(path: str, out: str | None = None) -> dict:
         rep.update(action="error", restored=True)
         return rep
     rep["action"] = "inpainted_partial" if skipped_large else "inpainted"
-    # 잔해 1회 재검(스파이럴 금지 — 정확히 한 번): 문구가 박스보다 커서 조각이 남는 undershoot 대응.
-    #   이전 제거 영역 부근(중심점 ±0.08)의 신규 박스만 재인페인트 — 다른 위치 신규 검출(글레어 등)은 무시.
+    # 잔해 재검(최대 2회 — 스파이럴 금지): 문구가 박스보다 커서 조각이 남는 undershoot 대응.
+    #   이전 제거 영역 부근(중심점 ±0.08)의 신규 박스만 재인페인트 — 위치 사전확률이 강하므로
+    #   근접 박스는 conf 0.5부터 허용(희미한 반토막 글자는 검출 확신이 낮게 옴). 다른 위치 신규 검출은 무시.
     try:
-        det2 = vision.detect_overlay(tmp)
-        resid = []
-        if det2.get("present") and det2.get("type") == "a":
-            prev = [b for b, _, _ in gated]
-            for o in (det2.get("overlays") or []):
-                if float(o.get("conf", 0.5)) < OVERLAY_CONF_MIN or (o.get("coverage") or 1.0) > _REMOVE_MAX_COV:
-                    continue
-                cx = (float(o.get("x0", 0)) + float(o.get("x1", 0))) / 2
-                cy = (float(o.get("y0", 0)) + float(o.get("y1", 0))) / 2
-                if not any(pb["x0"] - 0.08 <= cx <= pb["x1"] + 0.08
-                           and pb["y0"] - 0.08 <= cy <= pb["y1"] + 0.08 for pb in prev):
-                    continue
-                b2 = {k: float(o.get(k, 0)) for k in ("x0", "y0", "x1", "y1")}
-                pw2 = max((b2["x1"] - b2["x0"]) * 0.2, 0.025); ph2 = max((b2["y1"] - b2["y0"]) * 0.2, 0.025)
-                b2["x0"] = max(0.0, b2["x0"] - pw2); b2["x1"] = min(1.0, b2["x1"] + pw2)
-                b2["y0"] = max(0.0, b2["y0"] - ph2); b2["y1"] = min(1.0, b2["y1"] + ph2)
-                resid.append(b2)
-        if resid:
+        prev = [dict(b) for b, _, _ in gated]
+        for _rpass in range(2):
+            det2 = vision.detect_overlay(tmp)
+            resid = []
+            if det2.get("present") and det2.get("type") == "a":
+                for o in (det2.get("overlays") or []):
+                    if float(o.get("conf", 0.5)) < 0.5 or (o.get("coverage") or 1.0) > _REMOVE_MAX_COV:
+                        continue
+                    cx = (float(o.get("x0", 0)) + float(o.get("x1", 0))) / 2
+                    cy = (float(o.get("y0", 0)) + float(o.get("y1", 0))) / 2
+                    if not any(pb["x0"] - 0.08 <= cx <= pb["x1"] + 0.08
+                               and pb["y0"] - 0.08 <= cy <= pb["y1"] + 0.08 for pb in prev):
+                        continue
+                    b2 = {k: float(o.get(k, 0)) for k in ("x0", "y0", "x1", "y1")}
+                    pw2 = max((b2["x1"] - b2["x0"]) * 0.25, 0.03); ph2 = max((b2["y1"] - b2["y0"]) * 0.25, 0.03)
+                    b2["x0"] = max(0.0, b2["x0"] - pw2); b2["x1"] = min(1.0, b2["x1"] + pw2)
+                    b2["y0"] = max(0.0, b2["y0"] - ph2); b2["y1"] = min(1.0, b2["y1"] + ph2)
+                    resid.append(b2)
+            if not resid:
+                break
             from app.services import blur_client as _bc2
             try:
                 png2 = _bc2.inpaint(tmp, resid) if _bc2.configured() else None
@@ -400,17 +403,21 @@ def remove_overlay(path: str, out: str | None = None) -> dict:
                 import io as _io2
                 cur = ImageOps.exif_transpose(Image.open(_io2.BytesIO(png2))).convert("RGB")
             else:
+                _cv_ok = True
                 for b2 in resid:
                     fixed = _cv_inpaint(cur, b2, "telea")
                     if fixed is None:
-                        resid = []
+                        _cv_ok = False
                         break
                     cur = fixed
-            if resid:
-                cur.save(tmp, "JPEG", quality=92)
-                rep["residual_pass"] = len(resid)
-                _MASK_LAST_LOG.append({"photo": os.path.basename(path), "src": "overlay", "type": "a",
-                                       "kind": "잔해 재인페인트", "n": len(resid), "processed": True})
+                if not _cv_ok:
+                    break
+            cur.save(tmp, "JPEG", quality=92)
+            rep["residual_pass"] = rep.get("residual_pass", 0) + len(resid)
+            _MASK_LAST_LOG.append({"photo": os.path.basename(path), "src": "overlay", "type": "a",
+                                   "kind": "잔해 재인페인트", "pass": _rpass + 1, "n": len(resid),
+                                   "processed": True})
+            prev = prev + resid                    # 다음 패스의 근접 판정 기준에 방금 지운 영역 포함
     except Exception:
         pass
     return rep
