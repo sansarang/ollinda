@@ -420,8 +420,9 @@ def remove_overlay(path: str, out: str | None = None) -> dict:
         rep["action"] = "skip_type_b"
         return rep
     overlays = det.get("overlays") or []
-    # 서류 사진은 기관 워터마크·도장(크고 반투명)도 제거 대상(사장님 확정 방침) → 커버리지 상한 완화
-    _cov_cap = 0.5 if det.get("is_document") else _REMOVE_MAX_COV
+    # 🚨 서류 워터마크 제거 롤백(실측 사고 2026-07-26 18:34): 대형 인페인트가 서류 내용을
+    #   통째로 회색으로 파괴 — 서류 사진은 커버리지 완화 금지(원본 보존이 우선).
+    _cov_cap = _REMOVE_MAX_COV
     kinds, skipped_large, skipped_lowconf = [], 0, 0
     gated = []                                                    # 게이트 통과 박스 [(box, entry, kind)]
     for ov in overlays:

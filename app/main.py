@@ -249,9 +249,11 @@ def admin_gowatch_preview(request: Request, tenant_id: str):
 
 @app.get("/admin/resweep/{tenant_id}")
 def admin_resweep(tenant_id: str, days: int = 2):
-    """운영 — 기존 세트 사진을 현행 파이프라인으로 일괄 재보정(백그라운드).
-    사장님 방침: 구세트 산출물이 낡은 기준으로 돌아다니면 안 됨. 워터마크 제거 재실행 + R2 재미러.
-    (모자이크는 비가역 — 재보정으로 복구 불가. 제거 누락분만 개선됨)"""
+    """[봉인 2026-07-26] 재보정이 서류 사진을 파괴한 실측 사고 — 안전한 재설계 전까지 비활성."""
+    return JSONResponse({"ok": False, "error": "resweep 봉인(서류 파괴 사고) — 재설계 필요"}, status_code=503)
+
+
+def _admin_resweep_disabled(tenant_id: str, days: int = 2):
     import threading
 
     def _run():
