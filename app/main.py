@@ -7065,6 +7065,26 @@ async def admin_pii_test(request: Request, photo: UploadFile = File(...)):
             n = _pb.mask_personal_info(masked)
             with open(masked, "rb") as f:
                 mbytes = f.read()
+            # 오버레이(엔카 뷰어 UI·로고) 탐지·제거 진단
+            try:
+                _ov_det = _vz.detect_overlay(orig)
+                _dbg["overlay_detect"] = {"present": _ov_det.get("present"), "type": _ov_det.get("type"),
+                                          "coverage": _ov_det.get("coverage"),
+                                          "overlays": [{"kind": o.get("kind"), "conf": o.get("conf"),
+                                                        "cov": o.get("coverage"),
+                                                        "box": [round(float(o.get(k, 0)), 3) for k in ("x0", "y0", "x1", "y1")]}
+                                                       for o in (_ov_det.get("overlays") or [])[:8]]}
+                _clean = os.path.join(work, "clean.jpg")
+                _sh.copy(orig, _clean)
+                _pb._MASK_LAST_LOG = []
+                _ov_rep = _pb.remove_overlay(_clean)
+                _dbg["overlay_remove"] = {k: _ov_rep.get(k) for k in ("action", "removed", "type", "coverage", "kinds")}
+                _dbg["overlay_log"] = _pb._MASK_LAST_LOG[-10:]
+                with open(_clean, "rb") as f:
+                    _clean_b64 = _b64.b64encode(f.read()).decode()
+            except Exception as _oe:
+                _dbg["overlay_error"] = repr(_oe)[:200]
+                _clean_b64 = ""
         rows = [{"type": b.get("type"), "value": b.get("value", ""),
                  "conf": round(float(b.get("conf", 0.5)), 2),
                  "box": [round(float(b.get(k, 0)), 3) for k in ("x0", "y0", "x1", "y1")],
@@ -7072,7 +7092,8 @@ async def admin_pii_test(request: Request, photo: UploadFile = File(...)):
         return JSONResponse({"ok": True, "detected": len(boxes), "masked_count": n,
                              "gate_conf_min": _pb.PII_CONF_MIN, "boxes": rows, "ocr_debug": _dbg,
                              "mask_log": _pb._MASK_LAST_LOG[-20:],
-                             "masked_b64": _b64.b64encode(mbytes).decode()})   # 마스킹본(전후 대조용)
+                             "masked_b64": _b64.b64encode(mbytes).decode(),   # 마스킹본(전후 대조용)
+                             "clean_b64": locals().get("_clean_b64", "")})     # 오버레이 제거본
     except Exception:
         import traceback
         return JSONResponse({"ok": False, "error": "pii-test: " + traceback.format_exc()[-500:]}, status_code=500)
