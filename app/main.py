@@ -7036,6 +7036,16 @@ async def admin_pii_test(request: Request, photo: UploadFile = File(...)):
                 _dbg["ocr_error"] = repr(_e)[:150]
             _dbg["vision_configured"] = _vz.configured()
             _dbg["has_anthropic_key"] = bool(os.environ.get("ANTHROPIC_API_KEY"))
+            try:      # blurworker(YOLO) 배선 진단 — 번호판·얼굴 마스킹이 워커 경유인지 확정
+                from app.services import blur_client as _bc
+                _dbg["blur_url"] = bool(os.environ.get("BLUR_WORKER_URL"))
+                _dbg["blur_configured"] = _bc.configured()
+                _wb = _bc.detect(orig) if _bc.configured() else None
+                _dbg["blur_detect"] = ("none(폴백)" if _wb is None else f"{len(_wb)}건")
+                if _wb:
+                    _dbg["blur_boxes"] = [{"type": x["type"], "box": [round(x[k], 3) for k in ("x0", "y0", "x1", "y1")]} for x in _wb[:6]]
+            except Exception as _be:
+                _dbg["blur_error"] = repr(_be)[:150]
             try:
                 _pi = list(_vz.detect_personal_info(orig))
             except Exception as _ve:
