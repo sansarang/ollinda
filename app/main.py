@@ -2796,6 +2796,55 @@ def _photo_captions(tenant, blog, n: int) -> list[str]:
     return out
 
 
+def _content_photo_layout(tenant, blog):
+    """글 내용에 맞춰 사진 재배치·재정렬(글 텍스트 불변 — 마커 위치·번호와 사진 순서만).
+    반환 (new_body, order): order=콘텐츠 흐름순 원본 사진 인덱스. 다운로드·그리드가 이 순서를 따르면
+    '아무 순서로 올려도 글 순서대로' 정렬됨. per-photo 설명은 _photo_captions(정합 보장·kit서 재분석).
+    매칭=캡션↔문단 어절 겹침(결정적·레이트리밋 무관). 캐시: 결과를 blog.payload에 저장해 pack이 재사용."""
+    import re as _rl
+    pl = blog.payload or {}
+    imgs = pl.get("image_paths") or []
+    n = len(imgs)
+    body = pl.get("body") or ""
+    if n <= 1:
+        return body, list(range(n))
+    try:
+        caps = _photo_captions(tenant, blog, n)
+    except Exception:
+        caps = []
+    if len([c for c in caps if (c or "").strip()]) < max(2, n // 2):   # 설명 태부족 → 원순서 유지(날조·오배치 금지)
+        return body, list(range(n))
+    clean = _rl.sub(r"[ \t]*\[사진\d+\][ \t]*\n?", "", body).strip()
+    paras = [p.strip() for p in _rl.split(r"\n\s*\n", clean) if p.strip()]
+    if len(paras) < 2:
+        return body, list(range(n))
+
+    def _tok(s):
+        return {t for t in _rl.split(r"[^가-힣A-Za-z0-9]+", s or "") if len(t) >= 2}
+
+    ptoks = [_tok(caps[i] if i < len(caps) else "") for i in range(n)]
+    jtoks = [_tok(p) for p in paras]
+    best_para = []
+    for i in range(n):
+        scored = [(len(ptoks[i] & jtoks[j]), -j) for j in range(len(paras))]
+        mx = max(scored) if scored else (0, 0)
+        if mx[0] == 0:                                    # 무겹침 → 원 순서 비례 균등 분산(뭉침 방지)
+            best_para.append(min(len(paras) - 1, int(i * len(paras) / max(n, 1))))
+        else:
+            best_para.append(scored.index(mx))
+    order = sorted(range(n), key=lambda i: (best_para[i], i))   # 콘텐츠 흐름순
+    newnum = {orig: k + 1 for k, orig in enumerate(order)}      # 원인덱스 → 새 사진번호(오름차순)
+    by_para = {}
+    for i in range(n):
+        by_para.setdefault(best_para[i], []).append(i)
+    out = []
+    for j, para in enumerate(paras):
+        out.append(para)
+        for i in sorted(by_para.get(j, []), key=lambda x: newnum[x]):
+            out.append(f"[사진{newnum[i]}]")
+    return "\n\n".join(out), order
+
+
 def _caption_box(tenant, blog, n: int) -> str:
     """(이미지 SEO 5-2) 사진별 캡션 붙여넣기 박스 — 분석 없으면 렌더 생략."""
     caps = _photo_captions(tenant, blog, n)
@@ -5835,6 +5884,23 @@ def _contamination_block(pieces):
     return None
 
 
+def _ordered_imgs_for_pack(pieces, imgs):
+    """다운로드 사진을 '글 흐름순'으로 재정렬 — 사용자가 아무 순서로 올려도 ZIP은 글 순서대로 번호.
+    블로그 본문 기준 콘텐츠 매칭(_content_photo_layout). 블로그 피스 body도 재번호(이 요청 한정·미저장)."""
+    blogp = next((p for p in pieces if p.kind.value == "blog"), None)
+    if not (blogp and imgs):
+        return imgs
+    try:
+        tnt = db.get_tenant(blogp.tenant_id)
+        new_body, order = _content_photo_layout(tnt, blogp)
+        if order and len(order) == len(imgs) and order != list(range(len(imgs))):
+            blogp.payload["body"] = new_body          # 재번호 마커(사진 순서와 정합) — 메모리 한정
+            return [imgs[i] for i in order]
+    except Exception:
+        pass
+    return imgs
+
+
 @app.get("/kit/{asset_id}/pack/{pid}")
 def kit_pack(request: Request, asset_id: str, pid: str):
     """채널 1개 통째 ZIP(글+사진+영상)."""
@@ -5850,6 +5916,7 @@ def kit_pack(request: Request, asset_id: str, pid: str):
         return _blk
     _st = _contam_status(pieces)                              # D-3: 영상 표면 오염이면 영상만 제외(글·사진은 유지)
     imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
+    imgs = _ordered_imgs_for_pack(pieces, imgs)               # 글 흐름순 사진 정렬
     _nv = None if _st["video_dirty"] else _set_naver_video(pieces)
     data = _zip_bytes(_piece_pack_entries(piece, imgs, slug=_set_slug(pieces), nv=_nv))
     return _zip_response(data, f"{_safe_title(pieces)}_{_ch_folder(piece)}.zip")
@@ -5867,6 +5934,7 @@ def kit_pack_all(request: Request, asset_id: str):
         return _blk
     _st = _contam_status(pieces)                              # D-3: 영상 표면 오염이면 영상만 제외(글·사진·타채널 유지)
     imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
+    imgs = _ordered_imgs_for_pack(pieces, imgs)               # 글 흐름순 사진 정렬(아무 순서로 올려도 글 순서대로)
     _slug = _set_slug(pieces)
     _nv = None if _st["video_dirty"] else _set_naver_video(pieces)
     entries = []
