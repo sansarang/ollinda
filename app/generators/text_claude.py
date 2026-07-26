@@ -266,7 +266,8 @@ class BlogDraftGenerator(Generator):
             _kw_toks = {w for w in seo._kw_shorten(kw0).split() if len(w) >= 2}
             _rel = []
             for _pub in _dbl.list_blog_publishes(tenant.id, limit=15):
-                _t, _u = (_pub.get("post_title") or "").strip(), (_pub.get("published_url") or "").strip()
+                _t = (_pub.get("post_title") or "").strip()
+                _u = (_pub.get("published_url") or "").strip().split("?")[0]   # RSS 추적 파라미터 제거(복붙 청결)
                 if _t and _u and any(w in _t for w in _kw_toks):
                     _rel.append((_t, _u))
                 if len(_rel) >= 2:

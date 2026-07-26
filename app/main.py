@@ -2377,10 +2377,14 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             # 🧰 도구 서랍(리포트 탭 대체) — 블로그 연결·플레이스 도구·매장 QR·실경험. 기본 접힘.
             _fw2 = "bg-white rounded-3xl border border-slate-100 shadow-sm p-6 sm:p-8"
             try:
-                _tools = ("<details id='tools' class='mt-5'>"
-                          "<summary class='cursor-pointer text-sm font-bold text-slate-400 select-none'>"
-                          "🧰 도구 — 블로그 연결 · 플레이스 · 매장 QR · 실경험 답변</summary>"
-                          "<div class='mt-4 space-y-5'>"
+                _tools = ("<details id='tools' class='mt-5 bg-white rounded-3xl border border-slate-200 shadow-sm'>"
+                          "<summary class='cursor-pointer select-none list-none p-5 flex items-center gap-4'>"
+                          "<span class='w-12 h-12 rounded-2xl bg-[#EEF2FF] flex items-center justify-center text-2xl flex-shrink-0'>🧰</span>"
+                          "<span class='flex-1 min-w-0'>"
+                          "<span class='block text-base font-extrabold text-slate-900'>도구</span>"
+                          "<span class='block text-xs text-slate-400 mt-0.5'>블로그 연결 · 플레이스 · 매장 QR · 실경험 답변</span></span>"
+                          "<span class='text-slate-300 text-xl'>▾</span></summary>"
+                          "<div class='px-5 pb-5 space-y-5'>"
                           + _blog_connect_card(t, _fw2) + _place_card(t, _fw2) + _track_qr_box(t, _fw2)
                           + "<a href='/me/experience' class='block text-sm font-semibold text-slate-500 "
                           "hover:text-slate-700'>📝 사장님 실경험 답변 관리 →</a>"
@@ -4867,6 +4871,18 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                 f"<button type=button onclick=\"cp('{cid}',this)\" class='mt-1 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg'>복사</button>")
 
     imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
+    # ★ 결과 화면도 '글 흐름순' 정렬 — 네이버 페이지·ZIP과 단일 기준. 실측 버그: 여기만 원순서라
+    #   결과 화면에서 본문 복사 + ZIP 다운로드 시 [사진N] 번호와 파일 번호가 어긋났음.
+    try:
+        _blog0 = next((p for p in pieces if p.kind.value == "blog"), None)
+        if _blog0 and imgs:
+            _tn0 = db.get_tenant(_blog0.tenant_id)
+            _nb0, _od0, _ = _content_photo_layout(_tn0, _blog0)
+            if _od0 and len(_od0) == len(imgs) and _od0 != list(range(len(imgs))):
+                imgs = [imgs[i] for i in _od0]
+                _blog0.payload["body"] = _nb0             # 재번호 마커 — 메모리 한정(미저장)
+    except Exception:
+        pass
 
     def pack_btn(pid, has_video):
         what = "글+사진+영상" if has_video else "글+사진"
@@ -5664,14 +5680,14 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
         f"<textarea id='nvPlain' class='hidden'>{esc(_md_to_plain(body_marked))}</textarea>"
         f"<button onclick=\"copyRich2('nvHtml','nvPlain',this)\" style='min-height:48px' class='{cbtn} bg-emerald-500 hover:bg-emerald-600 w-full'>전체 본문 복사 (서식 유지)</button></div>"
         # 블로그 태그(쉼표 구분, 원클릭 복사) — 클립 해시태그(# 5개)와 형식·용도 구분
-        + ((lambda _tags: (
+        + ((lambda _tags: (lambda _ht: (
             f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>태그 "
             "<span class='text-emerald-600'>(복사해서 태그란에 붙여넣기)</span></div>"
-            f"<div class='bg-slate-50 rounded-xl p-3 text-sm text-slate-700 leading-relaxed mb-2'>{esc(', '.join(_tags))}</div>"
-            f"<textarea id='nvTags' class='hidden'>{esc(', '.join(_tags))}</textarea>"
+            f"<div class='bg-slate-50 rounded-xl p-3 text-sm text-slate-700 leading-relaxed mb-2'>{esc(_ht)}</div>"
+            f"<textarea id='nvTags' class='hidden'>{esc(_ht)}</textarea>"
             f"<button onclick=\"nvcp('nvTags',this)\" class='{cbtn} bg-emerald-500 hover:bg-emerald-600 w-full'>태그 복사</button>"
             "<p class='text-[11px] text-slate-400 mt-1.5'>발행 화면 맨 아래 태그란에 붙여넣으세요 — 태그로도 손님이 들어와요.</p></div>"
-        ) if _tags else "")(_blog_tags(tenant, blog)))
+        ))(" ".join("#" + t.replace(" ", "") for t in _tags)) if _tags else "")(_blog_tags(tenant, blog)))
         # 사진
         + (f"<div class='{sec}'><div class='flex items-center justify-between mb-3'>"
            "<div class='text-xs font-bold text-slate-400'>3. 사진 <span class='text-slate-500'>(순서대로)</span></div>"

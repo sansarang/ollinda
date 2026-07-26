@@ -182,7 +182,7 @@ def related_published(tenant_id: str, keywords: list[str], limit: int = 3) -> li
     kws = {_norm_text(k) for k in (keywords or []) if k}
     out = []
     for pub in db.list_blog_publishes(tenant_id, limit=30):
-        url = pub.get("published_url") or ""
+        url = (pub.get("published_url") or "").split("?")[0]   # RSS 추적 파라미터 제거(복붙 청결)
         if not url:
             continue
         title = pub.get("post_title") or ""
