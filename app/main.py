@@ -8525,29 +8525,36 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
           "}catch(e){b.innerHTML='<span class=\"text-rose-400\">인식 실패</span>';}}"
           "async function showGen(e){if(e&&e.preventDefault)e.preventDefault();var f=(e&&e.target)?e.target:document.querySelector('form[action*=\"/upload\"]');"
           "var o=document.getElementById('genOverlay');o.classList.remove('hidden');o.classList.add('flex');"
-          "var st=[[0,'마케팅 전략가가 분석 중…'],[20,'카피라이터가 글 쓰는 중…'],[42,'SEO 편집장이 다듬는 중…'],[62,'영상 감독이 영상 만드는 중…'],[85,'영상 마무리 중…']];"
-          "function setBar(v){var b=document.getElementById('gBar');if(b)b.style.width=v+'%';var g=document.getElementById('gPct');if(g)g.textContent=Math.round(v)+'%';var l=st[0][1];st.forEach(function(s){if(v>=s[0])l=s[1];});var gl=document.getElementById('gLabel');if(gl)gl.textContent=l;}"
-          "var aid='';var p=0;var tick=setInterval(function(){var cap=aid?97:60;p=Math.min(p+(p<58?1.0:0.35),cap);setBar(p);},600);"
+          # ★ 실제 진행률(/me/gen-progress)의 단계별 라벨·퍼센트를 그대로 표시(가짜 타이머 폐기).
+          #   사용자가 지금 뭘 하는지 정확히 봄: '사진 3/16장 분석'→'블로그 글 쓰는 중'→'인스타 캡션'→'다듬는 중'→'영상'.
+          "function setBar(v){var b=document.getElementById('gBar');if(b)b.style.width=Math.max(4,Math.min(100,v))+'%';var g=document.getElementById('gPct');if(g)g.textContent=Math.round(v)+'%';}"
+          "function setLabel(t){var gl=document.getElementById('gLabel');if(gl&&t)gl.textContent=t;}"
+          "function setDetail(t){var d=document.getElementById('gDetail');if(d)d.textContent=t||'';}"
+          "function setSlow(t){var s=document.getElementById('gSlow');if(s)s.textContent=t||'';}"
           "var base=0;try{base=(await (await fetch('/me/sets/count')).json()).n;}catch(_){}"
           "var fd=new FormData(f);try{if(window.PM&&PM.f&&PM.f.length){fd.delete('photos');PM.f.forEach(function(x){fd.append('photos',x);});}}catch(_){}"
           "try{await fetch(f.action,{method:'POST',body:fd});}catch(_){}"
-          "function doneU(){return aid?('/me?made='+aid):'/me';}"
-          "function done(url){clearInterval(iv);clearInterval(tick);location.href=url;}"
-          "var n=0;var iv=setInterval(async function(){n++;if(n>120){done(doneU());return;}"
+          "var aid='';var n=0;"
+          "function done(url){clearInterval(iv);location.href=url;}"
+          "var iv=setInterval(async function(){n++;if(n>240){done(aid?('/me?made='+aid):'/me');return;}"
           "try{"
-          "if(!aid){var d=await (await fetch('/me/sets/count')).json();if(d.n>base){aid=d.latest;if(p<62)p=62;setBar(p);}return;}"
-          "var pj=await (await fetch('/me/asset/'+aid+'/pieces')).json();"
-          "if(pj.n>=5){clearInterval(iv);clearInterval(tick);setBar(100);var gl=document.getElementById('gLabel');if(gl)gl.textContent='✅ 5채널 완성!';setTimeout(function(){location.href='/me?made='+aid;},700);}"
-          "else if(n>70){done('/me?made='+aid);}"        # 영상이 너무 오래 걸리면 만들기 대시보드에 결과 표시(폴링은 보기에서 이어받음)
+          "var pr=await (await fetch('/me/gen-progress')).json();"
+          "if(pr&&pr.status&&pr.status!=='idle'){if(pr.label)setLabel(pr.label);if(pr.pct!=null)setBar(pr.pct*100);setDetail(pr.detail||'');setSlow(pr.slow||'');"
+          "if(pr.status==='failed'){clearInterval(iv);setLabel('생성이 중단됐어요 — 다시 시도해 주세요');setSlow('사진 수를 줄이거나 잠시 후 다시 시도해 주세요');return;}}"
+          "if(!aid){var d=await (await fetch('/me/sets/count')).json();if(d.n>base){aid=d.latest;}}"
+          "else{var pj=await (await fetch('/me/asset/'+aid+'/pieces')).json();"
+          "if(pj.n>=5){clearInterval(iv);setBar(100);setLabel('✅ 5채널 완성!');setDetail('');setSlow('');setTimeout(function(){location.href='/me?made='+aid;},700);return;}}"
           "}catch(_){}"
-          "},3000);return false;}"
+          "},2000);return false;}"
           "</script>")
     gen_overlay = ("<div id='genOverlay' class='fixed inset-0 z-50 hidden items-center justify-center' style='background:rgba(15,23,42,.45);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)'>"
                    "<div class='bg-white rounded-2xl p-6 w-72 max-w-[85vw] text-center shadow-2xl'>"
-                   "<div id='gLabel' class='font-bold text-sm mb-3'>마케팅 전략가가 분석 중…</div>"
-                   "<div class='w-full h-2 bg-slate-100 rounded-full overflow-hidden'><div id='gBar' class='h-full bg-indigo-500' style='width:0%;transition:width .4s'></div></div>"
+                   "<div id='gLabel' class='font-bold text-sm mb-1'>준비 중…</div>"
+                   "<div id='gDetail' class='text-xs text-indigo-500 mb-2 h-4'></div>"
+                   "<div class='w-full h-2 bg-slate-100 rounded-full overflow-hidden'><div id='gBar' class='h-full bg-indigo-500' style='width:4%;transition:width .4s'></div></div>"
                    "<div id='gPct' class='text-slate-400 text-xs mt-1.5'>0%</div>"
-                   "<p class='text-xs text-slate-400 mt-3'>AI 전문가팀이 만드는 중… (20~60초)</p></div></div>")
+                   "<div id='gSlow' class='text-xs text-amber-600 mt-2'></div>"
+                   "<p class='text-xs text-slate-400 mt-3'>AI 전문가팀이 만드는 중…</p></div></div>")
     return form + js + gen_overlay
 
 
