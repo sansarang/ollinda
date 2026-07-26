@@ -258,7 +258,9 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
             pieces[0].payload["_missing_blog"] = _LEb.get(str(ContentKind.BLOG), "생성 실패(로그 참조)")
     _prog("polish", "제목·태그 다듬는 중", "", 0.82)
     _exp = (intake.get("experience") or "").strip()[:200]       # 사장님 경험담 — 결과 하이라이트용(A2)
-    for p in pieces:
+
+    def _polish_one(p):
+        """피스 1개 다듬기(감사→SEO편집장→추적링크→저장) — 피스 간 독립이라 병렬 안전."""
         p.payload.setdefault("image_path", paths[0])
         p.payload.setdefault("biz_type", getattr(tenant, "biz_type", "local") or "local")
         p.payload.setdefault("region", getattr(tenant, "region", "") or "")
@@ -274,7 +276,7 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
             p.payload["geo_audit"] = seo.geo_audit(
                 "blog", p.payload, name=tenant.name, industry=tenant.industry,
                 region=tenant.region or "", biz_type=getattr(tenant, "biz_type", "local") or "local")
-        polish(tenant, p)                                       # 🔍 SEO 편집장(저점수만 리라이트)
+        polish(tenant, p)                                       # 🔍 SEO 편집장(저점수만 부분 수정)
         try:                                                    # 콘텐츠별 추적링크 자동 포함(추적 P1)
             from app.services import tracklinks                 # polish 뒤 — 리라이트로 링크 유실 방지
             tracklinks.inject(tenant, p)
@@ -289,6 +291,16 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
             ex.append("🔍 SEO편집장")
         p.payload["experts"] = ex
         db.save_piece(p)
+    # ★ 피스별 병렬(다듬기 ②) — 블로그·캡션 재수정 LLM 콜이 겹쳐 다듬기 = 가장 느린 피스 시간.
+    #   예외는 그대로 전파(기존 직렬과 동일 의미론 — 실패 시 bg 캐치가 failed 마킹).
+    if len(pieces) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(3, len(pieces))) as _px:
+            for _f in [_px.submit(_polish_one, p) for p in pieces]:
+                _f.result()
+    else:
+        for p in pieces:
+            _polish_one(p)
     # 🔗 내부링크 제안(상위노출 PHASE 4) — 같은 주제 축의 발행 확인된 내 글(주제 응집도 = C-Rank 신호)
     try:
         blog_piece0 = next((p for p in pieces if p.kind == ContentKind.BLOG), None)

@@ -8787,10 +8787,12 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
           "var c=document.getElementById('pg_confirmed'),v=document.getElementById('pg_vision');if(c)c.value='';if(v)v.value='';pdReady(true,'');"
           "if(!PM.f.length){box.innerHTML='';return;}"
           "box.innerHTML='<div class=\"bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm\">'"
-          "+'<div class=\"text-slate-700\">사진 <b>'+PM.f.length+'장</b> 준비됐어요. 정리(×삭제·＋추가)가 끝났으면 AI 확인을 시작할까요?</div>'"
-          "+'<div class=\"flex items-center gap-2 mt-2\"><button type=\"button\" id=\"pg_start\" class=\"px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold\">이 사진들로 분석 시작</button>'"
+          "+'<div class=\"text-slate-700\">사진 <b>'+PM.f.length+'장</b> 준비됐어요. <b>3초 뒤 자동으로 AI 확인</b>을 시작해요 — 사진을 정리하면 다시 미뤄져요.</div>'"
+          "+'<div class=\"flex items-center gap-2 mt-2\"><button type=\"button\" id=\"pg_start\" class=\"px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold\">지금 바로 시작</button>'"
           "+'<span class=\"text-[11px] text-slate-400\">안 해도 바로 만들 수 있어요</span></div></div>';"
-          "document.getElementById('pg_start').onclick=function(){paidGuess();};}"
+          "document.getElementById('pg_start').onclick=function(){paidGuess();};"
+          # 분석 자동 시작(테트리스 원칙 1) — 3초 디바운스: 목록이 바뀌면 _pgseq가 올라 예약이 무효됨
+          "var _as=_pgseq;setTimeout(function(){if(_as===_pgseq&&PM.f.length)paidGuess();},3000);}"
           "async function paidGuess(){var box=document.getElementById('pg_guess');if(!box||!PM.f.length)return;"
           "var seq=++_pgseq,fin=false;pdReady(false,'사진을 확인하는 중이에요 — 잠시만요');"
           "box.innerHTML='<div class=\"bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5\">'"
@@ -8859,6 +8861,7 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
           "}catch(e){b.innerHTML='<span class=\"text-rose-400\">인식 실패</span>';}}"
           "async function showGen(e){if(e&&e.preventDefault)e.preventDefault();var f=(e&&e.target)?e.target:document.querySelector('form[action*=\"/upload\"]');"
           "var o=document.getElementById('genOverlay');o.classList.remove('hidden');o.classList.add('flex');"
+          "try{if(window.Notification&&Notification.permission==='default')Notification.requestPermission();}catch(_){}"
           # ★ 실제 진행률(/me/gen-progress)의 단계별 라벨·퍼센트를 그대로 표시(가짜 타이머 폐기).
           #   사용자가 지금 뭘 하는지 정확히 봄: '사진 3/16장 분석'→'블로그 글 쓰는 중'→'인스타 캡션'→'다듬는 중'→'영상'.
           "function setBar(v){var b=document.getElementById('gBar');if(b)b.style.width=Math.max(4,Math.min(100,v))+'%';var g=document.getElementById('gPct');if(g)g.textContent=Math.round(v)+'%';}"
@@ -8874,21 +8877,32 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
           "try{"
           "var pr=await (await fetch('/me/gen-progress')).json();"
           "if(pr&&pr.status&&pr.status!=='idle'){if(pr.label)setLabel(pr.label);if(pr.pct!=null)setBar(pr.pct*100);setDetail(pr.detail||'');setSlow(pr.slow||'');"
-          "if(pr.status==='failed'){clearInterval(iv);setLabel('생성이 중단됐어요 — 다시 시도해 주세요');setSlow('사진 수를 줄이거나 잠시 후 다시 시도해 주세요');return;}}"
+          "if(pr.status==='failed'){clearInterval(iv);setLabel('생성이 중단됐어요 — 다시 시도해 주세요');setSlow('사진 수를 줄이거나 잠시 후 다시 시도해 주세요');return;}"
+          # ★ 완성의 순간(테트리스 원칙 4): done 신호 → 보러가기 버튼 + 3초 자동 이동 + (딴 탭이면) 브라우저 알림.
+          #   구조건(피스 5개)은 영상 온디맨드 이후 영원히 안 채워져 사용자가 100%에서 방치됐음(캡처 실측).
+          "if(pr.status==='done'){clearInterval(iv);"
+          "if(!aid){try{var d0=await (await fetch('/me/sets/count')).json();if(d0.n>base)aid=d0.latest;}catch(_){}}"
+          "var url=aid?('/me?made='+aid):'/me';"
+          "setBar(100);setLabel('✅ 콘텐츠 완성!');setDetail('영상은 목록에서 원하는 플랫폼을 골라 만들 수 있어요');setSlow('');"
+          "var tm=document.getElementById('gTeam');if(tm)tm.textContent='3초 뒤 자동으로 이동해요';"
+          "var go=document.getElementById('gGo');if(go){go.href=url;go.classList.remove('hidden');}"
+          "try{if(document.hidden&&window.Notification&&Notification.permission==='granted')"
+          "new Notification('올린다 — 콘텐츠 완성!',{body:'글과 사진이 준비됐어요. 눌러서 확인하세요.'});}catch(_){}"
+          "setTimeout(function(){location.href=url;},3000);return;}}"
           "if(!aid){var d=await (await fetch('/me/sets/count')).json();if(d.n>base){aid=d.latest;}}"
-          "else{var pj=await (await fetch('/me/asset/'+aid+'/pieces')).json();"
-          "if(pj.n>=5){clearInterval(iv);setBar(100);setLabel('✅ 5채널 완성!');setDetail('');setSlow('');setTimeout(function(){location.href='/me?made='+aid;},700);return;}}"
           "}catch(_){}"
           "},2000);return false;}"
           "</script>")
     gen_overlay = ("<div id='genOverlay' class='fixed inset-0 z-50 hidden items-center justify-center' style='background:rgba(15,23,42,.45);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)'>"
-                   "<div class='bg-white rounded-2xl p-6 w-72 max-w-[85vw] text-center shadow-2xl'>"
+                   "<div class='bg-white rounded-2xl p-6 w-80 max-w-[88vw] text-center shadow-2xl'>"
                    "<div id='gLabel' class='font-bold text-sm mb-1'>준비 중…</div>"
-                   "<div id='gDetail' class='text-xs text-indigo-500 mb-2 h-4'></div>"
+                   "<div id='gDetail' class='text-xs text-indigo-500 mb-2 min-h-4'></div>"
                    "<div class='w-full h-2 bg-slate-100 rounded-full overflow-hidden'><div id='gBar' class='h-full bg-indigo-500' style='width:4%;transition:width .4s'></div></div>"
                    "<div id='gPct' class='text-slate-400 text-xs mt-1.5'>0%</div>"
                    "<div id='gSlow' class='text-xs text-amber-600 mt-2'></div>"
-                   "<p class='text-xs text-slate-400 mt-3'>AI 전문가팀이 만드는 중…</p></div></div>")
+                   "<a id='gGo' class='hidden block mt-3 w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 "
+                   "text-white font-extrabold text-sm transition'>지금 보러 가기 →</a>"
+                   "<p id='gTeam' class='text-xs text-slate-400 mt-3'>AI 전문가팀이 만드는 중…</p></div></div>")
     return form + js + gen_overlay
 
 

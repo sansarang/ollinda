@@ -314,11 +314,13 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
    var c=document.getElementById('d_confirmed'),v=document.getElementById('d_vision');
    if(c)c.value='';if(v)v.value='';_gseq++;setDemoReady(true,'');   // 목록 바뀜 → 이전 분석·확인 무효화
    box.innerHTML='<div class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm">'
-     +'<div class="text-slate-700">사진 <b>'+DP.length+'장</b> 준비됐어요. 정리(×삭제·＋추가)가 끝났으면 AI 확인을 시작할까요?</div>'
+     +'<div class="text-slate-700">사진 <b>'+DP.length+'장</b> 준비됐어요. <b>3초 뒤 자동으로 AI 확인</b>을 시작해요 — 사진을 정리하면 다시 미뤄져요.</div>'
      +'<div class="flex items-center gap-2 mt-2">'
-     +'<button type="button" id="d_gstart" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold">이 사진들로 분석 시작</button>'
+     +'<button type="button" id="d_gstart" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold">지금 바로 시작</button>'
      +'<span class="text-[11px] text-slate-400">안 해도 바로 만들 수 있어요</span></div></div>';
-   document.getElementById('d_gstart').onclick=function(){demoGuess();};}
+   document.getElementById('d_gstart').onclick=function(){demoGuess();};
+   // 분석 자동 시작(3초 디바운스) — 목록이 바뀌면 _gseq가 올라 예약 무효
+   var _das=_gseq;setTimeout(function(){if(_das===_gseq&&DP.length)demoGuess();},3000);}
  var DP=[];
  function dpSync(){try{var dt=new DataTransfer();DP.forEach(function(f){dt.items.add(f);});pf.files=dt.files;}catch(e){}}
  function dpReset(){var gb=document.getElementById('d_guessbox');if(gb)gb.innerHTML='';
