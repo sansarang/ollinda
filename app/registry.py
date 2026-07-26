@@ -30,8 +30,11 @@ PUBLISHERS: dict[Channel, Publisher] = {
 import os as _os
 from app.llm import HAIKU as _HAIKU
 
-_SHORT_MODEL = _os.environ.get("SHOPCAST_SHORT_MODEL", _HAIKU)
-_BLOG_MODEL = _os.environ.get("SHOPCAST_BLOG_MODEL", "claude-sonnet-5")
+# ★ 긴급 복구 — 하이브리드 기본 OFF. blog=Sonnet/short=Haiku 전환 후 4장 생성이 240s+ 지연/행 실측
+#   (원인 조사 전까지 알려진 정상 모델=Opus로 복귀). env로 재시도 가능(SHOPCAST_SHORT_MODEL 등).
+from app.generators.text_claude import MODEL as _OPUS
+_SHORT_MODEL = _os.environ.get("SHOPCAST_SHORT_MODEL", _OPUS)
+_BLOG_MODEL = _os.environ.get("SHOPCAST_BLOG_MODEL", _OPUS)
 
 GENERATORS: dict[ContentKind, Generator] = {
     ContentKind.CAPTION: CaptionGenerator(model=_SHORT_MODEL),     # 인스타(피드/릴스) — Haiku

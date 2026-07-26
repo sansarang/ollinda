@@ -19,22 +19,57 @@ def _dummy(prompt: str) -> str:
             "[이미지배치]\n- 서론: 메인사진\n[키워드]\n샘플,키워드,지역")
 
 
-def call(prompt: str, model: str = MODEL, max_tokens: int = 1200) -> str:
-    """공용 Claude 호출. 키 없으면 더미. SDK 기본 재시도(429/5xx) + 타임아웃."""
+def _retryable(e) -> bool:
+    """재시도 가치 판정 — 429·5xx·연결오류·타임아웃만 True. 400·401·크레딧부족은 False(헛 재시도 금지)."""
+    s = repr(e).lower()
+    if "credit" in s or "invalid" in s or "authentication" in s or "permission" in s:
+        return False
+    code = getattr(e, "status_code", None)
+    if code in (429, 500, 502, 503, 504, 529):
+        return True
+    return any(k in s for k in ("timeout", "timedout", "connection", "overloaded", "rate", "429", "503", "502", "504", "500"))
+
+
+def _messages(prompt: str, cache_prefix: str = ""):
+    """프롬프트 캐싱: 채널들이 공유하는 긴 프리픽스(cache_prefix — 브리프·사진분석)를 ephemeral 캐시로 표시 →
+    2·3·4번째 채널 호출이 프리픽스 재계산 없이 히트(P50 지연↓·비용 41~80%↓). 프리픽스 없으면 기존 단일 문자열."""
+    if cache_prefix and len(cache_prefix) > 400:           # 캐시 최소 토큰 미달이면 캐싱 이득 없음 → 그냥 합침
+        return [{"role": "user", "content": [
+            {"type": "text", "text": cache_prefix, "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": prompt}]}]
+    return [{"role": "user", "content": (cache_prefix + prompt) if cache_prefix else prompt}]
+
+
+def call(prompt: str, model: str = MODEL, max_tokens: int = 1200, cache_prefix: str = "") -> str:
+    """공용 Claude 호출. 키 없으면 더미. ★ 명시적 바운드 재시도(429/5xx/타임아웃, 지수백오프, 상한 3) +
+    타임아웃 + 프롬프트 캐싱(cache_prefix). 무한 행 방지 — 재시도 소진 시 예외 raise(호출부 except 처리)."""
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return _dummy(prompt)
+    import time as _t
     import anthropic
-    client = anthropic.Anthropic(timeout=120.0)  # 무한 대기 방지 — 60초는 Opus 장문에서 ReadTimeout 실측(주안 BLOG 사고)
+    client = anthropic.Anthropic(timeout=90.0, max_retries=0)  # SDK 자동재시도 끄고(중복 방지) 아래서 명시 제어
     _kw = {} if "haiku" in model else {"thinking": {"type": "adaptive"}}   # Haiku는 adaptive thinking 미지원(400)
-    resp = client.messages.create(
-        model=model, max_tokens=max_tokens,
-        messages=[{"role": "user", "content": prompt}], **_kw,
-    )
+    _msgs = _messages(prompt, cache_prefix)
+
+    def _create(mt):
+        last = None
+        for _try in range(3):                              # 상한 3 — 무한 재시도 금지
+            try:
+                return client.messages.create(model=model, max_tokens=mt, messages=_msgs, **_kw)
+            except Exception as e:
+                last = e
+                _rt = _retryable(e)
+                import logging as _lg
+                _lg.getLogger("shopcast.llm").warning("[llm] 콜 실패(try %d, retry=%s): %s",
+                                                      _try + 1, _rt, repr(e)[:120])
+                if not _rt or _try == 2:
+                    raise
+                _t.sleep(min(2 ** _try * 1.5, 12))         # 지수 백오프(상한 12초)
+        raise last
+
+    resp = _create(max_tokens)
     if getattr(resp, "stop_reason", "") == "max_tokens":   # thinking이 예산을 잠식해 본문이 잘림 → 2배로 1회 재시도
-        resp = client.messages.create(
-            model=model, max_tokens=max_tokens * 2,
-            messages=[{"role": "user", "content": prompt}], **_kw,
-        )
+        resp = _create(max_tokens * 2)
     global last_finish_reason, LAST_USAGE
     last_finish_reason = getattr(resp, "stop_reason", "") or ""
     _u = getattr(resp, "usage", None)                     # 실측 토큰(원가 추적) — resp.usage
@@ -124,7 +159,7 @@ def _gemini_generate(parts: list, model: str, max_tokens: int) -> str:
 
 def call_task(task: str, prompt: str, max_tokens: int = 1200,
               default_model: str | None = None,
-              images: list | None = None) -> str:
+              images: list | None = None, cache_prefix: str = "") -> str:
     """작업 유형별 라우팅 호출. images=[(media_type, b64), ...]면 멀티모달.
     Gemini 실패(429 포함) → 1회 재시도 → Anthropic 폴백(LAST_ROUTE에 기록).
     Anthropic도 불가면 예외 → 호출부의 기존 실패 처리(산출물 생략)로 — 글 파이프라인 안 막음."""
