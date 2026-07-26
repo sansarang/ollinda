@@ -62,6 +62,8 @@ def _analyze_gap(tenant, pub: dict, kw: str, cause: str, existing: list[str]) ->
         top = _search_blog(kw, 10)
         top_lines = "\n".join(f"- {t['title']} — {t['description'][:60]}" for t in top[:8]) or "(조회 실패)"
         cause_txt = ("색인 자체가 안 됐다(검색에 등록 실패 — 유사문서·저품질 가능)" if cause == "not_indexed"
+                     else "1페이지에 진입했다가 뚜렷하게 하락했다(사용자 체류·반응 부족 의심 — "
+                          "서두 훅·끝까지 읽게 하는 장치·콘텐츠 충실도 관점으로 진단하라)" if cause == "dwell_drop"
                      else f"색인은 됐지만 {UNEXPOSED_DAYS}일 넘게 30위 밖이다")
         from app import llm
         v = llm.call(
@@ -101,10 +103,19 @@ def _sweep_tenant(tenant, budget: int) -> int:
             continue
         best = _best_rank(tenant.id, kw)
         if best is not None and best <= 30:
-            db.add_lesson(tenant.id, "", source_kw=kw, source_piece_id=pid,
-                          cause="exposed", status="none")     # 노출됨 — 교훈 불필요(마커만)
-            continue
-        cause = "not_indexed" if not pub.get("indexed_at") else "unexposed"
+            # 🕐 체류 의심(2026 상위 유지 = 체류·반응, 실전 검증): 1페이지 진입 후 뚜렷한 하락 =
+            #   네이버가 사용자 반응(체류·재이탈)을 보고 내리는 전형 패턴 → 교훈 대상.
+            _hist = ([h["rank"] for h in db.rank_history(tenant.id, kw, kind="post") if h.get("rank")]
+                     or [h["rank"] for h in db.rank_history(tenant.id, kw, kind="blog_search") if h.get("rank")])
+            _cur = _hist[-1] if _hist else None
+            if best <= 10 and _cur and _cur > 15 and (_cur - best) >= 5:
+                cause = "dwell_drop"
+            else:
+                db.add_lesson(tenant.id, "", source_kw=kw, source_piece_id=pid,
+                              cause="exposed", status="none")     # 노출·유지 — 교훈 불필요(마커만)
+                continue
+        else:
+            cause = "not_indexed" if not pub.get("indexed_at") else "unexposed"
         if budget <= 0 or n_active >= MAX_ACTIVE:
             break                                        # 다음 스윕에서 계속(비용·과적재 가드)
         existing = [l["lesson"] for l in db.active_lessons(tenant.id, limit=MAX_ACTIVE)]

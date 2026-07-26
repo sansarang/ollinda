@@ -255,15 +255,27 @@ def refill(t, plan: str = "free") -> dict:
                             _log.info("[autoqueue] 헤드 빌드업 시드 t=%s %r→%r", t.id, _kw, _par)
             except Exception:
                 pass
-            for st in _sb.subtopics(seeds, min_volume=MIN_QUEUE_VOLUME, limit=8):
-                if _skip_kw(t, st["keyword"]):
-                    continue
+            # 🕰 최신성 가점(상위 블로거 실전 공략 검증): 상위 글이 낡은 키워드 = 이길 수 있는 문.
+            #   후보들의 상위 글 노후도를 실측해 '오래된 상위권' 키워드를 우선 적재.
+            _cands_sb = [st for st in _sb.subtopics(seeds, min_volume=MIN_QUEUE_VOLUME, limit=8)
+                         if not _skip_kw(t, st["keyword"])]
+            if _cands_sb:
+                try:
+                    from app.services import blogrank as _br
+                    for st in _cands_sb[:6]:
+                        st["_stale"] = _br.top_staleness_days(st["keyword"])
+                    _cands_sb.sort(key=lambda s: -(s.get("_stale") or -1))
+                except Exception:
+                    pass
+            for st in _cands_sb:
+                _stale = st.get("_stale", -1)
+                _fresh_note = f" · 상위글 중앙 {_stale}일 경과(최신성 기회)" if _stale >= 365 else ""
                 if db.enqueue_writing(t.id, "P4", st["keyword"], _sb.angle_for(st["keyword"]),
-                                      _reason(f"스마트블록 세부주제({st['intent']}형·월 {st['volume']}회 실측) 선점",
-                                              vol=st["volume"])):
+                                      _reason(f"스마트블록 세부주제({st['intent']}형·월 {st['volume']}회 실측) 선점{_fresh_note}",
+                                              vol=st["volume"], stale_days=_stale)):
                     added["P4"] += 1
-                    _log.info("[autoqueue] 적재 P4b(블록:%s) t=%s kw=%r vol=%s",
-                              st["intent"], t.id, st["keyword"], st["volume"])
+                    _log.info("[autoqueue] 적재 P4b(블록:%s) t=%s kw=%r vol=%s stale=%s",
+                              st["intent"], t.id, st["keyword"], st["volume"], _stale)
                     break                              # 블록 세부주제는 1건이면 충분(큐 다양성)
     except Exception:
         _log.exception("[autoqueue] P4b(스마트블록) 적재 실패 t=%s", t.id)

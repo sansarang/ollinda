@@ -165,6 +165,18 @@ class BlogDraftGenerator(Generator):
                 kws = list(dict.fromkeys([kw0, _parent_kw] + _rest))[:10]
         except Exception:
             _parent_kw = ""
+        # 📏 가변 분량(상위 블로거 실전 검증: 경쟁 키워드는 3천자급이 표준) — 검색량 실측으로 판정.
+        #   롱테일(기본) 1,500~2,200자 / 월 3,000회+ 경쟁 키워드 2,500~3,500자. 무키·실패 시 기본.
+        _target_len, _len_competitive = "1500~2200", False
+        try:
+            from app.services import searchad as _sa_len
+            if _sa_len.configured():
+                _v0 = next((int(r.get("total") or 0) for r in _sa_len.keyword_volumes([kw0])
+                            if (r.get("keyword") or "").replace(" ", "") == kw0.replace(" ", "")), 0)
+                if _v0 >= 3000:
+                    _target_len, _len_competitive = "2500~3500", True
+        except Exception:
+            pass
         if tkw:
             kplan["longtail"] = []      # 1글 1키워드(자동 글감 큐): 타깃 외 키워드 소제목 헤딩화 금지
         # ★ canonical_region — 지역 토큰 단일 소스(검색량 실측 + 기초지역 배제).
@@ -211,6 +223,13 @@ class BlogDraftGenerator(Generator):
                if getattr(asset, "angle", "") else "")
             + "[실경험 강화 · D.I.A.+ 핵심] 위 '사진 분석'의 구체 사실(색·질감·전후 변화·차종/제품·수치)을 "
             "1인칭 경험담('직접 해보니','만져보니','시공하고 나니')으로 녹여라. 추상적 미사여구·일반론 금지, 손에 잡히듯 구체적으로.\n"
+            # 체류 설계(2026 상위 유지 = 평균 체류 2.5~3분, 상위 블로거 실전 방법론 검증) — 업종 무관 공통 장치
+            + "[체류 설계 — 3장치 필수] ① 첫 문장: 이 키워드를 검색한 사람이 가장 걱정·궁금해하는 것을 짚고 "
+            "'이 글이 그 답을 직접 보여준다'는 예고로 시작(제목이 한 약속을 즉시 받아주기). "
+            "② 서두(첫 문단 안이나 직후): '끝까지 보시면 ①… ②… ③…을 그대로 가져가실 수 있습니다'처럼 "
+            "이 글에 실제로 있는 것만 3가지 예고. "
+            "③ 본문 중간: '바로 아래에서 ○○을 직접 보여드립니다' 같은 다음 섹션 예고를 1~2회 — "
+            "실제 뒤에 나오는 내용만(없는 것 예고 금지).\n"
             "[필수 섹션] ① '## 자주 묻는 질문'(Q&A 정확히 3쌍) ② 가격대/영업시간/찾아오는길을 마크다운 표(| 항목 | 내용 |) 1개 "
             "③ '## 한눈 요약'(핵심 3줄 목록 — GEO).\n"
             + _kw_natural_directive(kw0, _creg)
@@ -235,7 +254,7 @@ class BlogDraftGenerator(Generator):
             f"[본문]\n(첫 문장에 '{seo._kw_shorten(kw0)}' 같은 자연 변형 포함(원형 금지), "
             + (f"첫 문단 안에 '{_parent_kw}' 정확 구문(연속 그대로) 1회 필수 포함, " if _parent_kw else "")
             + "## 소제목 3~5개 + 마크다운 표 1개 + '## 자주 묻는 질문'(Q&A 3쌍), "
-            "1500~2200자, [사진N] 마커 배치)\n"
+            f"{_target_len}자, [사진N] 마커 배치)\n"
             "[이미지배치]\n(- 각 사진을 어디에 왜)\n"
             "[키워드]\n(쉼표로 5~8개, 타겟 키워드 우선)"
         )
@@ -251,7 +270,8 @@ class BlogDraftGenerator(Generator):
                                       getattr(asset, "angle", "howto") or "howto",
                                       asset.note or "", len(imgs),
                                       trust=_trust, experiences=_exp)
-        raw = _call_llm(prompt, self.model, 5500 if _ctype == "info" else 5000,
+        raw = _call_llm(prompt, self.model,
+                        7500 if _len_competitive else (5500 if _ctype == "info" else 5000),
                         cache_prefix=(cache_prefix_for(asset) if _ctype != "info" else ""))
         d = _parse_sections(raw, ["제목후보", "제목", "메타설명", "본문", "이미지배치", "키워드"])
         # ① 제목 3안 → 상위노출 최적 1개 자동 선택 ([제목]으로 준 경우도 흡수)

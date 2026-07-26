@@ -56,6 +56,25 @@ def _search_blog(keyword: str, display: int = TOP_N) -> list[dict]:
         return []
 
 
+def top_staleness_days(keyword: str, top_n: int = 5) -> int:
+    """상위 글 노후도(일) — 상위 top_n 글 발행일의 중앙값 나이. 실전 검증된 '최신성 공략' 신호:
+    상위권이 낡은 키워드 = 신규 블로그가 최신성으로 이길 수 있는 문이 열린 키워드.
+    조회 불가/발행일 없음 → -1."""
+    from datetime import datetime
+    items = _search_blog(keyword, max(top_n, 5))[:top_n]
+    ages = []
+    for it in items:
+        pd = (it.get("postdate") or "").strip()
+        try:
+            ages.append((datetime.utcnow() - datetime.strptime(pd, "%Y%m%d")).days)
+        except Exception:
+            continue
+    if not ages:
+        return -1
+    ages.sort()
+    return ages[len(ages) // 2]
+
+
 def _item_blog_id(item: dict) -> str:
     """검색결과 항목의 블로그 아이디 — link/bloggerlink 어느 쪽이든 추출."""
     return (normalize_blog_id(item.get("link", ""))

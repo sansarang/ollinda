@@ -5819,9 +5819,22 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
                             "잠시 후 새로고침하면 최종 사진으로 바뀝니다. 다운로드는 완료 후 진행돼요.</div>")
     except Exception:
         pass
+    # 🎬 발행 직전 영상 넛지(2026 D.I.A. 영상 삽입 가점) — 온디맨드 원칙 유지: 강요 없는 안내 1줄
+    _vid_nudge = ""
+    try:
+        _has_nv0 = any(((p.payload or {}).get("naver_video") or {}).get("path")
+                       for p in pieces if p.kind.value == "short")
+        _vj_now = next((p.payload.get("video_job") for p in pieces if p.kind.value == "blog"), None) or {}
+        if not _has_nv0 and _vj_now.get("status") not in ("registered", "running", "retrying"):
+            _vid_nudge = ("<div class='flex items-center gap-2 bg-violet-50 border border-violet-100 rounded-xl "
+                          "px-3.5 py-2.5 mb-3 text-sm text-violet-700'>💡 이 글에 <b>영상(9:16)</b>을 넣으면 "
+                          "네이버 노출 가점이 있어요 — 아래 '네이버 영상 만들기'로 몇 분이면 됩니다. "
+                          "<span class='text-violet-400'>그냥 발행해도 괜찮아요.</span></div>")
+    except Exception:
+        pass
     body = (
         "<a href='javascript:history.back()' class='inline-block text-sm text-slate-500 font-bold mb-2'>← 결과로</a>"
-        + _edit_banner
+        + _edit_banner + _vid_nudge
         + f"<div class='text-sm text-indigo-500 font-bold'>{esc(sname)}</div>"
         "<h1 class='text-2xl font-extrabold text-slate-900 mb-1'>네이버 블로그에 올리기</h1>"
         "<p class='text-slate-400 text-sm mb-5'>① 제목·본문 복사해서 붙여넣기 → ② 사진을 순서대로 저장 → ③ 본문 <b>[📷 사진N 위치]</b>에 네이버 사진버튼으로 올리기</p>"
