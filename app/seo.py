@@ -316,6 +316,46 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
     return cands[0] if cands else fallback
 
 
+def keyword_intent_ok(kw: str, industry: str, biz: str, content_type: str, note: str = "") -> bool:
+    """키워드-소재 의도 정합 검증(제목 개선 ①) — 검색량이 커도 '이 글이 그 검색의 답이 되는' 키워드만.
+    실측 결함: '자동차판매순위'(브랜드 판매량 통계 의도)가 중고 매물 글 타깃으로 선정 → 제목 어색 + 이탈 유발.
+    LLM 1콜(YES/NO), (키워드|업종|글유형) 단위 7일 캐시. 무키·실패 시 True(막지 않음 — 기존 동작 유지)."""
+    kw = " ".join((kw or "").split())
+    if not kw:
+        return True
+    ind0 = ((industry or "").replace("/", ",").split(",")[0] or "").strip()
+    try:
+        from app import ratelimit as _rl
+        _ck = f"kwintent:{kw}|{ind0}|{content_type}"
+        _hit = _rl.cache_get(_ck, 7 * 86400)
+        if _hit is not None:
+            return bool(_hit.get("ok", True))
+    except Exception:
+        _rl = None
+        _ck = ""
+    try:
+        from app import llm as _llm
+        _bz = {"local": "동네 매장(방문 손님 유치)", "seller": "온라인 판매자",
+               "hybrid": "매장+온라인"}.get(biz or "local", "매장")
+        _snip = " ".join((note or "").split())[:200]
+        v = _llm.call(
+            f"'{kw}'를 네이버에 검색하는 사람의 의도를 판단하라.\n"
+            f"글 주인: {ind0} 업종의 {_bz}. 이번 글 소재: {_snip or ind0}\n"
+            "이 검색자가 '이 가게의 실제 매물·시공·상품·서비스 소개 글'에서 원하는 답을 얻는가?\n"
+            "브랜드 판매량 순위·시세 통계·뉴스·연예 등 '자료 조사' 의도라서 가게 글이 답이 못 되면 NO.\n"
+            "구매·방문·시공·비교 검토 의도라 가게 글이 답이 되면 YES. YES 또는 NO 한 단어만.",
+            max_tokens=10)
+        ok = "NO" not in (v or "").strip().upper()[:8]
+    except Exception:
+        return True
+    try:
+        if _rl and _ck:
+            _rl.cache_set(_ck, {"ok": ok})
+    except Exception:
+        pass
+    return ok
+
+
 def resolve_target_keyword(industry: str, region: str, note: str, biz: str = "local",
                            content_type: str = "sell", brand: str = "", keyword_axis: str = "local",
                            target_kw_override: str = "", tenant_id: str = "", prof_name: str = "",
@@ -373,6 +413,25 @@ def resolve_target_keyword(industry: str, region: str, note: str, biz: str = "lo
             kw0 = _gk
             kws = list(dict.fromkeys([_gk] + [k for k in kws
                        if not is_basic_region_kw(k, region or "", _biz)]))[:10]
+    # ⑥ 의도 정합 게이트(제목 개선 ①) — 진단·큐가 준 override 포함 전 경로 공통.
+    #   기각 시 차순위 후보(최대 4개 검사) → 전부 기각이면 지역+업종 제네릭(글이 답 못 주는 키워드로 안 쓴다).
+    if content_type != "info" and kw0:
+        try:
+            _ordered = list(dict.fromkeys([kw0] + list(kws)))
+            for _cand in _ordered[:4]:
+                if keyword_intent_ok(_cand, industry, _biz, content_type, note):
+                    if _cand != kw0:
+                        _slog.warning("[resolve-kw] 의도 불일치 → 교체: %r → %r", kw0, _cand)
+                        kw0 = _cand
+                        kws = list(dict.fromkeys([_cand] + kws))[:10]
+                    break
+            else:
+                _gk2 = f"{_kw_shorten(region or '')} {prof_name}".strip() or prof_name
+                _slog.warning("[resolve-kw] 후보 전부 의도 불일치 → 제네릭 폴백: %r", _gk2)
+                kw0 = _gk2
+                kws = list(dict.fromkeys([_gk2] + kws))[:10]
+        except Exception:
+            pass
     return kw0, kws
 
 

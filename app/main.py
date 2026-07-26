@@ -247,6 +247,14 @@ def admin_gowatch_preview(request: Request, tenant_id: str):
     return HTMLResponse(page)
 
 
+@app.get("/admin/kw-intent")
+def admin_kw_intent(kw: str = "", industry: str = "", biz: str = "seller", note: str = ""):
+    """운영 진단 — 키워드-소재 의도 정합 게이트(seo.keyword_intent_ok) 단건 판정 확인용."""
+    from app import seo as _seo
+    return JSONResponse({"ok": True, "kw": kw,
+                         "intent_ok": _seo.keyword_intent_ok(kw, industry, biz, "sell", note)})
+
+
 @app.get("/admin/sets-list")
 def admin_sets_list(request: Request, tenant: str = "", limit: int = 20):
     """운영/검증용 — 최신 세트(asset_id·tenant·글수·생성) JSON. 콘티 검증 대상 선택용."""
