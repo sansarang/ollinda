@@ -5077,6 +5077,13 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                      + "<div class='flex items-center gap-10 text-slate-400 mt-3 text-sm'><span>💬</span><span>🔁</span><span>♡</span><span>📊</span></div>"
                      + f"<div class='mt-3 flex gap-2'>{(pack_btn(p.id, has_video)) if has_video else ''}{_cp('c_x', xt, '복사')}</div></div>")
         elif k == "short" and p.channel.value in ("youtube", "instagram"):
+            # 영상 온디맨드(사용자 선택 존중): 네이버 영상의 기반 렌더로 저장된 쇼츠 피스는
+            # 사용자가 그 채널을 요청(status=done 등)하기 전엔 카드로 안 보여준다(구건=상태 없음은 표시).
+            _st_ch = "shorts" if p.channel.value == "youtube" else "reels"
+            _cs_me = next((pp.payload.get("channel_status") for pp in pieces
+                           if pp.kind.value == "blog" and pp.payload.get("channel_status")), {}) or {}
+            if ((_cs_me.get(_st_ch) or {}).get("status") or "") == "not_requested":
+                continue
             title = pl.get("title", "") or (pl.get("text", "")[:30])
             desc = pl.get("narration", "") or pl.get("text", "")
             lab = "유튜브 쇼츠" if p.channel.value == "youtube" else "인스타 릴스"
@@ -6020,14 +6027,18 @@ def _set_naver_video(pieces) -> dict:
 
 
 def _fetch_local_or_r2(path: str):
-    """파일 바이트 — 로컬 없으면 R2에서 다운로드(이관 후 다운로드 보장). 실패 시 None."""
+    """파일 바이트 — 로컬 → R2 S3 API(인증·재시도) → 공개 URL 폴백. 실패 시 None.
+    실측 결함 수정: 공개 URL(r2.dev)만 쓰면 ZIP 16장 버스트에서 레이트리밋으로 12장 조용히 탈락."""
     try:
         if path and os.path.exists(path):
             with open(path, "rb") as f:
                 return f.read()
         from app import storage as _st
         if path and _st.r2_configured():
-            import urllib.request
+            data = _st.fetch_bytes(path)               # S3 API 인증 경로(레이트리밋 없음, 3회 재시도)
+            if data:
+                return data
+            import urllib.request                      # 최후 폴백: 공개 URL(구키 호환)
             key = os.path.relpath(path, _st.STORAGE_DIR).replace(os.sep, "/")
             url = os.environ["R2_PUBLIC_URL"].rstrip("/") + "/" + key
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})   # r2.dev가 기본 UA 차단
@@ -6052,18 +6063,28 @@ def _wait_photo_edit(asset_id: str, tenant_id: str = "", timeout: int = 60) -> b
 
 
 def _zip_bytes(entries) -> bytes:
-    """ZIP을 메모리에서 생성(디스크 미사용). 로컬 삭제된 사진·영상은 R2에서 받아 포함."""
+    """ZIP을 메모리에서 생성(디스크 미사용). 로컬 삭제된 사진·영상은 R2에서 받아 포함.
+    조용한 누락 금지: 회수 실패 파일이 있으면 안내 텍스트를 ZIP에 동봉 + 에러 로그."""
     import zipfile
     import io
     buf = io.BytesIO()
+    _missing = []
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for arc, src in entries:
             if isinstance(src, tuple) and src[0] == "text":
                 z.writestr(arc, src[1])
             elif src:
-                data = _fetch_local_or_r2(src)      # 로컬 또는 R2에서
+                data = _fetch_local_or_r2(src)      # 로컬 → S3 API(재시도) → 공개 URL
                 if data:
                     z.writestr(arc, data)
+                else:
+                    _missing.append(arc)
+        if _missing:
+            logging.getLogger("shopcast.kit").error("[pack] 파일 회수 실패 %d건: %s",
+                                                    len(_missing), _missing[:5])
+            z.writestr("⚠️ 일부 파일 누락 — 다시 다운로드해 주세요.txt",
+                       "일시 오류로 아래 파일이 이번 ZIP에서 빠졌습니다. 다시 다운로드하면 보통 해결됩니다:\n"
+                       + "\n".join(_missing))
     return buf.getvalue()
 
 

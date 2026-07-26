@@ -158,9 +158,11 @@ class BlogDraftGenerator(Generator):
         #   헤드 키워드 형태소·스마트블록 진입 재료 확보. kws 편입 → 태그·순위 추적 자동 편승.
         _parent_kw = ""
         try:
-            _parent_kw = seo.parent_keyword(kw0, tenant.region or "")
-            if _parent_kw:
-                kws = list(dict.fromkeys(list(kws) + [_parent_kw]))[:10]
+            _parent_kw = seo.parent_keyword(kw0, tenant.region or "",
+                                            getattr(tenant, "address", "") or "")
+            if _parent_kw:                              # kw0 바로 뒤(뒤에 붙이면 10개 캡에 잘림 — 실측)
+                _rest = [k for k in kws if k not in (kw0, _parent_kw)]
+                kws = list(dict.fromkeys([kw0, _parent_kw] + _rest))[:10]
         except Exception:
             _parent_kw = ""
         if tkw:
@@ -230,7 +232,9 @@ class BlogDraftGenerator(Generator):
             "맨 앞에 박지 말고, 어색하면 어순·조사를 바꿔 자연스러운 한국어 문장을 우선하라. "
             f"서로 다른 각도(후기형/정보형/혜택형), 22~35자 롱테일, 숫자·혜택으로 클릭 유도. {_title_reg})\n"
             "[메타설명]\n(150자 내외, 클릭 유도)\n"
-            f"[본문]\n(첫 문장에 '{seo._kw_shorten(kw0)}' 같은 자연 변형 포함(원형 금지), ## 소제목 3~5개 + 마크다운 표 1개 + '## 자주 묻는 질문'(Q&A 3쌍), "
+            f"[본문]\n(첫 문장에 '{seo._kw_shorten(kw0)}' 같은 자연 변형 포함(원형 금지), "
+            + (f"첫 문단 안에 '{_parent_kw}' 정확 구문(연속 그대로) 1회 필수 포함, " if _parent_kw else "")
+            + "## 소제목 3~5개 + 마크다운 표 1개 + '## 자주 묻는 질문'(Q&A 3쌍), "
             "1500~2200자, [사진N] 마커 배치)\n"
             "[이미지배치]\n(- 각 사진을 어디에 왜)\n"
             "[키워드]\n(쉼표로 5~8개, 타겟 키워드 우선)"
@@ -429,6 +433,21 @@ def _semantic_photo_placement(body: str, note: str, n: int) -> str:
     ptoks = {i: _toks(descs.get(i, "")) for i in range(1, n + 1)}
     jtoks = [_toks(p) for p in paras]
     used = [0] * len(paras)                   # 문단별 배정 수(과밀 방지)
+    # ★ 금지 구역(실측 결함 수정: 요약·FAQ 사이에 사진이 꽂히고 서두에 6장 뭉텅이):
+    #   소제목 단독·요약·FAQ·표·목록·고정정보·지도 마커 문단엔 사진 배정 금지 + 문단당 최대 2장.
+    _FORBID = ("한눈 요약", "자주 묻는", "찾아오는 길", "함께 보면 좋은", "[여기 네이버")
+    MAX_PER = 2
+
+    def _allowed(j: int) -> bool:
+        p = paras[j]
+        if p.startswith(("|", "- ", "**Q", "Q.", "A.", "📍")):
+            return False
+        if p.startswith("#") and "\n" not in p:        # 소제목 단독 문단 — 사진은 내용 문단 뒤로
+            return False
+        return not any(f in p for f in _FORBID)
+    allowed_idx = [j for j in range(len(paras)) if _allowed(j)]
+    if not allowed_idx:
+        return _ensure_photo_markers(body, n)
     assign: dict[int, int] = {}
     # 정보량 많은 사진부터 배정(강한 신호 우선 선점)
     order = sorted(range(1, n + 1), key=lambda i: -len(ptoks.get(i) or set()))
@@ -436,16 +455,20 @@ def _semantic_photo_placement(body: str, note: str, n: int) -> str:
         pt = ptoks.get(i) or set()
         is_hero = any(h in (descs.get(i, "")) for h in _HERO_HINT)
         best, best_score = None, -1e9
-        for j, jt in enumerate(jtoks):
-            overlap = len(pt & jt)
+        for j in allowed_idx:
+            if used[j] >= MAX_PER:                    # 하드 상한 — 뭉텅이 원천 차단
+                continue
+            overlap = len(pt & (jtoks[j]))
             score = overlap - used[j] * 0.6           # 과밀 문단 감점 → 고르게 분산
-            if is_hero and j == 0:
+            if is_hero and j == allowed_idx[0]:
                 score += 0.4                          # 대표(외관) 컷은 글 앞 문단 선호
             if score > best_score:
                 best_score, best = score, j
-        if best is None or best_score <= 0:           # 매칭 실패 → 빈 문단 순차 폴백
-            cand = [j for j in range(len(paras)) if used[j] == 0] or list(range(len(paras)))
-            best = cand[min(len(cand) - 1, i - 1)]
+        if best is None or best_score <= 0:           # 매칭 실패 → 허용 문단에 비례 위치로 고른 분산
+            cand = ([j for j in allowed_idx if used[j] == 0]
+                    or [j for j in allowed_idx if used[j] < MAX_PER] or allowed_idx)
+            _tgt = int((i - 1) / max(1, n) * len(cand))
+            best = cand[min(len(cand) - 1, _tgt)]
         assign[i] = best
         used[best] += 1
     # 3) 재조립 — 각 문단 뒤에 배정된 사진 마커(사진번호 오름차순)

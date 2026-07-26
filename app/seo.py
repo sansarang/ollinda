@@ -316,17 +316,20 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
     return cands[0] if cands else fallback
 
 
-def parent_keyword(kw: str, region: str = "") -> str:
+def parent_keyword(kw: str, region: str = "", address: str = "") -> str:
     """계층 공략(헤드 빌드업, 실측 요구 2026-07-26) — '광역+기초+업종' 키워드에서 기초지역을 뺀
     상위 변형. 예: '부산 기장 중고차판매' → '부산 중고차판매' / 실검색량이 더 큰 자연 축약형
-    ('부산 중고차')이 있으면 그쪽 선택(searchad 실측, 무키 시 원형 유지). 도출 불가면 ''."""
+    ('부산 중고차')이 있으면 그쪽 선택(searchad 실측, 무키 시 원형 유지). 도출 불가면 ''.
+    기초지역 어간은 region+address 양쪽에서 수집 — region이 '부산'처럼 짧아도 주소의 '기장군'으로 판별."""
     toks = (kw or "").split()
     if len(toks) < 3:
         return ""
-    rtoks = (region or "").split()
     base_stems = set()
-    for t in rtoks[1:]:                                    # region 둘째 토큰부터 = 기초지역 후보
-        core = re.sub(r"(특별자치시|특별자치도|광역시|자치도|군|구|읍|면|시)$", "", t)
+    _srcs = [t for t in (region or "").split()[1:]] + [t for t in (address or "").split()]
+    for t in _srcs:                                        # region 둘째 토큰부터 + 주소 전 토큰
+        if not re.search(r"(군|구|읍|면|동|리)$", t):       # 주소는 행정 접미 토큰만(도로명·번지 배제)
+            continue
+        core = re.sub(r"(특별자치시|특별자치도|광역시|자치도|군|구|읍|면|동|리|시)$", "", t)
         if len(core) >= 2:
             base_stems.add(core)
     drop_i = None

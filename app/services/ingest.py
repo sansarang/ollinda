@@ -265,10 +265,25 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
             pieces[0].payload["_missing_blog"] = _LEb.get(str(ContentKind.BLOG), "생성 실패(로그 참조)")
     _prog("polish", "제목·태그 다듬는 중", "", 0.82)
     _exp = (intake.get("experience") or "").strip()[:200]       # 사장님 경험담 — 결과 하이라이트용(A2)
+    # 🖼 대표 이미지 = 외관 대표컷(실측 결함 수정: 업로드 1번이 서류면 X·인스타 카드 대표가 서류 풀샷).
+    #   per-photo 분석에서 외관 묘사 첫 사진을 대표로 — 없으면 기존 paths[0] 유지.
+    _hero_path = paths[0]
+    try:
+        import re as _reh
+        _DOCW = ("서류", "등록증", "기록부", "문서", "증명서", "계약서")
+        for _mh in _reh.finditer(r"\[사진(\d+)\]\s*([^\n]+)", analysis or ""):
+            _ih = int(_mh.group(1)) - 1
+            _dh = _mh.group(2)
+            if (0 <= _ih < len(paths) and not any(w in _dh for w in _DOCW)
+                    and any(w in _dh for w in ("외관", "전측면", "전면", "차체", "전체 모습", "매장 전경", "대표"))):
+                _hero_path = paths[_ih]
+                break
+    except Exception:
+        pass
 
     def _polish_one(p):
         """피스 1개 다듬기(감사→SEO편집장→추적링크→저장) — 피스 간 독립이라 병렬 안전."""
-        p.payload.setdefault("image_path", paths[0])
+        p.payload.setdefault("image_path", _hero_path)
         p.payload.setdefault("biz_type", getattr(tenant, "biz_type", "local") or "local")
         p.payload.setdefault("region", getattr(tenant, "region", "") or "")
         if _exp and p.kind in (ContentKind.BLOG, ContentKind.CAPTION, ContentKind.X_POST):
@@ -870,12 +885,13 @@ def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: di
         reel.payload["reach"] = reach.estimate(reel.channel.value, reel.kind.value, reel.payload)
         db.save_piece(reel)
         _set_channel_status(asset.id, {"reels": {"status": "done"}})
-    # 𝕏 X에도 같은 숏폼 영상 첨부(글 + 영상)
-    xp = next((p for p in saved if p.kind == ContentKind.X_POST), None)
-    if xp:
-        xp.payload["video_path"] = short.payload.get("video_path")
-        xp.payload["image_paths"] = short.payload.get("image_paths", [])
-        db.save_piece(xp)
+    # 𝕏 X에도 같은 숏폼 영상 첨부(글 + 영상) — 쇼츠를 '요청한' 경우에만(온디맨드 선택 존중)
+    if "shorts" in want:
+        xp = next((p for p in saved if p.kind == ContentKind.X_POST), None)
+        if xp:
+            xp.payload["video_path"] = short.payload.get("video_path")
+            xp.payload["image_paths"] = short.payload.get("image_paths", [])
+            db.save_piece(xp)
     try:
         from app.generators.carousel import build_carousel
         blog = next((p for p in saved if p.kind == ContentKind.BLOG), None)

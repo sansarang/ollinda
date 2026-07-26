@@ -95,6 +95,24 @@ def get_key(key: str, local_path: str) -> str | None:
         return None
 
 
+def fetch_bytes(local_path: str) -> "bytes | None":
+    """미러 파일 바이트를 S3 API(인증)로 직접 읽기 — r2.dev 공개 URL의 버스트 레이트리밋 회피.
+    ZIP 팩 등 다중 파일 일괄 회수용(실측: 16장 중 12장 조용히 탈락). 재시도 3회, 실패 시 None+로그."""
+    if not (r2_configured() and local_path):
+        return None
+    key = _key_for(local_path)
+    for _try in range(3):
+        try:
+            r = _r2().get_object(Bucket=os.environ["R2_BUCKET"], Key=key)
+            return r["Body"].read()
+        except Exception:
+            import time
+            time.sleep(0.4 * (_try + 1))
+    import logging
+    logging.getLogger("shopcast.storage").error("[r2] fetch_bytes 실패(3회) key=%s", key)
+    return None
+
+
 def r2_media_url(tenant_id: str, fname: str) -> str | None:
     """서빙용 — 로컬에 없을 때 R2 공개 URL(리다이렉트 대상)."""
     if not r2_configured():
