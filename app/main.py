@@ -328,6 +328,38 @@ def me_gen_progress(request: Request):
     return JSONResponse(_progress_payload(t))
 
 
+@app.post("/me/video/make")
+async def me_video_make(request: Request, asset_id: str = Form(""), platforms: str = Form("")):
+    """영상 온디맨드 — 홈에서 플랫폼(shorts·reels·naver) 골라 요청 → 백그라운드 렌더."""
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"ok": False, "error": "로그인이 필요해요"}, status_code=401)
+    t = _ensure_user_tenant(u)
+    a = db.get_asset(asset_id)
+    if not a or getattr(a, "tenant_id", None) != t.id:
+        return JSONResponse({"ok": False, "error": "내 콘텐츠가 아니에요"}, status_code=404)
+    from app.services.ingest import request_video_bundle
+    ok2, err2 = request_video_bundle(t, asset_id, {x.strip() for x in platforms.split(",") if x.strip()})
+    return JSONResponse({"ok": ok2, "error": err2})
+
+
+@app.get("/me/video/status")
+def me_video_status(request: Request, asset_id: str = ""):
+    """영상 채널 상태 폴링(홈 카드) — shorts/reels/naver: not_requested·generating·done·failed."""
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"ok": False}, status_code=401)
+    t = _ensure_user_tenant(u)
+    a = db.get_asset(asset_id)
+    if not a or getattr(a, "tenant_id", None) != t.id:
+        return JSONResponse({"ok": False}, status_code=404)
+    ps = db.get_set_pieces(asset_id)
+    blog = next((p for p in ps if p.kind.value == "blog"), None)
+    cs = (blog.payload.get("channel_status") or {}) if blog else {}
+    return JSONResponse({"ok": True, "status": {
+        ch: ((cs.get(ch) or {}).get("status") or "") for ch in ("shorts", "reels", "naver")}})
+
+
 @app.post("/admin/gowatch/seed-demo")
 def admin_gowatch_seed_demo(request: Request, industry: str = "꽃집", keyword: str = "", region: str = ""):
     """W6 검증용 — 시드 아닌 업종의 모의 발행 데이터 생성(tenant+블로그 조각+발행기록). 동일 코드 경로 증명용.
@@ -550,7 +582,7 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
     # 스마트 입력(콘텐츠생성 PHASE 4) — 확인된 사진내용·질문답·경험을 생성에 구조 주입
     from app.services import smart_intake
     intake = {"confirmed": confirmed.strip()[:120],
-              "analysis": (vision_analysis or "").strip()[:4000],
+              "analysis": (vision_analysis or "").strip()[:12000],
               "answers": smart_intake.parse_answers(answers),
               "experience": experience.strip()[:200]}
     _level = smart_intake.enrichment_level(intake["confirmed"], intake["answers"], intake["experience"])
@@ -975,7 +1007,9 @@ async def intake_guess(request: Request, industry: str = Form(""), purpose: str 
             pass
         from PIL import Image as _Im, ImageOps as _IOps
         import io as _io
-        for i, (data, fname) in enumerate(files[:6]):
+        # 전 장수 분석(사진분석 단일화) — 여기서 만든 per-photo [사진N] 전문을 생성이 재사용 → 생성 시 vision 0콜.
+        # vision.analyze_all이 6장 청크 병렬이라 16장도 6장과 체감 지연 거의 동일(상한 30 = vision max).
+        for i, (data, fname) in enumerate(files[:30]):
             p = os.path.join(tmp, f"g{i}.jpg")
             try:
                 im = _Im.open(_io.BytesIO(data))
@@ -1904,8 +1938,39 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             return (f"<a href='/me?tab=report#blog' title='실측 기준 · 위치·기기별 차이' "
                     f"class='inline-block text-[11px] font-bold px-2 py-0.5 rounded-full {cls}'>"
                     f"{esc(kw)}{vtxt} · {body}</a>")
+        def _video_row(aid: str, ps) -> tuple[str, bool]:
+            """(영상 온디맨드) 카드 내 플랫폼 선택·상태 행 — 반환: (HTML, 생성중 여부)."""
+            _bp = next((p for p in ps if p.kind.value == "blog"), None)
+            if not _bp:
+                return "", False
+            _csv = _bp.payload.get("channel_status") or {}
+            _has_short_piece = any(p.kind.value == "short" for p in ps)
+            chips, sel_any, gen_any = "", False, False
+            for ch, lab in (("shorts", "숏폼"), ("reels", "릴스"), ("naver", "네이버")):
+                stt = (_csv.get(ch) or {}).get("status") or ""
+                if stt == "done" or (not stt and _has_short_piece):   # 구건(상태 기록 이전)은 피스 실재로 판정
+                    chips += ("<span class='text-[10px] font-bold text-emerald-600 bg-emerald-50 "
+                              f"px-1.5 py-0.5 rounded-full'>{lab} ✓</span>")
+                elif stt == "generating":
+                    gen_any = True
+                    chips += ("<span class='text-[10px] font-bold text-indigo-500 bg-indigo-50 "
+                              f"px-1.5 py-0.5 rounded-full animate-pulse'>{lab} 만드는 중…</span>")
+                else:                                   # not_requested·failed·기록 없음 → 선택 가능
+                    sel_any = True
+                    _retry = " 다시" if stt == "failed" else ""
+                    chips += ("<label class='text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 "
+                              "rounded-full cursor-pointer inline-flex items-center gap-1'>"
+                              f"<input type='checkbox' name='vp_{aid}' value='{ch}' checked "
+                              f"class='w-3 h-3 accent-indigo-600'>{lab}{_retry}</label>")
+            btn = (("<button type='button' onclick=\"vdMake('" + aid + "')\" "
+                    "class='text-[10px] font-bold text-white bg-slate-800 hover:bg-slate-900 "
+                    "px-2 py-1 rounded-full transition'>🎬 영상 만들기</button>") if sel_any else "")
+            row = (f"<div id='vd_{aid}'" + (f" data-vgenrow='{aid}'" if gen_any else "")
+                   + " class='mt-1.5 flex flex-wrap items-center gap-1'>" + chips + btn + "</div>")
+            return row, gen_any
         for s in sets:
             ps = db.get_set_pieces(s["asset_id"])
+            _vrow, _ = _video_row(s["asset_id"], ps)
             _nclk = sum(_ccounts.get(p.id[:8], 0) for p in ps)
             _ebadge = _expose_badge(ps)
             thumb = ""
@@ -1930,11 +1995,31 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                    f"title='올린다 추적링크 클릭 기준(조회수 아님)'>이 콘텐츠로 온 손님 {_nclk}명</span>" if _nclk else "")
                 + "</div>"
                 + f"<div class='text-xs text-slate-400 font-medium'>{esc(s['created'])} · {s['n']}채널</div>"
-                + (f"<div class='mt-1'>{_ebadge}</div>" if _ebadge else "") + "</div>"
+                + (f"<div class='mt-1'>{_ebadge}</div>" if _ebadge else "")
+                + _vrow + "</div>"
                 + f"<a href='/me?view={s['asset_id']}' class='px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-[.98] text-white text-xs font-bold rounded-xl transition'>보기</a>"
                 + f"<form method=post action='/me/set/{s['asset_id']}/delete' onsubmit=\"return confirm('이 콘텐츠를 삭제할까요?')\">"
                 + "<button class='px-1.5 py-2 text-slate-300 hover:text-rose-500 text-base transition' title='삭제'>" + _ic("xcircle", "w-4 h-4") + "</button></form></div>")
-        hist = "<div class='grid sm:grid-cols-2 gap-3'>" + "".join(_cards) + "</div>"
+        hist = ("<div class='grid sm:grid-cols-2 gap-3'>" + "".join(_cards) + "</div>"
+                # 영상 온디맨드 — 요청(선택 플랫폼 전송) + 생성중 카드 폴링(끝나면 새로고침으로 ✓ 반영)
+                "<script>"
+                "async function vdMake(aid){"
+                "var sel=[].slice.call(document.querySelectorAll(\"input[name=vp_\"+aid+\"]:checked\"))"
+                ".map(function(x){return x.value;});"
+                "if(!sel.length){alert('만들 플랫폼을 선택해 주세요');return;}"
+                "var fd=new FormData();fd.append('asset_id',aid);fd.append('platforms',sel.join(','));"
+                "try{var d=await (await fetch('/me/video/make',{method:'POST',body:fd})).json();"
+                "if(!d.ok){alert(d.error||'요청에 실패했어요');return;}"
+                "location.reload();}catch(e){alert('요청에 실패했어요');}}"
+                "(function(){var rows=document.querySelectorAll('[data-vgenrow]');if(!rows.length)return;"
+                "var iv=setInterval(async function(){var busy=false;"
+                "for(var i=0;i<rows.length;i++){var aid=rows[i].getAttribute('data-vgenrow');"
+                "try{var d=await (await fetch('/me/video/status?asset_id='+aid)).json();"
+                "var st=(d&&d.status)||{};"
+                "if(st.shorts==='generating'||st.reels==='generating'||st.naver==='generating')busy=true;"
+                "}catch(e){busy=true;}}"
+                "if(!busy){clearInterval(iv);location.reload();}},8000);})();"
+                "</script>")
     else:
         hist = "<p class='text-slate-400 text-sm py-6 text-center'>아직 만든 콘텐츠가 없어요. 위에서 사진 올려 만들어보세요.</p>"
     # ── 최초 1회 온보딩 vs 작동 대시보드 ──
@@ -4557,21 +4642,31 @@ async def my_set_add_photos(request: Request, asset_id: str, photos: list[Upload
             p.payload["photo_markers"] = [{"marker": f"[사진{i+1}]", "image_index": i, "image_path": pp}
                                           for i, pp in enumerate(all_paths[:SLOT_RECOMMENDED])]
         db.save_piece(p)
-    # 영상 3종 재생성: 기존 SHORT 폐기 → 즉시 백그라운드 재생성(자막 게이트 경유)
+    # 영상 재생성(온디맨드 존중): 이전에 영상을 만든 세트만 — 만들었던 플랫폼 그대로 재생성.
+    # 영상 미요청 세트는 SHORT도 없고 재생성도 없음(사용자가 원할 때 홈/키트에서 요청).
     from app.domain.models import ContentKind as _CK4
-    for p in pieces:
-        if p.kind == _CK4.SHORT:
-            db.delete_piece(p.id, p.tenant_id)
-    try:
-        from app.services.ingest import _set_video_job, _spawn_video_bundle
-        _set_video_job(asset_id, "registered", retried=False)
-        asset = db.get_asset(asset_id)
-        if asset:
-            _spawn_video_bundle(tenant, asset, all_paths, blog.payload.get("brief") or {})
-    except Exception:
-        import logging
-        logging.exception("[add-photos] 영상 재생성 예약 실패 asset=%s", asset_id)
-    return RedirectResponse(f"/kit/{asset_id}/naver?ok=사진 {len(new_paths)}장 추가 — 슬롯 재배치·영상 재생성 중", status_code=303)
+    _had_short = any(p.kind == _CK4.SHORT for p in pieces)
+    _vmsg = ""
+    if _had_short:
+        _cs_prev = blog.payload.get("channel_status") or {}
+        _want_prev = {ch for ch in ("shorts", "reels", "naver")
+                      if (_cs_prev.get(ch) or {}).get("status") in ("done", "generating", "registered", "failed")} \
+            or {"shorts", "reels", "naver"}
+        for p in pieces:
+            if p.kind == _CK4.SHORT:
+                db.delete_piece(p.id, p.tenant_id)
+        try:
+            from app.services.ingest import _set_video_job, _spawn_video_bundle
+            _set_video_job(asset_id, "registered", retried=False)
+            asset = db.get_asset(asset_id)
+            if asset:
+                _spawn_video_bundle(tenant, asset, all_paths, blog.payload.get("brief") or {},
+                                    want=frozenset(_want_prev))
+            _vmsg = "·영상 재생성 중"
+        except Exception:
+            import logging
+            logging.exception("[add-photos] 영상 재생성 예약 실패 asset=%s", asset_id)
+    return RedirectResponse(f"/kit/{asset_id}/naver?ok=사진 {len(new_paths)}장 추가 — 슬롯 재배치{_vmsg}", status_code=303)
 
 
 @app.post("/me/set/{asset_id}/delete")
@@ -4990,6 +5085,16 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
             _inner = ("<div class='flex items-center gap-2 text-sm text-slate-500'>"
                       "<span class='inline-block w-4 h-4 border-2 border-slate-300 border-t-indigo-500 rounded-full animate-spin'></span>"
                       "만드는 중이에요 (몇 분 걸려요) — 완성되면 자동으로 나타나요</div>")
+        elif _s == "not_requested":                        # 영상 온디맨드 — 여기서 바로 요청 가능
+            _inner = ("<div class='text-sm text-slate-500 mb-2'>영상은 필요할 때만 만들어요 — 글은 이미 완성!</div>"
+                      "<button type='button' class='px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 "
+                      "text-white text-xs font-bold transition' "
+                      "onclick=\"(async function(b){b.disabled=true;var fd=new FormData();"
+                      "fd.append('asset_id','" + esc(asset_id) + "');fd.append('platforms','" + _ch + "');"
+                      "try{var d=await (await fetch('/me/video/make',{method:'POST',body:fd})).json();"
+                      "if(d.ok){location.reload();}else{alert(d.error||'요청에 실패했어요');b.disabled=false;}}"
+                      "catch(e){alert('요청에 실패했어요');b.disabled=false;}})(this)\">"
+                      "🎬 이 영상 만들기</button>")
         elif int(_st.get("retries") or 0) >= 2:
             _inner = ("<div class='text-sm text-slate-500'>만들지 못했어요 — 아래 사유를 확인해 주세요</div>"
                       f"<div class='text-xs text-slate-400 mt-1'>{esc((_st.get('error') or '')[:120])}</div>")
@@ -8559,12 +8664,22 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
           "var stg=['사진 분석 중…','무엇이 담겼는지 파악 중…','거의 다 됐어요…'],si=0,w=15;"
           "var st=setInterval(function(){var l=document.getElementById('pg_pl'),b=document.getElementById('pg_pb');"
           "if(!l||!b){clearInterval(st);return;}si=Math.min(si+1,2);w=Math.min(w+22,90);l.textContent=stg[si];b.style.width=w+'%';},2200);"
-          "var n=Math.min(PM.f.length,6),tmo=Math.min(45000,25000+4000*n);"
+          "var n=Math.min(PM.f.length,8),tmo=Math.min(45000,25000+4000*n);"
           "var to=setTimeout(function(){if(fin||seq!==_pgseq)return;fin=true;clearInterval(st);"
           "box.innerHTML='';pdReady(true,'사진 확인이 오래 걸려 건너뛰었어요 — 바로 만들 수 있어요');},tmo);"
           "var fd=new FormData();fd.append('industry',(document.getElementById('s_industry')||{}).value||'');"
           "fd.append('purpose',(document.querySelector('input[name=purpose]:checked')||{}).value||'');"
-          "PM.f.slice(0,6).forEach(function(f){fd.append('photos',f);});"
+          # 전 장수 전송(사진분석 단일화) — 1280px 축소 후 업로드(landing 무료폼과 동일 패턴). 생성 시 재사용 → vision 중복 0.
+          "async function _shr(f){try{if(!/^image\\//.test(f.type||''))return f;"
+          "var bmp=await createImageBitmap(f);var mx=Math.max(bmp.width,bmp.height);"
+          "if(mx<=1280&&f.size<1500000)return f;"
+          "var s=Math.min(1,1280/mx),cv=document.createElement('canvas');"
+          "cv.width=Math.round(bmp.width*s);cv.height=Math.round(bmp.height*s);"
+          "cv.getContext('2d').drawImage(bmp,0,0,cv.width,cv.height);"
+          "var b=await new Promise(function(r){cv.toBlob(r,'image/jpeg',0.85);});"
+          "return b?new File([b],(f.name||'p').replace(/\\.[^.]+$/,'')+'.jpg',{type:'image/jpeg'}):f;}catch(e){return f;}}"
+          "var _sm=await Promise.all(PM.f.slice(0,30).map(_shr));if(fin||seq!==_pgseq)return;"
+          "_sm.forEach(function(f){fd.append('photos',f);});"
           "try{var r=await fetch('/api/intake/guess',{method:'POST',body:fd});var d=await r.json();"
           "if(fin||seq!==_pgseq)return;fin=true;clearTimeout(to);clearInterval(st);"
           "if(d.guess&&window.intakeConfirmUI){intakeConfirmUI(box,d.guess,d.analysis||'','pg_confirmed','pg_vision',function(){pdReady(true,'');},"
@@ -8736,7 +8851,7 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
                 ensure_profile(_ind)
             from app.services import smart_intake as _si
             _intake = {"confirmed": confirmed.strip()[:120],
-                       "analysis": (vision_analysis or "").strip()[:4000],
+                       "analysis": (vision_analysis or "").strip()[:12000],
                        "answers": _si.parse_answers(answers),
                        "experience": experience.strip()[:200],
                        "intent": intent.strip()[:40]}

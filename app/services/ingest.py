@@ -93,16 +93,22 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
                       + asset.note)
     if angle in ("review", "howto", "price"):
         asset.angle = angle
-    # 👁 비전: 대표 사진을 실제 분석해 생성 프롬프트에 반영(키 없으면 ""). DB엔 원본 메모 유지.
-    # ★ 전수 per-photo 분석을 항상 1회 실행 — 캡션·사진배치·매칭이 이 [사진N] 하나를 재사용(kit 재분석 0).
-    #   프리뷰 추측(intake.analysis: 6장·요약)을 본분석으로 쓰면 개별 사진 설명이 없어 kit에서 사진을
-    #   하나씩 재분석(중복)하게 됨 → analyze_all(병렬 청크, 순차 재분석보다 빠름)로 단일화. 추측은 실패 폴백만.
-    analysis = vision.analyze_all(
-        paths, tenant.industry,
-        progress_cb=lambda d, t: _prog("photo_analysis", "사진 분석 중", f"{d}/{t}장",
-                                       0.1 + 0.35 * (d / max(t, 1))))
-    if not (analysis or "").strip():
-        analysis = (intake.get("analysis") or "").strip()   # 분석 실패(레이트리밋·크레딧) → 프리뷰 추측 폴백
+    # 👁 비전(사진분석 단일화): 업로드 확인 단계가 이미 전 장수를 per-photo([사진N])로 분석했으면
+    #   그걸 그대로 재사용 → 생성 시 vision 0콜(같은 사진 두 번 분석 금지).
+    #   커버리지 검사(사진 수만큼 [사진N] 존재)로 판별 — 사진 추가/교체·구버전 요약 추측이면 자동 폴백(전수 분석).
+    import re as _re_an
+    _pre_an = (intake.get("analysis") or "").strip()
+    _marks = {int(m) for m in _re_an.findall(r"\[사진(\d+)\]", _pre_an)}
+    if _pre_an and _pcount and all(i in _marks for i in range(1, _pcount + 1)):
+        analysis = _pre_an
+        _prog("photo_analysis", "사진 분석 완료", f"{_pcount}/{_pcount}장 · 업로드 때 분석을 재사용했어요", 0.45)
+    else:
+        analysis = vision.analyze_all(
+            paths, tenant.industry,
+            progress_cb=lambda d, t: _prog("photo_analysis", "사진 분석 중", f"{d}/{t}장",
+                                           0.1 + 0.35 * (d / max(t, 1))))
+        if not (analysis or "").strip():
+            analysis = _pre_an   # 분석 실패(레이트리밋·크레딧) → 프리뷰 추측 폴백
     if analysis:
         # 확인 절차(SEO_CURRENT §5-3): 사용자 확인 없인 '추측' 라벨 + 단정 금지 — 사실로 각인 방지
         from app.services import smart_intake as _si2
@@ -266,11 +272,12 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
                 db.save_piece(blog_piece)
     except Exception:
         pass
-    # 🎬 영상 잡 등록·채널 상태 기록·스폰 — 반드시 블로그 payload 재저장(내부링크·플레이스) 뒤에.
-    # 앞에 두면 재저장이 메모리의 옛 blog 객체로 DB의 video_job/channel_status를 덮어씀(V1 실측 결함).
-    _set_video_job(asset.id, "registered")             # 잡 상태 기록(영상 증발 재발 방지) — 조용한 실종 금지
+    # 🎬 영상 온디맨드 — 자동 생성 폐지: 글이 먼저 완성되고, 영상은 사용자가 홈에서 플랫폼(숏폼·릴스·네이버)을
+    #   골라 요청할 때 생성(request_video_bundle). 렌더 대기·vision/LLM 경합이 글 완성 시간을 늘리지 않는다.
+    #   채널 상태는 not_requested — 워치독은 video_job이 있는 세트만 살피므로 미요청 세트를 부활시키지 않는다.
     from app.services.generate import LAST_ERRORS as _LE
-    _cs = {"naver": {"status": "generating"}, "shorts": {"status": "generating"}, "reels": {"status": "generating"}}
+    _cs = {"naver": {"status": "not_requested"}, "shorts": {"status": "not_requested"},
+           "reels": {"status": "not_requested"}}
     for _k, _ch in KIND_TO_CHANNEL.items():
         if any(p.kind == _k for p in pieces):
             _cs[_ch] = {"status": "done"}
@@ -282,8 +289,11 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
         db.record_gen_duration(tenant.id, max(0.0, _tprog.time() - _t_start))
     except Exception:
         pass
-    _prog("video", "영상 준비 중", "글은 완성됐어요 · 영상 마무리 중", 0.9)
-    _spawn_video_bundle(tenant, asset, paths, brief_public)
+    try:   # 글 완성 = 생성 완료(영상은 온디맨드) — 진행률 즉시 종료
+        db.set_gen_progress(tenant.id, "done", "콘텐츠 완성",
+                            "영상은 목록에서 원하는 플랫폼을 골라 만들 수 있어요", 1.0, status="done")
+    except Exception:
+        pass
     _autopilot(tenant, pieces)
     return pieces
 
@@ -366,6 +376,8 @@ def video_watchdog() -> None:
                 if not blog:
                     continue
                 vj = blog.payload.get("video_job") or {}
+                if not vj:
+                    continue   # 영상 미요청 세트(온디맨드) — 요청된 잡만 부활 대상
                 _rc = int(vj.get("retry_count") or (1 if vj.get("retried") else 0))
                 if vj.get("status") == "done" or _rc >= 2:
                     continue
@@ -454,10 +466,10 @@ def _text_channel_watchdog(log) -> None:
                         _has_short = any(p.kind == ContentKind.SHORT for p in pieces)
                         _nv_ok = any((p.payload or {}).get("naver_video", {}).get("path") for p in pieces
                                      if p.kind == ContentKind.SHORT)
-                        _cs2["shorts"] = {"status": "done" if _has_short else "failed"}
-                        _cs2["reels"] = {"status": "done" if _has_short else "failed"}
-                        _cs2["naver"] = ({"status": "done"} if _nv_ok else
-                                         {"status": "failed", "error": "네이버 영상 미생성(블로그 소급 후 재생성 필요)"})
+                        # 영상 온디맨드: SHORT 부재 = 실패가 아니라 미요청(요청된 잡은 video_watchdog 담당)
+                        _cs2["shorts"] = {"status": "done" if _has_short else "not_requested"}
+                        _cs2["reels"] = {"status": "done" if _has_short else "not_requested"}
+                        _cs2["naver"] = {"status": "done"} if _nv_ok else {"status": "not_requested"}
                         _set_channel_status(row["asset_id"], _cs2)
                     continue
                 cs = dict(blog.payload.get("channel_status") or {})
@@ -471,8 +483,10 @@ def _text_channel_watchdog(log) -> None:
                     _fill = {"insta": any(p.kind == ContentKind.CAPTION for p in pieces),
                              "x": any(p.kind == ContentKind.X_POST for p in pieces),
                              "shorts": _has_s, "reels": _has_s, "naver": _nv}
+                    _vj_req = bool(blog.payload.get("video_job"))   # 영상 잡 요청 이력 유무(온디맨드 판별)
                     _set_channel_status(row["asset_id"], {
-                        ch2: {"status": "done" if ok2 else "failed"}
+                        ch2: {"status": "done" if ok2 else
+                              ("failed" if (ch2 in ("insta", "x") or _vj_req) else "not_requested")}
                         for ch2, ok2 in _fill.items() if ch2 not in cs})
                     cs = dict((next((p.payload.get("channel_status") for p in db.get_set_pieces(row["asset_id"])
                                      if p.kind == ContentKind.BLOG), None)) or cs)
@@ -590,7 +604,36 @@ def _set_video_job(asset_id: str, status: str, error: str = "", retried: bool | 
         logging.exception("[ingest] video_job 기록 실패 asset=%s", asset_id)
 
 
-def _spawn_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: dict) -> None:
+VIDEO_PLATFORMS = ("shorts", "reels", "naver")
+
+
+def request_video_bundle(tenant: Tenant, asset_id: str, want: set[str]) -> tuple[bool, str]:
+    """영상 온디맨드 진입점 — 홈에서 플랫폼(숏폼·릴스·네이버) 선택 요청을 검증 후 백그라운드 렌더.
+    이미 만든 숏폼 렌더는 재사용(릴스 추가 요청 등은 재렌더 없이 빠르게)."""
+    want = {w for w in (want or set()) if w in VIDEO_PLATFORMS}
+    if not want:
+        return False, "만들 플랫폼을 선택해 주세요"
+    pieces = db.get_set_pieces(asset_id)
+    blog = next((p for p in pieces if p.kind == ContentKind.BLOG), None)
+    if not blog:
+        return False, "글이 아직 없는 콘텐츠예요"
+    vj = blog.payload.get("video_job") or {}
+    if vj.get("status") in ("registered", "running", "retrying"):
+        return False, "이미 영상을 만드는 중이에요 — 잠시만 기다려 주세요"
+    asset = db.get_asset(asset_id)
+    if not asset:
+        return False, "콘텐츠를 찾을 수 없어요"
+    paths = _restore_media(tenant.id, blog.payload.get("image_paths") or [])
+    if not paths:
+        return False, "사진 원본을 찾을 수 없어 영상을 만들 수 없어요"
+    _set_video_job(asset_id, "registered")
+    _set_channel_status(asset_id, {ch: {"status": "generating"} for ch in want})
+    _spawn_video_bundle(tenant, asset, paths, blog.payload.get("brief") or {}, want=frozenset(want))
+    return True, ""
+
+
+def _spawn_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: dict,
+                        want=VIDEO_PLATFORMS) -> None:
     """영상(SHORT)+릴스+캐러셀을 별도 스레드에서 생성·저장 — 요청을 막지 않음(폴링/새로고침으로 표시)."""
     import threading
 
@@ -599,59 +642,76 @@ def _spawn_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: d
         with RENDER_SEM:
             try:
                 _set_video_job(asset.id, "running")
-                _make_video_bundle(tenant, asset, paths, brief_public)
+                _make_video_bundle(tenant, asset, paths, brief_public, want=want)
             except Exception as e:
                 import logging
                 logging.exception("[ingest] 비동기 영상 번들 실패 tenant=%s", tenant.id)
                 _set_video_job(asset.id, "failed", error=repr(e))
                 _set_channel_status(asset.id, {ch: {"status": "failed", "error": repr(e)[:150]}
-                                               for ch in ("shorts", "reels", "naver")})
+                                               for ch in want})
     threading.Thread(target=_run, daemon=True).start()
 
 
-def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: dict) -> None:
-    shorts = generate_for(tenant, asset, [ContentKind.SHORT], images=paths)   # 🎬 영상감독
-    for p in shorts:
-        p.payload.setdefault("image_path", paths[0])
-        p.payload.setdefault("biz_type", getattr(tenant, "biz_type", "local") or "local")
-        p.payload.setdefault("region", getattr(tenant, "region", "") or "")
-        p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value, p.payload, source=asset.note)
-        p.payload["reach"] = reach.estimate(p.channel.value, p.kind.value, p.payload)
-        p.payload["brief"] = brief_public
-        p.payload["experts"] = ["🎯 전략가", "✍️ 카피라이터", "🎬 영상감독"]
-        db.save_piece(p)
-    short = next((p for p in shorts if p.kind == ContentKind.SHORT
+def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: dict,
+                       want=VIDEO_PLATFORMS) -> None:
+    want = set(want) or set(VIDEO_PLATFORMS)
+    # 기존 숏폼 렌더 재사용(온디맨드 추가 요청) — 네이버 영상까지 충족되면 재렌더 생략, 아니면 기존 피스 id로 대체 저장
+    _pre = db.get_set_pieces(asset.id)
+    short = next((p for p in _pre if p.kind == ContentKind.SHORT
                   and p.channel == Channel.YOUTUBE and p.payload.get("video_path")), None)
+    _need_naver = "naver" in want and not (short and (short.payload.get("naver_video") or {}).get("path"))
+    if short is None or _need_naver:
+        asset._want_naver = "naver" in want            # 🎬 영상감독이 네이버 렌더 생략 여부 판단(온디맨드)
+        _old_id = short.id if short else ""
+        shorts = generate_for(tenant, asset, [ContentKind.SHORT], images=paths)   # 🎬 영상감독
+        for p in shorts:
+            p.payload.setdefault("image_path", paths[0])
+            p.payload.setdefault("biz_type", getattr(tenant, "biz_type", "local") or "local")
+            p.payload.setdefault("region", getattr(tenant, "region", "") or "")
+            p.payload["ranking_audit"] = seo.quality_audit(p.channel.value, p.kind.value, p.payload, source=asset.note)
+            p.payload["reach"] = reach.estimate(p.channel.value, p.kind.value, p.payload)
+            p.payload["brief"] = brief_public
+            p.payload["experts"] = ["🎯 전략가", "✍️ 카피라이터", "🎬 영상감독"]
+            if _old_id and p.kind == ContentKind.SHORT and p.channel == Channel.YOUTUBE:
+                p.id = _old_id                         # 재렌더는 기존 피스 대체(중복 방지)
+            db.save_piece(p)
+        short = next((p for p in shorts if p.kind == ContentKind.SHORT
+                      and p.channel == Channel.YOUTUBE and p.payload.get("video_path")), None)
     if not short:
         from app.services.generate import LAST_ERRORS
         _err = LAST_ERRORS.get("ContentKind.SHORT", "영상 미생성(로그 참조)")
         _set_video_job(asset.id, "failed", error=_err)
-        _set_channel_status(asset.id, {"shorts": {"status": "failed", "error": _err},
-                                       "reels": {"status": "failed", "error": _err},
-                                       "naver": {"status": "failed", "error": _err}})
+        _set_channel_status(asset.id, {ch: {"status": "failed", "error": _err} for ch in want})
         return
     _set_video_job(asset.id, "done")
-    _set_channel_status(asset.id, {
-        "shorts": {"status": "done"},
-        "naver": ({"status": "done"} if (short.payload.get("naver_video") or {}).get("path")
-                  else {"status": "failed", "error": "네이버 영상 미생성(로그 참조)"})})
+    _cs_done = {}
+    if "shorts" in want:
+        _cs_done["shorts"] = {"status": "done"}
+    if "naver" in want:
+        _cs_done["naver"] = ({"status": "done"} if (short.payload.get("naver_video") or {}).get("path")
+                             else {"status": "failed", "error": "네이버 영상 미생성(로그 참조)"})
+    if _cs_done:
+        _set_channel_status(asset.id, _cs_done)
     saved = db.get_set_pieces(asset.id)
     caption = next((p for p in saved if p.kind == ContentKind.CAPTION), None)
-    reel = ContentPiece(
-        id=str(uuid.uuid4()), tenant_id=tenant.id, asset_id=asset.id,
-        channel=Channel.INSTAGRAM, kind=ContentKind.SHORT,
-        payload={"text": (caption.payload.get("text") if caption else short.payload.get("title", "")),
-                 "title": short.payload.get("title", ""),
-                 "video_path": short.payload.get("video_path"),
-                 "image_path": short.payload.get("image_path"),
-                 "image_paths": short.payload.get("image_paths", []),
-                 "duration_sec": short.payload.get("duration_sec", 0), "is_reel": True,
-                 "target_keywords": short.payload.get("target_keywords", [])},
-        status=ContentStatus.DRAFT)
-    reel.payload["ranking_audit"] = seo.quality_audit(reel.channel.value, reel.kind.value, reel.payload, source=asset.note)
-    reel.payload["reach"] = reach.estimate(reel.channel.value, reel.kind.value, reel.payload)
-    db.save_piece(reel)
-    _set_channel_status(asset.id, {"reels": {"status": "done"}})
+    if "reels" in want:
+        _old_reel = next((p for p in saved if p.kind == ContentKind.SHORT
+                          and p.channel == Channel.INSTAGRAM), None)
+        reel = ContentPiece(
+            id=(_old_reel.id if _old_reel else str(uuid.uuid4())), tenant_id=tenant.id, asset_id=asset.id,
+            channel=Channel.INSTAGRAM, kind=ContentKind.SHORT,
+            payload={"text": (caption.payload.get("text") if caption else short.payload.get("title", "")),
+                     "title": short.payload.get("title", ""),
+                     "video_path": short.payload.get("video_path"),
+                     "image_path": short.payload.get("image_path"),
+                     "image_paths": short.payload.get("image_paths", []),
+                     "duration_sec": short.payload.get("duration_sec", 0), "is_reel": True,
+                     "target_keywords": short.payload.get("target_keywords", [])},
+            status=ContentStatus.DRAFT)
+        reel.payload["ranking_audit"] = seo.quality_audit(reel.channel.value, reel.kind.value, reel.payload, source=asset.note)
+        reel.payload["reach"] = reach.estimate(reel.channel.value, reel.kind.value, reel.payload)
+        db.save_piece(reel)
+        _set_channel_status(asset.id, {"reels": {"status": "done"}})
     # 𝕏 X에도 같은 숏폼 영상 첨부(글 + 영상)
     xp = next((p for p in saved if p.kind == ContentKind.X_POST), None)
     if xp:
