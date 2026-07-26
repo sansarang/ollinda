@@ -57,14 +57,18 @@ _KIND_PROGRESS = {
 def _generate_sequential(tenant: Tenant, asset: Asset, kinds: list[ContentKind],
                          images: list[str] | None = None) -> list[ContentPiece]:
     pieces: list[ContentPiece] = []
+    # 온디맨드 영상(SHORT 단독)은 홈 생성 진행률을 건드리지 않는다 — 영상 진행은 video_job(stage)이
+    # 담당. 안 그러면 '영상 대본 짜는 중 running' 잔상이 영구히 남음(실측).
+    _touch_progress = kinds != [ContentKind.SHORT]
     for kind in kinds:
         try:
             lbl, pct = _KIND_PROGRESS.get(kind, ("콘텐츠 만드는 중", 0.65))
-            try:      # 채널별 세부 진행(사용자가 지금 뭘 만드는지 정확히 — 가짜 60% 스톨 방지)
-                from app import db as _db
-                _db.set_gen_progress(tenant.id, "body", lbl, "", pct)
-            except Exception:
-                pass
+            if _touch_progress:
+                try:  # 채널별 세부 진행(사용자가 지금 뭘 만드는지 정확히 — 가짜 60% 스톨 방지)
+                    from app import db as _db
+                    _db.set_gen_progress(tenant.id, "body", lbl, "", pct)
+                except Exception:
+                    pass
             gen = get_generator(kind)
             pieces.append(gen.generate(tenant, asset, images))
         except Exception as e:

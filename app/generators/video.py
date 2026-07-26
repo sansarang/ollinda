@@ -718,6 +718,96 @@ def _distinctive_objects(descs: dict) -> set:
     return {w for w, c in cnt.items() if 1 <= c <= max(1, n // 2)}
 
 
+_DOC_WORDS = ("서류", "등록증", "기록부", "문서", "증명서", "계약서", "성능점검")
+_EXT_WORDS = ("외관", "전면", "후면", "측면", "전측면", "후측면", "차체", "전체 모습")
+
+
+def _photo_role(desc: str) -> str:
+    """per-photo vision 묘사 → 역할 분류(데이터 유래): doc(서류) / ext(외관 대표컷) / etc."""
+    d = desc or ""
+    if any(w in d for w in _DOC_WORDS):
+        return "doc"
+    if any(w in d for w in _EXT_WORDS):
+        return "ext"
+    return "etc"
+
+
+def _apply_video_grammar(lines: list, imgs: list, orig_imgs: list, gen_source: str,
+                         log_tag: str = "") -> list:
+    """영상 문법 가드(실측 결함 수정 — 서류 풀프레임 남발·자막 불일치·흐름 붕괴):
+    ① 서류 사진은 '서류를 말하는 자막' 씬에만 + 영상 전체 1씬 상한(증거컷 역할만)
+    ② 오프닝·클로징 씬은 외관 우선(비주얼 훅 — 단 그 자막이 서류 얘기면 유지)
+    ③ 배정 없는·부적합 씬은 미사용 비서류 사진으로 대체(순차 끼워넣기 폐지)
+    역할은 per-photo vision 묘사로 분류(데이터 유래). 분석 부재·실패 시 원본 유지(무해)."""
+    try:
+        import logging as _lg
+        import re as _r
+        descs = {}
+        for m in _r.finditer(r"\[사진(\d+)\]\s*([^\n]+)", gen_source or ""):
+            i = int(m.group(1)) - 1
+            if 0 <= i < len(orig_imgs):
+                descs[orig_imgs[i]] = m.group(2)
+        if not descs or not lines:
+            return imgs
+
+        def role(p):
+            return _photo_role(descs.get(p, ""))
+        n = len(lines)
+        out = list(imgs[:n]) + [None] * max(0, n - len(imgs))
+        used = {x for x in out if x}
+        pool = [p for p in orig_imgs if p not in used]
+
+        def take(prefs):
+            for want in prefs:
+                for p in pool:
+                    if role(p) == want:
+                        pool.remove(p)
+                        return p
+            return pool.pop(0) if pool else None
+
+        def is_doc_line(k):
+            return any(w in (lines[k] or "") for w in ("서류", "등록증", "기록부", "점검", "증명", "계약"))
+        doc_used = 0
+        for k in range(n):
+            p = out[k]
+            if p is None:                               # 배정 없음 → 서류 자막이면 서류(상한 내), 아니면 외관
+                if is_doc_line(k) and doc_used < 1:
+                    c = take(("doc", "ext", "etc"))
+                    if c and role(c) == "doc":
+                        doc_used += 1
+                    out[k] = c
+                else:
+                    out[k] = take(("ext", "etc"))
+                continue
+            if role(p) == "doc":
+                if not is_doc_line(k) or doc_used >= 1:  # 서류 자막 아님 or 상한 초과 → 교체
+                    repl = take(("ext", "etc"))
+                    if repl:                             # 대체 불가면 유지(씬-사진 수 정합이 우선)
+                        pool.append(p)
+                        out[k] = repl
+                else:
+                    doc_used += 1
+            elif is_doc_line(k) and doc_used < 1:        # 역방향 교정: 서류 자막인데 비서류 사진
+                repl = take(("doc",))
+                if repl:
+                    pool.append(p)
+                    out[k] = repl
+                    doc_used += 1
+        for k in ((0, n - 1) if n > 1 else (0,)):        # 오프닝·클로징 외관 우선(서류 자막 씬 제외)
+            if out[k] is not None and role(out[k]) != "ext" and not is_doc_line(k):
+                repl = next((p for p in pool if role(p) == "ext"), None)
+                if repl:
+                    pool.remove(repl)
+                    pool.append(out[k])
+                    out[k] = repl
+        out = [x for x in out if x is not None]
+        _lg.getLogger("shopcast.video").info("[grammar:%s] %d씬 roles=%s", log_tag, len(out),
+                                             [role(p) for p in out])
+        return out or imgs
+    except Exception:
+        return imgs
+
+
 def _match_photos(lines: list, imgs: list, gen_source: str, log_tag: str = "",
                   drops: "list | None" = None, axis_vocab: "set | None" = None,
                   subject_vocab: "set | None" = None) -> list:
@@ -1242,7 +1332,9 @@ class ShortVideoGenerator(Generator):
             sent = _seam_dedup(hook, list(sent), outro_cta)   # 최종 이음매 중복 제거(강등·재생성 후 재보증)
             script = SceneScript(hook=hook, sentences=sent, outro=outro_cta, source="caption_llm", evidence=_evidence)
             if _gen_src and sent:                     # 씬 내용 ↔ 사진 vision 태그 매칭(서류 씬=서류 사진 등)
+                _orig_v = list(vid_imgs)
                 vid_imgs = _match_photos(list(sent), vid_imgs, _gen_src, "shorts")
+                vid_imgs = _apply_video_grammar(list(sent), vid_imgs, _orig_v, _gen_src, "shorts")
             video_path, note, dur_sec, cover_path = self._build_scene_video(
                 vid_imgs, script, kws, tenant, strat, title)
             _scene_note = note                                # 씬 경로 결과/오류(진단용)
@@ -1420,6 +1512,7 @@ class ShortVideoGenerator(Generator):
             import re as _rsub                                 # 영상 주제어(모델명 등) → 하드 지시어 제외
             _subjv = {w for w in _rsub.findall(r"[가-힣]{2,}", (kw0 or "") + " " + (kw_nat or ""))
                       if w not in ("중고", "구매", "판매", "추천", "가격", "후기", "정보")}
+            _orig_nv = list(vid_imgs)
             _matched = _match_photos(list(sent), vid_imgs, _gen_src2, "naver-video",
                                      drops=_drops, axis_vocab=_axv, subject_vocab=_subjv)
             _perline = _matched[:len(sent)]                   # 앞부분=자막별 배정(뒤는 미사용 잉여 사진)
@@ -1431,9 +1524,11 @@ class ShortVideoGenerator(Generator):
                 vid_imgs = [_perline[k] for k in _keep]
                 _nlog.warning("[naver-video] 지시어 불일치 %d씬 삭제 → %d씬 남김", len(_drops), len(sent))
             else:
-                vid_imgs = [x for x in _perline if x is not None] or vid_imgs
+                # 순차 끼워넣기 폐지(실측: 자막-사진 불일치 원인) — 정렬 유지, 빈 씬은 문법 가드가 안전 사진으로
+                vid_imgs = list(_perline)
                 if _drops:
-                    _nlog.warning("[naver-video] 지시어 불일치 %d씬 — 하한 미달로 삭제 보류(순차 폴백)", len(_drops))
+                    _nlog.warning("[naver-video] 지시어 불일치 %d씬 — 문법 가드가 안전 사진으로 대체", len(_drops))
+            vid_imgs = _apply_video_grammar(list(sent), vid_imgs, _orig_nv, _gen_src2, "naver-video")
             _nlog.warning("[naver-video] 사진 재배정 %d씬↔%d장", len(sent), len(vid_imgs))
         path, note, dur, _cover = self._build_scene_video(
             vid_imgs, SceneScript(hook=opening, sentences=sent, outro=outro, source="body_excerpt", evidence=body),
