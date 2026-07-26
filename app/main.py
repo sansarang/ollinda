@@ -295,14 +295,22 @@ def _progress_payload(t) -> dict:
             m, s = divmod(int(sec), 60)
             return (f"{m}분 {s}초" if s else f"{m}분") if m else f"{s}초"
         out["range_text"] = f"보통 {_kr(rng[0])}~{_kr(rng[1])} 걸려요"
-    # 지연 안내 — 시작 후 p90 초과면 정직 안내
+    # 느림 사유(정직 안내) — ① AI 재시도(레이트리밋) 최근 발생 시 그 사유, ② p90 초과 시 일반 안내.
+    #    사용자가 '뭘 하는지·왜 느린지' 알아 새로고침을 안 누르게.
+    try:
+        import time as _tm
+        from app import llm as _llm
+        if pr.get("status") == "running" and _llm.LAST_SLOW_TS and (_tm.time() - _llm.LAST_SLOW_TS) < 25:
+            out["slow"] = _llm.LAST_SLOW_REASON or "AI 응답을 기다리는 중이에요"
+    except Exception:
+        pass
     try:
         from datetime import datetime
         started = pr.get("started_at")
-        if rng and started and pr.get("status") == "running":
+        if not out.get("slow") and rng and started and pr.get("status") == "running":
             elapsed = (datetime.utcnow() - datetime.fromisoformat(started[:19])).total_seconds()
             if elapsed > rng[1]:
-                out["slow"] = "평소보다 오래 걸리고 있어요 — 사진이 많거나 분석이 몰려 있어요"
+                out["slow"] = "평소보다 오래 걸리고 있어요 — 사진이 많거나 요청이 몰렸어요 (새로고침 안 하셔도 돼요)"
     except Exception:
         pass
     if pr.get("status") == "failed":

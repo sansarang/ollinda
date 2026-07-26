@@ -44,11 +44,27 @@ def generate_for(tenant: Tenant, asset: Asset, kinds: list[ContentKind],
     return pieces
 
 
+# 채널별 세부 진행 라벨·퍼센트(정직한 표시 — "뭘 하는지 정확히"). 순차 생성이라 채널마다 갱신.
+_KIND_PROGRESS = {
+    ContentKind.BLOG: ("블로그 글 쓰는 중", 0.60),
+    ContentKind.CAPTION: ("인스타 캡션 쓰는 중", 0.70),
+    ContentKind.X_POST: ("X(트위터) 글 쓰는 중", 0.76),
+    ContentKind.MARKETPLACE: ("판매 상세페이지 쓰는 중", 0.80),
+    ContentKind.SHORT: ("영상 대본 짜는 중", 0.84),
+}
+
+
 def _generate_sequential(tenant: Tenant, asset: Asset, kinds: list[ContentKind],
                          images: list[str] | None = None) -> list[ContentPiece]:
     pieces: list[ContentPiece] = []
     for kind in kinds:
         try:
+            lbl, pct = _KIND_PROGRESS.get(kind, ("콘텐츠 만드는 중", 0.65))
+            try:      # 채널별 세부 진행(사용자가 지금 뭘 만드는지 정확히 — 가짜 60% 스톨 방지)
+                from app import db as _db
+                _db.set_gen_progress(tenant.id, "body", lbl, "", pct)
+            except Exception:
+                pass
             gen = get_generator(kind)
             pieces.append(gen.generate(tenant, asset, images))
         except Exception as e:

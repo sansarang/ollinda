@@ -10,6 +10,8 @@ import os
 MODEL = "claude-opus-4-8"
 
 last_finish_reason = ""   # 직전 호출의 stop_reason(생성 절단 검증 V1) — 생성기가 payload에 기록
+LAST_SLOW_TS = 0.0        # 직전 재시도(느림) 시각 — 진행률이 사용자에게 사유 안내
+LAST_SLOW_REASON = ""
 
 
 def _dummy(prompt: str) -> str:
@@ -64,6 +66,12 @@ def call(prompt: str, model: str = MODEL, max_tokens: int = 1200, cache_prefix: 
                                                       _try + 1, _rt, repr(e)[:120])
                 if not _rt or _try == 2:
                     raise
+                global LAST_SLOW_TS, LAST_SLOW_REASON       # 느림 사유 노출(진행률이 사용자에게 안내)
+                _es = repr(e).lower()
+                LAST_SLOW_TS = _t.time()
+                LAST_SLOW_REASON = ("AI 응답이 평소보다 느려요 — 요청이 몰려 잠시 기다리는 중이에요"
+                                    if ("429" in _es or "rate" in _es or "overloaded" in _es) else
+                                    "AI 응답을 기다리는 중이에요 — 잠시만요")
                 _t.sleep(min(2 ** _try * 1.5, 12))         # 지수 백오프(상한 12초)
         raise last
 
