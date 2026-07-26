@@ -149,17 +149,25 @@ def mask_personal_info(path: str) -> int:
         return 0
     try:
         from app import vision
-        # ① 사진 PII(얼굴·번호판·라벨) + ② 문서 식별번호(격자 국소화 — 등록번호·VIN·문서번호). 합집합.
-        boxes = list(vision.detect_personal_info(path))
+        boxes = []
+        # ① 번호판·얼굴 — YOLO 워커 우선(크레딧 독립·엔카 로고 등 브랜드 텍스트 오폭 없음).
+        #    워커 미배포/불통이면 None → 기존 vision으로 폴백(무중단).
+        from app.services import blur_client
+        _wb = blur_client.detect(path) if blur_client.configured() else None
+        if _wb is not None:
+            boxes += _wb                                  # YOLO 번호판·얼굴 박스
+        else:
+            # 폴백: 워커 없을 때만 LLM vision(얼굴·번호판·라벨) + 촬영 번호판 타일
+            boxes += list(vision.detect_personal_info(path))
+            if os.environ.get("SHOPCAST_PLATE_TILE", "1") != "0":
+                try:
+                    boxes += vision.detect_plates_vision(path)
+                except Exception:
+                    pass
+        # ② 문서 식별번호(등록번호·VIN·법인번호) — OCR 담당(워커와 무관, 항상 실행).
         if os.environ.get("SHOPCAST_DOC_PII", "1") != "0":
             try:
                 boxes += vision.detect_document_pii(path)
-            except Exception:
-                pass
-        # ③ 번호판 전용 타일 패스 — 큰 페이지/사진 속 촬영 실물 번호판(점검부·매물 사진) 국소화.
-        if os.environ.get("SHOPCAST_PLATE_TILE", "1") != "0":
-            try:
-                boxes += vision.detect_plates_vision(path)
             except Exception:
                 pass
         if not boxes:
