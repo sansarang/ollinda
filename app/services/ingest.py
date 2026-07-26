@@ -17,7 +17,8 @@ from app.strategies import resolve_strategy, ordered_kinds, kind_rank
 def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
                   kinds: list[ContentKind] | None = None,
                   target_kw: str = "", angle: str = "",
-                  intake: dict | None = None) -> list[ContentPiece]:
+                  intake: dict | None = None,
+                  pre_cleaned_idx: "set[int] | None" = None) -> list[ContentPiece]:
     """files: [(bytes, filename), ...] 여러 장. 1소스(여러 사진) → 멀티채널 생성.
     target_kw: 진단에서 고른 미노출 키워드 — 블로그 제목·본문이 이 키워드를 겨냥(상위노출 PHASE 1).
     angle: 후기형(review)/방법형(howto)/가격형(price) 앵글 — 스마트블록 다중진입용.
@@ -57,25 +58,42 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
             db.set_gen_progress(tenant.id, stage, label, detail, pct, new=new)
         except Exception:
             pass
-    # 라벨 정직 분리(실측 지적): 이 구간의 실작업은 '분석'이 아니라 '수정'(워터마크 제거·개인정보 가림·보정).
-    _prog("photo_edit", "사진 보정 중", f"0/{_pcount}장 · 워터마크 제거·개인정보 가림", 0.04, new=True)
-    # ✨ 사진 자동 보정(전문가 톤) + 검색노출용 EXIF·GPS 메타 삽입. 보정본을 R2에도 재미러.
+    # 사진 EXIF 메타(검색노출) + 선행 보정(stash) 집합 — 보정 실행은 아래 트랙 분기에서.
+    _pre_set = {paths[i] for i in (pre_cleaned_idx or set()) if 0 <= i < len(paths)}
     try:
-        from app.media import photo_boost
         _kws = seo.target_keywords(tenant.industry, tenant.region, note, limit=6)
-        _meta = {
-            "description": (f"{tenant.region} {tenant.industry} - {tenant.name}").strip(" -"),
-            "keywords": ", ".join(_kws) if _kws else f"{tenant.region} {tenant.industry}".strip(),
-            "artist": tenant.name,
-            "lat": getattr(tenant, "lat", None), "lon": getattr(tenant, "lon", None),
-        }
-        photo_boost.enhance_all(paths, tenant.industry, _meta,
-                                progress_cb=lambda d, t: _prog(
-                                    "photo_edit", "사진 보정 중",
-                                    f"{d}/{t}장 · 워터마크 제거·개인정보 가림", 0.04 + 0.26 * (d / max(t, 1))))
     except Exception:
-        import logging as _lgm
-        _lgm.getLogger("shopcast.ingest").warning("[ingest] 사진 보정 실패(무시) — 미러는 별도 보장")
+        _kws = []
+    _meta = {
+        "description": (f"{tenant.region} {tenant.industry} - {tenant.name}").strip(" -"),
+        "keywords": ", ".join(_kws) if _kws else f"{tenant.region} {tenant.industry}".strip(),
+        "artist": tenant.name,
+        "lat": getattr(tenant, "lat", None), "lon": getattr(tenant, "lon", None),
+    }
+    # ★ 두-트랙 분기(사장님 설계): 업로드 확인 분석([사진N] 전수)이 있으면 글쓰기에 사진 파일이 필요 없다 →
+    #   보정(워터마크·개인정보·화질)은 별도 트랙(백그라운드)으로 돌리고 글쓰기를 즉시 시작.
+    #   분석을 다시 해야 하는 폴백은 기존 직렬 유지 — 마스킹 끝난 사진을 분석해야 개인정보가 분석문에 안 실린다.
+    import re as _re_an
+    _pre_an = (intake.get("analysis") or "").strip()
+    _marks = {int(m) for m in _re_an.findall(r"\[사진(\d+)\]", _pre_an)}
+    _missing = [i for i in range(1, _pcount + 1) if i not in _marks]
+    _full_reuse = bool(_pre_an and _pcount and not _missing)
+    if _full_reuse:
+        _prog("photo_edit", "사진 준비 중", "보정(워터마크·개인정보)은 뒤에서 병렬로 진행돼요", 0.05, new=True)
+    else:
+        # 폴백 직렬: 보정(블로킹) → 분석. 라벨 정직 분리 — 이 구간 실작업은 '수정'이다.
+        _prog("photo_edit", "사진 보정 중", f"0/{_pcount}장 · 워터마크 제거·개인정보 가림", 0.04, new=True)
+        try:
+            from app.media import photo_boost
+            _pre_n = len(_pre_set)
+            _lab_edit = (f"미리 보정 {_pre_n}장 재사용 · " if _pre_n else "") + "워터마크 제거·개인정보 가림"
+            photo_boost.enhance_all(paths, tenant.industry, _meta, pre_cleaned=_pre_set,
+                                    progress_cb=lambda d, t: _prog(
+                                        "photo_edit", "사진 보정 중",
+                                        f"{d}/{t}장 · {_lab_edit}", 0.04 + 0.26 * (d / max(t, 1))))
+        except Exception:
+            import logging as _lgm
+            _lgm.getLogger("shopcast.ingest").warning("[ingest] 사진 보정 실패(무시) — 미러는 별도 보장")
     # ★ R2 미러 = 원본 영구 보존의 핵심 → 보정 성패와 무관하게 '항상' 실행 + 실패 로그(조용한 누락 금지).
     #   설계상 로컬은 캐시라 미러가 없으면 로컬 만료 시 진짜 소실된다.
     if storage.r2_configured():
@@ -100,13 +118,11 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
     # 👁 비전(사진분석 단일화): 업로드 확인 단계가 이미 전 장수를 per-photo([사진N])로 분석했으면
     #   그걸 그대로 재사용 → 생성 시 vision 0콜(같은 사진 두 번 분석 금지).
     #   커버리지 검사(사진 수만큼 [사진N] 존재)로 판별 — 사진 추가/교체·구버전 요약 추측이면 자동 폴백(전수 분석).
-    import re as _re_an
-    _pre_an = (intake.get("analysis") or "").strip()
-    _marks = {int(m) for m in _re_an.findall(r"\[사진(\d+)\]", _pre_an)}
-    _missing = [i for i in range(1, _pcount + 1) if i not in _marks]
-    if _pre_an and _pcount and not _missing:
+    if _full_reuse:
         analysis = _pre_an
-        _prog("photo_analysis", "사진 분석 완료", f"{_pcount}/{_pcount}장 · 업로드 때 분석을 재사용했어요", 0.45)
+        _prog("photo_analysis", "사진 분석 완료", f"{_pcount}/{_pcount}장 · 업로드 때 분석을 재사용했어요", 0.3)
+        # 🖌 두 번째 트랙 가동 — 보정은 글쓰기와 병렬. 끝나면 R2 재미러(끼워 맞추기 = 같은 경로의 파일 완성).
+        _spawn_photo_edit(tenant, asset.id, paths, _pre_set, _meta)
     elif _pre_an and _marks and len(_missing) < _pcount:
         # 부분 재사용 — 업로드 확인이 일부 장수만 분석한 경우(구버전 페이지 6장 등): 있는 분석은
         # 버리지 않고 빠진 장수만 추가 분석해 병합(같은 사진 재분석 0 원칙 유지).
@@ -352,6 +368,101 @@ def _autopilot(tenant: Tenant, pieces: list[ContentPiece]) -> None:
         db.set_piece_status(p.id, ContentStatus.APPROVED)
         p.status = ContentStatus.APPROVED
         publish_and_record(p)
+
+
+# ── 🖌 사진 보정 두 번째 트랙(사장님 설계) — 글쓰기와 병렬, 완료 시 R2 재미러 ─────────────
+PHOTO_EDIT_JOBS: dict = {}   # asset_id → {"finished": bool, "ts": float}
+
+
+def _edit_flag_path(tenant_id: str, asset_id: str) -> str:
+    return os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), tenant_id,
+                        f".edit_pending_{asset_id}.json")
+
+
+def photo_edit_pending(asset_id: str, tenant_id: str = "") -> bool:
+    """이 세트의 사진 보정이 아직 안 끝났는가 — 다운로드 가드·키트 배너용.
+    재시작으로 잡이 죽었으면 플래그 파일이 남아 있다(스윕이 마무리)."""
+    j = PHOTO_EDIT_JOBS.get(asset_id)
+    if j is not None:
+        return not j.get("finished")
+    if tenant_id:
+        return os.path.exists(_edit_flag_path(tenant_id, asset_id))
+    return False
+
+
+def _spawn_photo_edit(tenant: Tenant, asset_id: str, paths: list, pre_set: set, meta: dict) -> None:
+    """보정(워터마크 제거·개인정보 가림·화질·EXIF)을 별도 스레드로 — 글쓰기를 막지 않는다.
+    플래그 파일 선기록: 재시작으로 스레드가 죽어도 크론 스윕이 마무리(개인정보 마스킹 보증)."""
+    import json as _j
+    import threading
+    import time as _tm
+    flag = _edit_flag_path(tenant.id, asset_id)
+    try:
+        os.makedirs(os.path.dirname(flag), exist_ok=True)
+        with open(flag, "w") as f:
+            _j.dump({"paths": paths, "pre": sorted(pre_set), "industry": tenant.industry,
+                     "meta": {k: v for k, v in (meta or {}).items() if isinstance(v, (str, int, float))},
+                     "ts": _tm.time()}, f)
+    except Exception:
+        pass
+    PHOTO_EDIT_JOBS[asset_id] = {"finished": False, "ts": _tm.time()}
+
+    def _run():
+        import logging
+        try:
+            from app.media import photo_boost
+            photo_boost.enhance_all(paths, tenant.industry, meta, pre_cleaned=pre_set)
+            for p in paths:                     # 보정본으로 R2 재미러(업로드 시 원본 미러를 덮음)
+                try:
+                    storage.mirror_to_r2(p)
+                except Exception:
+                    pass
+        except Exception:
+            logging.getLogger("shopcast.ingest").exception("[photo-edit] 병렬 보정 실패 asset=%s", asset_id)
+        finally:
+            PHOTO_EDIT_JOBS[asset_id] = {"finished": True, "ts": _tm.time()}
+            try:
+                os.remove(flag)
+            except Exception:
+                pass
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def photo_edit_sweep() -> None:
+    """(재시작 보증) 서버 재시작으로 죽은 병렬 보정 잡 마무리 — 30분 크론(fresh_index)에 얹음.
+    플래그 파일이 5분 넘게 남아 있고 이 프로세스에 살아있는 잡이 없으면 보정을 다시 돌린다."""
+    import glob
+    import json as _j
+    import logging
+    import time as _tm
+    log = logging.getLogger("shopcast.ingest")
+    root = os.environ.get("SHOPCAST_STORAGE", "storage")
+    try:
+        for flag in glob.glob(os.path.join(root, "*", ".edit_pending_*.json")):
+            try:
+                if _tm.time() - os.path.getmtime(flag) < 300:
+                    continue                          # 방금 시작한 잡일 수 있음(5분 유예)
+                aid = os.path.basename(flag).replace(".edit_pending_", "").replace(".json", "")
+                j = PHOTO_EDIT_JOBS.get(aid)
+                if j is not None and not j.get("finished"):
+                    continue                          # 이 프로세스에서 진행 중 — 중복 실행 금지
+                d = _j.load(open(flag))
+                paths2 = [p for p in (d.get("paths") or []) if p and os.path.exists(p)]
+                if paths2:
+                    from app.media import photo_boost
+                    photo_boost.enhance_all(paths2, d.get("industry") or "", d.get("meta") or None,
+                                            pre_cleaned=set(d.get("pre") or ()))
+                    for p in paths2:
+                        try:
+                            storage.mirror_to_r2(p)
+                        except Exception:
+                            pass
+                    log.warning("[photo-edit-sweep] 죽은 보정 잡 마무리 asset=%s (%d장)", aid, len(paths2))
+                os.remove(flag)
+            except Exception:
+                log.exception("[photo-edit-sweep] 처리 실패 flag=%s", flag)
+    except Exception:
+        log.exception("[photo-edit-sweep] 스캔 실패")
 
 
 def _restore_media(tenant_id: str, paths: list) -> list:

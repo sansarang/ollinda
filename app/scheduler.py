@@ -105,6 +105,11 @@ def _fresh_index_check() -> None:
         video_watchdog()                    # 죽은 영상 잡 감지·1회 재시도(같은 30분 주기에 얹음)
     except Exception:
         logging.getLogger("shopcast.video").exception("[video-watchdog] 크론 실패")
+    try:
+        from app.services.ingest import photo_edit_sweep
+        photo_edit_sweep()                  # 재시작으로 죽은 병렬 사진 보정 마무리(개인정보 마스킹 보증)
+    except Exception:
+        logging.getLogger("shopcast.ingest").exception("[photo-edit-sweep] 크론 실패")
 
 
 def _rss_autosync() -> None:

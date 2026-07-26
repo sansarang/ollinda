@@ -984,6 +984,94 @@ def _spawn_profile_gen(industry: str) -> bool:
     return True
 
 
+# ── 사진 보정 선행(개선 ③) — 사진 선택 직후 원본을 선업로드받아 느린 정리(워터마크·개인정보)를
+#    백그라운드로 미리 실행. '만들기' 시점엔 끝나 있어 생성 체감이 준다. 미완료·실패는 기존 경로 폴백(무해).
+_INTAKE_STASH: dict = {}
+import threading as _stash_th
+_INTAKE_STASH_LOCK = _stash_th.Lock()
+_INTAKE_STASH_SEM = _stash_th.BoundedSemaphore(
+    max(1, int(os.environ.get("SHOPCAST_PHOTO_CONCURRENCY", "4"))))   # 동시 preclean 상한(vision 폭주 방지)
+
+
+def _stash_dir() -> str:
+    import tempfile
+    d = os.path.join(tempfile.gettempdir(), "intake_stash")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _stash_prune() -> None:
+    """2시간 지난 stash 파일·엔트리 정리(디스크 누수 방지)."""
+    import time as _tm
+    now = _tm.time()
+    try:
+        d = _stash_dir()
+        for f in os.listdir(d):
+            fp = os.path.join(d, f)
+            if now - os.path.getmtime(fp) > 7200:
+                os.remove(fp)
+    except Exception:
+        pass
+    with _INTAKE_STASH_LOCK:
+        for k in [k for k, e in _INTAKE_STASH.items() if now - e.get("ts", 0) > 7200]:
+            _INTAKE_STASH.pop(k, None)
+
+
+@app.post("/api/intake/stash")
+async def intake_stash(request: Request, token: str = Form(""), photo: UploadFile = File(...)):
+    """사진 1장 선업로드 → 전체 해상도 JPEG 정규화 후 preclean(워터마크 제거+PII 마스킹)을 백그라운드 시작.
+    반환 key를 폼 제출 시 stash_keys로 되돌려주면 업로드 핸들러가 보정본을 재사용한다."""
+    u = auth.current_user(request)
+    tenant = db.get_tenant(u["tenant_id"]) if (u and u.get("tenant_id")) else None
+    if tenant is None and token.strip():
+        tenant, _ = db.get_tenant_by_token(token.strip())
+    if tenant is None:
+        return JSONResponse({"ok": False}, status_code=401)
+    from app import ratelimit
+    ip = (request.headers.get("cf-connecting-ip")
+          or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+          or (request.client.host if request.client else "") or "unknown")
+    if not ratelimit.allow("stash:" + ip, 80, 600):
+        return JSONResponse({"ok": False, "error": "rate"}, status_code=429)
+    files = await _read_image_uploads([photo], limit=1)
+    if not files:
+        return JSONResponse({"ok": False}, status_code=400)
+    _stash_prune()
+    import time as _tm
+    import uuid as _uu
+    data, fname = files[0]
+    key = _uu.uuid4().hex
+    p = os.path.join(_stash_dir(), key + ".jpg")
+    with _INTAKE_STASH_LOCK:
+        _INTAKE_STASH[key] = {"path": p, "done": False, "cleaned": False,
+                              "ts": _tm.time(), "tid": tenant.id}
+
+    def _run():
+        entry = _INTAKE_STASH.get(key) or {}
+        try:
+            with _INTAKE_STASH_SEM:
+                # 전체 해상도 유지 JPEG 정규화(HEIC·회전 흡수) — 실패 시 cleaned=False로 두면
+                # 제출 시 이 stash를 안 쓰고 원본 경로가 정상 처리(개인정보 마스킹 누락 봉쇄).
+                import io as _io
+                try:
+                    from pillow_heif import register_heif_opener
+                    register_heif_opener()
+                except Exception:
+                    pass
+                from PIL import Image as _Im, ImageOps as _IOps
+                im = _IOps.exif_transpose(_Im.open(_io.BytesIO(data))).convert("RGB")
+                im.save(p, "JPEG", quality=92)
+                from app.media import photo_boost as _pb
+                _pb.preclean(p)
+                entry["cleaned"] = True
+        except Exception:
+            logging.getLogger("shopcast.stash").exception("[stash] preclean 실패 key=%s", key[:8])
+        finally:
+            entry["done"] = True
+    _stash_th.Thread(target=_run, daemon=True).start()
+    return JSONResponse({"ok": True, "key": key})
+
+
 @app.post("/api/intake/guess")
 async def intake_guess(request: Request, industry: str = Form(""), purpose: str = Form(""),
                        photos: list[UploadFile] = File(None)):
@@ -5611,9 +5699,23 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
             "<p class='text-xs text-amber-600 mb-3'>영상 파일이 정리돼 지금은 받을 수 없어요 — 아래 버튼으로 다시 만들면 바로 받을 수 있어요 (1~2분).</p>"
             f"<form method=post action='/kit/{asset_id}/regen-naver'>"
             f"<button class='{cbtn} bg-emerald-600 hover:bg-emerald-700'>🎬 네이버 영상 다시 만들기</button></form>")
+    # 두-트랙 보정 진행 배너 — 병렬 보정이 아직이면 알림(사진은 같은 주소로 완성본 교체됨)
+    _edit_banner = ""
+    try:
+        from app.services.ingest import photo_edit_pending as _pep
+        if _pep(asset_id, pieces[0].tenant_id):
+            _edit_banner = ("<div class='flex items-center gap-2 bg-amber-50 border border-amber-200 "
+                            "rounded-xl px-3 py-2.5 mb-3 text-sm text-amber-700'>"
+                            "<span class='inline-block w-4 h-4 border-2 border-amber-300 border-t-amber-600 "
+                            "rounded-full animate-spin flex-shrink-0'></span>"
+                            "사진 보정(워터마크 제거·개인정보 가림)을 마무리하는 중이에요 — "
+                            "잠시 후 새로고침하면 최종 사진으로 바뀝니다. 다운로드는 완료 후 진행돼요.</div>")
+    except Exception:
+        pass
     body = (
         "<a href='javascript:history.back()' class='inline-block text-sm text-slate-500 font-bold mb-2'>← 결과로</a>"
-        f"<div class='text-sm text-indigo-500 font-bold'>{esc(sname)}</div>"
+        + _edit_banner
+        + f"<div class='text-sm text-indigo-500 font-bold'>{esc(sname)}</div>"
         "<h1 class='text-2xl font-extrabold text-slate-900 mb-1'>네이버 블로그에 올리기</h1>"
         "<p class='text-slate-400 text-sm mb-5'>① 제목·본문 복사해서 붙여넣기 → ② 사진을 순서대로 저장 → ③ 본문 <b>[📷 사진N 위치]</b>에 네이버 사진버튼으로 올리기</p>"
         # 근거 카드(trust PHASE 3) — 본문 위쪽, 접힘 기본(복붙 흐름 무간섭·읽기 전용)
@@ -5942,6 +6044,20 @@ def _fetch_local_or_r2(path: str):
     return None
 
 
+def _wait_photo_edit(asset_id: str, tenant_id: str = "", timeout: int = 60) -> bool:
+    """(두-트랙 안전장치) 병렬 사진 보정 미완료면 최대 timeout초 대기 — 워터마크·번호판이
+    남은 원본이 다운로드로 나가는 것을 방지. 완료(또는 잡 없음) True, 타임아웃 False."""
+    import time as _tm
+    from app.services.ingest import photo_edit_pending
+    t0 = _tm.time()
+    while photo_edit_pending(asset_id, tenant_id):
+        if _tm.time() - t0 > timeout:
+            logging.getLogger("shopcast.kit").warning("[pack] 보정 대기 타임아웃 asset=%s", asset_id)
+            return False
+        _tm.sleep(2)
+    return True
+
+
 def _zip_bytes(entries) -> bytes:
     """ZIP을 메모리에서 생성(디스크 미사용). 로컬 삭제된 사진·영상은 R2에서 받아 포함."""
     import zipfile
@@ -6042,6 +6158,7 @@ def kit_pack(request: Request, asset_id: str, pid: str):
     if _blk:
         return _blk
     _st = _contam_status(pieces)                              # D-3: 영상 표면 오염이면 영상만 제외(글·사진은 유지)
+    _wait_photo_edit(asset_id, pieces[0].tenant_id)           # 병렬 보정 미완료 사진 유출 방지
     imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
     imgs = _ordered_imgs_for_pack(pieces, imgs)               # 글 흐름순 사진 정렬
     _nv = None if _st["video_dirty"] else _set_naver_video(pieces)
@@ -6060,6 +6177,7 @@ def kit_pack_all(request: Request, asset_id: str):
     if _blk:
         return _blk
     _st = _contam_status(pieces)                              # D-3: 영상 표면 오염이면 영상만 제외(글·사진·타채널 유지)
+    _wait_photo_edit(asset_id, pieces[0].tenant_id)           # 병렬 보정 미완료 사진 유출 방지
     imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
     imgs = _ordered_imgs_for_pack(pieces, imgs)               # 글 흐름순 사진 정렬(아무 순서로 올려도 글 순서대로)
     _slug = _set_slug(pieces)
@@ -8619,6 +8737,7 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
       <div><label class='{lb}'>5. 사진 확인·정보 <span class='text-slate-400 font-normal text-xs'>(선택 · 넣을수록 글이 구체적으로 좋아져요)</span></label>
         <input type=hidden name=confirmed id=pg_confirmed><input type=hidden name=intent id=pg_intent><input type=hidden name=vision_analysis id=pg_vision>
         <input type=hidden name=answers id=pg_answers><input type=hidden name=experience id=pg_experience>
+        <input type=hidden name=stash_keys id=pg_stashkeys>
         <div id=pg_guess class='mb-2'></div>
         <div id=pg_questions class='mb-2'></div>
         <input name=note maxlength=50 oninput="var c=document.getElementById('reqc');if(c)c.textContent=this.value.length+'/50';" placeholder='꼭 반영할 요청 (예: 급매 강조 / 차분한 톤)' class='{inp}'>
@@ -8632,7 +8751,15 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
           "if(v==='seller'){if(q)q.placeholder='내 상품/스토어 링크 붙여넣기 (또는 상품명)';if(h)h.innerHTML='내 상품 링크를 붙이면 그게 손님이 갈 <b>판매 링크</b>가 돼요. 링크 없으면 상품명으로 검색(정보만) 후 <b>내 링크는 직접 입력</b>.';}"
           "else{if(q)q.placeholder='가게 이름 (자동 인식)';if(h)h.innerHTML='';}}"
           "var PM={f:[],drag:-1};"
-          "function pmSync(){var dt=new DataTransfer();PM.f.forEach(function(x){dt.items.add(x);});document.getElementById('up_photos').files=dt.files;}"
+          + f"var UPTOK='{token}';"
+          # 사진 보정 선행(개선 ③): 사진이 목록에 들어오는 즉시 원본을 서버에 선업로드 → 서버가
+          # 백그라운드로 워터마크 제거·개인정보 가림을 미리 실행. 제출 시 키를 돌려줘 보정본 재사용.
+          "PM.sk=new WeakMap();"
+          "async function pmStash(f){try{var fd=new FormData();fd.append('token',UPTOK);fd.append('photo',f);"
+          "var d=await (await fetch('/api/intake/stash',{method:'POST',body:fd})).json();"
+          "PM.sk.set(f,(d&&d.ok&&d.key)?d.key:'');}catch(e){PM.sk.set(f,'');}}"
+          "function pmStashAll(){PM.f.forEach(function(x){if(!PM.sk.has(x)){PM.sk.set(x,'pending');pmStash(x);}});}"
+          "function pmSync(){var dt=new DataTransfer();PM.f.forEach(function(x){dt.items.add(x);});document.getElementById('up_photos').files=dt.files;pmStashAll();}"
           "function pmDel(i){PM.f.splice(i,1);pmRender();if(typeof pdOffer==='function')pdOffer();}"
           "function pmAdd(){document.getElementById('up_photos').click();}"
           "function pmDrop(target){if(PM.drag<0)return;var it=PM.f.splice(PM.drag,1)[0];if(target>PM.f.length)target=PM.f.length;if(target<0)target=0;PM.f.splice(target,0,it);PM.drag=-1;pmRender();}"
@@ -8705,6 +8832,8 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
           "document.querySelectorAll('input[name=purpose]').forEach(function(r){r.addEventListener('change',paidQuestions);});"
           "var f=document.querySelector('form[action$=\"/upload\"]');"
           "if(f)f.addEventListener('submit',function(e){var b=document.getElementById('pd_submit');if(b&&b.disabled){e.preventDefault();return;}var a=document.getElementById('pg_answers');if(a)a.value=JSON.stringify(window.__intakeAnswers||{});"
+          "var sk=document.getElementById('pg_stashkeys');"
+          "if(sk)sk.value=JSON.stringify(PM.f.map(function(x){var k=PM.sk.get(x);return (k&&k!=='pending')?k:'';}));"
           "var e1=document.getElementById('pg_exp'),e2=document.getElementById('pg_experience');if(e1&&e2)e2.value=e1.value||'';});})();"
           "function fillStore(d){document.getElementById('s_name').value=d.name||'';document.getElementById('s_industry').value=d.industry||'';"
           "var bz=(d.type==='seller')?'seller':'local';document.getElementById('s_biz').value=bz;bizFields(bz);"
@@ -8784,7 +8913,8 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
                  s_map: str = Form(""), s_market: str = Form(""), s_brand: str = Form(""),
                  s_search: str = Form(""), target_kw: str = Form(""), angle: str = Form(""),
                  confirmed: str = Form(""), vision_analysis: str = Form(""),
-                 answers: str = Form(""), experience: str = Form(""), intent: str = Form("")):
+                 answers: str = Form(""), experience: str = Form(""), intent: str = Form(""),
+                 stash_keys: str = Form("")):
     tenant, _ = db.get_tenant_by_token(token)
     if not tenant:
         return HTMLResponse("<p>잘못된 링크입니다.</p>", status_code=404)
@@ -8809,6 +8939,24 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
     files = await _read_image_uploads(photos)
     if not files:
         return HTMLResponse("<p>이미지 파일을 한 장 이상 올려주세요. (jpg·png·webp·heic, 최대 25MB)</p>", status_code=400)
+    # 선행 보정(개선 ③) 회수: stash가 이미 정리(워터마크·개인정보)한 장은 보정본 바이트로 대체하고
+    # 인덱스를 표시 — ingest가 그 장의 느린 정리를 스킵. 미완료·실패·불일치는 원본 그대로(안전 폴백).
+    _pre_idx: set = set()
+    if stash_keys.strip():
+        try:
+            import json as _sj
+            _keys = _sj.loads(stash_keys)
+            for _i, _k in enumerate(_keys if isinstance(_keys, list) else []):
+                if _i >= len(files) or not _k:
+                    continue
+                _e = _INTAKE_STASH.get(str(_k))
+                if (_e and _e.get("tid") == tenant.id and _e.get("done") and _e.get("cleaned")
+                        and os.path.exists(_e.get("path", ""))):
+                    with open(_e["path"], "rb") as _sf:
+                        files[_i] = (_sf.read(), os.path.basename(_e["path"]))
+                    _pre_idx.add(_i)
+        except Exception:
+            _pre_idx = set()
     # 사진 설명·목적·요청(최대 50자)을 메모에 합쳐 AI 생성 품질↑
     parts = []
     if photo_desc.strip():
@@ -8879,7 +9027,7 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
             made = ingest_upload(tenant, files, _note2,
                                  target_kw=target_kw.strip()[:40],
                                  angle=(angle.strip() if angle.strip() in ("review", "howto", "price") else ""),
-                                 intake=_intake)
+                                 intake=_intake, pre_cleaned_idx=_pre_idx)
             if made and _q_claim:
                 _bp = next((p for p in made if p.kind.value == "blog"), None)
                 from app import db as _db3
