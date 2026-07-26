@@ -241,6 +241,20 @@ def refill(t, plan: str = "free") -> dict:
             _wide = " ".join(tk for tk in (t.region or "").split()
                              if not __import__("re").search(r"(군|구|읍|면)$", tk))
             seeds = [x for x in (ind0, f"{_wide} {ind0}".strip()) if x]
+            # 🏔 헤드 빌드업(계층 공략): 롱테일 10위 내 달성 키워드의 부모('부산 중고차'류)를 시드에 —
+            #   이긴 공식을 상위 지역으로 확장. 실검색량 게이트·앵글 정렬은 기존 그대로.
+            try:
+                from app import seo as _seo
+                for _kw in db.tracked_keywords(t.id, limit=8):
+                    _h = ([h for h in db.rank_history(t.id, _kw, kind="post") if h.get("rank")]
+                          or [h for h in db.rank_history(t.id, _kw, kind="blog_search") if h.get("rank")])
+                    if _h and _h[-1]["rank"] and _h[-1]["rank"] <= 10:
+                        _par = _seo.parent_keyword(_kw, t.region or "")
+                        if _par and _par not in seeds:
+                            seeds.append(_par)
+                            _log.info("[autoqueue] 헤드 빌드업 시드 t=%s %r→%r", t.id, _kw, _par)
+            except Exception:
+                pass
             for st in _sb.subtopics(seeds, min_volume=MIN_QUEUE_VOLUME, limit=8):
                 if _skip_kw(t, st["keyword"]):
                     continue

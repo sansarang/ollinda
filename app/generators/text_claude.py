@@ -154,6 +154,15 @@ class BlogDraftGenerator(Generator):
             industry=(getattr(tenant, "industry", "") or prof.name), region=tenant.region or "",
             note=asset.note or "", biz=_biz_g, content_type=_ctype, brand=tenant.brand_name or "",
             keyword_axis=strat.keyword_axis, target_kw_override=tkw, tenant_id=tenant.id, prof_name=prof.name)
+        # 🏔 헤드 빌드업(계층 공략): '부산 기장 중고차'의 부모('부산 중고차') 정확 구문을 글에 심어
+        #   헤드 키워드 형태소·스마트블록 진입 재료 확보. kws 편입 → 태그·순위 추적 자동 편승.
+        _parent_kw = ""
+        try:
+            _parent_kw = seo.parent_keyword(kw0, tenant.region or "")
+            if _parent_kw:
+                kws = list(dict.fromkeys(list(kws) + [_parent_kw]))[:10]
+        except Exception:
+            _parent_kw = ""
         if tkw:
             kplan["longtail"] = []      # 1글 1키워드(자동 글감 큐): 타깃 외 키워드 소제목 헤딩화 금지
         # ★ canonical_region — 지역 토큰 단일 소스(검색량 실측 + 기초지역 배제).
@@ -203,6 +212,9 @@ class BlogDraftGenerator(Generator):
             "[필수 섹션] ① '## 자주 묻는 질문'(Q&A 정확히 3쌍) ② 가격대/영업시간/찾아오는길을 마크다운 표(| 항목 | 내용 |) 1개 "
             "③ '## 한눈 요약'(핵심 3줄 목록 — GEO).\n"
             + _kw_natural_directive(kw0, _creg)
+            + (f"[상위 확장 키워드] '{_parent_kw}' — 이 정확 구문(연속된 그대로)을 첫 문단에 자연스럽게 1회, "
+               "본문에서 1~2회만 더 스치게 써라(도배 금지). 제목 후보 3안 중 1개에도 자연스러우면 포함하라. "
+               "소제목(##)에는 쓰지 마라(1글 1키워드 유지).\n" if _parent_kw else "")
             + "[입력 원문 노출 금지] 업종/키워드 입력이 '썬팅,광택'처럼 쉼표 나열형이면 제목·본문에 원문 그대로 "
             "박지 말고 자연어로 풀어 써라(예: '썬팅과 광택', '썬팅·광택 시공').\n"
             + (f"[연관 표현] '{', '.join(kplan['longtail'])}' 는 본문 문장 속에 자연스럽게 1회씩만 스치게 써라 — "

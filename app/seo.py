@@ -316,6 +316,47 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
     return cands[0] if cands else fallback
 
 
+def parent_keyword(kw: str, region: str = "") -> str:
+    """계층 공략(헤드 빌드업, 실측 요구 2026-07-26) — '광역+기초+업종' 키워드에서 기초지역을 뺀
+    상위 변형. 예: '부산 기장 중고차판매' → '부산 중고차판매' / 실검색량이 더 큰 자연 축약형
+    ('부산 중고차')이 있으면 그쪽 선택(searchad 실측, 무키 시 원형 유지). 도출 불가면 ''."""
+    toks = (kw or "").split()
+    if len(toks) < 3:
+        return ""
+    rtoks = (region or "").split()
+    base_stems = set()
+    for t in rtoks[1:]:                                    # region 둘째 토큰부터 = 기초지역 후보
+        core = re.sub(r"(특별자치시|특별자치도|광역시|자치도|군|구|읍|면|시)$", "", t)
+        if len(core) >= 2:
+            base_stems.add(core)
+    drop_i = None
+    for i, t in enumerate(toks[1:], 1):
+        core = re.sub(r"(군|구|읍|면)$", "", t)
+        if re.search(r"(군|구|읍|면)$", t) or core in base_stems:
+            drop_i = i
+            break
+    if drop_i is None:
+        return ""
+    parent = " ".join(toks[:drop_i] + toks[drop_i + 1:]).strip()
+    if not parent or parent == kw or len(parent.split()) < 2:
+        return ""
+    cands = [parent]
+    tail = parent.split()[-1]                              # 업종어 자연 축약 변형(판매·매매 등 접미 제거)
+    short_tail = re.sub(r"(판매|매매|업체|전문점|전문)$", "", tail)
+    if short_tail and short_tail != tail and len(short_tail) >= 2:
+        cands.append(" ".join(parent.split()[:-1] + [short_tail]))
+    if len(cands) > 1:
+        try:
+            from app.services import searchad
+            if searchad.configured():
+                vols = {(v.get("keyword") or "").replace(" ", ""): (v.get("total") or 0)
+                        for v in searchad.keyword_volumes(cands)}
+                cands.sort(key=lambda c: -(vols.get(c.replace(" ", ""), 0)))
+        except Exception:
+            pass
+    return cands[0]
+
+
 def keyword_intent_ok(kw: str, industry: str, biz: str, content_type: str, note: str = "") -> bool:
     """키워드-소재 의도 정합 검증(제목 개선 ①) — 검색량이 커도 '이 글이 그 검색의 답이 되는' 키워드만.
     실측 결함: '자동차판매순위'(브랜드 판매량 통계 의도)가 중고 매물 글 타깃으로 선정 → 제목 어색 + 이탈 유발.
