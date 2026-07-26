@@ -737,9 +737,11 @@ def _regen_text_piece(tenant: Tenant, asset, kind: ContentKind, ref) -> bool:
     return True
 
 
-def _set_video_job(asset_id: str, status: str, error: str = "", retried: bool | None = None) -> None:
+def _set_video_job(asset_id: str, status: str, error: str = "", retried: bool | None = None,
+                   stage: str = "") -> None:
     """영상 잡 상태를 블로그 피스 payload.video_job에 기록(영상 증발 재발 방지).
-    registered→running→done/failed(+사유). 실패·미실행이 조용히 사라지는 구조 금지."""
+    registered→running→done/failed(+사유). stage=진행 단계 문구(온디맨드 진행률 표시).
+    실패·미실행이 조용히 사라지는 구조 금지."""
     try:
         from datetime import datetime
         blog = next((p for p in db.get_set_pieces(asset_id) if p.kind == ContentKind.BLOG), None)
@@ -747,6 +749,8 @@ def _set_video_job(asset_id: str, status: str, error: str = "", retried: bool | 
             return
         vj = dict(blog.payload.get("video_job") or {})
         vj.update({"status": status, "ts": datetime.utcnow().isoformat()})
+        if stage or status in ("done", "failed"):
+            vj["stage"] = stage
         if error:
             vj["error"] = error[:200]
         if retried is not None:
@@ -795,7 +799,7 @@ def _spawn_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: d
         from app.generators.video import RENDER_SEM   # 동시 렌더 상한(ffmpeg 폭주 방지, PHASE 12)
         with RENDER_SEM:
             try:
-                _set_video_job(asset.id, "running")
+                _set_video_job(asset.id, "running", stage="영상 대본·렌더링 중 (몇 분 걸려요)")
                 _make_video_bundle(tenant, asset, paths, brief_public, want=want)
             except Exception as e:
                 import logging

@@ -384,8 +384,23 @@ def me_video_status(request: Request, asset_id: str = ""):
     ps = db.get_set_pieces(asset_id)
     blog = next((p for p in ps if p.kind.value == "blog"), None)
     cs = (blog.payload.get("channel_status") or {}) if blog else {}
+    vj = (blog.payload.get("video_job") or {}) if blog else {}
     return JSONResponse({"ok": True, "status": {
-        ch: ((cs.get(ch) or {}).get("status") or "") for ch in ("shorts", "reels", "naver")}})
+        ch: ((cs.get(ch) or {}).get("status") or "") for ch in ("shorts", "reels", "naver")},
+        "job": {"status": vj.get("status") or "", "stage": vj.get("stage") or "",
+                "error": (vj.get("error") or "")[:120]}})
+
+
+@app.get("/admin/video-status/{asset_id}")
+def admin_video_status(asset_id: str):
+    """운영 진단 — 세트의 video_job·channel_status 원본(실패 사유 확인용)."""
+    ps = db.get_set_pieces(asset_id)
+    blog = next((p for p in ps if p.kind.value == "blog"), None)
+    if not blog:
+        return JSONResponse({"ok": False, "error": "블로그 피스 없음"}, status_code=404)
+    return JSONResponse({"ok": True, "video_job": blog.payload.get("video_job") or {},
+                         "channel_status": blog.payload.get("channel_status") or {},
+                         "has_short": any(p.kind.value == "short" for p in ps)})
 
 
 @app.post("/admin/gowatch/seed-demo")
@@ -4834,12 +4849,31 @@ def _result_naver_video(pieces, asset_id: str) -> str:
                     + _player + _action + "</div>")
         blog = next((p for p in pieces if p.kind == _CKr.BLOG), None)
         vj = (blog.payload.get("video_job") or {}) if blog else {}
-        if vj.get("status") in ("registered", "running", "retrying"):   # 실패·부재는 생략(무한 '만드는 중' 방지)
-            return ("<div class='mt-3 flex items-center gap-2 text-xs text-slate-400'>"
-                    "<span class='inline-block w-3 h-3 border-2 border-slate-300 border-t-indigo-500 rounded-full animate-spin'></span>"
-                    "영상 만드는 중이에요 (몇 분 걸려요) — 완성되면 여기에 나타나요</div>")
-        # 영상 온디맨드 — 네이버 영상은 블로그 카드 안이 자리(별도 채널 카드 없음) → 여기서 바로 생성 버튼
+        if vj.get("status") in ("registered", "running", "retrying"):   # 진행 중 — 단계 문구 + 폴링(완성 시 자동 갱신)
+            _stg = esc(vj.get("stage") or "영상 만드는 중이에요 (몇 분 걸려요)")
+            return ("<div class='mt-3'><div class='flex items-center gap-2 text-sm text-slate-600'>"
+                    "<span class='inline-block w-4 h-4 border-2 border-slate-300 border-t-indigo-500 rounded-full animate-spin flex-shrink-0'></span>"
+                    f"🎬 <b>네이버 영상 만드는 중</b> — <span id='nvVjStage'>{_stg}</span></div>"
+                    "<div class='text-xs text-slate-400 mt-1'>완성되면 이 자리에 자동으로 나타나요 (화면 안 닫아도 돼요)</div>"
+                    f"<script>(function(){{var n=0;var iv=setInterval(async function(){{n++;if(n>240){{clearInterval(iv);return;}}"
+                    f"try{{var d=await (await fetch('/me/video/status?asset_id={esc(asset_id)}')).json();"
+                    "var j=(d&&d.job)||{};var el=document.getElementById('nvVjStage');"
+                    "if(el&&j.stage)el.textContent=j.stage;"
+                    "if(j.status==='done'||j.status==='failed'){clearInterval(iv);location.reload();}"
+                    "}catch(_){}},5000);})();</script></div>")
         _cs_nv = (((blog.payload.get("channel_status") or {}).get("naver") or {}).get("status") or "") if blog else ""
+        if vj.get("status") == "failed" or _cs_nv == "failed":          # 실패 — 조용히 사라지지 않기(버그 실측): 사유+재시도
+            return ("<div class='mt-3'><div class='text-sm text-slate-600 mb-1'>😢 영상을 만들지 못했어요 — 다시 시도할 수 있어요</div>"
+                    + (f"<div class='text-[11px] text-slate-400 mb-2'>{esc((vj.get('error') or '')[:80])}</div>" if vj.get("error") else "")
+                    + "<button type='button' class='w-full px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-900 "
+                    "text-white text-sm font-bold transition' "
+                    "onclick=\"(async function(b){b.disabled=true;var fd=new FormData();"
+                    "fd.append('asset_id','" + esc(asset_id) + "');fd.append('platforms','naver');"
+                    "try{var d=await (await fetch('/me/video/make',{method:'POST',body:fd})).json();"
+                    "if(d.ok){location.reload();}else{alert(d.error||'요청에 실패했어요');b.disabled=false;}}"
+                    "catch(e){alert('요청에 실패했어요');b.disabled=false;}})(this)\">"
+                    "🎬 네이버 영상 다시 만들기</button></div>")
+        # 영상 온디맨드 — 네이버 영상은 블로그 카드 안이 자리(별도 채널 카드 없음) → 여기서 바로 생성 버튼
         if _cs_nv == "not_requested":
             return ("<div class='mt-3'><div class='text-xs font-bold text-slate-400 mb-1'>네이버용 영상 (블로그 첨부 · 클립 겸용)</div>"
                     "<div class='text-xs text-slate-500 mb-2'>영상은 필요할 때만 만들어요 — 글은 이미 완성!</div>"
@@ -5210,18 +5244,26 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                      if p.kind.value == "blog" and p.payload.get("channel_status")), {}) or {}
     _pending_ch = any((v or {}).get("status") in ("generating", "registered", "failed") and int((v or {}).get("retries") or 0) < 2
                       for v in _cs_poll.values())
-    if _recent and (_pending_ch or not any(p.kind.value == "short" for p in pieces)):
-        _banner = ""
-        if not any(p.kind.value == "short" for p in pieces):     # 배너는 영상 부재 시만(텍스트 재시도엔 카드가 상태 표시)
-            _banner = ("<div class='bg-amber-50 border border-amber-100 text-amber-700 rounded-2xl p-3.5 mb-5 text-sm flex items-center gap-2'>"
-                       "<div class='w-4 h-4 border-2 border-amber-300 border-t-amber-600 rounded-full animate-spin flex-shrink-0'></div>"
-                       "유튜브 쇼츠·인스타 릴스 <b>영상 생성 중…</b> 완성되면 자동으로 나타나요 (이 화면 유지)</div>")
+    # ★ 영상 배너는 '실제 요청된 영상'만(온디맨드) — '영상 부재=생성 중'으로 찍던 가짜 배너(구 자동생성
+    #   잔재, 실측 캡처) 폐지. 진행 단계(stage)도 함께 표시, 완성(sig 변화) 시 자동 새로고침.
+    _CHLAB_V = {"shorts": "유튜브 쇼츠", "reels": "인스타 릴스", "naver": "네이버 영상"}
+    _gen_chs = [c for c in ("shorts", "reels", "naver")
+                if (_cs_poll.get(c) or {}).get("status") in ("generating", "registered")]
+    _banner = ""
+    if _gen_chs:
+        _banner = ("<div class='bg-amber-50 border border-amber-100 text-amber-700 rounded-2xl p-3.5 mb-5 text-sm flex items-center gap-2'>"
+                   "<div class='w-4 h-4 border-2 border-amber-300 border-t-amber-600 rounded-full animate-spin flex-shrink-0'></div>"
+                   f"<div>🎬 {'·'.join(_CHLAB_V[c] for c in _gen_chs)} <b>영상 만드는 중…</b>"
+                   "<span id='vbStage' class='text-amber-600'></span> — 완성되면 자동으로 나타나요</div></div>")
+    if _banner or (_recent and _pending_ch):
         _vid_poll = (_banner
                      + f"<script>(function(){{var base=null,n=0,aid='{asset_id}';"
-                     "var iv=setInterval(async function(){n++;if(n>50){clearInterval(iv);return;}"
+                     "var iv=setInterval(async function(){n++;if(n>240){clearInterval(iv);return;}"
                      "try{var d=await (await fetch('/me/asset/'+aid+'/pieces')).json();"
-                     "if(base===null){base=d.sig;return;}if(d.sig!==base){clearInterval(iv);location.reload();}}catch(_){}"
-                     "},3000);})();</script>")
+                     "if(base===null){base=d.sig;}else if(d.sig!==base){clearInterval(iv);location.reload();return;}"
+                     "var v=await (await fetch('/me/video/status?asset_id='+aid)).json();"
+                     "var s=document.getElementById('vbStage');if(s&&v.job&&v.job.stage)s.textContent=' — '+v.job.stage;"
+                     "}catch(_){}},5000);})();</script>")
     # 🎯 성과 추적 링크/QR — 콘텐츠에 넣으면 유입 집계(리포트와 연결)
     track_box = ""
     try:
