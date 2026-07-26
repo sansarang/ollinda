@@ -8776,6 +8776,10 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
                                     error=traceback.format_exc()[-500:])
             except Exception:
                 pass
+    try:      # ★ 새 생성 시작 즉시 진행률 리셋 — 직전 생성의 낡은 값(84% '영상 대본' 등) 잔상 방지.
+        db.set_gen_progress(tenant.id, "start", "준비 중", "사진 정리 중", 0.02, new=True)
+    except Exception:
+        pass
     import threading
     threading.Thread(target=_bg_generate, daemon=True).start()
     if auth.current_user(req):                     # 로그인 회원 → 대시보드(생성 중 표시)

@@ -94,11 +94,15 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
     if angle in ("review", "howto", "price"):
         asset.angle = angle
     # 👁 비전: 대표 사진을 실제 분석해 생성 프롬프트에 반영(키 없으면 ""). DB엔 원본 메모 유지.
-    # 선추측(intake.analysis) 있으면 재호출 생략 — 같은 사진을 이미 분석함(비용 1콜 유지, PHASE 4)
-    analysis = (intake.get("analysis") or "").strip() or vision.analyze_all(
+    # ★ 전수 per-photo 분석을 항상 1회 실행 — 캡션·사진배치·매칭이 이 [사진N] 하나를 재사용(kit 재분석 0).
+    #   프리뷰 추측(intake.analysis: 6장·요약)을 본분석으로 쓰면 개별 사진 설명이 없어 kit에서 사진을
+    #   하나씩 재분석(중복)하게 됨 → analyze_all(병렬 청크, 순차 재분석보다 빠름)로 단일화. 추측은 실패 폴백만.
+    analysis = vision.analyze_all(
         paths, tenant.industry,
         progress_cb=lambda d, t: _prog("photo_analysis", "사진 분석 중", f"{d}/{t}장",
                                        0.1 + 0.35 * (d / max(t, 1))))
+    if not (analysis or "").strip():
+        analysis = (intake.get("analysis") or "").strip()   # 분석 실패(레이트리밋·크레딧) → 프리뷰 추측 폴백
     if analysis:
         # 확인 절차(SEO_CURRENT §5-3): 사용자 확인 없인 '추측' 라벨 + 단정 금지 — 사실로 각인 방지
         from app.services import smart_intake as _si2

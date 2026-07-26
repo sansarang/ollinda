@@ -318,7 +318,7 @@ class BlogDraftGenerator(Generator):
                      "gen_finish": _last_finish(),      # stop_reason 기록(절단 검증 V1)
                      "title_pick": {"candidates": title_cands[:3], "picked": title,
                                     "why": _pick_why},          # 제목 3안 내부 선택 로그(CTR 4-2 — 유저 비노출)
-                     "gen_source": (asset.note or "")[:4000],   # 날조 대조용 입력 스냅샷(게이트 경로 폴백)
+                     "gen_source": (asset.note or "")[:8000],   # 입력 스냅샷 — [사진N] 전수 보존(kit 캡션·매칭 재사용, 재분석 0)
                      "request_check": request_check,            # '꼭 반영할 요청' 셀프체크(1-3d)
                      "fixed_info_block": fixed_block,      # 발행 화면 컴포넌트 가이드용(템플릿 PHASE 2·3)
                      "raw": raw, "image_path": imgs[0], "image_paths": imgs},
