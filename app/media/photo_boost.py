@@ -91,30 +91,52 @@ def auto_enhance(src: str, out: str | None = None, industry: str = "", meta: dic
         return src
 
 
-def enhance_all(paths: list[str], industry: str = "", meta: dict | None = None) -> int:
+def enhance_all(paths: list[str], industry: str = "", meta: dict | None = None,
+                progress_cb=None) -> int:
     """여러 장 일괄 보정(제자리) + 개인정보 자동 모자이크 + EXIF·GPS 삽입. 보정 성공 개수 반환.
-    ★ 마스킹은 신뢰도 게이트 통과 박스만(오폭 방지). 부착물(type-c)은 미제거 + attached 플래그(UI 경고)."""
+    ★ 마스킹은 신뢰도 게이트 통과 박스만(오폭 방지). 부착물(type-c)은 미제거 + attached 플래그(UI 경고).
+    progress_cb(done,total): 장수 진행 콜백(정직한 표시). 사진별 병렬(기본 4 — 워터마크 vision 콜 대기 겹침)."""
     global _MASK_LAST_LOG
     _MASK_LAST_LOG = []          # 이 배치의 [사진/박스/유형/신뢰도/처리여부] 로그 시작
     attached_photos = []
-    n = 0
-    for p in paths:
-        if p and os.path.exists(p):
-            # ★ 순서 고정: 오버레이 인페인트 → PII 모자이크. 반대로 하면 vision이 방금 씌운
-            #   번호판 모자이크를 '오버레이'로 오인해 LaMa가 그 위를 복원(마스킹 무효화) — 실측 재발 방지.
-            if os.environ.get("SHOPCAST_OVERLAY_REMOVE", "1") != "0":   # 기본 ON. 끄려면 =0
-                try:                                                     # 유형 a 국소 오버레이(신뢰도 게이트)
-                    _r = remove_overlay(p)
-                    if _r.get("attached"):                               # 부착물 가림막 잔존 → UI 경고 대상
+    todo = [p for p in paths if p and os.path.exists(p)]
+    if not todo:
+        return 0
+    import threading as _th
+    _lock = _th.Lock()
+    _done, _ok = [0], [0]
+
+    def _one(p):
+        # ★ 순서 고정: 오버레이 인페인트 → PII 모자이크. 반대로 하면 vision이 방금 씌운
+        #   번호판 모자이크를 '오버레이'로 오인해 LaMa가 그 위를 복원(마스킹 무효화) — 실측 재발 방지.
+        if os.environ.get("SHOPCAST_OVERLAY_REMOVE", "1") != "0":   # 기본 ON. 끄려면 =0
+            try:                                                     # 유형 a 국소 오버레이(신뢰도 게이트)
+                _r = remove_overlay(p)
+                if _r.get("attached"):                               # 부착물 가림막 잔존 → UI 경고 대상
+                    with _lock:
                         attached_photos.append(os.path.basename(p))
-                except Exception:
-                    pass
-            mask_personal_info(p)   # 🔒 번호판·얼굴·전화·라벨 자동 가림(신뢰도 게이트)
-            if auto_enhance(p, p, industry, meta) == p:
-                n += 1
+            except Exception:
+                pass
+        mask_personal_info(p)   # 🔒 번호판·얼굴·전화·라벨 자동 가림(신뢰도 게이트)
+        if auto_enhance(p, p, industry, meta) == p:
+            with _lock:
+                _ok[0] += 1
+        with _lock:
+            _done[0] += 1
+            d = _done[0]
+        if progress_cb:
+            try:
+                progress_cb(d, len(todo))
+            except Exception:
+                pass
+
+    from concurrent.futures import ThreadPoolExecutor
+    _cc = max(1, int(os.environ.get("SHOPCAST_PHOTO_CONCURRENCY", "4")))
+    with ThreadPoolExecutor(max_workers=min(_cc, len(todo))) as _ex:
+        list(_ex.map(_one, todo))
     if attached_photos:                                                  # 배치 요약(호출부가 세트에 경고 저장)
         _MASK_LAST_LOG.append({"src": "summary", "attached_photos": attached_photos})
-    return n
+    return _ok[0]
 
 
 def _pixelate_region(im, box) -> bool:

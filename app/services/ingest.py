@@ -57,7 +57,8 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
             db.set_gen_progress(tenant.id, stage, label, detail, pct, new=new)
         except Exception:
             pass
-    _prog("photo_analysis", "사진 분석 중", f"0/{_pcount}장", 0.06, new=True)
+    # 라벨 정직 분리(실측 지적): 이 구간의 실작업은 '분석'이 아니라 '수정'(워터마크 제거·개인정보 가림·보정).
+    _prog("photo_edit", "사진 보정 중", f"0/{_pcount}장 · 워터마크 제거·개인정보 가림", 0.04, new=True)
     # ✨ 사진 자동 보정(전문가 톤) + 검색노출용 EXIF·GPS 메타 삽입. 보정본을 R2에도 재미러.
     try:
         from app.media import photo_boost
@@ -68,7 +69,10 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
             "artist": tenant.name,
             "lat": getattr(tenant, "lat", None), "lon": getattr(tenant, "lon", None),
         }
-        photo_boost.enhance_all(paths, tenant.industry, _meta)
+        photo_boost.enhance_all(paths, tenant.industry, _meta,
+                                progress_cb=lambda d, t: _prog(
+                                    "photo_edit", "사진 보정 중",
+                                    f"{d}/{t}장 · 워터마크 제거·개인정보 가림", 0.04 + 0.26 * (d / max(t, 1))))
     except Exception:
         import logging as _lgm
         _lgm.getLogger("shopcast.ingest").warning("[ingest] 사진 보정 실패(무시) — 미러는 별도 보장")
@@ -99,14 +103,34 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
     import re as _re_an
     _pre_an = (intake.get("analysis") or "").strip()
     _marks = {int(m) for m in _re_an.findall(r"\[사진(\d+)\]", _pre_an)}
-    if _pre_an and _pcount and all(i in _marks for i in range(1, _pcount + 1)):
+    _missing = [i for i in range(1, _pcount + 1) if i not in _marks]
+    if _pre_an and _pcount and not _missing:
         analysis = _pre_an
         _prog("photo_analysis", "사진 분석 완료", f"{_pcount}/{_pcount}장 · 업로드 때 분석을 재사용했어요", 0.45)
+    elif _pre_an and _marks and len(_missing) < _pcount:
+        # 부분 재사용 — 업로드 확인이 일부 장수만 분석한 경우(구버전 페이지 6장 등): 있는 분석은
+        # 버리지 않고 빠진 장수만 추가 분석해 병합(같은 사진 재분석 0 원칙 유지).
+        _base = _pcount - len(_missing)
+        _prog("photo_analysis", "사진 분석 중", f"{_base}장 재사용 · 나머지 {len(_missing)}장만 분석", 0.32)
+        _mpaths = [paths[i - 1] for i in _missing]
+        part = vision.analyze_all(
+            _mpaths, tenant.industry,
+            progress_cb=lambda d, t: _prog("photo_analysis", "사진 분석 중",
+                                           f"{_base}장 재사용 · 추가 {d}/{t}장",
+                                           0.32 + 0.13 * (d / max(t, 1))))
+        if (part or "").strip():
+            part = _re_an.sub(r"^\[(전체|해석|확신도|선택지)\].*$", "", part, flags=_re_an.M)
+            part = _re_an.sub(r"\[사진(\d+)\]",
+                              lambda m: (f"[사진{_missing[int(m.group(1)) - 1]}]"
+                                         if 0 < int(m.group(1)) <= len(_missing) else m.group(0)), part)
+            analysis = (_pre_an + "\n" + part.strip()).strip()
+        else:
+            analysis = _pre_an   # 추가 분석 실패 → 있는 분석이라도 사용
     else:
         analysis = vision.analyze_all(
             paths, tenant.industry,
             progress_cb=lambda d, t: _prog("photo_analysis", "사진 분석 중", f"{d}/{t}장",
-                                           0.1 + 0.35 * (d / max(t, 1))))
+                                           0.32 + 0.13 * (d / max(t, 1))))
         if not (analysis or "").strip():
             analysis = _pre_an   # 분석 실패(레이트리밋·크레딧) → 프리뷰 추측 폴백
     if analysis:
