@@ -136,20 +136,21 @@ def analyze_all(image_paths: list[str], industry_name: str = "", max_imgs: int =
         return ""
     if len(paths) == 1:
         return analyze(paths[0], industry_name, context)
-    if len(paths) > 6:                                   # 배치 처리(비용·타임아웃·rate limit 관리)
+    if len(paths) > 6:                                   # 배치 처리 — ★청크 병렬(순차 대기 제거)
         import re as _r
-        import time as _t
-        out = []
-        for ci in range(0, len(paths), 6):
+        _idxs = list(range(0, len(paths), 6))
+
+        def _do(ci):
             chunk = paths[ci:ci + 6]
             part = analyze_all(chunk, industry_name, max_imgs=6,
                                context=(context if ci + 6 >= len(paths) else None))  # 해석·[전체]는 마지막 청크만
-            part = _r.sub(r"\[사진(\d+)\]", lambda m: f"[사진{int(m.group(1)) + ci}]", part or "")
-            if part:
-                out.append(part)
-            if ci + 6 < len(paths):
-                _t.sleep(2)
-        return "\n".join(out).strip()
+            return _r.sub(r"\[사진(\d+)\]", lambda m: f"[사진{int(m.group(1)) + ci}]", part or "")
+
+        from concurrent.futures import ThreadPoolExecutor
+        _cc = max(1, int(os.environ.get("SHOPCAST_VISION_CONCURRENCY", "4")))
+        with ThreadPoolExecutor(max_workers=min(_cc, len(_idxs))) as _ex:
+            parts = list(_ex.map(_do, _idxs))               # 입력 순서 보존
+        return "\n".join(p for p in parts if p).strip()
     try:
         imgs64 = []
         for i, p in enumerate(paths):
@@ -228,10 +229,9 @@ def build_catalog(image_paths: list[str], industry_name: str = "", max_imgs: int
     # ② 미캐시만 vision(작은 청크 + 큐) — 큰 청크가 결정적 빈반환 유발(6장 실증), 3장이 안정적. 캐시로 누적.
     _CH = int(os.environ.get("SHOPCAST_CATALOG_CHUNK", "3"))
     _calls, _oks = 0, 0
-    for ci in range(0, len(uncached), _CH):
-        if ci > 0:
-            _tq.sleep(float(os.environ.get("SHOPCAST_VISION_GAP", "6")))
-        chunk = uncached[ci:ci + _CH]
+
+    def _do_chunk(chunk):
+        """청크 1개 vision 분석 → {path:entry}, calls, ok, raw, to_cache. 스레드 안전(공유상태 미변경·DB 미접근)."""
         try:
             imgs64 = [_b64_for_vision(p) for p, _ in chunk]
             prompt = (
@@ -243,15 +243,13 @@ def build_catalog(image_paths: list[str], industry_name: str = "", max_imgs: int
                 '"text":"사진 속 글자 그대로(서류 항목·수치 등, 없으면 빈칸)","shot":"전체|클로즈업",'
                 '"flags":["흐림"|"표식"|"저해상" 중 해당되는 것만, 없으면 빈 배열]}\n'
                 "part는 '이 사진이 무엇을 보여주는 컷인지'다 — 서류 사진은 '서류', 엔진룸 사진은 '엔진룸'으로 정확히.")
-            resp = ""
+            resp, calls = "", 0
             for _try in (1, 2):
                 resp = (_llm.call_task("vision", prompt, 1400, default_model=MODEL, images=imgs64) or "").strip()
-                _calls += 1
+                calls += 1
                 if resp:
                     break
-                _tq.sleep(2)
-            if not _CATALOG_LAST_RAW:
-                _CATALOG_LAST_RAW = resp[:600]
+                _tq.sleep(1)
             m = _r.search(r"\[.*\]", resp, _r.S)
             arr = []
             if m:
@@ -263,17 +261,36 @@ def build_catalog(image_paths: list[str], industry_name: str = "", max_imgs: int
                             arr.append(_j.loads(mm.group(0)))
                         except Exception:
                             pass
-            if arr:
-                _oks += 1
+            res, to_cache = {}, []
             for i, e in enumerate(arr):
                 if isinstance(e, dict) and i < len(chunk):
                     p, _hh = chunk[i]
                     ent = _norm(e)
-                    entries[p] = ent
+                    res[p] = ent
                     if _hh:
-                        _db.save_catalog_cache(_hh, ent)     # 캐시 적재 → 다음 regen 재분석 0
+                        to_cache.append((_hh, ent))
+            return {"entries": res, "calls": calls, "ok": 1 if arr else 0, "raw": resp[:600], "cache": to_cache}
         except Exception:
-            continue
+            return {"entries": {}, "calls": 0, "ok": 0, "raw": "", "cache": []}
+
+    # ★ 청크 병렬 처리(순차 6초 대기 제거) — Sonnet은 rate limit 여유. 캐시 저장은 스레드 밖에서(SQLite 잠금 회피).
+    _chunks = [uncached[ci:ci + _CH] for ci in range(0, len(uncached), _CH)]
+    if _chunks:
+        from concurrent.futures import ThreadPoolExecutor
+        _cc = max(1, int(os.environ.get("SHOPCAST_VISION_CONCURRENCY", "4")))
+        if len(_chunks) == 1:
+            _results = [_do_chunk(_chunks[0])]
+        else:
+            with ThreadPoolExecutor(max_workers=min(_cc, len(_chunks))) as _ex:
+                _results = list(_ex.map(_do_chunk, _chunks))
+        for _r2 in _results:
+            entries.update(_r2["entries"])
+            _calls += _r2["calls"]
+            _oks += _r2["ok"]
+            if not _CATALOG_LAST_RAW and _r2["raw"]:
+                _CATALOG_LAST_RAW = _r2["raw"]
+            for _hh, _ent in _r2["cache"]:                   # 캐시 적재(메인 스레드) → 다음 regen 재분석 0
+                _db.save_catalog_cache(_hh, _ent)
     # ③ 크레딧 고갈 감지 — 미캐시가 있었는데 vision 콜이 전부 빈반환 = 크레딧 고갈 의심(조용한 실패 금지)
     if uncached and _calls > 0 and _oks == 0:
         _CATALOG_CREDIT_EXHAUSTED = True
