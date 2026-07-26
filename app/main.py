@@ -379,7 +379,9 @@ async def admin_gen_test(request: Request, tenant_id: str, photos: list[UploadFi
     files = await _read_image_uploads(photos)
     try:
         made = ingest_upload(t, files, "[진단 테스트]", intake={})
-        return JSONResponse({"ok": True, "pieces": [p.kind.value for p in made], "n": len(made)})
+        from app.services.generate import LAST_ERRORS as _LEd
+        return JSONResponse({"ok": True, "pieces": [p.kind.value for p in made], "n": len(made),
+                             "errors": dict(_LEd)})
     except Exception:
         import traceback
         return JSONResponse({"ok": False, "traceback": traceback.format_exc()[-1500:]}, status_code=500)
