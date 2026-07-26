@@ -4983,6 +4983,8 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                      + f"<div class='px-3.5 py-2 text-sm whitespace-pre-wrap leading-relaxed max-h-44 overflow-y-auto'><b>{esc(sname)}</b> {esc(cap)}</div>"
                      + f"<div class='px-3.5 pb-3.5 flex gap-2'>{pack_btn(p.id, has_video)}{_cp('c_cap', cap, '캡션')}</div></div>")
         elif k == "blog":
+            if "?fromRss=" in (pl.get("body") or ""):     # 구세트 추적 파라미터 — 모든 렌더 경로 공통 정리(메모리 한정)
+                pl["body"] = pl["body"].replace("?fromRss=true&trackingCode=rss", "")
             title = pl.get("selected_title") or pl.get("title", "")   # PHASE B: 선택 제목 우선
             sid = p.id[:5]
             body_part = _re.sub(r"\[사진(\d+)\]", r"⬇⬇ 여기에 사진\1 올리기 ⬇⬇", pl.get("body", "")).strip()
