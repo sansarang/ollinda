@@ -1267,12 +1267,14 @@ class ShortVideoGenerator(Generator):
                 pass
         variants = self._aspect_variants(video_path, out_dir) if video_path else {}
         # 네이버용 정보형 영상(추가 산출물) — 실패해도 릴스·글 흐름에 영향 없음(R1·R3)
+        # 온디맨드: 사용자가 네이버를 선택 안 했으면 렌더 생략(_want_naver=False, ingest가 지정)
         naver_path, naver_meta = None, {}
-        try:
-            naver_path, naver_meta = self._naver_video(tenant, asset, vid_imgs, kws, strat, out_dir)
-        except Exception:
-            import logging
-            logging.getLogger("shopcast.video").exception("[naver-video] 생성 실패 t=%s", tenant.id)
+        if getattr(asset, "_want_naver", True):
+            try:
+                naver_path, naver_meta = self._naver_video(tenant, asset, vid_imgs, kws, strat, out_dir)
+            except Exception:
+                import logging
+                logging.getLogger("shopcast.video").exception("[naver-video] 생성 실패 t=%s", tenant.id)
         # 화질 자동 검사(R3) — 쇼츠도 동일 기준으로 계측(미달은 경고+기록, 발행 흐름은 유지)
         _vq_ok, _vq_spec = (True, {})
         if video_path and os.path.exists(video_path):
