@@ -4986,6 +4986,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
             title = pl.get("selected_title") or pl.get("title", "")   # PHASE B: 선택 제목 우선
             sid = p.id[:5]
             body_part = _re.sub(r"\[사진(\d+)\]", r"⬇⬇ 여기에 사진\1 올리기 ⬇⬇", pl.get("body", "")).strip()
+            body_part = body_part.replace("?fromRss=true&trackingCode=rss", "")   # 구세트 추적 파라미터 정리
             blog_copy = title + "\n\n" + body_part
             topts = [t for t in (pl.get("title_options") or []) if t]
             opts_html = ""
@@ -5596,6 +5597,7 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
     sname = tenant.name if tenant else "내 가게"
     title = blog.payload.get("selected_title") or blog.payload.get("title", "")   # PHASE B: 선택 제목
     body_marked = _re.sub(r"\[사진(\d+)\]", r"\n\n[📷 사진\1 위치]\n\n", blog.payload.get("body", "")).strip()
+    body_marked = body_marked.replace("?fromRss=true&trackingCode=rss", "")   # 구세트 내부링크 추적 파라미터 정리
     _slot_refs = {int(n) for n in _re.findall(r"\[사진(\d+)\]", blog.payload.get("body", ""))}
     if _slot_refs and max(_slot_refs) > len(imgs):     # (정합 2-1) 슬롯 참조 > 사진 수 감지(상시)
         import logging as _lg3
