@@ -234,6 +234,19 @@ def mask_personal_info(path: str) -> int:
                 entry["reason"] = f"conf<{PII_CONF_MIN}"
                 _MASK_LAST_LOG.append(entry)
                 continue
+            # 🛞 번호판 형태 가드(실측: 휠 클로즈업 통째 모자이크): 번호판은 '가로로 긴 소형' 영역 —
+            #   종횡비 < 1.3(정사각·세로형 = 휠·그릴 오폭) 또는 화면 35%+ 박스는 번호판일 수 없다.
+            if (b.get("type") or "") == "plate":
+                try:
+                    _bw = float(b.get("x1", 0)) - float(b.get("x0", 0))
+                    _bh = float(b.get("y1", 0)) - float(b.get("y0", 0))
+                    if _bh > 0 and ((_bw / _bh) < 1.3 or (_bw * _bh) > 0.35):
+                        entry["processed"] = False
+                        entry["reason"] = f"plate-shape-gate(비율 {(_bw / _bh):.2f}·면적 {(_bw * _bh):.2f})"
+                        _MASK_LAST_LOG.append(entry)
+                        continue
+                except Exception:
+                    pass
             done = _pixelate_region(im, b)
             entry["processed"] = bool(done)
             if not done:
