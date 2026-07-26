@@ -261,6 +261,48 @@ def _is_smudge(im, box: dict) -> bool:
         return False
 
 
+def _crop_verify_boxes(tmp: str, prev_boxes: list, max_crops: int = 4) -> list:
+    """제거 영역 확대(60%) 크롭을 줌인 재검 — 흐린 잔해도 크롭에선 잘 검출됨(전체 재검의 미탐 보완).
+    반환: 전체 이미지 좌표(0~1)의 잔해 박스들(패딩 25%·최소 2% 포함). 실패·잔해 없음 → []."""
+    out = []
+    try:
+        from app import vision
+        from PIL import Image as _Im
+        import tempfile
+        import uuid as _uu
+        im = _Im.open(tmp)
+        W, H = im.size
+        for pb in prev_boxes[:max_crops]:
+            bw = pb["x1"] - pb["x0"]; bh = pb["y1"] - pb["y0"]
+            ex0 = max(0.0, pb["x0"] - bw * 0.6); ey0 = max(0.0, pb["y0"] - bh * 0.6)
+            ex1 = min(1.0, pb["x1"] + bw * 0.6); ey1 = min(1.0, pb["y1"] + bh * 0.6)
+            crop = im.crop((int(ex0 * W), int(ey0 * H), int(ex1 * W), int(ey1 * H)))
+            if crop.width < 40 or crop.height < 40:
+                continue
+            cp = os.path.join(tempfile.gettempdir(), f"ovchk_{_uu.uuid4().hex}.jpg")
+            try:
+                crop.convert("RGB").save(cp, "JPEG", quality=90)
+                d = vision.detect_overlay(cp)
+            finally:
+                try:
+                    os.remove(cp)
+                except Exception:
+                    pass
+            if not d.get("present") or d.get("type") != "a":
+                continue
+            for o in (d.get("overlays") or []):
+                if float(o.get("conf", 0.5)) < 0.5:      # 잔해는 위치 사전확률이 강함 → conf 완화
+                    continue
+                fx0 = ex0 + float(o.get("x0", 0)) * (ex1 - ex0); fx1 = ex0 + float(o.get("x1", 0)) * (ex1 - ex0)
+                fy0 = ey0 + float(o.get("y0", 0)) * (ey1 - ey0); fy1 = ey0 + float(o.get("y1", 0)) * (ey1 - ey0)
+                pw = max((fx1 - fx0) * 0.25, 0.02); ph = max((fy1 - fy0) * 0.25, 0.02)
+                out.append({"x0": max(0.0, fx0 - pw), "y0": max(0.0, fy0 - ph),
+                            "x1": min(1.0, fx1 + pw), "y1": min(1.0, fy1 + ph)})
+    except Exception:
+        return out
+    return out
+
+
 def remove_overlay(path: str, out: str | None = None) -> dict:
     """A-2/A-3: 단일 vision 호출로 '지워야 할 불투명 로고·배지'를 모두 받아(overlays 배열) 각각 telea 인페인트로
     제거(한 사진에 코너 로고+중앙 배지 등 다중 대응, 반복 재탐지 스파이럴 없음 → 반사·글레어 과잉제거 방지).
@@ -371,27 +413,12 @@ def remove_overlay(path: str, out: str | None = None) -> dict:
         return rep
     rep["action"] = "inpainted_partial" if skipped_large else "inpainted"
     # 잔해 재검(최대 2회 — 스파이럴 금지): 문구가 박스보다 커서 조각이 남는 undershoot 대응.
-    #   이전 제거 영역 부근(중심점 ±0.08)의 신규 박스만 재인페인트 — 위치 사전확률이 강하므로
-    #   근접 박스는 conf 0.5부터 허용(희미한 반토막 글자는 검출 확신이 낮게 옴). 다른 위치 신규 검출은 무시.
+    #   ★ 전체 이미지 재검은 흐린 반토막 글자를 못 잡는다(실측) → 제거 영역을 60% 확장 크롭해
+    #   '줌인 재검' — 잔해가 화면 대부분을 차지해 확실히 검출됨. 크롭 밖(글레어 등) 신규 검출은 원천 배제.
     try:
         prev = [dict(b) for b, _, _ in gated]
         for _rpass in range(2):
-            det2 = vision.detect_overlay(tmp)
-            resid = []
-            if det2.get("present") and det2.get("type") == "a":
-                for o in (det2.get("overlays") or []):
-                    if float(o.get("conf", 0.5)) < 0.5 or (o.get("coverage") or 1.0) > _REMOVE_MAX_COV:
-                        continue
-                    cx = (float(o.get("x0", 0)) + float(o.get("x1", 0))) / 2
-                    cy = (float(o.get("y0", 0)) + float(o.get("y1", 0))) / 2
-                    if not any(pb["x0"] - 0.08 <= cx <= pb["x1"] + 0.08
-                               and pb["y0"] - 0.08 <= cy <= pb["y1"] + 0.08 for pb in prev):
-                        continue
-                    b2 = {k: float(o.get(k, 0)) for k in ("x0", "y0", "x1", "y1")}
-                    pw2 = max((b2["x1"] - b2["x0"]) * 0.25, 0.03); ph2 = max((b2["y1"] - b2["y0"]) * 0.25, 0.03)
-                    b2["x0"] = max(0.0, b2["x0"] - pw2); b2["x1"] = min(1.0, b2["x1"] + pw2)
-                    b2["y0"] = max(0.0, b2["y0"] - ph2); b2["y1"] = min(1.0, b2["y1"] + ph2)
-                    resid.append(b2)
+            resid = _crop_verify_boxes(tmp, prev)
             if not resid:
                 break
             from app.services import blur_client as _bc2
