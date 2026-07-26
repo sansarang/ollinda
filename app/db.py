@@ -1307,6 +1307,68 @@ def list_tenants_with_blog() -> list:
         return []
 
 
+# ── 🧪 가게 단위 글쓰기 교훈(미노출 개선 루프 — 주방 전용, UI 0개) ─────────────────
+def _ensure_lessons_table(c) -> None:
+    c.execute("CREATE TABLE IF NOT EXISTS tenant_lessons("
+              "id TEXT PRIMARY KEY, tenant_id TEXT, lesson TEXT, source_kw TEXT, "
+              "source_piece_id TEXT, cause TEXT, status TEXT DEFAULT 'active', "
+              "wins INTEGER DEFAULT 0, fails INTEGER DEFAULT 0, "
+              "created_at TEXT, updated_at TEXT)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_lessons_t ON tenant_lessons(tenant_id, status)")
+
+
+def add_lesson(tenant_id: str, lesson: str, source_kw: str = "", source_piece_id: str = "",
+               cause: str = "", status: str = "active") -> str:
+    """교훈 저장. status='none'은 '분석했지만 교훈 없음'(재분석 방지 마커)."""
+    import uuid as _u
+    lid = _u.uuid4().hex[:12]
+    try:
+        with _conn() as c:
+            _ensure_lessons_table(c)
+            c.execute("INSERT INTO tenant_lessons(id, tenant_id, lesson, source_kw, source_piece_id, "
+                      "cause, status, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                      (lid, tenant_id, (lesson or "").strip()[:120], source_kw, source_piece_id,
+                       cause, status, _now(), _now()))
+        return lid
+    except sqlite3.OperationalError:
+        return ""
+
+
+def active_lessons(tenant_id: str, limit: int = 3) -> list[dict]:
+    """생성 주입용 활성 교훈(최신순) — 검증(wins)이 있는 교훈 우선."""
+    try:
+        with _conn() as c:
+            _ensure_lessons_table(c)
+            rows = c.execute("SELECT * FROM tenant_lessons WHERE tenant_id=? AND status='active' "
+                             "AND lesson!='' ORDER BY wins DESC, created_at DESC LIMIT ?",
+                             (tenant_id, limit)).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.OperationalError:
+        return []
+
+
+def lesson_piece_ids(tenant_id: str) -> set:
+    """이미 분석한 발행 piece_id 집합(중복 분석 방지 — status 무관)."""
+    try:
+        with _conn() as c:
+            _ensure_lessons_table(c)
+            rows = c.execute("SELECT source_piece_id FROM tenant_lessons WHERE tenant_id=?",
+                             (tenant_id,)).fetchall()
+        return {r["source_piece_id"] for r in rows if r["source_piece_id"]}
+    except sqlite3.OperationalError:
+        return set()
+
+
+def update_lesson_stats(lesson_id: str, wins: int, fails: int, status: str) -> None:
+    try:
+        with _conn() as c:
+            _ensure_lessons_table(c)
+            c.execute("UPDATE tenant_lessons SET wins=?, fails=?, status=?, updated_at=? WHERE id=?",
+                      (wins, fails, status, _now(), lesson_id))
+    except sqlite3.OperationalError:
+        pass
+
+
 def rank_history(tenant_id: str, keyword: str, kind: str = "", limit: int = 30) -> list[dict]:
     """키워드 순위 이력(오래된→최신) — 성장 그래프·주간 변화 계산용."""
     try:

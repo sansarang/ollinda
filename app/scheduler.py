@@ -110,6 +110,11 @@ def _fresh_index_check() -> None:
         photo_edit_sweep()                  # 재시작으로 죽은 병렬 사진 보정 마무리(개인정보 마스킹 보증)
     except Exception:
         logging.getLogger("shopcast.ingest").exception("[photo-edit-sweep] 크론 실패")
+    try:
+        from app.services import lessons
+        lessons.sweep()                     # 🧪 미노출 자동 개선 — 격차 진단→교훈 적재→검증(UI 0개)
+    except Exception:
+        logging.getLogger("shopcast.lessons").exception("[lessons] 크론 실패")
 
 
 def _rss_autosync() -> None:

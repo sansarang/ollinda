@@ -247,6 +247,26 @@ def admin_gowatch_preview(request: Request, tenant_id: str):
     return HTMLResponse(page)
 
 
+@app.get("/admin/lessons")
+def admin_lessons(tid: str = "", run: str = ""):
+    """운영 진단 — 가게 교훈 목록 + run=1이면 스윕 즉시 실행(크론 대기 없이 검증용)."""
+    from app.services import lessons as _les
+    if run == "1":
+        _les.sweep()
+    out = []
+    try:
+        import sqlite3 as _sq
+        with db._conn() as c:
+            db._ensure_lessons_table(c)
+            q = ("SELECT * FROM tenant_lessons" + (" WHERE tenant_id=?" if tid else "")
+                 + " ORDER BY created_at DESC LIMIT 30")
+            rows = c.execute(q, ((tid,) if tid else ())).fetchall()
+            out = [dict(r) for r in rows]
+    except Exception:
+        pass
+    return JSONResponse({"ok": True, "n": len(out), "lessons": out})
+
+
 @app.get("/admin/kw-intent")
 def admin_kw_intent(kw: str = "", industry: str = "", biz: str = "seller", note: str = ""):
     """운영 진단 — 키워드-소재 의도 정합 게이트(seo.keyword_intent_ok) 단건 판정 확인용."""

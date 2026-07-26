@@ -243,6 +243,13 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
                                "이 키워드·앵글 방향을 참고해 더 강화하라(그대로 복제 금지).")
     except Exception:
         pass
+    try:   # 🧪 실패 학습(미노출 개선 루프) — 가게 단위 교훈을 모든 생성에 조용히 주입(UI 0개)
+        from app.services import lessons as _les
+        _lb = _les.note_block(tenant.id)
+        if _lb:
+            asset.note += _lb
+    except Exception:
+        pass
     brief_public = {k: v for k, v in brief.items() if not k.startswith("_")}
     _prog("body", "본문 작성 중", "", 0.6)
     pieces = generate_for(tenant, asset, kinds, images=paths)   # ✍️ 카피라이터·🎬 영상감독

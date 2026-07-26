@@ -1,0 +1,179 @@
+"""
+🧪 미노출 자동 개선 루프(주방 전용 — UI 0개, 사장님 확정 설계 2026-07-26).
+
+미노출 확정 글(발행 7일+, 순위 30위 밖/색인 실패)을 상위 글과 비교 진단해
+'가게 단위 글쓰기 교훈'을 만들고, 이후 모든 생성(ingest)이 조용히 주입한다.
+검증: 교훈 생성 이후 발행 글의 순위로 wins/fails 집계 — 효과 없으면 자동 폐기(retire).
+사장님에게는 아무것도 안 보임 — 다음 글이 그냥 더 잘 될 뿐.
+
+호출: scheduler._fresh_index_check(30분 크론)에서 sweep(). LLM 콜 상한: 스윕당 2건.
+"""
+from __future__ import annotations
+
+import logging
+from datetime import datetime
+
+from app import db
+
+_log = logging.getLogger("shopcast.lessons")
+
+MAX_ANALYSES_PER_SWEEP = 2      # 스윕당 LLM 진단 상한(비용 가드)
+MAX_ACTIVE = 5                  # 가게당 활성 교훈 상한(프롬프트 과적재 방지)
+UNEXPOSED_DAYS = 7              # 발행 후 이 일수 지나도록 30위 밖이면 미노출 확정
+RETIRE_FAILS = 3                # 교훈 적용 후 미노출 글 3건·성공 0건 → 폐기
+
+
+def _publish_kw(pub: dict) -> str:
+    """발행 글의 타깃 키워드 — blog_publishes.target_kw 우선, 피스 payload 폴백."""
+    kw = (pub.get("target_kw") or "").strip()
+    if kw:
+        return kw
+    try:
+        p = db.get_piece(pub.get("piece_id") or "")
+        return ((p.payload.get("target_keywords") or [""])[0] or "").strip() if p else ""
+    except Exception:
+        return ""
+
+
+def _best_rank(tenant_id: str, kw: str) -> "int | None":
+    hist = [h["rank"] for h in db.rank_history(tenant_id, kw, kind="post") if h.get("rank")]
+    hist += [h["rank"] for h in db.rank_history(tenant_id, kw, kind="blog_search") if h.get("rank")]
+    return min(hist) if hist else None
+
+
+def _days_since(iso: str) -> int:
+    try:
+        return (datetime.utcnow() - datetime.fromisoformat((iso or "")[:19])).days
+    except Exception:
+        return 0
+
+
+def _analyze_gap(tenant, pub: dict, kw: str, cause: str, existing: list[str]) -> str:
+    """격차 진단(LLM 1콜) — 내 글 실측 스탯 + 상위 글 제목·요약 → 일반화된 교훈 한 문장.
+    특정 매물·키워드 고정 금지(다른 소재 글에도 통하는 교훈만). 실패·무키 시 ''."""
+    try:
+        piece = db.get_piece(pub.get("piece_id") or "")
+        title = (pub.get("post_title") or (piece.payload.get("title") if piece else "") or "").strip()
+        body = (piece.payload.get("body") if piece else "") or ""
+        n_imgs = len((piece.payload.get("image_paths") if piece else None) or [])
+        stats = (f"글자수 {len(body)} · 사진 {n_imgs}장 · 표 {'있음' if '|' in body else '없음'} · "
+                 f"FAQ {'있음' if '자주 묻는' in body else '없음'} · 제목 {len(title)}자")
+        from app.services.blogrank import _search_blog
+        top = _search_blog(kw, 10)
+        top_lines = "\n".join(f"- {t['title']} — {t['description'][:60]}" for t in top[:8]) or "(조회 실패)"
+        cause_txt = ("색인 자체가 안 됐다(검색에 등록 실패 — 유사문서·저품질 가능)" if cause == "not_indexed"
+                     else f"색인은 됐지만 {UNEXPOSED_DAYS}일 넘게 30위 밖이다")
+        from app import llm
+        v = llm.call(
+            "너는 네이버 상위노출 분석가다. 우리 가게 블로그 글이 아래 키워드 검색에서 "
+            f"{cause_txt}. 상위 글들과 비교해 원인을 추정하고, '다음 글부터 적용할 교훈' 1개를 만들어라.\n"
+            f"[키워드] {kw}\n[가게 업종] {getattr(tenant, 'industry', '')}\n"
+            f"[우리 글 제목] {title}\n[우리 글 실측] {stats}\n"
+            f"[검색 상위 글 제목·요약]\n{top_lines}\n"
+            f"[기존 교훈(중복 금지)] {' / '.join(existing) or '없음'}\n\n"
+            "규칙: 이 가게의 '다른 소재 글'에도 통하는 일반 교훈만(특정 매물명·이번 키워드를 박지 마라). "
+            "명령형 한 문장 20~60자. 기존 교훈과 겹치거나 확신이 없으면 '없음'만 출력. 교훈 한 줄만 출력.",
+            max_tokens=100)
+        lesson = " ".join((v or "").split()).strip().strip("\"'")
+        if not lesson or lesson == "없음" or not (10 <= len(lesson) <= 90):
+            return ""
+        if any(lesson[:15] in e or e[:15] in lesson for e in existing):   # 근사 중복 방지
+            return ""
+        return lesson
+    except Exception:
+        _log.exception("[lessons] 격차 진단 실패 kw=%r", kw)
+        return ""
+
+
+def _sweep_tenant(tenant, budget: int) -> int:
+    """미노출 확정 글 진단 → 교훈 적재. 남은 LLM 예산 반환."""
+    done = db.lesson_piece_ids(tenant.id)
+    n_active = len(db.active_lessons(tenant.id, limit=MAX_ACTIVE))
+    for pub in db.list_blog_publishes(tenant.id, limit=20):
+        pid = pub.get("piece_id") or ""
+        if not pid or pid in done:
+            continue
+        if _days_since(pub.get("published_at") or "") < UNEXPOSED_DAYS:
+            continue                                     # 아직 판정 전
+        kw = _publish_kw(pub)
+        if not kw:
+            db.add_lesson(tenant.id, "", source_piece_id=pid, cause="no_kw", status="none")
+            continue
+        best = _best_rank(tenant.id, kw)
+        if best is not None and best <= 30:
+            db.add_lesson(tenant.id, "", source_kw=kw, source_piece_id=pid,
+                          cause="exposed", status="none")     # 노출됨 — 교훈 불필요(마커만)
+            continue
+        cause = "not_indexed" if not pub.get("indexed_at") else "unexposed"
+        if budget <= 0 or n_active >= MAX_ACTIVE:
+            break                                        # 다음 스윕에서 계속(비용·과적재 가드)
+        existing = [l["lesson"] for l in db.active_lessons(tenant.id, limit=MAX_ACTIVE)]
+        lesson = _analyze_gap(tenant, pub, kw, cause, existing)
+        budget -= 1
+        db.add_lesson(tenant.id, lesson, source_kw=kw, source_piece_id=pid, cause=cause,
+                      status=("active" if lesson else "none"))
+        if lesson:
+            n_active += 1
+            _log.info("[lessons] 교훈 적재 t=%s kw=%r cause=%s: %s", tenant.id, kw, cause, lesson)
+    return budget
+
+
+def _validate_tenant(tenant) -> None:
+    """교훈 생성 이후 발행 글의 실측 순위로 wins/fails 재계산 — 효과 없으면 폐기."""
+    try:
+        import sqlite3
+        with db._conn() as c:
+            db._ensure_lessons_table(c)
+            rows = c.execute("SELECT * FROM tenant_lessons WHERE tenant_id=? AND status='active' "
+                             "AND lesson!=''", (tenant.id,)).fetchall()
+            lessons = [dict(r) for r in rows]
+    except Exception:
+        return
+    if not lessons:
+        return
+    pubs = db.list_blog_publishes(tenant.id, limit=30)
+    for l in lessons:
+        wins = fails = 0
+        for pub in pubs:
+            if (pub.get("published_at") or "") <= (l.get("created_at") or ""):
+                continue                                 # 교훈 이전 글은 제외
+            kw = _publish_kw(pub)
+            if not kw:
+                continue
+            best = _best_rank(tenant.id, kw)
+            if best is not None and best <= 10:
+                wins += 1
+            elif _days_since(pub.get("published_at") or "") >= UNEXPOSED_DAYS and (best is None or best > 30):
+                fails += 1
+        status = "retired" if (fails >= RETIRE_FAILS and wins == 0) else "active"
+        if wins != l.get("wins") or fails != l.get("fails") or status != "active":
+            db.update_lesson_stats(l["id"], wins, fails, status)
+            if status == "retired":
+                _log.info("[lessons] 교훈 폐기(효과 없음 fails=%d) t=%s: %s", fails, tenant.id, l["lesson"])
+
+
+def sweep() -> None:
+    """30분 크론 진입점 — 블로그 연결 가게 전체를 진단·검증. LLM 콜은 스윕당 상한."""
+    budget = MAX_ANALYSES_PER_SWEEP
+    try:
+        for t in db.list_tenants_with_blog():
+            try:
+                budget = _sweep_tenant(t, budget)
+                _validate_tenant(t)
+            except Exception:
+                _log.exception("[lessons] 가게 스윕 실패 t=%s", getattr(t, "id", "?"))
+    except Exception:
+        _log.exception("[lessons] 스윕 실패")
+
+
+def note_block(tenant_id: str) -> str:
+    """생성 주입용 교훈 블록 — ingest가 모든 생성에서 호출(조용한 반영, UI 없음)."""
+    try:
+        ls = db.active_lessons(tenant_id, limit=3)
+        if not ls:
+            return ""
+        return ("\n[글쓰기 교훈 — 이 가게 글의 실측 분석] 아래 교훈을 이번 글에 자연스럽게 반영하라"
+                "(교훈 문장 자체를 글에 옮기지 마라): "
+                + " / ".join(l["lesson"] for l in ls))
+    except Exception:
+        return ""
