@@ -121,8 +121,19 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
     if _full_reuse:
         analysis = _pre_an
         _prog("photo_analysis", "사진 분석 완료", f"{_pcount}/{_pcount}장 · 업로드 때 분석을 재사용했어요", 0.3)
+        # 분석 앵커 재검 대상: 분석이 로고·워터마크·표식을 언급한 사진 — 선행 보정을 거쳤어도
+        # 제거 검사 1회 강제(탐지 비결정성으로 벽면 브랜딩이 남는 실측 결함 보강).
+        _recheck = set()
+        try:
+            for _mr in _re_an.finditer(r"\[사진(\d+)\]\s*([^\n]+)", analysis or ""):
+                _ir = int(_mr.group(1)) - 1
+                if 0 <= _ir < len(paths) and any(
+                        w in _mr.group(2) for w in ("로고", "워터마크", "브랜드", "표식", "문구", "글자")):
+                    _recheck.add(paths[_ir])
+        except Exception:
+            _recheck = set()
         # 🖌 두 번째 트랙 가동 — 보정은 글쓰기와 병렬. 끝나면 R2 재미러(끼워 맞추기 = 같은 경로의 파일 완성).
-        _spawn_photo_edit(tenant, asset.id, paths, _pre_set, _meta)
+        _spawn_photo_edit(tenant, asset.id, paths, _pre_set, _meta, recheck=_recheck)
     elif _pre_an and _marks and len(_missing) < _pcount:
         # 부분 재사용 — 업로드 확인이 일부 장수만 분석한 경우(구버전 페이지 6장 등): 있는 분석은
         # 버리지 않고 빠진 장수만 추가 분석해 병합(같은 사진 재분석 0 원칙 유지).
@@ -424,9 +435,11 @@ def photo_edit_pending(asset_id: str, tenant_id: str = "") -> bool:
     return False
 
 
-def _spawn_photo_edit(tenant: Tenant, asset_id: str, paths: list, pre_set: set, meta: dict) -> None:
+def _spawn_photo_edit(tenant: Tenant, asset_id: str, paths: list, pre_set: set, meta: dict,
+                      recheck: "set | None" = None) -> None:
     """보정(워터마크 제거·개인정보 가림·화질·EXIF)을 별도 스레드로 — 글쓰기를 막지 않는다.
-    플래그 파일 선기록: 재시작으로 스레드가 죽어도 크론 스윕이 마무리(개인정보 마스킹 보증)."""
+    플래그 파일 선기록: 재시작으로 스레드가 죽어도 크론 스윕이 마무리(개인정보 마스킹 보증).
+    recheck: 분석이 로고·표식을 언급한 사진 — 선행 보정분도 제거 검사 1회 강제."""
     import json as _j
     import threading
     import time as _tm
@@ -435,6 +448,7 @@ def _spawn_photo_edit(tenant: Tenant, asset_id: str, paths: list, pre_set: set, 
         os.makedirs(os.path.dirname(flag), exist_ok=True)
         with open(flag, "w") as f:
             _j.dump({"paths": paths, "pre": sorted(pre_set), "industry": tenant.industry,
+                     "recheck": sorted(recheck or set()),
                      "meta": {k: v for k, v in (meta or {}).items() if isinstance(v, (str, int, float))},
                      "ts": _tm.time()}, f)
     except Exception:
@@ -445,7 +459,8 @@ def _spawn_photo_edit(tenant: Tenant, asset_id: str, paths: list, pre_set: set, 
         import logging
         try:
             from app.media import photo_boost
-            photo_boost.enhance_all(paths, tenant.industry, meta, pre_cleaned=pre_set)
+            photo_boost.enhance_all(paths, tenant.industry, meta, pre_cleaned=pre_set,
+                                    recheck=recheck)
             for p in paths:                     # 보정본으로 R2 재미러(업로드 시 원본 미러를 덮음)
                 try:
                     storage.mirror_to_r2(p)
@@ -485,7 +500,8 @@ def photo_edit_sweep() -> None:
                 if paths2:
                     from app.media import photo_boost
                     photo_boost.enhance_all(paths2, d.get("industry") or "", d.get("meta") or None,
-                                            pre_cleaned=set(d.get("pre") or ()))
+                                            pre_cleaned=set(d.get("pre") or ()),
+                                            recheck=set(d.get("recheck") or ()))
                     for p in paths2:
                         try:
                             storage.mirror_to_r2(p)
