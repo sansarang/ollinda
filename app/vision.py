@@ -230,8 +230,9 @@ def build_catalog(image_paths: list[str], industry_name: str = "", max_imgs: int
     _CH = int(os.environ.get("SHOPCAST_CATALOG_CHUNK", "3"))
     _calls, _oks = 0, 0
 
-    def _do_chunk(chunk):
-        """청크 1개 vision 분석 → {path:entry}, calls, ok, raw, to_cache. 스레드 안전(공유상태 미변경·DB 미접근)."""
+    def _do_chunk(chunk, model=MODEL):
+        """청크 1개 vision 분석 → {path:entry}, calls, ok, raw, to_cache. 스레드 안전(공유상태 미변경·DB 미접근).
+        model: 1차 Haiku(빠름/저렴), 서류·텍스트 사진 재판독은 Sonnet(정확)."""
         try:
             imgs64 = [_b64_for_vision(p) for p, _ in chunk]
             prompt = (
@@ -242,10 +243,11 @@ def build_catalog(image_paths: list[str], industry_name: str = "", max_imgs: int
                 '엔진룸, 실내 대시보드, 휠, 계기판, 서류/성능점검부, 트렁크 등. 특정 업종 어휘 강요 말고 실제 보이는 부위명)",'
                 '"text":"사진 속 글자 그대로(서류 항목·수치 등, 없으면 빈칸)","shot":"전체|클로즈업",'
                 '"flags":["흐림"|"표식"|"저해상" 중 해당되는 것만, 없으면 빈 배열]}\n'
-                "part는 '이 사진이 무엇을 보여주는 컷인지'다 — 서류 사진은 '서류', 엔진룸 사진은 '엔진룸'으로 정확히.")
+                "part는 '이 사진이 무엇을 보여주는 컷인지'다 — 서류 사진은 '서류', 엔진룸 사진은 '엔진룸'으로 정확히. "
+                "★ 서류·계기판·표지판 등 글자가 있으면 text에 숫자·항목까지 정확히 옮겨라.")
             resp, calls = "", 0
             for _try in (1, 2):
-                resp = (_llm.call_task("vision", prompt, 1400, default_model=MODEL, images=imgs64) or "").strip()
+                resp = (_llm.call_task("vision", prompt, 1400, default_model=model, images=imgs64) or "").strip()
                 calls += 1
                 if resp:
                     break
@@ -273,24 +275,50 @@ def build_catalog(image_paths: list[str], industry_name: str = "", max_imgs: int
         except Exception:
             return {"entries": {}, "calls": 0, "ok": 0, "raw": "", "cache": []}
 
-    # ★ 청크 병렬 처리(순차 6초 대기 제거) — Sonnet은 rate limit 여유. 캐시 저장은 스레드 밖에서(SQLite 잠금 회피).
+    def _needs_sonnet(ent):
+        """서류·계기판·텍스트/수치 사진 = 정확 판독 필요 → Sonnet 재판독 대상. 나머지는 Haiku로 확정."""
+        part = ent.get("part") or ""
+        text = ent.get("text") or ""
+        if any(k in part for k in ("서류", "점검", "등록", "문서", "계기", "번호", "명세", "증", "표지", "라벨", "스티커")):
+            return True
+        if text and _r.search(r"\d{2,}", text):              # 의미있는 수치(주행거리·연식 등) → 정확 재판독
+            return True
+        return False
+
+    # ★ 하이브리드: 1차 Haiku(빠름·저렴) 병렬 → 서류/텍스트 사진만 Sonnet 재판독(정확). 캐시는 스레드 밖 저장.
+    _MODEL1 = _llm.HAIKU if os.environ.get("SHOPCAST_CATALOG_HYBRID", "1") != "0" else MODEL
+    from concurrent.futures import ThreadPoolExecutor
+    _cc = max(1, int(os.environ.get("SHOPCAST_VISION_CONCURRENCY", "4")))
+
+    def _run(chs, model):
+        if not chs:
+            return []
+        if len(chs) == 1:
+            return [_do_chunk(chs[0], model)]
+        with ThreadPoolExecutor(max_workers=min(_cc, len(chs))) as _ex:
+            return list(_ex.map(lambda c: _do_chunk(c, model), chs))
+
     _chunks = [uncached[ci:ci + _CH] for ci in range(0, len(uncached), _CH)]
-    if _chunks:
-        from concurrent.futures import ThreadPoolExecutor
-        _cc = max(1, int(os.environ.get("SHOPCAST_VISION_CONCURRENCY", "4")))
-        if len(_chunks) == 1:
-            _results = [_do_chunk(_chunks[0])]
-        else:
-            with ThreadPoolExecutor(max_workers=min(_cc, len(_chunks))) as _ex:
-                _results = list(_ex.map(_do_chunk, _chunks))
-        for _r2 in _results:
-            entries.update(_r2["entries"])
-            _calls += _r2["calls"]
-            _oks += _r2["ok"]
-            if not _CATALOG_LAST_RAW and _r2["raw"]:
-                _CATALOG_LAST_RAW = _r2["raw"]
-            for _hh, _ent in _r2["cache"]:                   # 캐시 적재(메인 스레드) → 다음 regen 재분석 0
-                _db.save_catalog_cache(_hh, _ent)
+    for _r2 in _run(_chunks, _MODEL1):                       # 1차 Haiku
+        entries.update(_r2["entries"])
+        _calls += _r2["calls"]
+        _oks += _r2["ok"]
+        if not _CATALOG_LAST_RAW and _r2["raw"]:
+            _CATALOG_LAST_RAW = _r2["raw"]
+        for _hh, _ent in _r2["cache"]:
+            _db.save_catalog_cache(_hh, _ent)
+    if _MODEL1 != MODEL:                                     # 2차 Sonnet — 서류/텍스트 사진만 재판독
+        _doc = [(p, _hh) for (p, _hh) in uncached if p in entries and _needs_sonnet(entries[p])]
+        _dchunks = [_doc[ci:ci + _CH] for ci in range(0, len(_doc), _CH)]
+        for _r3 in _run(_dchunks, MODEL):
+            entries.update(_r3["entries"])                   # Sonnet 판독으로 교체
+            _calls += _r3["calls"]
+            _oks += _r3["ok"]
+            for _hh, _ent in _r3["cache"]:
+                _db.save_catalog_cache(_hh, _ent)            # 캐시도 Sonnet 판독으로 덮음
+        if _doc:
+            _lgc.getLogger("shopcast.vision").info("[catalog] 하이브리드: Haiku %d장 + Sonnet 재판독 %d장",
+                                                   len(uncached), len(_doc))
     # ③ 크레딧 고갈 감지 — 미캐시가 있었는데 vision 콜이 전부 빈반환 = 크레딧 고갈 의심(조용한 실패 금지)
     if uncached and _calls > 0 and _oks == 0:
         _CATALOG_CREDIT_EXHAUSTED = True
