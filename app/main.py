@@ -2193,28 +2193,8 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
     content = ("<div id='myContent' class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5'>"
                "<h2 class='font-bold text-slate-900 mb-1'>내 콘텐츠</h2>"
                "<p class='text-xs text-slate-400 mb-3'>‘보기’를 누르면 결과가 나와요.</p>" + hist + "</div>")
-    # 성과 데이터(통계 카드 + 최근 키워드)
-    _sets2, _scores, _kws2, _np = db.list_sets(tenant_id=t.id, limit=200), [], [], 0
-    for s in _sets2:
-        for p in db.get_set_pieces(s["asset_id"]):
-            _np += 1
-            sc = (p.payload.get("ranking_audit") or {}).get("score")
-            if isinstance(sc, (int, float)):
-                _scores.append(sc)
-            for k in (p.payload.get("target_keywords") or []):
-                if k and k not in _kws2:
-                    _kws2.append(k)
-    _avg = round(sum(_scores) / len(_scores)) if _scores else 0
-
-    def _statc(icon, chip, num, label):
-        return (f"<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6 flex items-center gap-5'>"
-                f"<div class='w-16 h-16 rounded-2xl flex items-center justify-center text-3xl {chip} flex-shrink-0'>{icon}</div>"
-                f"<div class='min-w-0'><div class='text-4xl sm:text-5xl font-extrabold text-slate-900 leading-none tracking-tight'>{num}</div>"
-                f"<div class='text-sm text-slate-400 font-semibold mt-1.5'>{label}</div></div></div>")
-    stats_row = (("<div class='grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6'>"
-                  + _statc(_ic("package", "w-7 h-7"), "bg-[#EEF2FF] text-indigo-600", len(_sets2), "만든 세트")
-                  + _statc(_ic("grid", "w-7 h-7"), "bg-[#EEF2FF] text-indigo-600", _np, "채널 발행물")
-                  + _statc(_ic("target", "w-7 h-7"), "bg-[#EEF2FF] text-indigo-600", _avg, "평균 노출점수") + "</div>") if _sets2 else "")
+    # ('주방은 보여주지 않는다') 통계 KPI 카드(만든 세트·발행물·평균 노출점수) 삭제 —
+    # 자체 채점·개수는 허영 지표. 사장님에게 의미 있는 건 실측(순위·유입·문의)뿐.
     kw_card = ""    # (auto) '노리는 키워드' 카드 제거
     view = (request.query_params.get("view") or "").strip()
     tab = (request.query_params.get("tab") or "").strip()
@@ -2235,36 +2215,9 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         _kwbox = ""    # (auto) '노리는 키워드' 태그 제거 — AI 내부 재료
         # 키워드 순위 — 페이지 열면 자동 조회(네이버 지역검색)
         _rankbox = ""    # (auto) 키워드 순위 UI 제거 — /me/rank는 엔진 내부용으로 유지
-        # 🔁 상위노출 루프 진행상황(상위노출 PHASE 6) — 진단→타겟생성→발행일관성→순위변화 한눈에
+        # ('주방은 보여주지 않는다') 상위노출 실행 루프 STEP 다이어그램 삭제 —
+        # 제품 설명이지 리포트가 아님. 루프는 우리가 조용히 돌리고, 사장님은 결과만 본다.
         _loopbox = ""
-        try:
-            from app.services import pubcal as _pc
-            _wp2 = _pc.week_plan(t, _plan)
-            _n_pub = len(db.list_blog_publishes(t.id, limit=30))
-            _n_imp = len(db.improving_keywords(t.id))
-            _has_diag = bool((t.industry or "").strip())
-
-            def _step(num, emoji, label, state, sub):
-                on = "border-emerald-300 bg-emerald-50" if state else "border-slate-200 bg-white"
-                return (f"<div class='flex-1 min-w-[130px] rounded-2xl border {on} p-3'>"
-                        f"<div class='text-[10px] font-bold text-slate-400'>STEP {num}</div>"
-                        f"<div class='text-sm font-extrabold text-slate-800'>{emoji} {label}</div>"
-                        f"<div class='text-[11px] text-slate-500 mt-0.5'>{sub}</div></div>")
-            _loopbox = (f"<div class='{_fw} mb-5'>"
-                        "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>상위노출 실행 루프</h2>"
-                        "<p class='text-sm text-slate-400 mb-4'>진단 → 타겟 글 → 꾸준한 발행 → 순위 추적·학습. 올린다가 이 루프를 돌려요.</p>"
-                        "<div class='flex gap-2.5 flex-wrap'>"
-                        + _step(1, _ic("search", "w-4 h-4 mx-auto"), "진단", _has_diag, "AI가 기회를 자동 탐색" if _has_diag else "가게 정보를 설정하세요")
-                        + _step(2, _ic("pen", "w-4 h-4 mx-auto"), "타겟 생성", len(db.list_sets(tenant_id=t.id, limit=1)) > 0,
-                                "미노출 키워드 겨냥 글")
-                        + _step(3, _ic("calendar", "w-4 h-4 mx-auto"), "발행 일관성", _wp2["done"] >= 1,
-                                f"이번 주 {_wp2['done']}/{_wp2['target']}회" + (" · 발행확인 " + str(_n_pub) + "건" if _n_pub else ""))
-                        + _step(4, _ic("refresh", "w-4 h-4 mx-auto"), "추적·학습", _n_imp > 0 or _n_pub > 0,
-                                (f"추적 글 {min(_n_pub, 10)}개 · " if _n_pub else "")
-                                + (f"오른 키워드 {_n_imp}개 → 다음 글에 강화" if _n_imp else "순위 자동추적 중"))
-                        + "</div></div>")
-        except Exception:
-            _loopbox = ""
         # (auto) '놓치는 키워드' 섹션 제거 — 미노출 키워드는 자동 글감 큐(P2)가 처리한다.
         _missbox = ""
         # 🎯 성과 실측 — 추적 링크/QR로 '이 콘텐츠 보고 온 손님' 집계
@@ -2323,26 +2276,32 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 f"<div class='flex-1 flex flex-col items-center gap-1'>"
                 f"<div class='w-full max-w-[26px] rounded-t bg-violet-400' style='height:{max(3, int(44 * d['n'] / _mx))}px'></div>"
                 f"<span class='text-[10px] text-slate-400'>{d['date']}</span></div>" for d in _series)
-            _perfbox = (
-                f"<div class='{_fw} mt-5'>"
-                "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>콘텐츠 성과 · 링크 클릭 실측</h2>"
-                "<p class='text-sm text-slate-500 mb-1'>내가 만든 글에 넣은 링크를 손님이 몇 번 눌렀는지 — "
-                "<b class='text-slate-700'>어느 글이 손님을 데려오는지</b> 보여요.</p>"
-                "<p class='text-sm text-slate-400 mb-4'>집계는 올린다 추적링크 클릭 기준이에요 — "
-                "<b class='text-slate-600'>조회수·체류는 네이버/인스타 앱에서 확인하세요.</b> "
-                "온라인 글(블로그·인스타) 유입과 매장 QR(오프라인) 유입은 구분 집계돼요.</p>"
-                + _top3
-                + "<div class='grid sm:grid-cols-2 gap-6'>"
-                + f"<div><div class='text-sm font-bold text-slate-600 mb-1'>채널별 유입 (30일)</div>{_sp_rows or '<span class=\"text-sm text-slate-400\">아직 유입이 없어요 — 블로그·인스타·매장 QR별로 나눠 보여드려요<div class=\'mt-1.5\'><a href=\'/me\' class=\'text-xs font-semibold text-indigo-600\'>첫 글을 발행하면 여기가 채워져요 — 홈에서 사진을 올려주세요 →</a></div></span>'}</div>"
-                + f"<div><div class='text-sm font-bold text-slate-600 mb-1'>최근 7일 추이</div><div class='flex items-end gap-1.5 h-16'>{_bars}</div></div>"
-                + "</div>" + _visitor_box(t) + "</div>")
+            # ('주방은 보여주지 않는다') 데이터 없으면 카드도 없다 — 유입 0이면 한 줄만.
+            if not _rank3 and not _split:
+                _perfbox = (f"<div class='{_fw} mt-5 text-sm text-slate-400'>"
+                            "글 속 링크·매장 QR로 손님이 오면, 어느 글이 데려왔는지 여기 표시돼요.</div>")
+            else:
+                _perfbox = (
+                    f"<div class='{_fw} mt-5'>"
+                    "<h2 class='text-xl font-extrabold text-slate-900 mb-1'>손님을 데려온 글</h2>"
+                    "<p class='text-xs text-slate-400 mb-4'>올린다 추적링크 클릭 실측 (조회수·체류는 네이버/인스타 앱)</p>"
+                    + _top3
+                    + "<div class='grid sm:grid-cols-2 gap-6'>"
+                    + f"<div><div class='text-sm font-bold text-slate-600 mb-1'>채널별 유입 (30일)</div>{_sp_rows}</div>"
+                    + f"<div><div class='text-sm font-bold text-slate-600 mb-1'>최근 7일 추이</div><div class='flex items-end gap-1.5 h-16'>{_bars}</div></div>"
+                    + "</div>" + _visitor_box(t) + "</div>")
         except Exception:
             _perfbox = ""
         # (auto) 순위 성장(키워드 나열)·키워드 순위·최근 키워드 섹션 제거 — AI 내부 재료.
         # 사장님에게는 '글의 결과'(내 네이버 블로그 글별 순위)와 손님 실측만 보여준다.
-        main_inner = (_sbadge + _ai_summary(t) + stats_row + _loopbox + _missbox
+        # ('주방은 보여주지 않는다') 리포트 = 실측 3층: 한 줄 결산 → 순위(블로그·지도) → 손님 유입.
+        # QR·손님추적 도구는 접힘으로 강등(리포트가 아니라 도구함).
+        _toolfold = (("<details class='mt-5'><summary class='cursor-pointer text-sm font-bold "
+                      "text-slate-500 select-none'>🧰 매장 QR · 손님 추적 도구</summary>"
+                      + _trackbox + "</details>") if _trackbox else "")
+        main_inner = (_sbadge + _ai_summary(t) + _missbox
                       + _blog_connect_card(t, _fw) + _place_card(t, _fw)
-                      + _trackbox + _perfbox)
+                      + _perfbox + _toolfold)
     else:                                                 # ✨ 만들기 (기본) — 완성되면 여기(만들기 대시보드)에 결과 표시
         active = "create"
         _made = (request.query_params.get("made") or "").strip()
@@ -2419,37 +2378,9 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 _due_html = "".join(_cards)
             except Exception:
                 pass
-            if not _due_html:
-                try:
-                    from app.services import autoqueue as _aq2
-                    _st = _aq2.state(t)
-                    if _st.get("need_photos"):
-                        _due_html = ("<div class='flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-5'>"
-                                     f"<span class='text-amber-500'>{_ic('camera', 'w-5 h-5 flex-shrink-0')}</span>"
-                                     "<div class='flex-1 text-sm text-amber-800'><b>다음 글을 만들려면 사진이 필요해요</b> — "
-                                     "가게 사진 3장만 올려주시면 글은 AI가 알아서 써둘게요.</div>"
-                                     "<a href='/me#makebox' class='flex-shrink-0 bg-amber-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>사진 올리기</a></div>")
-                except Exception:
-                    pass
-            # 발행 리듬 리마인드(6-2): 마지막 발행(RSS 실측) 2일↑ 공백 + 준비 글 있음 → 화면 내 텍스트만
-            if not _due_html:
-                try:
-                    from app.services import autoqueue as _aq3
-                    _st3 = _aq3.state(t)
-                    _pubs3 = db.list_blog_publishes(t.id, limit=1)
-                    if _st3.get("ready_unpub") and _pubs3:
-                        from datetime import datetime as _dtr, timedelta as _tdr
-                        _gap = ((_dtr.utcnow() + _tdr(hours=9)).date()
-                                - _dtr.fromisoformat((_pubs3[0].get("published_at") or "")[:19]).date()).days
-                        if _gap >= 2:
-                            _due_html = ("<div class='flex items-center gap-3 bg-violet-50 border border-violet-200 rounded-2xl p-4 mb-5'>"
-                                         f"<span class='text-violet-500'>{_ic('calendar', 'w-5 h-5 flex-shrink-0')}</span>"
-                                         f"<div class='flex-1 text-sm text-violet-800'><b>{'이틀' if _gap == 2 else str(_gap) + '일'} 쉬었어요</b> — "
-                                         "꾸준함이 쌓아온 신호가 아까워요. 오늘 글이 준비돼 있어요.</div>"
-                                         "<a href='/me?tab=content' class='flex-shrink-0 bg-violet-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>준비된 글 보기</a></div>")
-                except Exception:
-                    pass
-            # 사장 언어 전환 카드(PHASE 3) — 발행→클릭→문의. 순위·인용수는 상세(tab=report)로.
+            # ('주방은 보여주지 않는다' 다이어트) '사진 필요'·'N일 쉬었어요' 카드 삭제 —
+            # 할 일 안내는 브리핑 카드 하나가 담당(잔소리·중복 금지). 발행 준비 카드만 유지(실제 할 일).
+            # 결과 한 줄('주방은 보여주지 않는다') — 실측 숫자만 한 줄 + 문의 기록(접힘). 큰 카드 폐지.
             _conv_card = ""
             try:
                 _cv = db.weekly_conversion(t.id)
@@ -2458,39 +2389,28 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                     f"<button name=source value='{s}' class='py-2 rounded-lg bg-slate-100 hover:bg-emerald-100 text-slate-700 text-xs font-bold'>{s}</button>"
                     for s in _srcs)
                 _conv_card = (
-                    "<div class='bg-white rounded-2xl border border-slate-200 shadow-sm p-5 mb-5'>"
-                    "<div class='text-xs font-bold text-slate-400 mb-3'>이번 주 성과 — 블로그 보고 온 손님</div>"
-                    "<div class='flex items-center justify-between text-center'>"
-                    f"<div class='flex-1'><div class='text-2xl font-extrabold text-slate-900'>{_cv['posts']}</div><div class='text-[11px] text-slate-500'>글 발행</div></div>"
-                    "<div class='text-slate-300 px-1'>→</div>"
-                    f"<div class='flex-1'><div class='text-2xl font-extrabold text-indigo-600'>{_cv['clicks']}</div><div class='text-[11px] text-slate-500'>링크 클릭</div></div>"
-                    "<div class='text-slate-300 px-1'>→</div>"
-                    f"<div class='flex-1'><div class='text-2xl font-extrabold text-emerald-600'>{_cv['inquiries']}</div><div class='text-[11px] text-slate-500'>기록된 문의</div></div>"
-                    "</div>"
-                    "<details class='mt-4'><summary class='cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold text-center py-2.5 rounded-xl list-none select-none'>＋ 문의 왔어요 (손님이 연락왔어요)</summary>"
-                    "<form method=post action='/me/inquiry' class='mt-3'>"
-                    "<div class='text-xs text-slate-500 mb-2'>어디 보고 연락 왔나요? (누르면 바로 기록)</div>"
-                    f"<div class='grid grid-cols-5 gap-1.5 mb-2'>{_src_btns}</div>"
-                    "<input name=memo maxlength=200 placeholder='메모(선택, 1줄)' class='w-full border border-slate-200 rounded-lg px-3 py-2 text-sm'>"
+                    "<div class='flex items-center gap-3 bg-white rounded-2xl border border-slate-200 shadow-sm px-4 py-3 mb-5'>"
+                    "<div class='flex-1 text-sm text-slate-700'>이번 주 "
+                    f"발행 <b>{_cv['posts']}</b> · 클릭 <b class='text-indigo-600'>{_cv['clicks']}</b> · "
+                    f"문의 <b class='text-emerald-600'>{_cv['inquiries']}</b></div>"
+                    "<details class='relative'><summary class='cursor-pointer text-xs font-bold text-emerald-600 "
+                    "hover:text-emerald-700 list-none select-none whitespace-nowrap'>＋ 문의 기록</summary>"
+                    "<form method=post action='/me/inquiry' class='absolute right-0 top-7 z-10 bg-white border "
+                    "border-slate-200 rounded-xl shadow-lg p-3 w-64'>"
+                    f"<div class='grid grid-cols-5 gap-1 mb-2'>{_src_btns}</div>"
+                    "<input name=memo maxlength=200 placeholder='메모(선택)' class='w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs'>"
                     "</form></details>"
-                    "<a href='/me?tab=report' class='block text-right text-xs text-slate-400 mt-2 hover:text-slate-600'>순위·인용수 자세히 보기 →</a>"
+                    "<a href='/me?tab=report' class='text-xs text-slate-400 hover:text-slate-600 whitespace-nowrap'>자세히 →</a>"
                     "</div>")
             except Exception:
                 _conv_card = ""
-            # 트랙 B 실경험 배너 — 미등록이면 등록 유도(안내), 등록됐으면 관리 링크
-            _exp_banner = ""
-            try:
-                if not db.has_owner_experience(t.id):
-                    _exp_banner = ("<a href='/me/experience' class='block bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-5 hover:bg-amber-100 transition'>"
-                                   "<div class='text-sm text-amber-800'><b>📝 정보성 글(네이버 AI 브리핑용) 시작하기</b> — "
-                                   "손님이 자주 묻는 질문·답변을 등록하면 사장님 경험이 담긴 정보글이 자동으로 만들어져요.</div></a>")
-                else:
-                    _exp_banner = "<a href='/me/experience' class='block text-right text-xs text-slate-400 mb-2 hover:text-slate-600'>사장님 실경험 답변 관리 →</a>"
-            except Exception:
-                pass
-            main_inner = (greeting + _conv_card + _upsell + _due_html + _exp_banner + _guide_card(t) + _briefing_card(t, _plan) + _notice_html
-                          + _calendar_card(t, _plan)
-                          + _blog_nudge + upload_section
+            # ('주방은 보여주지 않는다' 다이어트) 정보성 글 배너·발행 캘린더 카드 삭제 —
+            # 정보성 글은 리포트의 도구 섹션에서 접근, 발행 리듬은 브리핑(할 일 1개)이 담당.
+            # 시작 가이드는 첫 콘텐츠 전에만(온보딩 끝난 사장님에게 체크리스트 반복 금지).
+            _guide = _guide_card(t) if not db.list_sets(tenant_id=t.id, limit=1) else ""
+            _task = _due_html or _briefing_card(t, _plan)     # 오늘 할 일은 딱 1장(발행 준비 우선)
+            main_inner = (greeting + _conv_card + _upsell + _task + _notice_html
+                          + _guide + _blog_nudge + upload_section
                           + "<div class='mt-5'></div>" + _store_info_card(t))
     # 🆕 새로 추가한 '빈 새 가게'면 실수 대비 '뒤로가기(취소)' 배너
     if t.name == "새 가게" and len(db.list_user_stores(u["id"])) > 1 and not db.list_sets(tenant_id=t.id):
@@ -3135,8 +3055,9 @@ def _blog_connect_card(t, fw: str) -> str:
             if _feed.get("ok") and _feed.get("exists"):
                 _target = (getattr(t, "publish_schedule", 0) or 0) or _cfg.BLOG_WEEKLY_TARGET
                 cons = _bs.posting_consistency(_feed["posts"], weekly_target=_target)
-                _pace = ("<span class='text-emerald-600'>이번 주 목표 달성 ✓ — 꾸준함이 신호를 쌓고 있어요</span>" if cons["on_pace"]
-                         else f"<span class='text-amber-600'>이번 주 {cons['this_week']}/{cons['weekly_target']}회 — 꾸준함이 쌓아온 신호가 아까워요</span>")
+                # ('주방은 보여주지 않는다') 잔소리 삭제 — 숫자만 담백하게
+                _pace = (f"<span class='text-emerald-600'>이번 주 {cons['this_week']}/{cons['weekly_target']}회 ✓</span>"
+                         if cons["on_pace"] else f"이번 주 {cons['this_week']}/{cons['weekly_target']}회")
                 _mx = max(cons["week_counts"] + [1])
                 _bars = "".join(
                     f"<div class='flex flex-col items-center gap-1'><div class='w-7 rounded-t bg-emerald-400' "
@@ -3149,9 +3070,7 @@ def _blog_connect_card(t, fw: str) -> str:
                              f"<div class='text-sm font-bold text-slate-700'>실제 발행 현황(RSS 실측) — {_pace}</div>"
                              f"<div class='text-xs text-slate-400'>연속 {cons['streak_weeks']}주 발행{_gap}</div></div>"
                              f"<div class='flex items-end gap-2 h-14'>{_bars}</div>"
-                             "<div class='text-[10px] text-slate-400 mt-1'>← 4주 전 · · 이번 주 →</div>"
-                             "<p class='text-xs text-slate-500 mt-2'>꾸준한 발행이 네이버 신뢰를 쌓아요. "
-                             f"주 {cons['weekly_target']}회 페이스를 유지해 봐요. (무조건 상위 보장은 아니에요)</p></div>")
+                             "<div class='text-[10px] text-slate-400 mt-1'>← 4주 전 · · 이번 주 →</div></div>")
         except Exception:
             pass
         _wr = db.latest_weekly_report(t.id)
@@ -3235,13 +3154,10 @@ def _blog_connect_card(t, fw: str) -> str:
                 "<input type=hidden name=blog value=''>"
                 "<button class='text-xs text-slate-400 hover:text-rose-500 font-semibold'>연결 해제</button></form>"
                 "</div>"
-                # 네이버 통계 딥링크(방문자 B3) — 조회수·성별연령·유입검색어는 네이버만 보여준다(정직)
-                + ("<div class='flex items-center gap-3 bg-emerald-50/60 border border-emerald-100 rounded-xl px-3.5 py-2.5 mt-3'>"
-                   "<div class='flex-1 text-xs text-slate-600'><b class='text-slate-700'>조회수·성별·연령·유입 검색어</b>는 "
-                   "네이버 블로그 통계에서만 볼 수 있어요. 특히 <b class='text-emerald-700'>유입 검색어</b>를 보세요 — "
-                   "손님이 어떤 말로 검색해 들어왔는지가 곧 다음 글 소재예요.</div>"
-                   f"<a href='https://admin.blog.naver.com/AnalyticsMainView.naver?blogId={esc(t.blog_id)}' target=_blank rel=noopener "
-                   "class='flex-shrink-0 bg-emerald-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl'>네이버 통계 열기 ↗</a></div>")
+                # ('주방은 보여주지 않는다') 통계 교육 배너 삭제 — 딥링크 한 줄만
+                + (f"<a href='https://admin.blog.naver.com/AnalyticsMainView.naver?blogId={esc(t.blog_id)}' "
+                   "target=_blank rel=noopener class='inline-block text-xs font-semibold text-slate-400 "
+                   "hover:text-slate-600 mt-2'>조회수·유입 검색어는 네이버 통계에서 ↗</a>")
                 + cons_html + pub_box +
                 "<script>async function blogChk(btn){var m=document.getElementById('blogChkMsg');m.textContent='확인 중…';btn.disabled=true;"
                 "try{var r=await fetch('/api/blog/check-published',{method:'POST'});var d=await r.json();"
@@ -3531,8 +3447,8 @@ def _place_card(t, fw: str) -> str:
         rank_rows += (f"<div class='flex justify-between text-sm py-1.5 border-b border-slate-100'>"
                       f"<span class='text-slate-600'>{esc(r['keyword'])}</span>"
                       f"<span class='font-bold text-slate-800'>{lab}{chg}</span></div>")
-    rank_box = ((f"<div class='mb-4'><div class='text-xs font-bold text-slate-500 mb-1'>지도 노출 순위(분리 추적)</div>{rank_rows}</div>")
-                if rank_rows else "")
+    rank_box = (f"<div class='mb-1'>{rank_rows}</div>" if rank_rows
+                else "<div class='text-sm text-slate-400'>지도 순위가 잡히면 여기 표시돼요</div>")
     # 체크리스트
     chk = ""
     for i in s["checklist"]:
@@ -3562,17 +3478,18 @@ def _place_card(t, fw: str) -> str:
           "<div class='text-xs text-slate-600'>이 QR을 카운터에 두면 손님이 바로 내 플레이스로 가요.<br>"
           f"<a href='/me/review-card.png' download class='text-indigo-600 font-bold'>⬇ 리뷰 요청 카드(인쇄용)</a> · "
           f"<a href='/me/qr/{_tl['code']}.png' download class='text-indigo-600 font-bold'>⬇ QR 저장</a></div></div>") if _tl else ""
+    # ('주방은 보여주지 않는다') 실측 순위만 노출 — 체크리스트·리뷰키트·QR·인쇄물은 도구(접힘)로 강등.
     return (f"<div id='place' class='{fw} mt-5'>"
-            "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>플레이스 최적화 (매장)</h2>"
-            f"<p class='text-sm text-slate-400 mb-4'>동네매장은 지도 상위노출이 방문에 직결돼요 · 정보 완성 {s['done']}/{s['known']}"
-            " · 리뷰는 <b>실제 방문 손님</b>에게만 정당하게 요청해요(가짜 리뷰 금지).</p>"
+            "<h2 class='text-xl font-extrabold text-slate-900 mb-3'>지도 노출 순위</h2>"
             + rank_box
-            + "<div class='grid sm:grid-cols-2 gap-5'>"
+            + "<details class='mt-3'><summary class='cursor-pointer text-sm font-bold text-slate-500 select-none'>"
+            f"🧰 플레이스 도구 — 체크리스트(정보 완성 {s['done']}/{s['known']})·리뷰 요청·QR·인쇄물</summary>"
+            "<div class='mt-3 grid sm:grid-cols-2 gap-5'>"
             f"<div><div class='text-xs font-bold text-slate-500 mb-1'>정보 완성도 체크리스트</div>{chk}</div>"
             f"<div><div class='text-xs font-bold text-slate-500 mb-1'>리뷰 요청 키트</div>{rv}{qr}</div>"
             "</div>"
             + _print_block(t)
-            + "</div>")
+            + "</details></div>")
 
 
 def _visitor_box(t) -> str:
@@ -3947,14 +3864,12 @@ def _briefing_card(t, plan: str) -> str:
             f"<label class='text-sm text-slate-600 flex items-center gap-1.5'>"
             f"<input type=checkbox name=on value=1 {'checked' if on else ''}> 아침 브리핑 받기</label>"
             f"<button class='{_BTN} text-xs px-3 py-2'>저장</button></form></details>")
+    # ('주방은 보여주지 않는다') 헤드라인 잔소리·이유·파트너 노트 삭제 — 할 일 한 문장 + 버튼만.
     return (f"<div class='bg-[#F5F3FF] border border-indigo-200 rounded-2xl p-5 mb-5'>"
-            "<div class='flex items-center gap-2 mb-2'>"
+            "<div class='flex items-center gap-2 mb-1.5'>"
             f"{_ic('message', 'w-4 h-4 text-indigo-600')}"
-            "<span class='text-xs font-bold text-indigo-600'>오늘 아침 브리핑</span></div>"
-            f"<div class='font-bold text-slate-900 mb-1'>{b.get('headline', '')}</div>"
-            f"<div class='text-sm text-slate-700'><b>오늘 할 일 딱 하나</b> — {esc(b.get('task', ''))}</div>"
-            f"<div class='text-xs text-slate-500 mt-1'>{esc(b.get('reason', ''))}</div>"
-            f"<div class='text-xs text-indigo-500 mt-1.5'>{esc(b.get('partner_note', ''))}</div>"
+            "<span class='text-xs font-bold text-indigo-600'>오늘 할 일 딱 하나</span></div>"
+            f"<div class='text-sm font-bold text-slate-900'>{esc(b.get('task', ''))}</div>"
             "<div class='flex items-center gap-2 mt-3'>"
             f"<a href='{b.get('action_href', '/me')}' class='{_BTN} text-sm px-4 py-2.5'>{esc(b.get('action_label', '시작하기'))}</a>"
             "<button type=button onclick=\"fetch('/api/briefing/pass',{method:'POST'}).then(r=>r.json())"
