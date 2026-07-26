@@ -100,7 +100,8 @@ def enhance_all(paths: list[str], industry: str = "", meta: dict | None = None) 
     n = 0
     for p in paths:
         if p and os.path.exists(p):
-            mask_personal_info(p)   # 🔒 번호판·얼굴·전화·라벨 자동 가림(신뢰도 게이트)
+            # ★ 순서 고정: 오버레이 인페인트 → PII 모자이크. 반대로 하면 vision이 방금 씌운
+            #   번호판 모자이크를 '오버레이'로 오인해 LaMa가 그 위를 복원(마스킹 무효화) — 실측 재발 방지.
             if os.environ.get("SHOPCAST_OVERLAY_REMOVE", "1") != "0":   # 기본 ON. 끄려면 =0
                 try:                                                     # 유형 a 국소 오버레이(신뢰도 게이트)
                     _r = remove_overlay(p)
@@ -108,6 +109,7 @@ def enhance_all(paths: list[str], industry: str = "", meta: dict | None = None) 
                         attached_photos.append(os.path.basename(p))
                 except Exception:
                     pass
+            mask_personal_info(p)   # 🔒 번호판·얼굴·전화·라벨 자동 가림(신뢰도 게이트)
             if auto_enhance(p, p, industry, meta) == p:
                 n += 1
     if attached_photos:                                                  # 배치 요약(호출부가 세트에 경고 저장)
