@@ -1450,7 +1450,7 @@ def _print_block(t) -> str:
 @app.get("/me/print")
 def print_page(request: Request):
     """(UI 정리) 인쇄물 페이지 제거 — 리포트 > 플레이스 섹션의 '인쇄물 만들기'로 일원화."""
-    return RedirectResponse("/me?tab=report#place", status_code=303)
+    return RedirectResponse("/me#place", status_code=303)
 
 
 @app.get("/api/lookup")
@@ -1838,7 +1838,7 @@ def _daily_action(t) -> dict:
                 "cta": "이 키워드 더 밀기", "href": "/me?target_kw=" + _q(k)}
     if clicks > 0:
         return {"emoji": "target", "text": f"추적 링크 클릭 {clicks}회 — 콘텐츠가 실제 손님을 부르고 있어요. 계속 올려요!",
-                "cta": "성과 보기", "href": "/me?tab=report"}
+                "cta": "성과 보기", "href": "/me"}
     return {"emoji": "wand", "text": "오늘 콘텐츠 하나로 노출을 늘려보세요. 매주 2~3개가 상위노출의 정석이에요.",
             "cta": "만들기", "href": "/me"}
 
@@ -2051,7 +2051,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 body, cls = "추적 시작 전", "text-slate-500 bg-slate-100"
             else:
                 return ""
-            return (f"<a href='/me?tab=report#blog' title='실측 기준 · 위치·기기별 차이' "
+            return (f"<a href='/me#blog' title='실측 기준 · 위치·기기별 차이' "
                     f"class='inline-block text-[11px] font-bold px-2 py-0.5 rounded-full {cls}'>"
                     f"{esc(kw)}{vtxt} · {body}</a>")
         def _video_row(aid: str, ps) -> tuple[str, bool]:
@@ -2230,98 +2230,9 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         main_inner = (_sbadge + f"<div class='{_fw}'>"
                       "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>내 콘텐츠</h2>"
                       "<p class='text-sm text-slate-400 mb-5'>‘보기’를 누르면 결과가 크게 나와요.</p>" + hist + "</div>")
-    elif tab == "report":                                 # 성과 리포트 · 최근 키워드 + 순위(자동) (전체 폭)
-        active = "report"
-        _kwbox = ""    # (auto) '노리는 키워드' 태그 제거 — AI 내부 재료
-        # 키워드 순위 — 페이지 열면 자동 조회(네이버 지역검색)
-        _rankbox = ""    # (auto) 키워드 순위 UI 제거 — /me/rank는 엔진 내부용으로 유지
-        # ('주방은 보여주지 않는다') 상위노출 실행 루프 STEP 다이어그램 삭제 —
-        # 제품 설명이지 리포트가 아님. 루프는 우리가 조용히 돌리고, 사장님은 결과만 본다.
-        _loopbox = ""
-        # (auto) '놓치는 키워드' 섹션 제거 — 미노출 키워드는 자동 글감 큐(P2)가 처리한다.
-        _missbox = ""
-        # 🎯 성과 실측 — 추적 링크/QR로 '이 콘텐츠 보고 온 손님' 집계
-        _tl = _ensure_track_link(t)
-        _clicks = sum(int(l.get("clicks") or 0) for l in db.list_links(t.id))
-        _trackbox = ""
-        if _tl:
-            _base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
-            _short = f"{_base}/r/{_tl['code']}"
-            _trackbox = (
-                f"<div class='{_fw} mt-5' id='qr'>"
-                "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>성과 실측 · 내 손님 추적</h2>"
-                "<p class='text-sm text-slate-400 mb-4'>이 QR을 <b>명함·매장 앞</b>에 붙이면, 찍고 온 손님이 여기 집계돼요. "
-                "사용법: <b class='text-slate-600'>① QR 이미지 저장 ② 인쇄해서 붙이기</b> — 링크는 인스타 프로필에 넣어도 돼요.</p>"
-                "<div class='flex items-center gap-5 flex-wrap'>"
-                f"<img src='/me/qr/{_tl['code']}.png' class='w-28 h-28 rounded-xl border border-slate-100 p-1 bg-white' alt='추적 QR'>"
-                "<div class='flex-1 min-w-[220px]'>"
-                f"<div class='text-4xl font-extrabold text-indigo-600'>{_clicks}<span class='text-base text-slate-400 font-bold ml-1'>회 유입</span></div>"
-                "<div class='mt-2 flex items-center gap-2'>"
-                f"<input readonly value='{_short}' id='trkurl' class='flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600'>"
-                "<button type=button onclick=\"omCopy(document.getElementById('trkurl').value);this.textContent='✅'\" class='flex-shrink-0 bg-indigo-600 text-white text-sm font-bold px-3 py-2 rounded-lg'>복사</button></div>"
-                f"<div class='text-xs text-slate-400 mt-1.5'>→ {esc(_tl.get('label',''))}(으)로 연결돼요</div>"
-                f"<a href='/me/qr/{_tl['code']}.png' download='ollinda-qr.png' class='inline-block mt-2 text-xs font-bold text-indigo-500'>⬇ QR 이미지 저장</a>"
-                "</div></div></div>")
-        # 🏆 콘텐츠 성과(추적 P2) — 전부 추적링크 클릭 실측. '조회수' 아님을 명시(정직).
-        _perfbox = ""
-        try:
-            _rank3 = db.content_click_ranking(t.id, days=30, limit=3)
-            _split = db.channel_click_split(t.id, days=30)
-            _series = db.daily_click_series(t.id, 7)
-            _ch_lab = {"naver_blog": "네이버 블로그", "instagram": "인스타그램", "marketplace": "판매 콘텐츠",
-                       "x": "X", "qr": "매장 QR(오프라인)", "direct": "직접·기타"}
-            _rows = ""
-            for i, rk in enumerate(_rank3, 1):
-                _b = db.find_piece_brief(t.id, rk["content_id"]) or {}
-                _tt = esc((_b.get("title") or "(삭제된 콘텐츠)")[:34])
-                _cl = _ch_lab.get(rk.get("channel") or _b.get("channel") or "", rk.get("channel") or "")
-                _rows += (f"<div class='flex items-center gap-3 py-2 border-b border-slate-100'>"
-                          f"<span class='text-lg font-extrabold text-violet-500 w-6'>{i}</span>"
-                          f"<div class='flex-1 min-w-0'><div class='text-sm font-bold text-slate-700 truncate'>{_tt}</div>"
-                          f"<div class='text-[11px] text-slate-400'>{_cl}</div></div>"
-                          f"<span class='text-xl font-extrabold text-violet-600'>{rk['n']}<span class='text-xs text-slate-400 font-bold ml-0.5'>명</span></span></div>")
-            _coach = ""    # (auto) 코칭 배너 제거 — 잘 되는 방향은 글감 큐(P3)가 자동 굳히기
-            _top3 = ((f"<div class='mb-4'><div class='text-sm font-bold text-slate-600 mb-1'>가장 손님 많이 데려온 콘텐츠 TOP {len(_rank3)}</div>{_rows}{_coach}</div>")
-                     if _rank3 else
-                     ("<div class='mb-4 bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm text-slate-500'>"
-                      "아직 유입이 없어요 — 발행물 속 추적링크·매장 QR로 온 손님이 여기 콘텐츠별로 집계돼요. "
-                      "글을 발행하고 링크가 눌리면 TOP 3가 채워집니다."
-                      "<div class='mt-1.5'><a href='/me' class='text-xs font-semibold text-indigo-600'>첫 글을 발행하면 여기가 채워져요 — 홈에서 사진을 올려주세요 →</a></div></div>"))
-            _sp_rows = "".join(
-                f"<div class='flex items-center justify-between py-1.5'><span class='text-sm text-slate-600'>{_ch_lab.get(k, esc(k))}</span>"
-                f"<span class='text-base font-extrabold text-violet-600'>{v}<span class='text-xs text-slate-400 font-bold ml-0.5'>클릭</span></span></div>"
-                for k, v in _split.items())
-            _mx = max((d["n"] for d in _series), default=0) or 1
-            _bars = "".join(
-                f"<div class='flex-1 flex flex-col items-center gap-1'>"
-                f"<div class='w-full max-w-[26px] rounded-t bg-violet-400' style='height:{max(3, int(44 * d['n'] / _mx))}px'></div>"
-                f"<span class='text-[10px] text-slate-400'>{d['date']}</span></div>" for d in _series)
-            # ('주방은 보여주지 않는다') 데이터 없으면 카드도 없다 — 유입 0이면 한 줄만.
-            if not _rank3 and not _split:
-                _perfbox = (f"<div class='{_fw} mt-5 text-sm text-slate-400'>"
-                            "글 속 링크·매장 QR로 손님이 오면, 어느 글이 데려왔는지 여기 표시돼요.</div>")
-            else:
-                _perfbox = (
-                    f"<div class='{_fw} mt-5'>"
-                    "<h2 class='text-xl font-extrabold text-slate-900 mb-1'>손님을 데려온 글</h2>"
-                    "<p class='text-xs text-slate-400 mb-4'>올린다 추적링크 클릭 실측 (조회수·체류는 네이버/인스타 앱)</p>"
-                    + _top3
-                    + "<div class='grid sm:grid-cols-2 gap-6'>"
-                    + f"<div><div class='text-sm font-bold text-slate-600 mb-1'>채널별 유입 (30일)</div>{_sp_rows}</div>"
-                    + f"<div><div class='text-sm font-bold text-slate-600 mb-1'>최근 7일 추이</div><div class='flex items-end gap-1.5 h-16'>{_bars}</div></div>"
-                    + "</div>" + _visitor_box(t) + "</div>")
-        except Exception:
-            _perfbox = ""
-        # (auto) 순위 성장(키워드 나열)·키워드 순위·최근 키워드 섹션 제거 — AI 내부 재료.
-        # 사장님에게는 '글의 결과'(내 네이버 블로그 글별 순위)와 손님 실측만 보여준다.
-        # ('주방은 보여주지 않는다') 리포트 = 실측 3층: 한 줄 결산 → 순위(블로그·지도) → 손님 유입.
-        # QR·손님추적 도구는 접힘으로 강등(리포트가 아니라 도구함).
-        _toolfold = (("<details class='mt-5'><summary class='cursor-pointer text-sm font-bold "
-                      "text-slate-500 select-none'>🧰 매장 QR · 손님 추적 도구</summary>"
-                      + _trackbox + "</details>") if _trackbox else "")
-        main_inner = (_sbadge + _ai_summary(t) + _missbox
-                      + _blog_connect_card(t, _fw) + _place_card(t, _fw)
-                      + _perfbox + _toolfold)
+    elif tab == "report":                                 # ('주방은 보여주지 않는다') 리포트 탭 삭제
+        # 결과는 홈 한 줄 + 증빙 접힘이 전부 — 구 링크·북마크는 홈으로.
+        return RedirectResponse("/me", status_code=303)
     else:                                                 # ✨ 만들기 (기본) — 완성되면 여기(만들기 대시보드)에 결과 표시
         active = "create"
         _made = (request.query_params.get("made") or "").strip()
@@ -2337,7 +2248,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                            "<span class='text-indigo-600'>" + _ic("pen", "w-5 h-5") + "</span>"
                            "<div class='flex-1 min-w-0 text-sm text-slate-700'><b>내 네이버 블로그를 연결</b>하면 "
                            "발행 여부 자동 확인 + 내 블로그 순위 추적이 정확해져요. (공개 RSS만 사용)</div>"
-                           "<a href='/me?tab=report#blog' class='flex-shrink-0 bg-emerald-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-emerald-700 transition'>연결하기</a></div>")
+                           "<a href='/me#blog' class='flex-shrink-0 bg-emerald-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-emerald-700 transition'>연결하기</a></div>")
         # 🔔 앱내 알림(발행 리마인더 등) — 보여주고 읽음 처리
         _notices = db.unread_notices(t.id)
         _notice_html = ""
@@ -2400,7 +2311,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 pass
             # ('주방은 보여주지 않는다' 다이어트) '사진 필요'·'N일 쉬었어요' 카드 삭제 —
             # 할 일 안내는 브리핑 카드 하나가 담당(잔소리·중복 금지). 발행 준비 카드만 유지(실제 할 일).
-            # 결과 한 줄('주방은 보여주지 않는다') — 실측 숫자만 한 줄 + 문의 기록(접힘). 큰 카드 폐지.
+            # 결과 한 줄('주방은 보여주지 않는다') — 실측 요약 한 줄 + 증빙 접힘(영수증). 리포트 탭 대체.
             _conv_card = ""
             try:
                 _cv = db.weekly_conversion(t.id)
@@ -2408,20 +2319,54 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 _src_btns = "".join(
                     f"<button name=source value='{s}' class='py-2 rounded-lg bg-slate-100 hover:bg-emerald-100 text-slate-700 text-xs font-bold'>{s}</button>"
                     for s in _srcs)
+                # 상위노출 요약 + 증빙 rows — 블로그 글 순위 · 지도 순위 (전부 저장된 실측, 네트워크 0)
+                _rrows, _exposed, _best = "", 0, None
+
+                def _rrow(lab, val):
+                    return (f"<div class='flex justify-between text-sm py-1.5 border-b border-slate-100'>"
+                            f"<span class='text-slate-600 truncate pr-3'>{esc(lab)}</span>"
+                            f"<span class='font-bold text-slate-800 whitespace-nowrap'>{val}</span></div>")
+                try:
+                    for _pub in db.list_blog_publishes(t.id, limit=8):
+                        _pkw = (_pub.get("target_kw") or "").strip()
+                        if not _pkw:
+                            continue
+                        _h = [h["rank"] for h in db.rank_history(t.id, _pkw, kind="post") if h.get("rank")]
+                        _r = _h[-1] if _h else None
+                        if _r:
+                            _exposed += 1 if _r <= 10 else 0
+                            _best = _r if (_best is None or _r < _best) else _best
+                        _rrows += _rrow(f"글 · {_pkw}", f"{_r}위" if _r else "추적 중")
+                    from app.services import place_opt as _po
+                    for _pr in (_po.place_summary(t).get("place_ranks") or [])[:4]:
+                        _r = _pr.get("rank")
+                        if _r:
+                            _exposed += 1 if _r <= 5 else 0
+                            _best = _r if (_best is None or _r < _best) else _best
+                        _rrows += _rrow(f"지도 · {_pr['keyword']}", f"{_r}위" if _r else "5위 밖")
+                except Exception:
+                    pass
+                _expo = ((f" · 상위노출 <b class='text-indigo-600'>{_exposed}곳</b>"
+                          + (f" <span class='text-slate-400'>(최고 {_best}위)</span>" if _best else ""))
+                         if _exposed else "")
+                _receipt = ((f"<details class='mt-1'><summary class='cursor-pointer text-xs text-slate-400 "
+                             "hover:text-slate-600 list-none select-none'>자세히 →</summary>"
+                             f"<div class='mt-2 pt-1 border-t border-slate-100'>{_rrows}</div></details>")
+                            if _rrows else "")
                 _conv_card = (
-                    "<div class='flex items-center gap-3 bg-white rounded-2xl border border-slate-200 shadow-sm px-4 py-3 mb-5'>"
+                    "<div class='bg-white rounded-2xl border border-slate-200 shadow-sm px-4 py-3 mb-5'>"
+                    "<div class='flex items-center gap-3'>"
                     "<div class='flex-1 text-sm text-slate-700'>이번 주 "
                     f"발행 <b>{_cv['posts']}</b> · 클릭 <b class='text-indigo-600'>{_cv['clicks']}</b> · "
-                    f"문의 <b class='text-emerald-600'>{_cv['inquiries']}</b></div>"
+                    f"문의 <b class='text-emerald-600'>{_cv['inquiries']}</b>{_expo}</div>"
                     "<details class='relative'><summary class='cursor-pointer text-xs font-bold text-emerald-600 "
                     "hover:text-emerald-700 list-none select-none whitespace-nowrap'>＋ 문의 기록</summary>"
                     "<form method=post action='/me/inquiry' class='absolute right-0 top-7 z-10 bg-white border "
                     "border-slate-200 rounded-xl shadow-lg p-3 w-64'>"
                     f"<div class='grid grid-cols-5 gap-1 mb-2'>{_src_btns}</div>"
                     "<input name=memo maxlength=200 placeholder='메모(선택)' class='w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs'>"
-                    "</form></details>"
-                    "<a href='/me?tab=report' class='text-xs text-slate-400 hover:text-slate-600 whitespace-nowrap'>자세히 →</a>"
-                    "</div>")
+                    "</form></details></div>"
+                    + _receipt + "</div>")
             except Exception:
                 _conv_card = ""
             # ('주방은 보여주지 않는다' 다이어트) 정보성 글 배너·발행 캘린더 카드 삭제 —
@@ -2429,9 +2374,24 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             # 시작 가이드는 첫 콘텐츠 전에만(온보딩 끝난 사장님에게 체크리스트 반복 금지).
             _guide = _guide_card(t) if not db.list_sets(tenant_id=t.id, limit=1) else ""
             _task = _due_html or _briefing_card(t, _plan)     # 오늘 할 일은 딱 1장(발행 준비 우선)
+            # 🧰 도구 서랍(리포트 탭 대체) — 블로그 연결·플레이스 도구·매장 QR·실경험. 기본 접힘.
+            _fw2 = "bg-white rounded-3xl border border-slate-100 shadow-sm p-6 sm:p-8"
+            try:
+                _tools = ("<details id='tools' class='mt-5'>"
+                          "<summary class='cursor-pointer text-sm font-bold text-slate-400 select-none'>"
+                          "🧰 도구 — 블로그 연결 · 플레이스 · 매장 QR · 실경험 답변</summary>"
+                          "<div class='mt-4 space-y-5'>"
+                          + _blog_connect_card(t, _fw2) + _place_card(t, _fw2) + _track_qr_box(t, _fw2)
+                          + "<a href='/me/experience' class='block text-sm font-semibold text-slate-500 "
+                          "hover:text-slate-700'>📝 사장님 실경험 답변 관리 →</a>"
+                          "</div></details>"
+                          "<script>if(['#tools','#blog','#place','#qr'].indexOf(location.hash)>=0)"
+                          "{var _td=document.getElementById('tools');if(_td)_td.setAttribute('open','');}</script>")
+            except Exception:
+                _tools = ""
             main_inner = (greeting + _conv_card + _upsell + _task + _notice_html
                           + _guide + _blog_nudge + upload_section
-                          + "<div class='mt-5'></div>" + _store_info_card(t))
+                          + "<div class='mt-5'></div>" + _store_info_card(t) + _tools)
     # 🆕 새로 추가한 '빈 새 가게'면 실수 대비 '뒤로가기(취소)' 배너
     if t.name == "새 가게" and len(db.list_user_stores(u["id"])) > 1 and not db.list_sets(tenant_id=t.id):
         _backban = ("<div class='flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-5'>"
@@ -2440,8 +2400,8 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                     "<form method=post action='/me/store/cancel'><button class='bg-white border border-amber-300 text-amber-700 text-sm font-bold px-4 py-2 rounded-xl hover:bg-amber-100 transition whitespace-nowrap'>← 뒤로가기</button></form></div>")
         main_inner = _backban + main_inner
     from app import landing
-    _navitems = [("wand", "홈", "/me", "create"), ("book", "내 콘텐츠", "/me?tab=content", "content"),
-                 ("chart", "리포트", "/me?tab=report", "report")]
+    # ('주방은 보여주지 않는다') 리포트 탭 삭제 — 결과는 홈 한 줄 + 증빙 접힘이 전부.
+    _navitems = [("wand", "홈", "/me", "create"), ("book", "내 콘텐츠", "/me?tab=content", "content")]
 
     def _navlink(i, l, h, key):
         cls = ("bg-[#EEF2FF] text-indigo-700" if key == active
@@ -2533,13 +2493,13 @@ def my_blog_connect(request: Request, blog: str = Form("")):
     raw = (blog or "").strip()
     if not raw:                                      # 연결 해제
         db.set_tenant_blog(t.id, "", "")
-        return RedirectResponse("/me?tab=report&ok=" + _q("블로그 연결을 해제했어요"), status_code=303)
+        return RedirectResponse("/me?ok=" + _q("블로그 연결을 해제했어요"), status_code=303)
     v = blogsync.verify_blog(raw)
     if not v["ok"]:
-        return RedirectResponse("/me?tab=report&err=" + _q(v["error"]), status_code=303)
+        return RedirectResponse("/me?err=" + _q(v["error"]), status_code=303)
     db.set_tenant_blog(t.id, v["url"], v["blog_id"])
     msg = f"블로그 '{v['title'] or v['blog_id']}' 연결 완료! 이제 발행 확인·순위 매칭이 정확해져요"
-    return RedirectResponse("/me?tab=report&ok=" + _q(msg), status_code=303)
+    return RedirectResponse("/me?ok=" + _q(msg), status_code=303)
 
 
 def _confirm_blog_publish(t, piece, url: str, matched_by: str, score: float = 1.0,
@@ -2591,7 +2551,7 @@ def my_blog_published(request: Request, piece_id: str = Form(""), url: str = For
         return RedirectResponse("/login", status_code=303)
     t = _ensure_user_tenant(u)
     piece = db.get_piece(piece_id.strip())
-    back = f"/kit/{piece.asset_id}/naver" if piece else "/me?tab=report"
+    back = f"/kit/{piece.asset_id}/naver" if piece else "/me"
     if not piece or piece.tenant_id != t.id or piece.kind.value != "blog":
         return RedirectResponse("/me?tab=content&err=" + _q("내 블로그 글을 찾지 못했어요"), status_code=303)
     url = (url or "").strip()
@@ -3549,6 +3509,28 @@ def _visitor_box(t) -> str:
               "(쿠키를 지우면 추적되지 않아요). 지역은 국가 단위까지만 봅니다.</p></div>")
 
 
+def _track_qr_box(t, fw: str) -> str:
+    """매장 QR·손님 추적(도구 서랍용, 압축판) — QR + 유입 수 + 링크. 상시 화면 아님."""
+    _tl = _ensure_track_link(t)
+    if not _tl:
+        return ""
+    _clicks = sum(int(l.get("clicks") or 0) for l in db.list_links(t.id))
+    _base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
+    _short = f"{_base}/r/{_tl['code']}"
+    return (f"<div class='{fw}' id='qr'>"
+            "<div class='text-sm font-bold text-slate-700 mb-2'>매장 QR — 명함·매장 앞에 붙이면 찍고 온 손님이 집계돼요</div>"
+            "<div class='flex items-center gap-4 flex-wrap'>"
+            f"<img src='/me/qr/{_tl['code']}.png' class='w-24 h-24 rounded-xl border border-slate-100 p-1 bg-white' alt='추적 QR'>"
+            "<div class='flex-1 min-w-[200px]'>"
+            f"<div class='text-2xl font-extrabold text-indigo-600'>{_clicks}<span class='text-sm text-slate-400 font-bold ml-1'>회 유입</span></div>"
+            "<div class='mt-2 flex items-center gap-2'>"
+            f"<input readonly value='{_short}' id='trkurl' class='flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600'>"
+            "<button type=button onclick=\"navigator.clipboard&&navigator.clipboard.writeText(document.getElementById('trkurl').value);this.textContent='✅'\" "
+            "class='flex-shrink-0 bg-indigo-600 text-white text-sm font-bold px-3 py-2 rounded-lg'>복사</button></div>"
+            f"<a href='/me/qr/{_tl['code']}.png' download='ollinda-qr.png' class='inline-block mt-2 text-xs font-bold text-indigo-500'>⬇ QR 이미지 저장</a>"
+            "</div></div></div>")
+
+
 def _ai_summary(t) -> str:
     """(auto 3-3) AI 활동 요약 한 줄 — 실측 집계만(이번 주 준비 글 수·1페이지 글 수). 키워드명 없음."""
     try:
@@ -3606,7 +3588,7 @@ def _guide_card(t) -> str:
             + dismiss + "</div>"
             + _step(s1, 1, "사진 올려 첫 콘텐츠 만들기", "/me#made", "만들기")
             + _step(s2, 2, "네이버 블로그에 발행하기", "/me?tab=content", "발행 소재 보기")
-            + _step(s3, 3, "매장 QR·추적링크 붙이기 (손님 유입이 집계돼요)", "/me?tab=report#qr", "QR 받기")
+            + _step(s3, 3, "매장 QR·추적링크 붙이기 (손님 유입이 집계돼요)", "/me#qr", "QR 받기")
             + "</div>")
 
 
@@ -3707,7 +3689,7 @@ def api_race(piece_id: str, request: Request):
 @app.get("/me/mass")
 def mass_page(request: Request):
     """(auto) 발굴·배치 UI 제거 — 키워드·승률은 AI 내부 재료. 엔진(mine/generate)은 큐가 내부 호출."""
-    return RedirectResponse("/me?tab=report", status_code=303)
+    return RedirectResponse("/me", status_code=303)
 
 
 @app.post("/api/mass/mine")
@@ -5459,7 +5441,7 @@ def _naver_publish_confirm_box(tenant, blog, sec: str, cbtn: str, ok: str = "", 
                 + banner + auto + fallback + "</div>")
     return (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>발행 완료하셨나요? <span class='text-emerald-600'>(순위 추적 시작)</span></div>"
             + banner
-            + "<p class='text-xs text-amber-600 mb-3'><a href='/me?tab=report#blog' class='font-bold underline'>내 블로그를 연결</a>하면 "
+            + "<p class='text-xs text-amber-600 mb-3'><a href='/me#blog' class='font-bold underline'>내 블로그를 연결</a>하면 "
             "발행 여부를 자동으로 확인해 드려요. 연결 전에는 아래에 발행 주소를 남겨주세요.</p>"
             + f"<form method=post action='/me/blog/published' class='flex gap-2'>"
             f"<input type=hidden name=piece_id value='{blog.id}'>"
