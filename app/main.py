@@ -4917,6 +4917,19 @@ def _result_naver_video(pieces, asset_id: str) -> str:
             return ("<div class='mt-3 flex items-center gap-2 text-xs text-slate-400'>"
                     "<span class='inline-block w-3 h-3 border-2 border-slate-300 border-t-indigo-500 rounded-full animate-spin'></span>"
                     "영상 만드는 중이에요 (몇 분 걸려요) — 완성되면 여기에 나타나요</div>")
+        # 영상 온디맨드 — 네이버 영상은 블로그 카드 안이 자리(별도 채널 카드 없음) → 여기서 바로 생성 버튼
+        _cs_nv = (((blog.payload.get("channel_status") or {}).get("naver") or {}).get("status") or "") if blog else ""
+        if _cs_nv == "not_requested":
+            return ("<div class='mt-3'><div class='text-xs font-bold text-slate-400 mb-1'>네이버용 영상 (블로그 첨부 · 클립 겸용)</div>"
+                    "<div class='text-xs text-slate-500 mb-2'>영상은 필요할 때만 만들어요 — 글은 이미 완성!</div>"
+                    "<button type='button' class='w-full px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-900 "
+                    "text-white text-sm font-bold transition' "
+                    "onclick=\"(async function(b){b.disabled=true;var fd=new FormData();"
+                    "fd.append('asset_id','" + esc(asset_id) + "');fd.append('platforms','naver');"
+                    "try{var d=await (await fetch('/me/video/make',{method:'POST',body:fd})).json();"
+                    "if(d.ok){location.reload();}else{alert(d.error||'요청에 실패했어요');b.disabled=false;}}"
+                    "catch(e){alert('요청에 실패했어요');b.disabled=false;}})(this)\">"
+                    "🎬 네이버 영상 만들기</button></div>")
         return ""
     except Exception:
         return ""
@@ -8873,7 +8886,7 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
           "try{await fetch(f.action,{method:'POST',body:fd});}catch(_){}"
           "var aid='';var n=0;"
           "function done(url){clearInterval(iv);location.href=url;}"
-          "var iv=setInterval(async function(){n++;if(n>240){done(aid?('/me?made='+aid):'/me');return;}"
+          "var iv=setInterval(async function(){n++;if(n>240){done(aid?('/me?view='+aid):'/me');return;}"
           "try{"
           "var pr=await (await fetch('/me/gen-progress')).json();"
           "if(pr&&pr.status&&pr.status!=='idle'){if(pr.label)setLabel(pr.label);if(pr.pct!=null)setBar(pr.pct*100);setDetail(pr.detail||'');setSlow(pr.slow||'');"
@@ -8882,7 +8895,7 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
           #   구조건(피스 5개)은 영상 온디맨드 이후 영원히 안 채워져 사용자가 100%에서 방치됐음(캡처 실측).
           "if(pr.status==='done'){clearInterval(iv);"
           "if(!aid){try{var d0=await (await fetch('/me/sets/count')).json();if(d0.n>base)aid=d0.latest;}catch(_){}}"
-          "var url=aid?('/me?made='+aid):'/me';"
+          "var url=aid?('/me?view='+aid):'/me';"
           "setBar(100);setLabel('✅ 콘텐츠 완성!');setDetail('영상은 목록에서 원하는 플랫폼을 골라 만들 수 있어요');setSlow('');"
           "var tm=document.getElementById('gTeam');if(tm)tm.textContent='3초 뒤 자동으로 이동해요';"
           "var go=document.getElementById('gGo');if(go){go.href=url;go.classList.remove('hidden');}"
