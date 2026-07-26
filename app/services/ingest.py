@@ -47,6 +47,17 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
     paths: list[str] = []
     for data, fname in files:
         paths.append(storage.save_upload(data, fname or "photo.jpg", tenant.id))
+    # 진행률(정직한 표시) — 단계별 마커. tenant 단위, 프론트가 폴링. 실패도 기록(조용한 실패 금지).
+    import time as _tprog
+    _t_start = _tprog.time()
+    _pcount = len(paths)
+
+    def _prog(stage, label, detail="", pct=None, new=False):
+        try:
+            db.set_gen_progress(tenant.id, stage, label, detail, pct, new=new)
+        except Exception:
+            pass
+    _prog("photo_analysis", "사진 분석 중", f"0/{_pcount}장", 0.06, new=True)
     # ✨ 사진 자동 보정(전문가 톤) + 검색노출용 EXIF·GPS 메타 삽입. 보정본을 R2에도 재미러.
     try:
         from app.media import photo_boost
@@ -84,11 +95,15 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
         asset.angle = angle
     # 👁 비전: 대표 사진을 실제 분석해 생성 프롬프트에 반영(키 없으면 ""). DB엔 원본 메모 유지.
     # 선추측(intake.analysis) 있으면 재호출 생략 — 같은 사진을 이미 분석함(비용 1콜 유지, PHASE 4)
-    analysis = (intake.get("analysis") or "").strip() or vision.analyze_all(paths, tenant.industry)
+    analysis = (intake.get("analysis") or "").strip() or vision.analyze_all(
+        paths, tenant.industry,
+        progress_cb=lambda d, t: _prog("photo_analysis", "사진 분석 중", f"{d}/{t}장",
+                                       0.1 + 0.35 * (d / max(t, 1))))
     if analysis:
         # 확인 절차(SEO_CURRENT §5-3): 사용자 확인 없인 '추측' 라벨 + 단정 금지 — 사실로 각인 방지
         from app.services import smart_intake as _si2
         asset.note = f"{note}" + _si2.analysis_block(analysis, intake.get("confirmed", ""))
+    _prog("keyword", "키워드·전략 선정 중", "", 0.5)
     # 🎯 마케팅 전략가 — 전 채널이 공유할 크리에이티브 브리프(1콜). 프롬프트에 주입 → 채널 일관성.
     from app.generators.strategist import build_brief, brief_to_directive
     from app.generators.editor import polish
@@ -179,6 +194,7 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
     except Exception:
         pass
     brief_public = {k: v for k, v in brief.items() if not k.startswith("_")}
+    _prog("body", "본문 작성 중", "", 0.6)
     pieces = generate_for(tenant, asset, kinds, images=paths)   # ✍️ 카피라이터·🎬 영상감독
     # 블로그(=상태 저장소)가 실패하면 channel_status·video_job·워치독 전부 실명 → 즉시 1회 재시도(단일점 봉합)
     if ContentKind.BLOG in kinds and not any(p.kind == ContentKind.BLOG for p in pieces):
@@ -190,6 +206,7 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
         pieces.extend(retry)
         if not retry and pieces:                       # 재시도도 실패 → 첫 피스에 사유 각인(워치독이 읽음)
             pieces[0].payload["_missing_blog"] = _LEb.get(str(ContentKind.BLOG), "생성 실패(로그 참조)")
+    _prog("polish", "제목·태그 다듬는 중", "", 0.82)
     _exp = (intake.get("experience") or "").strip()[:200]       # 사장님 경험담 — 결과 하이라이트용(A2)
     for p in pieces:
         p.payload.setdefault("image_path", paths[0])
@@ -256,6 +273,12 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
         else:
             _cs[_ch] = {"status": "failed", "error": _LE.get(str(_k), "생성 실패(로그 참조)")}
     _set_channel_status(asset.id, _cs)
+    # 텍스트 완성 — 이 시점까지가 체감 소요. 실측 기록(범위 자동 갱신) + '영상 준비 중'(비동기 렌더).
+    try:
+        db.record_gen_duration(tenant.id, max(0.0, _tprog.time() - _t_start))
+    except Exception:
+        pass
+    _prog("video", "영상 준비 중", "글은 완성됐어요 · 영상 마무리 중", 0.9)
     _spawn_video_bundle(tenant, asset, paths, brief_public)
     _autopilot(tenant, pieces)
     return pieces

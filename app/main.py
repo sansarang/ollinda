@@ -261,6 +261,50 @@ def admin_gowatch_consume(request: Request):
     return JSONResponse({"ok": True, **res})
 
 
+@app.get("/admin/gen-progress/{tenant_id}")
+def admin_gen_progress(request: Request, tenant_id: str):
+    """생성 진행/실패 진단 — 해당 tenant의 최신 생성 단계·에러(traceback 포함)."""
+    return JSONResponse({"ok": True, "progress": db.get_gen_progress(tenant_id),
+                         "duration_range": db.gen_duration_range()})
+
+
+def _progress_payload(t) -> dict:
+    """사용자용 진행률 — 단계·퍼센트·실측 범위·지연/실패 안내(정직한 표시). 숫자 남은시간 미표시."""
+    pr = db.get_gen_progress(t.id) or {}
+    rng = db.gen_duration_range()
+    out = {"stage": pr.get("stage"), "label": pr.get("label") or "", "detail": pr.get("detail") or "",
+           "pct": pr.get("pct"), "status": pr.get("status") or "idle"}
+    # 실측 범위 문구(p25~p90) — 표본 충분할 때만. vision 병렬화 효과 즉시 반영.
+    if rng:
+        def _kr(sec):
+            m, s = divmod(int(sec), 60)
+            return (f"{m}분 {s}초" if s else f"{m}분") if m else f"{s}초"
+        out["range_text"] = f"보통 {_kr(rng[0])}~{_kr(rng[1])} 걸려요"
+    # 지연 안내 — 시작 후 p90 초과면 정직 안내
+    try:
+        from datetime import datetime
+        started = pr.get("started_at")
+        if rng and started and pr.get("status") == "running":
+            elapsed = (datetime.utcnow() - datetime.fromisoformat(started[:19])).total_seconds()
+            if elapsed > rng[1]:
+                out["slow"] = "평소보다 오래 걸리고 있어요 — 사진이 많거나 분석이 몰려 있어요"
+    except Exception:
+        pass
+    if pr.get("status") == "failed":
+        out["error_note"] = "생성이 중단됐어요 — 다시 시도해 주세요"
+    return out
+
+
+@app.get("/me/gen-progress")
+def me_gen_progress(request: Request):
+    """사용자 홈 진행률 폴링 — 정직한 단계 표시(블로그·영상·재생성 공통 컴포넌트)."""
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"status": "idle"})
+    t = _ensure_user_tenant(u)
+    return JSONResponse(_progress_payload(t))
+
+
 @app.post("/admin/gowatch/seed-demo")
 def admin_gowatch_seed_demo(request: Request, industry: str = "꽃집", keyword: str = "", region: str = ""):
     """W6 검증용 — 시드 아닌 업종의 모의 발행 데이터 생성(tenant+블로그 조각+발행기록). 동일 코드 경로 증명용.
@@ -8589,8 +8633,14 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
                 _refund_usage(owner)               # 생성 결과 없음 → 예약 원복
         except Exception:
             _refund_usage(owner)                   # 실패 → 예약 원복
-            import logging
+            import logging, traceback
             logging.exception("[upload-bg] 생성 실패 tenant=%s", tenant.id)
+            try:      # 조용한 실패 금지 — 사유를 진행률에 기록(사용자 안내 + 진단)
+                db.set_gen_progress(tenant.id, "failed", "생성이 중단됐어요",
+                                    "잠시 후 다시 시도해 주세요", None, status="failed",
+                                    error=traceback.format_exc()[-500:])
+            except Exception:
+                pass
     import threading
     threading.Thread(target=_bg_generate, daemon=True).start()
     if auth.current_user(req):                     # 로그인 회원 → 대시보드(생성 중 표시)

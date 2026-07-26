@@ -128,22 +128,39 @@ def analyze(image_path: str, industry_name: str = "", context: str | None = None
 
 
 def analyze_all(image_paths: list[str], industry_name: str = "", max_imgs: int = 30,
-                context: str | None = None) -> str:
-    """여러 사진 분석 — 사진 제한 해제(안전 상한 30). 6장 초과는 청크(6장)로 나눠 배치 호출하고
-    [사진N] 번호를 전체 기준으로 이어붙임(Gemini 무료 rate limit 대응: 청크 간 짧은 대기)."""
+                context: str | None = None, progress_cb=None) -> str:
+    """여러 사진 분석 — 사진 제한 해제(안전 상한 30). 6장 초과는 청크(6장) 병렬.
+    progress_cb(done,total): 진행률 표시용(청크 완료마다 누적 장수 콜백)."""
     paths = [p for p in (image_paths or []) if p and os.path.exists(p)][:max_imgs]
     if not (configured() and paths):
         return ""
     if len(paths) == 1:
-        return analyze(paths[0], industry_name, context)
+        _o = analyze(paths[0], industry_name, context)
+        if progress_cb:
+            try:
+                progress_cb(1, 1)
+            except Exception:
+                pass
+        return _o
     if len(paths) > 6:                                   # 배치 처리 — ★청크 병렬(순차 대기 제거)
         import re as _r
+        import threading as _th
         _idxs = list(range(0, len(paths), 6))
+        _done = [0]
+        _lock = _th.Lock()
 
         def _do(ci):
             chunk = paths[ci:ci + 6]
             part = analyze_all(chunk, industry_name, max_imgs=6,
                                context=(context if ci + 6 >= len(paths) else None))  # 해석·[전체]는 마지막 청크만
+            if progress_cb:                              # 청크 완료 → 누적 장수 보고(정직한 진행)
+                with _lock:
+                    _done[0] += len(chunk)
+                    _d = _done[0]
+                try:
+                    progress_cb(_d, len(paths))
+                except Exception:
+                    pass
             return _r.sub(r"\[사진(\d+)\]", lambda m: f"[사진{int(m.group(1)) + ci}]", part or "")
 
         from concurrent.futures import ThreadPoolExecutor

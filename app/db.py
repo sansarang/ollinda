@@ -483,6 +483,73 @@ def proposals_this_week(tenant_id: str) -> int:
         return 0
 
 
+# ── 생성 진행률(정직한 진행 표시) — tenant 단위 최신 생성 단계. 프론트가 폴링 ──
+def _ensure_progress_tables(c) -> None:
+    c.execute("CREATE TABLE IF NOT EXISTS gen_progress("
+              "tenant_id TEXT PRIMARY KEY, stage TEXT, label TEXT, detail TEXT, pct REAL, "
+              "status TEXT DEFAULT 'running', error TEXT, started_at TEXT, updated_at TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS gen_durations("
+              "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, seconds REAL, at TEXT)")
+
+
+def set_gen_progress(tenant_id: str, stage: str, label: str = "", detail: str = "",
+                     pct: "float | None" = None, status: str = "running", error: str = "",
+                     new: bool = False) -> None:
+    """생성 단계 기록(upsert). new=True면 started_at 갱신(새 생성 시작). 조용한 실패 금지 — 실패도 기록."""
+    try:
+        with _conn() as c:
+            _ensure_progress_tables(c)
+            ex = c.execute("SELECT started_at FROM gen_progress WHERE tenant_id=?", (tenant_id,)).fetchone()
+            started = (None if new else (ex["started_at"] if ex else None)) or _now()
+            c.execute("INSERT OR REPLACE INTO gen_progress"
+                      "(tenant_id, stage, label, detail, pct, status, error, started_at, updated_at) "
+                      "VALUES(?,?,?,?,?,?,?,?,?)",
+                      (tenant_id, stage, label, detail, pct, status, error, started, _now()))
+    except sqlite3.OperationalError:
+        pass
+
+
+def get_gen_progress(tenant_id: str) -> Optional[dict]:
+    try:
+        with _conn() as c:
+            _ensure_progress_tables(c)
+            r = c.execute("SELECT * FROM gen_progress WHERE tenant_id=?", (tenant_id,)).fetchone()
+        return dict(r) if r else None
+    except sqlite3.OperationalError:
+        return None
+
+
+def record_gen_duration(tenant_id: str, seconds: float) -> None:
+    try:
+        with _conn() as c:
+            _ensure_progress_tables(c)
+            c.execute("INSERT INTO gen_durations(tenant_id, seconds, at) VALUES(?,?,?)",
+                      (tenant_id, float(seconds), _now()))
+            c.execute("DELETE FROM gen_durations WHERE id NOT IN "
+                      "(SELECT id FROM gen_durations ORDER BY id DESC LIMIT 60)")   # 롤링 보관
+    except sqlite3.OperationalError:
+        pass
+
+
+def gen_duration_range() -> "tuple[int, int] | None":
+    """최근 20세트 실측 소요의 p25~p90(초). 표본<5면 None(고정 문구 폴백). vision 병렬화 효과 즉시 반영."""
+    try:
+        with _conn() as c:
+            _ensure_progress_tables(c)
+            rows = [r[0] for r in c.execute(
+                "SELECT seconds FROM gen_durations ORDER BY id DESC LIMIT 20").fetchall()]
+        vals = sorted(float(x) for x in rows if x and x > 0)
+        if len(vals) < 5:
+            return None
+
+        def _pct(p):
+            i = min(len(vals) - 1, max(0, int(round(p * (len(vals) - 1)))))
+            return int(vals[i])
+        return (_pct(0.25), _pct(0.90))
+    except sqlite3.OperationalError:
+        return None
+
+
 def add_notice(tenant_id: str, kind: str, text: str) -> None:
     """같은 종류의 미읽음 알림이 있으면 중복 생성하지 않음(리마인더 도배 방지)."""
     try:
