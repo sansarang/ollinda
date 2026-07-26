@@ -740,7 +740,11 @@ def _teaser_html(pieces, brief, asset_id, remaining: int = 0,
     정직성: 잠긴 채널도 '실제로 생성됨'만 표기, 가짜 급함 없이 남은 무료 횟수만 표시."""
     import re as _re
     by = {p.kind.value: p for p in pieces}
-    imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
+    imgs = (next((p.payload.get("image_paths") for p in pieces
+                 if p.kind.value == "blog" and p.payload.get("image_paths")), None)
+            or next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or [])
+    # ★ 블로그 피스 우선(실측 버그): 다듬기 병렬화로 저장 순서가 뒤섞여 X 피스(발행용 4장 제한)가
+    #   먼저 잡히면 그리드·ZIP·재정렬이 전부 4장으로 좁아짐 — 16장 중 4장만 다운로드된 원인.
     thumbs = [x for x in (_img_thumb_data_uri(p) for p in imgs[:6]) if x]
     photos = (("<div class='flex gap-2 overflow-x-auto pb-1 mb-3'>"
                + "".join(f"<img src='{u}' class='h-24 w-24 object-cover rounded-lg flex-shrink-0'>" for u in thumbs)
@@ -945,7 +949,11 @@ def demo_zip(asset_id: str, request: Request):
     _blk = _contamination_block(pieces)
     if _blk:
         return _blk
-    imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
+    imgs = (next((p.payload.get("image_paths") for p in pieces
+                 if p.kind.value == "blog" and p.payload.get("image_paths")), None)
+            or next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or [])
+    # ★ 블로그 피스 우선(실측 버그): 다듬기 병렬화로 저장 순서가 뒤섞여 X 피스(발행용 4장 제한)가
+    #   먼저 잡히면 그리드·ZIP·재정렬이 전부 4장으로 좁아짐 — 16장 중 4장만 다운로드된 원인.
     _slug = _set_slug(pieces)
     _nv = _set_naver_video(pieces)
     entries = []
@@ -2912,6 +2920,20 @@ def _content_photo_layout(tenant, blog):
         caps = _photo_captions(tenant, blog, n)
     except Exception:
         caps = []
+    # ★ 1차: 본문 마커 '등장순 재번호'(결정적·무조건 성립) — 생성기가 이미 의미 배치를 끝냈으므로
+    #   kit은 재배치하지 않고 번호만 흐름순으로 바꾼다(표시=ZIP=네이버 단일 기준, 조건부 포기 없음).
+    _seen_i = []
+    for _mm in _rl.finditer(r"\[사진(\d+)\]", body):
+        _iv = int(_mm.group(1))
+        if 1 <= _iv <= n and _iv not in _seen_i:
+            _seen_i.append(_iv)
+    if len(_seen_i) >= max(2, n // 2):
+        _order0 = _seen_i + [i for i in range(1, n + 1) if i not in _seen_i]   # 미등장은 뒤로
+        _newnum = {orig: k + 1 for k, orig in enumerate(_order0)}
+        _nb = _rl.sub(r"\[사진(\d+)\]",
+                      lambda m: f"[사진{_newnum.get(int(m.group(1)), int(m.group(1)))}]", body)
+        return _nb, [i - 1 for i in _order0], caps
+    # 2차(구세트 폴백): 마커가 거의 없으면 기존 캡션↔문단 재매칭 경로
     if len([c for c in caps if (c or "").strip()]) < max(2, n // 2):   # 설명 태부족 → 원순서 유지(날조·오배치 금지)
         return body, list(range(n)), caps
     clean = _rl.sub(r"[ \t]*\[사진\d+\][ \t]*\n?", "", body).strip()
@@ -4904,7 +4926,11 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
         return (f"<textarea id='{cid}' readonly class='w-full h-{h} border border-slate-200 rounded-xl p-2 text-sm bg-slate-50'>{esc(text)}</textarea>"
                 f"<button type=button onclick=\"cp('{cid}',this)\" class='mt-1 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg'>복사</button>")
 
-    imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
+    imgs = (next((p.payload.get("image_paths") for p in pieces
+                 if p.kind.value == "blog" and p.payload.get("image_paths")), None)
+            or next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or [])
+    # ★ 블로그 피스 우선(실측 버그): 다듬기 병렬화로 저장 순서가 뒤섞여 X 피스(발행용 4장 제한)가
+    #   먼저 잡히면 그리드·ZIP·재정렬이 전부 4장으로 좁아짐 — 16장 중 4장만 다운로드된 원인.
     # ★ 결과 화면도 '글 흐름순' 정렬 — 네이버 페이지·ZIP과 단일 기준. 실측 버그: 여기만 원순서라
     #   결과 화면에서 본문 복사 + ZIP 다운로드 시 [사진N] 번호와 파일 번호가 어긋났음.
     try:
@@ -6173,7 +6199,11 @@ def kit_pack(request: Request, asset_id: str, pid: str):
         return _blk
     _st = _contam_status(pieces)                              # D-3: 영상 표면 오염이면 영상만 제외(글·사진은 유지)
     _wait_photo_edit(asset_id, pieces[0].tenant_id)           # 병렬 보정 미완료 사진 유출 방지
-    imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
+    imgs = (next((p.payload.get("image_paths") for p in pieces
+                 if p.kind.value == "blog" and p.payload.get("image_paths")), None)
+            or next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or [])
+    # ★ 블로그 피스 우선(실측 버그): 다듬기 병렬화로 저장 순서가 뒤섞여 X 피스(발행용 4장 제한)가
+    #   먼저 잡히면 그리드·ZIP·재정렬이 전부 4장으로 좁아짐 — 16장 중 4장만 다운로드된 원인.
     imgs = _ordered_imgs_for_pack(pieces, imgs)               # 글 흐름순 사진 정렬
     _nv = None if _st["video_dirty"] else _set_naver_video(pieces)
     data = _zip_bytes(_piece_pack_entries(piece, imgs, slug=_set_slug(pieces), nv=_nv))
@@ -6192,7 +6222,11 @@ def kit_pack_all(request: Request, asset_id: str):
         return _blk
     _st = _contam_status(pieces)                              # D-3: 영상 표면 오염이면 영상만 제외(글·사진·타채널 유지)
     _wait_photo_edit(asset_id, pieces[0].tenant_id)           # 병렬 보정 미완료 사진 유출 방지
-    imgs = next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or []
+    imgs = (next((p.payload.get("image_paths") for p in pieces
+                 if p.kind.value == "blog" and p.payload.get("image_paths")), None)
+            or next((p.payload.get("image_paths") for p in pieces if p.payload.get("image_paths")), []) or [])
+    # ★ 블로그 피스 우선(실측 버그): 다듬기 병렬화로 저장 순서가 뒤섞여 X 피스(발행용 4장 제한)가
+    #   먼저 잡히면 그리드·ZIP·재정렬이 전부 4장으로 좁아짐 — 16장 중 4장만 다운로드된 원인.
     imgs = _ordered_imgs_for_pack(pieces, imgs)               # 글 흐름순 사진 정렬(아무 순서로 올려도 글 순서대로)
     _slug = _set_slug(pieces)
     _nv = None if _st["video_dirty"] else _set_naver_video(pieces)
