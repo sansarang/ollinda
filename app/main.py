@@ -247,6 +247,27 @@ def admin_gowatch_preview(request: Request, tenant_id: str):
     return HTMLResponse(page)
 
 
+@app.get("/admin/dedupe-blogs/{asset_id}")
+def admin_dedupe_blogs(asset_id: str):
+    """운영 수리 — 워치독 레이스로 생긴 중복 블로그 피스 제거(channel_status·사진 수·최신 우선 보존)."""
+    from app.domain.models import ContentKind as _CKd
+    pieces = db.get_set_pieces(asset_id)
+    blogs = [p for p in pieces if p.kind == _CKd.BLOG]
+    if len(blogs) < 2:
+        return JSONResponse({"ok": True, "blogs": len(blogs), "removed": 0})
+    blogs.sort(key=lambda b: (bool(b.payload.get("channel_status")),
+                              len(b.payload.get("image_paths") or []),
+                              str(getattr(b, "created_at", ""))), reverse=True)
+    removed = []
+    for dup in blogs[1:]:
+        db.delete_piece(dup.id, dup.tenant_id)
+        removed.append(dup.id[:8])
+    keep = blogs[0]
+    return JSONResponse({"ok": True, "kept": keep.id[:8],
+                         "kept_imgs": len(keep.payload.get("image_paths") or []),
+                         "removed": removed})
+
+
 @app.get("/admin/lessons")
 def admin_lessons(tid: str = "", run: str = ""):
     """운영 진단 — 가게 교훈 목록 + run=1이면 스윕 즉시 실행(크론 대기 없이 검증용)."""

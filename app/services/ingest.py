@@ -602,9 +602,29 @@ def _text_channel_watchdog(log) -> None:
         _pinged = None                                   # 크레딧 핑은 스캔당 최대 1회
         for row in db.recent_asset_rows(hours=24, limit=50):
             try:
+                # ★ 신생 세트 유예(실측 사고): 다듬기 병렬화로 캡션이 블로그보다 먼저 저장될 수 있어,
+                #   정각 크론이 '생성 중' 세트를 블로그 부재로 오판 → 블로그 중복 생성. 10분 미만은 건너뜀.
+                try:
+                    if datetime.utcnow() - datetime.fromisoformat(
+                            (row.get("created_at") or "")[:19]) < timedelta(minutes=10):
+                        continue
+                except Exception:
+                    pass
                 pieces = db.get_set_pieces(row["asset_id"])
                 if not pieces:
                     continue
+                # 🧹 중복 블로그 자동 정리(자기 치유): 위 레이스로 생긴 복제 블로그 제거 —
+                #   channel_status 있는 쪽(원본, 상태 저장소) 우선 보존, 동률이면 최신 유지.
+                _blogs = [p for p in pieces if p.kind == ContentKind.BLOG]
+                if len(_blogs) > 1:
+                    _blogs.sort(key=lambda b: (bool(b.payload.get("channel_status")),
+                                               len(b.payload.get("image_paths") or []),
+                                               str(getattr(b, "created_at", ""))), reverse=True)
+                    for _dup in _blogs[1:]:
+                        db.delete_piece(_dup.id, _dup.tenant_id)
+                        log.warning("[text-watchdog] 중복 블로그 제거 asset=%s piece=%s",
+                                    row["asset_id"], _dup.id[:8])
+                    pieces = db.get_set_pieces(row["asset_id"])
                 blog = next((p for p in pieces if p.kind == ContentKind.BLOG), None)
                 if not blog:
                     # 블로그 부재 세트 — 재시도 카운트는 첫 피스 payload(_blog_retries)에
