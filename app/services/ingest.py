@@ -914,6 +914,20 @@ def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: di
         _set_channel_status(asset.id, {ch: {"status": "failed", "error": _err} for ch in want})
         return
     _set_video_job(asset.id, "done")
+    # 🎞 렌더 결과 화면 자동 검사(업종 중립) — 잘림·자막·PII를 vision이 보고 기록(발행 전 확인 신호)
+    try:
+        from app.generators.video import video_qc as _vqc
+        _qc = {}
+        _nvp = (short.payload.get("naver_video") or {}).get("path")
+        if "naver" in want and _nvp:
+            _qc["naver"] = _vqc(_nvp)
+        if "shorts" in want and short.payload.get("video_path"):
+            _qc["shorts"] = _vqc(short.payload["video_path"])
+        if _qc:
+            short.payload["video_qc"] = _qc
+            db.save_piece(short)
+    except Exception:
+        pass
     _cs_done = {}
     if "shorts" in want:
         _cs_done["shorts"] = {"status": "done"}

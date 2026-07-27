@@ -346,6 +346,13 @@ class BlogDraftGenerator(Generator):
         # 기계 티 방지(2026-07-27): 도입 스타일 시드 회전 + 최근 글 첫 문장 반복 금지(데이터 기반)
         _hook = _hook_style(asset.id)
         _recent_open = _recent_openers(tenant.id)
+        # 🔬 상위 글 실측 기준선(캐시만 — 크롤 대기 0초, 없으면 백그라운드 예열) — 전 업종 공통
+        _anat_line = ""
+        try:
+            from app.services import bloganatomy as _ba
+            _anat_line = _ba.baseline_line(kw0)
+        except Exception:
+            pass
         prompt = (
             f"[가게] {tenant.name} (업종: {prof.name}, 지역: {_reg_txt})\n"
             f"[사업형태] {strat.label} — {strat.goal}\n"
@@ -376,6 +383,7 @@ class BlogDraftGenerator(Generator):
             + (("[최근 글 첫 문장 — 반복 금지] 아래는 이 가게가 최근 쓴 글의 시작들이다. "
                 "같은 훅·비슷한 문장 구조·같은 상투구로 시작하면 안 된다(유사문서·기계 티):\n"
                 + "\n".join(f"- {s}" for s in _recent_open) + "\n") if _recent_open else "")
+            + _anat_line
             + "[필수 섹션] ① '## 자주 묻는 질문'(Q&A 정확히 3쌍) ② 가격대/영업시간/찾아오는길을 마크다운 표(| 항목 | 내용 |) 1개 "
             "③ '## 한눈 요약'(핵심 3줄 목록 — GEO).\n"
             + _kw_natural_directive(kw0, _creg)
@@ -484,6 +492,12 @@ class BlogDraftGenerator(Generator):
             except Exception:
                 request_check = ""
         _subj_b = seo.subject_match(body[:1200], asset.note or "", kw0)   # 소재 정합 감사(블로그는 기록만)
+        _win_rec = None                                # 🎲 승산 스코어(실패해도 생성 안 막음)
+        try:
+            from app.services import winscore as _wsc
+            _win_rec = _wsc.score(tenant.id, kw0)
+        except Exception:
+            pass
         markers = [{"marker": f"[사진{i+1}]", "image_index": i, "image_path": p}
                    for i, p in enumerate(imgs)]
         return ContentPiece(
@@ -511,6 +525,7 @@ class BlogDraftGenerator(Generator):
                      "gen_source": (asset.note or "")[:8000],   # 입력 스냅샷 — [사진N] 전수 보존(kit 캡션·매칭 재사용, 재분석 0)
                      "request_check": request_check,            # '꼭 반영할 요청' 셀프체크(1-3d)
                      "dwell_gate": _dwell_rep,                  # 체류 장치 발현률 게이트 감사 기록
+                     "win_score": _win_rec,                     # 🎲 쓰기 전 승산 실측(근거 포함)
                      "subject_check": ("" if _subj_b is None else ("ok" if _subj_b else "miss")),
 
                      "fixed_info_block": fixed_block,      # 발행 화면 컴포넌트 가이드용(템플릿 PHASE 2·3)

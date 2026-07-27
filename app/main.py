@@ -388,6 +388,24 @@ def admin_gen_progress_close(request: Request, tenant_id: str):
     return JSONResponse({"ok": True, "closed_from": pr.get("status"), "label": pr.get("label")})
 
 
+@app.get("/admin/anatomy")
+def admin_anatomy(kw: str = ""):
+    """🔬 상위 글 해부 진단 — 동기 크롤(키워드당 상위 5개, 저속)·구조 지표 집계 반환(원문 미저장)."""
+    if not kw.strip():
+        return JSONResponse({"ok": False, "error": "kw 필요"}, status_code=400)
+    from app.services import bloganatomy
+    return JSONResponse({"ok": True, "anatomy": bloganatomy.anatomize(kw.strip())})
+
+
+@app.get("/admin/win-score")
+def admin_win_score(tenant_id: str = "", kw: str = ""):
+    """🎲 승산 스코어 진단 — 쓰기 전 '이길 수 있는 판인가' 근거 포함 반환."""
+    if not (tenant_id and kw.strip() and db.get_tenant(tenant_id)):
+        return JSONResponse({"ok": False, "error": "tenant_id·kw 필요"}, status_code=400)
+    from app.services import winscore
+    return JSONResponse({"ok": True, **winscore.score(tenant_id, kw.strip())})
+
+
 @app.api_route("/admin/quality-check", methods=["GET", "POST"])
 def admin_quality_check(request: Request, tenant_id: str = "", src_asset: str = "", video: int = 0):
     """📏 품질 회귀 검사(골든세트) — src_asset 세트의 사진으로 '실제 생성'을 동기 실행하고

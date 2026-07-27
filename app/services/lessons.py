@@ -61,6 +61,17 @@ def _analyze_gap(tenant, pub: dict, kw: str, cause: str, existing: list[str]) ->
         from app.services.blogrank import _search_blog
         top = _search_blog(kw, 10)
         top_lines = "\n".join(f"- {t['title']} — {t['description'][:60]}" for t in top[:8]) or "(조회 실패)"
+        # 🔬 상위 글 해부 실측(제목·요약 너머 구조 지표 — 캐시만, 없으면 예열)
+        try:
+            from app.services import bloganatomy as _ba
+            _an = _ba.cached(kw)
+            if _an is None:
+                _ba.ensure_async(kw)
+            else:
+                top_lines += (f"\n[상위 글 구조 실측] 평균 {_an['avg_chars']}자·사진 {_an['avg_imgs']}장·"
+                              f"소제목 {_an['avg_heads']}개·표 {_an['table_pct']}%·동영상 {_an['video_pct']}%")
+        except Exception:
+            pass
         cause_txt = ("색인 자체가 안 됐다(검색에 등록 실패 — 유사문서·저품질 가능)" if cause == "not_indexed"
                      else "1페이지에 진입했다가 뚜렷하게 하락했다(사용자 체류·반응 부족 의심 — "
                           "서두 훅·끝까지 읽게 하는 장치·콘텐츠 충실도 관점으로 진단하라)" if cause == "dwell_drop"

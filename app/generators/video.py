@@ -357,6 +357,58 @@ def _cut_word(s: str, n: int) -> str:
     return cut[:cut.rfind(" ")].rstrip(" ,·—-") if " " in cut else cut
 
 
+def video_qc(video_path: str, n_frames: int = 3) -> dict:
+    """🎞 렌더 결과 화면 자동 검사(업종 중립, 사장님 승인 2026-07-28) — 프레임 추출 → vision 판정.
+    잡는 것: ①핵심 피사체(차·제품·음식·시공물 등) 어색한 잘림 ②자막 깨짐·겹침 ③PII(번호판·전화·얼굴) 노출.
+    실패는 조용히({"ok": None}) — 영상 파이프라인을 막지 않고 기록만."""
+    import base64
+    import json as _j
+    import logging as _lg
+    import tempfile
+    log = _lg.getLogger("shopcast.video")
+    if not (video_path and os.path.exists(video_path) and shutil.which("ffmpeg")):
+        return {"ok": None, "reason": "영상/ffmpeg 없음"}
+    try:
+        pr = subprocess.run(["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+                             "-of", "csv=p=0", video_path], capture_output=True, text=True, timeout=20)
+        dur = max(1.0, float((pr.stdout or "3").strip() or 3))
+        imgs = []
+        with tempfile.TemporaryDirectory() as td:
+            for i in range(n_frames):
+                ts = dur * (i + 1) / (n_frames + 1)
+                fp = os.path.join(td, f"q{i}.jpg")
+                subprocess.run(["ffmpeg", "-y", "-ss", f"{ts:.1f}", "-i", video_path, "-vframes", "1",
+                                "-vf", "scale=540:-2", "-q:v", "5", fp],
+                               capture_output=True, timeout=30)
+                if os.path.exists(fp):
+                    with open(fp, "rb") as f:
+                        imgs.append(("image/jpeg", base64.b64encode(f.read()).decode()))
+        if not imgs:
+            return {"ok": None, "reason": "프레임 추출 실패"}
+        from app import llm
+        raw = llm.call_task(
+            "vision",
+            f"세로 영상에서 뽑은 프레임 {len(imgs)}장이다. 전체 프레임을 보고 JSON 한 줄로만 답하라.\n"
+            "① crop: 핵심 피사체(차량·제품·음식·시공물·사람 등 그 프레임의 주인공)가 어색하게 잘려 "
+            "무엇인지 알아보기 어려운 프레임이 있으면 true (블러 배경 위 온전한 피사체는 정상=false)\n"
+            "② subtitle: 자막이 화면 밖으로 나가거나 겹치거나 깨져 읽기 어려우면 true\n"
+            "③ pii: 차량 번호판 글자·전화번호·사람 얼굴이 가림(모자이크) 없이 식별되면 true\n"
+            '형식: {"crop":false,"subtitle":false,"pii":false,"note":"한 줄 요약"}',
+            300, images=imgs)
+        m = re.search(r"\{.*\}", raw or "", re.S)
+        d = _j.loads(m.group(0)) if m else {}
+        out = {"ok": not (d.get("crop") or d.get("subtitle") or d.get("pii")),
+               "crop": bool(d.get("crop")), "subtitle": bool(d.get("subtitle")),
+               "pii": bool(d.get("pii")), "note": str(d.get("note") or "")[:120]}
+        if out["pii"]:
+            log.error("[video-qc] ⚠️ PII 노출 의심: %s (%s)", video_path, out["note"])
+        elif not out["ok"]:
+            log.warning("[video-qc] 화면 결함 의심: %s", out)
+        return out
+    except Exception as e:
+        return {"ok": None, "reason": repr(e)[:100]}
+
+
 def _parse_emphasis(text: str) -> tuple[str, list]:
     """자막 강조 마킹 {어절} 파싱 → (마킹 제거 텍스트, 강조 어절 목록[최대 1 — 남발 금지]).
     마킹은 기존 어절을 감싸는 표시일 뿐 — 텍스트 자체는 사실 게이트를 통과한 그대로."""
