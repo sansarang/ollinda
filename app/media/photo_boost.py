@@ -215,6 +215,15 @@ def mask_personal_info(path: str) -> int:
         _wb = blur_client.detect(path) if blur_client.configured() else None
         if _wb is not None:
             boxes += _wb                                  # YOLO 번호판·얼굴 박스
+            # ★ 임시(노란 종이) 번호판 보강(실사고 2026-07-27: '당진시장 317997' 미마스킹) —
+            #   YOLO는 표준 번호판 학습이라 임시판을 놓침. 워커가 번호판을 하나도 못 찾은 사진만
+            #   vision 타일 패스로 재확인(번호판 없는 사진 1콜 수준의 비용).
+            if not any(b.get("type") == "plate" for b in _wb) and \
+               os.environ.get("SHOPCAST_PLATE_TILE", "1") != "0":
+                try:
+                    boxes += vision.detect_plates_vision(path)
+                except Exception:
+                    pass
         else:
             # 폴백: 워커 없을 때만 LLM vision(얼굴·번호판·라벨) + 촬영 번호판 타일
             boxes += list(vision.detect_personal_info(path))

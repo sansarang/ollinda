@@ -388,6 +388,44 @@ def admin_gen_progress_close(request: Request, tenant_id: str):
     return JSONResponse({"ok": True, "closed_from": pr.get("status"), "label": pr.get("label")})
 
 
+@app.api_route("/admin/remask/{asset_id}", methods=["GET", "POST"])
+def admin_remask(asset_id: str, apply: int = 0, file: str = ""):
+    """PII 재마스킹 진단·복구(임시번호판 미탐 실사고 후속). apply=0 드라이런 — 사본에서 탐지만 실행해
+    per-photo 판정 로그 반환(원본 불변). apply=1 실제 마스킹(모자이크 추가만 — 파괴적 처리 없음).
+    file=파일명 지정 시 그 사진만."""
+    import shutil as _sh
+    import tempfile
+    _sp = db.get_set_pieces(asset_id)
+    _bl0 = next((p for p in _sp if (p.payload or {}).get("image_paths")), None)
+    if not _bl0:
+        return JSONResponse({"ok": False, "error": "사진 있는 피스 없음"}, status_code=404)
+    paths = [x for x in (_bl0.payload.get("image_paths") or []) if x and os.path.exists(x)]
+    if file:
+        paths = [p for p in paths if os.path.basename(p) == file]
+    from app.media import photo_boost as _pb
+    out = []
+    for p in paths:
+        _n0 = len(getattr(_pb, "_MASK_LAST_LOG", []))
+        if apply:
+            n = _pb.mask_personal_info(p)
+            out.append({"file": os.path.basename(p), "masked": n,
+                        "log": list(getattr(_pb, "_MASK_LAST_LOG", []))[_n0:]})
+        else:
+            with tempfile.NamedTemporaryFile(suffix=os.path.splitext(p)[1] or ".jpg", delete=False) as tf:
+                cp = tf.name
+            try:
+                _sh.copyfile(p, cp)
+                n = _pb.mask_personal_info(cp)
+                out.append({"file": os.path.basename(p), "would_mask": n,
+                            "log": list(getattr(_pb, "_MASK_LAST_LOG", []))[_n0:]})
+            finally:
+                try:
+                    os.unlink(cp)
+                except Exception:
+                    pass
+    return JSONResponse({"ok": True, "apply": bool(apply), "n": len(out), "photos": out})
+
+
 @app.get("/admin/kw-audit")
 def admin_kw_audit(limit: int = 30):
     """키워드-소재 정합 전수 검사(캐스퍼/토레스 실사고 후속) — 세트별로
