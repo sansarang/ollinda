@@ -376,6 +376,18 @@ async def admin_dwell_test(request: Request):
                          "body": fixed_body})
 
 
+@app.post("/admin/gen-progress-close/{tenant_id}")
+def admin_gen_progress_close(request: Request, tenant_id: str):
+    """stale 'running' 진행률 잔상 수동 종료(운영 복구용) — 단건 재생성 경로가 남긴 잔상 정리.
+    실제 실행 중 스레드에는 영향 없음(표시 행만 done 처리)."""
+    if not db.get_tenant(tenant_id):
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    pr = db.get_gen_progress(tenant_id) or {}
+    db.set_gen_progress(tenant_id, pr.get("stage") or "done", pr.get("label") or "", "",
+                        1.0, status="done")
+    return JSONResponse({"ok": True, "closed_from": pr.get("status"), "label": pr.get("label")})
+
+
 @app.get("/admin/kw-audit")
 def admin_kw_audit(limit: int = 30):
     """키워드-소재 정합 전수 검사(캐스퍼/토레스 실사고 후속) — 세트별로

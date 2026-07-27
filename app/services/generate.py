@@ -89,9 +89,10 @@ _KIND_PROGRESS = {
 def _generate_sequential(tenant: Tenant, asset: Asset, kinds: list[ContentKind],
                          images: list[str] | None = None) -> list[ContentPiece]:
     pieces: list[ContentPiece] = []
-    # 온디맨드 영상(SHORT 단독)은 홈 생성 진행률을 건드리지 않는다 — 영상 진행은 video_job(stage)이
-    # 담당. 안 그러면 '영상 대본 짜는 중 running' 잔상이 영구히 남음(실측).
-    _touch_progress = kinds != [ContentKind.SHORT]
+    # 단건 생성(온디맨드 영상·워치독 보완·autoqueue 단독 블로그)은 홈 생성 진행률을 건드리지 않는다 —
+    # done 마킹은 업로드 플로우(ingest)만 하므로, 단건 경로가 running을 남기면 영구 잔상(실측 2회:
+    # SHORT '영상 대본' 잔상, 2026-07-27 워치독 X 보완 'X 글 쓰는 중' 26분 잔상).
+    _touch_progress = len(kinds) > 1
     for kind in kinds:
         try:
             lbl, pct = _KIND_PROGRESS.get(kind, ("콘텐츠 만드는 중", 0.65))
