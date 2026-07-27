@@ -388,6 +388,47 @@ def admin_gen_progress_close(request: Request, tenant_id: str):
     return JSONResponse({"ok": True, "closed_from": pr.get("status"), "label": pr.get("label")})
 
 
+@app.api_route("/admin/quality-check", methods=["GET", "POST"])
+def admin_quality_check(request: Request, tenant_id: str = "", src_asset: str = "", video: int = 0):
+    """📏 품질 회귀 검사(골든세트) — src_asset 세트의 사진으로 '실제 생성'을 동기 실행하고
+    산출물을 결정적 규칙으로 채점(services.qualitycheck). video=1이면 네이버 영상까지 온디맨드 요청.
+    배포 후 이걸 돌려 품질 후퇴를 사장님보다 먼저 발견한다(사장님=QA 구조 종식, 2026-07-28)."""
+    t = db.get_tenant(tenant_id)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    _sp = db.get_set_pieces(src_asset)
+    _src = next((p for p in _sp if (p.payload or {}).get("image_paths")), None)
+    if not _src:
+        return JSONResponse({"ok": False, "error": "src_asset에 사진 없음"}, status_code=404)
+    from app.services.ingest import _restore_media, ingest_upload, request_video_bundle
+    paths = _restore_media(t.id, list(_src.payload.get("image_paths") or [])[:8])
+    if not paths:
+        return JSONResponse({"ok": False, "error": "골든 사진 복원 실패"}, status_code=500)
+    files = []
+    for p in paths:
+        try:
+            with open(p, "rb") as f:
+                files.append((f.read(), os.path.basename(p)))
+        except Exception:
+            continue
+    try:
+        made = ingest_upload(t, files, "[품질검사 골든세트]", intake={})
+    except Exception:
+        import traceback
+        return JSONResponse({"ok": False, "traceback": traceback.format_exc()[-1500:]}, status_code=500)
+    aid = made[0].asset_id if made else ""
+    from app.services import qualitycheck as _qc
+    rep = _qc.run_checks(aid) if aid else {"pass": 0, "fail": 1, "checks": [{"name": "생성 실패", "ok": False}]}
+    if video and aid:
+        try:
+            request_video_bundle(t, aid, ["naver"])
+            rep["video_requested"] = True
+        except Exception as e:
+            rep["video_requested"] = repr(e)[:120]
+    rep["ok"] = True
+    return JSONResponse(rep)
+
+
 @app.api_route("/admin/remask/{asset_id}", methods=["GET", "POST"])
 def admin_remask(asset_id: str, apply: int = 0, file: str = ""):
     """PII 재마스킹 진단·복구(임시번호판 미탐 실사고 후속). apply=0 드라이런 — 사본에서 탐지만 실행해
@@ -399,7 +440,8 @@ def admin_remask(asset_id: str, apply: int = 0, file: str = ""):
     _bl0 = next((p for p in _sp if (p.payload or {}).get("image_paths")), None)
     if not _bl0:
         return JSONResponse({"ok": False, "error": "사진 있는 피스 없음"}, status_code=404)
-    paths = [x for x in (_bl0.payload.get("image_paths") or []) if x and os.path.exists(x)]
+    from app.services.ingest import _restore_media
+    paths = _restore_media(_bl0.tenant_id, list(_bl0.payload.get("image_paths") or []))
     if file:
         paths = [p for p in paths if os.path.basename(p) == file]
     from app.media import photo_boost as _pb

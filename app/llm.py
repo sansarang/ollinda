@@ -131,9 +131,16 @@ SONNET = "claude-sonnet-5"
 # '빼기만·더하기 금지' 제약 준수 작업이라 Claude Haiku 지정(A/B 실측 Claude 우위 유형, 문장 수 적어 비용 미미).
 TASK_DEFAULTS = {"spoken": ("anthropic", SONNET)}   # 대본 품질(전보문 자막 실사고 2026-07-27) — Haiku→Sonnet 상향
 
+# 품질 표면 고정(2026-07-28 사장님 결정: 품질 우선, 비용 절감 라우팅 폐지) — env LLM_* 보다 우선.
+# 캡션 제미나이 절감 라우팅은 사진 분석 미전달 실사고(캐스퍼 날조)의 온상이었음. 절감 실험은
+# 품질 회귀 검사(/admin/quality-check) 정착 후에만 재개.
+QUALITY_PIN = {"caption": ("anthropic", MODEL)}
+
 
 def route(task: str) -> tuple[str, str]:
-    """작업 유형 → (provider, model). env → 작업별 기본값 → ('anthropic', 기본 모델)."""
+    """작업 유형 → (provider, model). 품질 고정(QUALITY_PIN) → env → 작업별 기본값 → 기본 모델."""
+    if task in QUALITY_PIN:
+        return QUALITY_PIN[task]
     v = (os.environ.get(f"LLM_{task.upper()}") or "").strip()
     if ":" in v:
         p, m = v.split(":", 1)
