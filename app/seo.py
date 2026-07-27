@@ -38,13 +38,32 @@ def _volume_boost_cached(hints_key: str) -> tuple:
     return res
 
 
+def _no_new_subject(cand: str, ctx_toks: set) -> bool:
+    """주입 키워드 안전 판정(업종 중립) — 내 후보 어휘에 없는 '새 내용 명사'(다른 차종·제품·동네)를
+    끌고 오는 키워드는 거부. 스키마 토큰 열거(phantom 필터)에 의존하지 않는 원천 차단.
+    실사고(2026-07-27): 네이버 고검색량 연관어 '캐스퍼 중고'가 토레스 세트 후보에 주입 → 캡션 날조 연쇄."""
+    import re as _r
+    for t in _r.findall(r"[가-힣A-Za-z0-9]{2,}", cand or ""):
+        if not any((t in c) or (c in t) for c in ctx_toks):
+            return False
+    return True
+
+
 def _apply_volume(kws: list[str], limit: int, hints: list[str] | None = None) -> list[str]:
-    """검색광고 API 있으면 실검색량 스윗스팟 키워드 2개를 보강(내 지역 키워드는 앞에 유지)."""
+    """검색광고 API 있으면 실검색량 스윗스팟 키워드 2개를 보강(내 지역 키워드는 앞에 유지).
+    ★ 보강 키워드는 내 후보 어휘의 재조합만 허용(_no_new_subject) — 세트와 무관한 인기 키워드 주입 차단."""
+    import re as _r
     seeds = [h for h in (hints or kws)[:3] if h]
     vol = _volume_boost_cached("|".join(seeds))
     if not vol:
         return kws[:limit]
-    extra = [v for v in vol if v and v not in kws][:2]          # 실검색량 신규 키워드 2개
+    ctx = {t for k in kws for t in _r.findall(r"[가-힣A-Za-z0-9]{2,}", k)}
+    _rej = [v for v in vol if v and v not in kws and not _no_new_subject(v, ctx)]
+    if _rej:
+        import logging as _lg
+        _lg.getLogger("shopcast.seo").warning("[volume-boost] 이질 소재 주입 거부(%d): %s",
+                                              len(_rej), _rej[:4])
+    extra = [v for v in vol if v and v not in kws and _no_new_subject(v, ctx)][:2]
     keep = kws[:max(1, limit - len(extra))]                     # 내 키워드 우선(첫 키워드=지역 유지)
     return list(dict.fromkeys(keep + extra))[:limit]
 

@@ -420,8 +420,11 @@ def admin_kw_audit(limit: int = 30):
             if pl.get("subject_check"):
                 subj[p.kind.value] = pl["subject_check"]
             body = (pl.get("body") or pl.get("text") or "")
-            toks = [w for w in _re.findall(r"[가-힣A-Za-z0-9]{2,}", tk)
-                    if w not in _stop and w not in note and w in body]
+            # ★ 대표 키워드만이 아니라 '키워드 목록 전체'를 검사 — 캐스퍼는 깊은 목록에서 유입(실측)
+            _all_kw = " ".join([tk] + [str(k) for k in (pl.get("target_keywords") or [])]
+                               + [str(k) for k in (pl.get("seo_keywords") or [])])
+            toks = sorted({w for w in _re.findall(r"[가-힣A-Za-z0-9]{2,}", _all_kw)
+                           if w not in _stop and w not in note and w in body})
             if toks and note:
                 sus.append({"kind": p.kind.value, "tokens": toks})
         if len(kws) > 1 or sus or "miss" in subj.values():
