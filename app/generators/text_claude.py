@@ -57,6 +57,39 @@ def _pick_title(cands: list[str], kw0: str, body: str = "") -> tuple[str, str]:
     return best, f"{why} (점수 {best_score}, 후보 {len(pool)}·게이트 통과 {len(gated)})"
 
 
+def _recent_openers(tenant_id: str, limit: int = 5) -> list[str]:
+    """이 가게 최근 블로그 글의 첫 문장들 — '같은 훅 반복'(기계 티·유사문서 신호) 방지용 금지 목록.
+    실측: '이거 안 보면/모르면 호구' 훅이 연속 글에서 반복됐음(2026-07-27)."""
+    import re as _re
+    out: list[str] = []
+    try:
+        from app import db as _db
+        from app.models import ContentKind as _CK
+        for s in _db.list_sets(tenant_id=tenant_id, limit=limit + 2):
+            for p in _db.get_set_pieces(s["asset_id"]):
+                if p.kind != _CK.BLOG:
+                    continue
+                body = (p.payload.get("body") or "").strip()
+                first_line = next((ln.strip() for ln in body.split("\n")
+                                   if ln.strip() and not ln.strip().startswith(("[", "#"))), "")
+                first = _re.split(r"(?<=[다요죠])[.!?]?\s", first_line)[0][:70].strip()
+                if first and first not in out:
+                    out.append(first)
+                break
+            if len(out) >= limit:
+                break
+    except Exception:
+        pass
+    return out
+
+
+def _hook_style(asset_id: str) -> tuple:
+    """asset 시드로 도입 스타일 1개 배정(결정적) — 같은 세트 재생성은 같은 스타일, 세트마다 회전."""
+    import hashlib
+    _h = int(hashlib.md5((asset_id or "").encode()).hexdigest()[:8], 16)
+    return seo.HOOK_STYLES[_h % len(seo.HOOK_STYLES)]
+
+
 _DWELL_PROMISE = ("보여드", "알려드", "공개", "정리해", "가져가", "확인하는 법", "말씀드", "펼쳐")
 _DWELL_BRIDGE = ("아래에서", "바로 아래", "이제 ", "지금부터", "궁금하실", "다음은", "이어서",
                  "그렇다면", "여기서 ", "하나 더", "이 다음", "넘어가", "살펴보", "마지막에")
@@ -93,8 +126,8 @@ def _ensure_dwell_devices(body: str, kw0: str) -> tuple[str, dict]:
         _need.append("[첫문단]\n(첫 문장이 '이 글이 답을 직접 보여준다'는 예고로 시작하도록 기존 첫 문단을 "
                      "고쳐 쓴 교체본 — 내용·사실은 원문 그대로)")
     if "itemized_preview" in missing:
-        _need.append("[예고]\n('끝까지 보시면 ①… ②… ③…을 가져가실 수 있습니다' 한 문장 — "
-                     "이 글 본문에 실제 있는 내용 3가지만)")
+        _need.append("[예고]\n(①②③ 번호로 이 글이 줄 것 3가지를 예고하는 한 문장 — 본문에 실제 있는 내용만. "
+                     "'끝까지 보시면 ~ 가져가실 수 있습니다' 정형구를 그대로 쓰지 말고 글의 문체에 맞게 변주)")
     if "bridge" in missing:
         _need.append("[이정표]\n(숫자 하나(몇 번째 문단 뒤에 넣을지) | 다음 섹션으로 넘어가는 자연스러운 "
                      "전환 문장 1개 — 실제 뒤에 나오는 내용만 예고)")
@@ -293,6 +326,9 @@ class BlogDraftGenerator(Generator):
                        "시스템이 자동 삽입하니 본문에 쓰지 마라(중복 금지). "
                        f"'네이버에서 \"{tenant.name}\" 검색 → 플레이스 저장·방문자리뷰·예약' 행동 유도는 좋다"
                        "(저장·리뷰·예약은 플레이스 순위의 핵심 신호). " + _reg_line)
+        # 기계 티 방지(2026-07-27): 도입 스타일 시드 회전 + 최근 글 첫 문장 반복 금지(데이터 기반)
+        _hook = _hook_style(asset.id)
+        _recent_open = _recent_openers(tenant.id)
         prompt = (
             f"[가게] {tenant.name} (업종: {prof.name}, 지역: {_reg_txt})\n"
             f"[사업형태] {strat.label} — {strat.goal}\n"
@@ -316,8 +352,14 @@ class BlogDraftGenerator(Generator):
             "② 서두(첫 문단 안이나 직후): '끝까지 보시면 ①… ②… ③…을 그대로 가져가실 수 있습니다'처럼 "
             "이 글에 실제로 있는 것만 3가지 예고. "
             "③ 본문 중간: '바로 아래에서 ○○을 직접 보여드립니다' 같은 다음 섹션 예고를 1~2회 — "
-            "실제 뒤에 나오는 내용만(없는 것 예고 금지).\n"
-            "[필수 섹션] ① '## 자주 묻는 질문'(Q&A 정확히 3쌍) ② 가격대/영업시간/찾아오는길을 마크다운 표(| 항목 | 내용 |) 1개 "
+            "실제 뒤에 나오는 내용만(없는 것 예고 금지). "
+            "★3장치 모두 정형 문구를 복사하지 말고 이 글의 소재·문체에 맞는 자연스러운 표현으로 변주하라.\n"
+            + f"[이번 글 도입 스타일 — 필수] '{_hook[0]}': {_hook[1]} "
+            "체류 설계 ①(답 예고)은 이 스타일 안에서 녹여라(스타일 따로 예고 따로 금지).\n"
+            + (("[최근 글 첫 문장 — 반복 금지] 아래는 이 가게가 최근 쓴 글의 시작들이다. "
+                "같은 훅·비슷한 문장 구조·같은 상투구로 시작하면 안 된다(유사문서·기계 티):\n"
+                + "\n".join(f"- {s}" for s in _recent_open) + "\n") if _recent_open else "")
+            + "[필수 섹션] ① '## 자주 묻는 질문'(Q&A 정확히 3쌍) ② 가격대/영업시간/찾아오는길을 마크다운 표(| 항목 | 내용 |) 1개 "
             "③ '## 한눈 요약'(핵심 3줄 목록 — GEO).\n"
             + _kw_natural_directive(kw0, _creg)
             + (f"[상위 확장 키워드] '{_parent_kw}' — 이 정확 구문(연속된 그대로)을 첫 문단에 자연스럽게 1회, "
