@@ -16,6 +16,25 @@ def generate_for(tenant: Tenant, asset: Asset, kinds: list[ContentKind],
     """요청된 종류(kinds)별로 콘텐츠 초안을 생성한다. images=업로드된 사진 경로들(여러 장).
     ★ 채널 병렬 생성(순차→동시) — 채널마다 독립 LLM 호출이라 최대 채널 수만큼 빨라짐. asset은 읽기 공유."""
     import os
+    # ★ 세트=한 소재=한 키워드: 타깃 키워드는 세트당 1회만 결정해 전 채널이 공유.
+    #   채널별 재결정 시 큐 회전으로 캡션이 '다른 차종' 키워드를 받아 사진에 없는 차종·흠집을
+    #   서술한 실사고(2026-07-27, 캐스퍼/토레스) — 날조 금지 위반의 구조적 원인.
+    if not (getattr(asset, "target_kw", "") or "").strip():
+        try:
+            from app import seo as _seo
+            from app.industries import resolve_industry as _ri
+            from app.strategies import resolve_strategy as _rs
+            _prof, _strat = _ri(tenant.industry), _rs(tenant)
+            _kw0, _ = _seo.resolve_target_keyword(
+                industry=(getattr(tenant, "industry", "") or _prof.name), region=tenant.region or "",
+                note=asset.note or "", biz=(getattr(tenant, "biz_type", "local") or "local"),
+                content_type=(getattr(asset, "content_type", "sell") or "sell"),
+                brand=tenant.brand_name or "", keyword_axis=_strat.keyword_axis,
+                target_kw_override="", tenant_id=tenant.id, prof_name=_prof.name)
+            if _kw0:
+                asset.target_kw = _kw0
+        except Exception:
+            pass
     # ★ 병렬화 기본 OFF(긴급 롤백) — 채널 병렬 생성이 행(hang) 유발 실측(타임아웃 없는 LLM 호출이 블록).
     #   순차로 복귀(모델 하이브리드 Haiku/Sonnet는 유지 → 속도 이득 대부분 보존). 타임아웃 보강 후 재활성.
     if len(kinds) <= 1 or os.environ.get("SHOPCAST_GEN_PARALLEL", "0") == "0":

@@ -409,7 +409,10 @@ async def admin_gen_test(request: Request, tenant_id: str, photos: list[UploadFi
 
 @app.get("/admin/gen-progress/{tenant_id}")
 def admin_gen_progress(request: Request, tenant_id: str):
-    """생성 진행/실패 진단 — 해당 tenant의 최신 생성 단계·에러(traceback 포함)."""
+    """생성 진행/실패 진단 — 해당 tenant의 최신 생성 단계·에러(traceback 포함).
+    ★ 미존재 tenant는 404 — 배포 게이트가 잘못된 ID로 'idle 착각' 후 push한 실사고(2026-07-27) 방지."""
+    if not db.get_tenant(tenant_id):
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
     return JSONResponse({"ok": True, "progress": db.get_gen_progress(tenant_id),
                          "duration_range": db.gen_duration_range()})
 
