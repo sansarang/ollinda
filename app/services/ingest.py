@@ -286,9 +286,22 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
             _ih = int(_mh.group(1)) - 1
             _dh = _mh.group(2)
             if (0 <= _ih < len(paths) and not any(w in _dh for w in _DOCW)
-                    and any(w in _dh for w in ("외관", "전측면", "전면", "차체", "전체 모습", "매장 전경", "대표"))):
+                    and any(w in _dh for w in ("외관", "전측면", "전면", "차체", "전체 모습", "매장 전경", "대표",
+                                               "후면", "측면", "전경"))):
                 _hero_path = paths[_ih]
                 break
+        # 외관 매치 실패 시: '정체불명 컷'(천장·조명·바닥 등)을 대표로 쓰지 않기(실사고 2026-07-28:
+        # 썬팅 세트 X·인스타 대표가 천장 형광등 사진) — 부정어 없는 첫 사진으로 폴백. 업종 중립.
+        if _hero_path == paths[0]:
+            _BADW = ("천장", "조명", "형광등", "벽면", "바닥", "흐릿", "초점이", "알아보기 어")
+            _descs = {int(_m2.group(1)) - 1: _m2.group(2)
+                      for _m2 in _reh.finditer(r"\[사진(\d+)\]\s*([^\n]+)", analysis or "")}
+            if any(w in _descs.get(0, "") for w in _BADW):
+                for _i2 in range(len(paths)):
+                    _d2 = _descs.get(_i2, "")
+                    if _d2 and not any(w in _d2 for w in _BADW) and not any(w in _d2 for w in _DOCW):
+                        _hero_path = paths[_i2]
+                        break
     except Exception:
         pass
 

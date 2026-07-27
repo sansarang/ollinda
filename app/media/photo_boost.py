@@ -175,7 +175,9 @@ def _pixelate_region(im, box) -> bool:
     if x1 - x0 < 6 or y1 - y0 < 6:
         return False
     region = im.crop((x0, y0, x1, y1))
-    small = region.resize((max(1, (x1 - x0) // 14), max(1, (y1 - y0) // 14)))   # 축소→확대 = 모자이크
+    # 셀 수 상한(2026-07-28 실사고: 초근접 번호판은 //14 입자로도 숫자가 그대로 읽힘 — 사장님 실측).
+    # 영역이 클수록 셀을 굵게: 가로 12칸·세로 6칸 상한이면 어떤 크기·거리에서도 판독 불가.
+    small = region.resize((max(1, min((x1 - x0) // 14, 12)), max(1, min((y1 - y0) // 14, 6))))
     im.paste(small.resize((x1 - x0, y1 - y0), Image.NEAREST), (x0, y0))
     return True
 
