@@ -236,6 +236,21 @@ class CaptionGenerator(Generator):
                               cache_prefix=cache_prefix_for(asset))   # 인스타 캡션(공유 컨텍스트 캐싱)
         _cap_route = dict(_llm.LAST_ROUTE.get("caption") or {})
         # 저장·공유 CTA 자동 삽입(영상강화 PHASE 5) — 저장·공유가 좋아요보다 3~5배 가중치.
+        # 소재 정합 게이트(캐스퍼/토레스 실사고 재발 방지) — 불일치면 소재 고정 재작성 1회
+        _subj_state = ""
+        _subj = seo.subject_match(text, asset.note or "", (kws[0] if kws else ""))
+        if _subj is False:
+            _re2 = _llm.call_task(
+                "caption", self._prompt(tenant, asset, len(imgs), kws)
+                + "\n[재작성 — 소재 고정] 직전 초안이 사진 분석에 없는 차종·제품을 실물처럼 서술해 폐기됐다. "
+                  "이번 소재는 위 [사진N] 분석에서 확인되는 것만이다. 사진과 다른 차종·모델명은 언급 자체를 "
+                  "하지 마라.", 1200, default_model=self.model, cache_prefix=cache_prefix_for(asset))
+            if (_re2 or "").strip():
+                text = _re2
+            _subj = seo.subject_match(text, asset.note or "", (kws[0] if kws else ""))
+            _subj_state = "retried_ok" if _subj is not False else "miss"
+        elif _subj is True:
+            _subj_state = "ok"
         # LLM이 이미 넣었으면 중복 삽입하지 않음. 해시태그 앞에 배치.
         if text and "저장" not in text:
             cta = seo.save_share_line("instagram")
@@ -245,7 +260,8 @@ class CaptionGenerator(Generator):
             id=str(uuid.uuid4()), tenant_id=tenant.id, asset_id=asset.id,
             channel=Channel.INSTAGRAM, kind=self.kind,
             payload={"text": text, "image_path": imgs[0], "image_paths": imgs,
-                     "target_keywords": kws, "llm_route": _cap_route},
+                     "target_keywords": kws, "llm_route": _cap_route,
+                     "subject_check": _subj_state},
             status=ContentStatus.DRAFT)
 
 
@@ -466,6 +482,7 @@ class BlogDraftGenerator(Generator):
                 request_check = "ok" if "YES" in (_v or "").upper() else "miss"
             except Exception:
                 request_check = ""
+        _subj_b = seo.subject_match(body[:1200], asset.note or "", kw0)   # 소재 정합 감사(블로그는 기록만)
         markers = [{"marker": f"[사진{i+1}]", "image_index": i, "image_path": p}
                    for i, p in enumerate(imgs)]
         return ContentPiece(
@@ -493,6 +510,7 @@ class BlogDraftGenerator(Generator):
                      "gen_source": (asset.note or "")[:8000],   # 입력 스냅샷 — [사진N] 전수 보존(kit 캡션·매칭 재사용, 재분석 0)
                      "request_check": request_check,            # '꼭 반영할 요청' 셀프체크(1-3d)
                      "dwell_gate": _dwell_rep,                  # 체류 장치 발현률 게이트 감사 기록
+                     "subject_check": ("" if _subj_b is None else ("ok" if _subj_b else "miss")),
 
                      "fixed_info_block": fixed_block,      # 발행 화면 컴포넌트 가이드용(템플릿 PHASE 2·3)
                      "raw": raw, "image_path": imgs[0], "image_paths": imgs},

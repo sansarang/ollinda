@@ -376,6 +376,49 @@ async def admin_dwell_test(request: Request):
                          "body": fixed_body})
 
 
+@app.get("/admin/kw-audit")
+def admin_kw_audit(limit: int = 30):
+    """키워드-소재 정합 전수 검사(캐스퍼/토레스 실사고 후속) — 세트별로
+    ① 채널 간 target_kw 불일치 ② 키워드 고유 토큰이 사진 분석(note)에 없는데 본문에 등장(날조 신호)
+    ③ 생성 시 기록된 subject_check 값(miss=게이트 불일치 판정)을 모아 반환."""
+    import re as _re
+    _COMMON = {"중고", "중고차", "판매", "추천", "후기", "가격", "비용", "시공", "매장", "전문", "업체"}
+    out, checked = [], 0
+    try:
+        _sets = db.list_sets(limit=limit)
+    except Exception:
+        _sets = []
+    for s in _sets:
+        pieces = db.get_set_pieces(s["asset_id"])
+        if not pieces:
+            continue
+        checked += 1
+        a = db.get_asset(s["asset_id"])
+        note = (getattr(a, "note", "") or "") if a else ""
+        t = db.get_tenant(s["tenant_id"])
+        _stop = set(_re.findall(r"[가-힣A-Za-z0-9]{2,}",
+                                f"{getattr(t, 'region', '')} {getattr(t, 'name', '')} "
+                                f"{getattr(t, 'industry', '')}" if t else "")) | _COMMON
+        kws, subj, sus = {}, {}, []
+        for p in pieces:
+            pl = p.payload or {}
+            tk = ((pl.get("target_kw") or "") or ((pl.get("target_keywords") or [""])[0] or "")).strip()
+            if tk:
+                kws.setdefault(tk, []).append(p.kind.value)
+            if pl.get("subject_check"):
+                subj[p.kind.value] = pl["subject_check"]
+            body = (pl.get("body") or pl.get("text") or "")
+            toks = [w for w in _re.findall(r"[가-힣A-Za-z0-9]{2,}", tk)
+                    if w not in _stop and w not in note and w in body]
+            if toks and note:
+                sus.append({"kind": p.kind.value, "tokens": toks})
+        if len(kws) > 1 or sus or "miss" in subj.values():
+            out.append({"asset_id": s["asset_id"], "tenant": s["tenant"], "created": s["created"],
+                        "kws": {k: v for k, v in kws.items()}, "divergent": len(kws) > 1,
+                        "suspect_tokens": sus, "subject_check": subj})
+    return JSONResponse({"ok": True, "checked": checked, "flagged": len(out), "sets": out})
+
+
 @app.get("/admin/sets-list")
 def admin_sets_list(request: Request, tenant: str = "", limit: int = 20):
     """운영/검증용 — 최신 세트(asset_id·tenant·글수·생성) JSON. 콘티 검증 대상 선택용."""

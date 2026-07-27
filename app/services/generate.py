@@ -20,6 +20,19 @@ def generate_for(tenant: Tenant, asset: Asset, kinds: list[ContentKind],
     #   채널별 재결정 시 큐 회전으로 캡션이 '다른 차종' 키워드를 받아 사진에 없는 차종·흠집을
     #   서술한 실사고(2026-07-27, 캐스퍼/토레스) — 날조 금지 위반의 구조적 원인.
     if not (getattr(asset, "target_kw", "") or "").strip():
+        # ① 같은 세트에 이미 생성된 피스가 있으면 그 키워드를 승계 — asset.target_kw는 메모리 전용이라
+        #   워치독 보완·온디맨드 영상(다른 시점/프로세스)이 재결정하면 또 어긋난다(영속화 구멍).
+        try:
+            from app import db as _db
+            for _p in _db.get_set_pieces(asset.id):
+                _tk = ((_p.payload.get("target_kw") or "")
+                       or ((_p.payload.get("target_keywords") or [""])[0] or "")).strip()
+                if _tk:
+                    asset.target_kw = _tk
+                    break
+        except Exception:
+            pass
+    if not (getattr(asset, "target_kw", "") or "").strip():
         try:
             from app import seo as _seo
             from app.industries import resolve_industry as _ri

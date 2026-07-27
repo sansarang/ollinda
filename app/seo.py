@@ -706,6 +706,29 @@ SHORT_DIRECTIVES_SELLER = (
 )
 
 # 정직 원칙 — 모든 생성물(글·영상·상세페이지) 공통. 허위·날조는 '안 만드느니만 못함' + 표시광고법 위반.
+def subject_match(text: str, note: str, kw: str) -> "bool | None":
+    """소재 정합 게이트(생성 후 기계 검증) — 글이 '실물처럼' 서술하는 소재(차종·모델·제품)가
+    사진 분석(note)에서 확인되는지 LLM YES/NO. True=일치, False=불일치, None=판정 불가(fail-open).
+    실사고(2026-07-27): 캡션이 키워드 '캐스퍼'에 끌려 토레스 사진 세트에 '오늘 들여온 캐스퍼'·
+    '휠 스크래치'를 날조 — 프롬프트 지시만으로는 재발을 못 막아 기계 게이트로 보증."""
+    if not (text or "").strip() or "[사진" not in (note or ""):
+        return None                                     # 사진 분석 없는 세트는 판정 불가(스킵)
+    try:
+        from app import llm
+        v = llm.call(
+            "너는 사실 검증자다. [글]이 '지금 여기 있는 실물'처럼 서술하는 소재(차종·모델명·제품명)가 "
+            "[사진 분석]에서 확인되는지만 판단하라. 사진 분석에 없는 차종·모델·제품을 실물처럼(입고·검수·"
+            "흠집·상태 묘사) 서술하면 NO. 지역·업종·일반 조언·비유 언급은 판단에서 제외. YES/NO 한 단어만.\n"
+            f"[타깃 키워드] {kw}\n[사진 분석(발췌)]\n{(note or '')[:2500]}\n\n[글]\n{(text or '')[:1200]}",
+            max_tokens=10)
+        s = (v or "").strip().upper()
+        if "NO" in s and "YES" not in s:
+            return False
+        return True if "YES" in s else None
+    except Exception:
+        return None
+
+
 FACTS_RULE = (
     "[⚠️ 정직 원칙 — 반드시 지켜라(위반하면 콘텐츠 폐기)]\n"
     "- 입력(메모·사진분석·상품정보)에 '없는' 가격·할인율·수치·스펙·모델명·성분·효능·용량·수상/인증·후기수를 절대 지어내지 마라.\n"

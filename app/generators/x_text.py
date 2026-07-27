@@ -43,9 +43,23 @@ class XPostGenerator(Generator):
             "X(트위터)용 단문을 한국어로 작성하라. 한 덩어리 텍스트로만 출력."
         )
         text = _call_llm(prompt, self.model, 400, cache_prefix=cache_prefix_for(asset))[:280]
+        # 소재 정합 게이트(캐스퍼/토레스 실사고 재발 방지) — 불일치면 소재 고정 재작성 1회
+        _subj_state = ""
+        _subj = seo.subject_match(text, asset.note or "", (kws[0] if kws else ""))
+        if _subj is False:
+            _re2 = _call_llm(prompt + "\n[재작성 — 소재 고정] 직전 초안이 사진 분석에 없는 차종·제품을 "
+                             "실물처럼 서술해 폐기됐다. 위 [사진N] 분석에서 확인되는 소재만 서술하고, 사진과 "
+                             "다른 차종·모델명은 언급 자체를 하지 마라.",
+                             self.model, 400, cache_prefix=cache_prefix_for(asset))[:280]
+            if (_re2 or "").strip():
+                text = _re2
+            _subj = seo.subject_match(text, asset.note or "", (kws[0] if kws else ""))
+            _subj_state = "retried_ok" if _subj is not False else "miss"
+        elif _subj is True:
+            _subj_state = "ok"
         return ContentPiece(
             id=str(uuid.uuid4()), tenant_id=tenant.id, asset_id=asset.id,
             channel=Channel.X, kind=self.kind,
             payload={"text": text, "image_path": imgs[0], "image_paths": imgs[:4],
-                     "target_keywords": kws},  # X 미디어 최대 4
+                     "target_keywords": kws, "subject_check": _subj_state},  # X 미디어 최대 4
             status=ContentStatus.DRAFT)
