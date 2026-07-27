@@ -176,9 +176,12 @@ def call_task(task: str, prompt: str, max_tokens: int = 1200,
     log = logging.getLogger("shopcast.llm")
     provider, model = route(task)
     info = {"provider": provider, "model": model, "fallback": False}
+    # ★ cache_prefix(브리프·사진 분석)는 Gemini 경로에도 반드시 포함 — 누락 시 캡션이 사진을 전혀
+    #   못 보고 소재를 지어냄(실사고 2026-07-27: 토레스 세트 캡션이 '오늘 들여온 캐스퍼' 날조의 진짜 원인).
+    _full_prompt = (cache_prefix + prompt) if cache_prefix else prompt
     if provider == "gemini":
         parts = ([{"inline_data": {"mime_type": mt, "data": b64}} for mt, b64 in (images or [])]
-                 + [{"text": prompt}])
+                 + [{"text": _full_prompt}])
         for attempt in (1, 2):                        # 1회 재시도(rate limit 폭주 금지)
             try:
                 out = _gemini_generate(parts, model, max_tokens)
@@ -208,7 +211,7 @@ def call_task(task: str, prompt: str, max_tokens: int = 1200,
             info["error"] = repr(e)[:150]
             if os.environ.get("GEMINI_API_KEY"):      # 역방향 폴백: anthropic → gemini
                 try:
-                    out = _gemini_generate([{"text": prompt}], "gemini-flash-latest", max_tokens)
+                    out = _gemini_generate([{"text": _full_prompt}], "gemini-flash-latest", max_tokens)
                     info["fallback"] = True
                     info["fallback_to"] = "gemini"
                     LAST_ROUTE[task] = info
@@ -226,4 +229,4 @@ def call_task(task: str, prompt: str, max_tokens: int = 1200,
         resp = anthropic.Anthropic(timeout=120.0).messages.create(   # 이미지 배치(6장)는 60초로 빠듯 — 실측 상향
             model=am, max_tokens=max_tokens, messages=[{"role": "user", "content": content}])
         return next((b.text for b in resp.content if b.type == "text"), "").strip()
-    return call(prompt, am, max_tokens)
+    return call(prompt, am, max_tokens, cache_prefix=cache_prefix)
