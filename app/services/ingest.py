@@ -345,6 +345,27 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
                 db.save_piece(blog_piece0)
     except Exception:
         pass
+    # 📏 글올리기 전 자체 검사 AI(2026-07-28 사장님 결정) — 터미널 에이전트 방식: 스스로 검사 →
+    #   걸린 항목만 표면 수정 → 재검사. 통과한 글만 사장님 눈에 닿는다(사장님=QA 구조 종식).
+    #   끄기: SHOPCAST_SELF_REVIEW=0. 검사 자체는 비용 0(기계 채점), 수정은 걸렸을 때만 LLM 1~3콜.
+    try:
+        if os.environ.get("SHOPCAST_SELF_REVIEW", "1") != "0" and pieces:
+            _prog("polish", "자체 검사·퇴고 중", "", 0.9)
+            from app.services import qualitycheck as _qc
+            _sr = _qc.self_review(pieces[0].asset_id, max_rounds=1)
+            _blog_sr = next((p for p in pieces if p.kind == ContentKind.BLOG), None)
+            if _blog_sr:
+                _blog_sr.payload["self_review"] = {"rounds": _sr.get("rounds"), "fixed": _sr.get("fixed"),
+                                                   "pass": _sr.get("pass"), "fail": _sr.get("fail")}
+                db.save_piece(_blog_sr)
+            # ★ self_review는 DB를 직접 고치므로 메모리 pieces에도 반영(이후 단계가 구본문을 쓰지 않게)
+            _fresh = {p.id: p for p in db.get_set_pieces(pieces[0].asset_id)}
+            for _i, _p in enumerate(pieces):
+                if _p.id in _fresh:
+                    pieces[_i].payload = _fresh[_p.id].payload
+    except Exception:
+        import logging as _lgq
+        _lgq.getLogger("shopcast.ingest").exception("[self-review] 실패(글은 그대로 진행)")
     # 네이버 플레이스 연동 — 매장(local/hybrid)이면 블로그에 플레이스 키워드 + 리뷰요청 문구 첨부 (#플레이스전략)
     try:
         if (getattr(tenant, "biz_type", "local") or "local") in ("local", "hybrid"):

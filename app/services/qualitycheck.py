@@ -93,3 +93,68 @@ def run_checks(asset_id: str) -> dict:
 
     n_ok = sum(1 for c in checks if c["ok"])
     return {"asset_id": asset_id, "pass": n_ok, "fail": len(checks) - n_ok, "checks": checks}
+
+
+# 자체 수정 가능 항목(문장 '표면'만 — 사실·구조·마커·링크 불변 원칙)
+_FIXABLE_KEYS = ("금지 클리셰", "어미 다양성")
+
+
+def _revise_text(text: str, problems: list[str], is_blog: bool) -> str:
+    """걸린 항목만 고치는 표면 수정 1콜 — 실패·빈 응답이면 원문 유지(안전)."""
+    try:
+        from app.generators.text_claude import _call_llm
+        keep = ("소제목(##)·표·FAQ·[사진N] 마커·링크·숫자·사실 전부 그대로 유지, "
+                if is_blog else "해시태그·사실·숫자 그대로 유지, ")
+        out = _call_llm(
+            "아래 글의 '문제'만 고쳐서 전체를 다시 출력하라. 문장 표현만 다듬고 "
+            + keep + "내용 추가·삭제 금지. 설명 없이 결과 텍스트만.\n"
+            f"[문제] {'; '.join(problems)}\n\n[글]\n{text}",
+            max_tokens=(6000 if is_blog else 900))
+        out = (out or "").strip()
+        # 안전 게이트: 지나친 축소·마커 소실이면 원문 유지
+        if is_blog:
+            import re as _r
+            if len(out) < len(text) * 0.7 or len(_r.findall(r"\[사진\d+\]", out)) != len(_r.findall(r"\[사진\d+\]", text)):
+                return text
+        elif len(out) < len(text) * 0.5:
+            return text
+        return out or text
+    except Exception:
+        return text
+
+
+def self_review(asset_id: str, max_rounds: int = 1) -> dict:
+    """📏 글올리기 전 자체 검사 AI(2026-07-28 사장님 결정) — 터미널 에이전트 방식 그대로:
+    생성 직후 스스로 검사 → 걸린 것만 스스로 고침 → 재검사. 통과한 글만 사장님 눈에 닿는다.
+    반환: 최종 run_checks 결과 + {"rounds", "fixed"}."""
+    rep = run_checks(asset_id)
+    fixed: list[str] = []
+    rounds = 0
+    for _ in range(max(0, max_rounds)):
+        fails = [c for c in rep["checks"] if not c["ok"] and any(k in c["name"] for k in _FIXABLE_KEYS)]
+        if not fails:
+            break
+        rounds += 1
+        pieces = db.get_set_pieces(asset_id)
+        for kind, label, key in ((ContentKind.BLOG, "블로그", "body"),
+                                 (ContentKind.CAPTION, "캡션", "text"),
+                                 (ContentKind.X_POST, "X", "text")):
+            probs = [f"{c['name']}({c['detail']})" for c in fails if c["name"].startswith(label)]
+            if kind == ContentKind.BLOG:      # 블로그 공통 항목(어미 다양성)도 블로그로 귀속
+                probs += [f"{c['name']}({c['detail']})" for c in fails if c["name"].startswith("어미")]
+            if not probs:
+                continue
+            p = _get(pieces, kind)
+            if not p:
+                continue
+            old = (p.payload or {}).get(key) or ""
+            new = _revise_text(old, probs, is_blog=(kind == ContentKind.BLOG))
+            if new != old:
+                p.payload[key] = new
+                db.save_piece(p)
+                fixed += probs
+        rep = run_checks(asset_id)
+    rep["rounds"] = rounds
+    rep["fixed"] = fixed
+    return rep
+
