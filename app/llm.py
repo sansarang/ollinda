@@ -126,9 +126,10 @@ LAST_ROUTE: dict = {}   # {task: {"provider","model","fallback","error"}} — pa
 
 
 HAIKU = "claude-haiku-4-5-20251001"
+SONNET = "claude-sonnet-5"
 # 작업별 기본 라우팅(env LLM_<TASK>로 오버라이드 가능) — spoken(자막 구어 변환)은
 # '빼기만·더하기 금지' 제약 준수 작업이라 Claude Haiku 지정(A/B 실측 Claude 우위 유형, 문장 수 적어 비용 미미).
-TASK_DEFAULTS = {"spoken": ("anthropic", HAIKU)}
+TASK_DEFAULTS = {"spoken": ("anthropic", SONNET)}   # 대본 품질(전보문 자막 실사고 2026-07-27) — Haiku→Sonnet 상향
 
 
 def route(task: str) -> tuple[str, str]:

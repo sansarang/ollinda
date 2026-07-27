@@ -363,7 +363,18 @@ def _parse_emphasis(text: str) -> tuple[str, list]:
     import re as _r
     emph = _r.findall(r"\{([^{}]{1,20})\}", text or "")[:1]
     clean = _r.sub(r"[{}]", "", text or "")
-    return clean, [e.strip() for e in emph if e.strip()]
+    # 조사 스트립(강조는 명사 핵심만 — '{테이프로}' 강조 실사고 2026-07-27): 남는 어간 2자+일 때만
+    _JOSA = ("에서부터", "으로부터", "이라도", "까지", "부터", "에서", "으로", "이랑", "처럼",
+             "조차", "마저", "한테", "에게", "보다", "만큼", "라도", "대로",
+             "로", "와", "과", "은", "는", "이", "가", "을", "를", "에", "도", "의", "만", "랑")
+    out = []
+    for e in (e.strip() for e in emph if e.strip()):
+        for j in _JOSA:
+            if e.endswith(j) and len(e) - len(j) >= 2:
+                e = e[:-len(j)]
+                break
+        out.append(e)
+    return clean, out
 
 
 def _fact_guard(line: str, source: str) -> str:
@@ -642,7 +653,8 @@ def _script_from_body(body: str, n: int, kw_nat: str, source: str, tone: str = "
             "- 예고를 했으면('단점부터 볼게요' 등) 바로 다음 씬이 그 내용이어야 한다. 예고만 하고 안 보여주기 금지.\n"
             "- 동일·유사 문장 반복 금지. 씬당 하나의 메시지, 핵심 숫자·단어를 문장 앞에.\n"
             "- 본문에 있는 사실만. 새 정보·수치·명사 추가 절대 금지. 완결된 문장만(어중간한 조각·조사 시작 금지).\n"
-            "- 각 씬에서 가장 중요한 숫자·차종·핵심명사 어절 하나만 {중괄호}로 감싸라(씬당 최대 1개, 원문 어절 그대로).\n"
+            "- 각 씬에서 가장 중요한 숫자·차종·핵심명사 하나만 {중괄호}로 감싸라(씬당 최대 1개). "
+            "조사를 떼고 명사·숫자만 감싸라(예: {마스킹} O / {테이프로} X, {36,524km} O).\n"
             "- 출력은 자막 줄만. 머리말·설명·'대본입니다' 류 문장 절대 출력 금지.\n"
             + _hook_rule +
             f"- 타깃 키워드(참고용 — 훅·자막에 이 문구를 통째로 넣지 말고, 검색자의 실제 궁금증을 네 말로): {kw_nat}\n\n[본문]\n" + body[:3500])
@@ -669,7 +681,7 @@ def _script_from_body(body: str, n: int, kw_nat: str, source: str, tone: str = "
             if _hb:
                 bad = f"훅 {_hb}"
         if not bad:
-            _lim = 30 if tone == "reach" else 46      # reach는 짧은 씬 강제(과분할 방지), info는 하류 캡에 위임
+            _lim = 30 if tone == "reach" else 34      # 자막 2줄(줄당 ~10자·최대 3줄) 내 — 4줄 자막 실사고 방지
             _over = [l for l in lines if len(l.replace("{", "").replace("}", "")) > _lim]
             if _over:
                 bad = f"씬 길이 초과({len(_over)}개, 각 {_lim}자 이내로): '{_over[0][:26]}…'"
@@ -2081,7 +2093,7 @@ class ShortVideoGenerator(Generator):
         d = ImageDraw.Draw(img)
         font = _pil_font(62, "Bold")
         accent = (255, 224, 77)        # 키워드 강조(노랑)
-        lines = self._wrap_lines(d, text, font, W - 150)[:4]
+        lines = self._wrap_lines(d, text, font, W - 150)[:2]   # 쇼츠 정석 1~2줄(4줄 자막 실사고 방지)
         lh = 84
         block_h = lh * len(lines)
         y0 = H - 470 - block_h
@@ -2349,18 +2361,41 @@ class ShortVideoGenerator(Generator):
         crop='closeup' = 콘티 지정 클로즈업 — 기존 zoompan을 더 타이트하게 파라미터화(새 렌더 로직 아님)."""
         total_t = dur + max(0.0, tail)
         frames = max(1, int(total_t * FPS))
+        # ★ 가로 사진 판별(2026-07-27 실사고): 가로 차 사진을 9:16 커버 크롭하면 가운데 세로 띠만 남아
+        #   차가 잘려나감(트렁크만 보이는 정체불명 화면). 가로는 '통째로 + 블러 패드'로 렌더.
+        _iw = _ih = 0
+        try:
+            from PIL import Image as _Im
+            with _Im.open(img) as _im:
+                _iw, _ih = _im.size
+        except Exception:
+            pass
+        _landscape = bool(_iw and _ih and _iw > _ih * 1.05)
+        if _landscape and crop == "closeup":
+            crop = "full"                              # 가로 사진 매크로 크롭 금지(정체불명 화면 방지)
         if crop == "closeup":                              # 콘티 crop 힌트 → zoompan 시작 배율 상향(부위 강조)
             zdir = ("if(eq(on,1),1.22,min(zoom+0.0012,1.38))" if idx % 2 == 0
                     else "if(eq(on,1),1.38,max(zoom-0.0012,1.22))")
         else:
             zdir = "min(zoom+0.0012,1.12)" if idx % 2 == 0 else "if(eq(on,1),1.12,max(zoom-0.0012,1.0))"
-        vf = (f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,"
-              f"eq=contrast=1.06:saturation=1.12:brightness=0.02,"
-              f"zoompan=z='{zdir}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-              f"d={frames}:s={W}x{H}:fps={FPS}" + ("" if tail > 0 else self._fade(dur)))
-        cmd = ["ffmpeg", "-y", "-loop", "1", "-t", f"{total_t:.2f}", "-i", img, "-vf", vf,
-               "-map", "0:v", "-t", f"{total_t:.2f}", "-r", str(FPS), "-pix_fmt", "yuv420p",
-               "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", "-an", out]
+        _zp = (f"zoompan=z='{zdir}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+               f"d={frames}:s={W}x{H}:fps={FPS}")
+        _eq = "eq=contrast=1.06:saturation=1.12:brightness=0.02"
+        if _landscape:
+            vf = (f"[0:v]split=2[a][b];"
+                  f"[b]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=22:2[bg];"
+                  f"[a]scale={W}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,"
+                  f"{_eq},{_zp}" + ("" if tail > 0 else self._fade(dur)) + "[v]")
+            cmd = ["ffmpeg", "-y", "-loop", "1", "-t", f"{total_t:.2f}", "-i", img,
+                   "-filter_complex", vf, "-map", "[v]", "-t", f"{total_t:.2f}", "-r", str(FPS),
+                   "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
+                   "-an", out]
+        else:
+            vf = (f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,"
+                  f"{_eq},{_zp}" + ("" if tail > 0 else self._fade(dur)))
+            cmd = ["ffmpeg", "-y", "-loop", "1", "-t", f"{total_t:.2f}", "-i", img, "-vf", vf,
+                   "-map", "0:v", "-t", f"{total_t:.2f}", "-r", str(FPS), "-pix_fmt", "yuv420p",
+                   "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", "-an", out]
         r = _run_ff(cmd, 120, f"scene{idx}")
         return out if (r and os.path.exists(out)) else None
 
