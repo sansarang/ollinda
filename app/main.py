@@ -206,6 +206,21 @@ def _startup() -> None:
                     if not (t and fps):
                         db.finish_gen_job(j["id"], "failed")
                         continue
+                    # 중복 창 방어(2026-07-29): 잡 기록 이후 블로그가 이미 만들어졌다면
+                    # (피스 저장~완료 마킹 사이 크래시) 재실행 생략 — done 처리
+                    _dup = False
+                    try:
+                        for _s3 in db.list_sets(tenant_id=t.id, limit=3):
+                            _ps3 = db.get_set_pieces(_s3["asset_id"])
+                            if any(p.kind.value == "blog" and str(getattr(p, "created_at", ""))[:19]
+                                   >= (j.get("created_at") or "")[:19] for p in _ps3):
+                                db.finish_gen_job(j["id"], "done", asset_id=_s3["asset_id"])
+                                _dup = True
+                                break
+                    except Exception:
+                        pass
+                    if _dup:
+                        continue
                     import json as _jj
                     meta = _jj.loads(j.get("meta") or "{}")
                     files2 = []
