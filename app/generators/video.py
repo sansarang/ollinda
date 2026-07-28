@@ -707,7 +707,8 @@ def _script_from_body(body: str, n: int, kw_nat: str, source: str, tone: str = "
         + "- 타깃 키워드를 통째로 훅에 넣지 마라(비문·도배). 질문·반전으로 자연스럽게.\n")
     base = ("아래 블로그 본문을 근거로, 세로 영상 자막 대본을 써라. 전체가 하나의 이야기가 되게.\n"
             f"- 자막 씬 {n}개, 한 줄씩 출력(번호·라벨 없이). 각 씬 12~20자(공백 포함, 절대 24자 초과 금지) — 한 호흡에 읽히게.\n"
-            "- 한 문장이 길면 두 씬으로 쪼개라(내용을 더 많은 짧은 씬에 나눠 담기). 씬 하나에 두 메시지 금지.\n"
+            "- 한 문장이 길면 두 씬으로 쪼개되, 반드시 '문장 경계'에서만 쪼개라 — 각 씬은 그 자체로 완결"
+            "(종결어미 다/요/죠/까 또는 문장부호로 끝). 문장 중간에서 끊긴 씬 절대 금지. 씬 하나에 두 메시지 금지.\n"
             + _struct +
             "- 예고를 했으면('단점부터 볼게요' 등) 바로 다음 씬이 그 내용이어야 한다. 예고만 하고 안 보여주기 금지.\n"
             "- 동일·유사 문장 반복 금지. 씬당 하나의 메시지, 핵심 숫자·단어를 문장 앞에.\n"
@@ -744,6 +745,14 @@ def _script_from_body(body: str, n: int, kw_nat: str, source: str, tone: str = "
             _over = [l for l in lines if len(l.replace("{", "").replace("}", "")) > _lim]
             if _over:
                 bad = f"씬 길이 초과({len(_over)}개, 각 {_lim}자 이내로): '{_over[0][:26]}…'"
+        if not bad:
+            # 씬 완결성 게이트(2026-07-28 실사고: '이 글이 도움 출고 직후' 절단 자막) —
+            # 종결어미·문장부호로 끝나지 않는 씬 = 문장 중간 절단 → 재작성
+            _frag = [l for l in lines
+                     if not _r.search(r"([다요죠까네]|[.!?…]|\d|km|%)\s*[.!?…]?$",
+                                      l.replace("{", "").replace("}", "").strip())]
+            if _frag:
+                bad = f"문장 중간 절단 씬({len(_frag)}개, 완결 문장으로): '{_frag[0][:26]}…'"
         if not bad:
             return lines
         log.warning("[script] 대본 게이트 차단(%d/2): %s", attempt, bad)
