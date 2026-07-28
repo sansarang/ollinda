@@ -522,7 +522,9 @@ def target_keywords(industry_name: str, region: str, note: str = "", limit: int 
                   + target_keywords(industry_name, region, note, limit))
         return list(dict.fromkeys(merged))[:limit]
     kws: list[str] = []
-    reg = (region or "").strip()
+    # 행정 풀네임 축약(2026-07-28 실사고: '부산광역시 동구 썬팅업체' 키워드 → 모든 글이 풀네임 반복
+    # → 감사 감점 자기모순). 검색자도 '부산 동구'로 검색 — 키워드는 축약형이 정답.
+    reg = _kw_shorten((region or "").strip()) or (region or "").strip()
     ind = (industry_name or "").strip()
     if reg and ind:
         # 지역 다중 granularity — 검색자마다 '동/구/시+구'로 다르게 검색하므로 변형별 키워드 생성
