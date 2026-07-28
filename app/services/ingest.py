@@ -287,7 +287,7 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
             _dh = _mh.group(2)
             if (0 <= _ih < len(paths) and not any(w in _dh for w in _DOCW)
                     and any(w in _dh for w in ("외관", "전측면", "전면", "차체", "전체 모습", "매장 전경", "대표",
-                                               "후면", "측면", "전경"))):
+                                               "후면", "측면", "전경", "완성", "진열", "제품 전체", "간판"))):
                 _hero_path = paths[_ih]
                 break
         # 외관 매치 실패 시: '정체불명 컷'(천장·조명·바닥 등)을 대표로 쓰지 않기(실사고 2026-07-28:

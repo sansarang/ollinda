@@ -193,6 +193,44 @@ def _startup() -> None:
     except Exception:
         import logging
         logging.exception("[startup] DB 초기화 실패(디스크 풀 등) — 앱은 기동, /admin/disk-sos로 정리 필요")
+    try:  # 💾 죽지 않는 잡 이어하기 — 재시작으로 죽은 생성(running 잡)을 스풀 입력으로 재개
+        def _resume_jobs():
+            import glob as _gl
+            import logging as _lgj
+            import time as _tj
+            _tj.sleep(12)                        # 부팅 안정화 후(스케줄러·DB 준비)
+            for j in db.pending_gen_jobs():
+                try:
+                    t = db.get_tenant(j["tenant_id"])
+                    fps = sorted(_gl.glob(os.path.join(j["spool_dir"], "*")))
+                    if not (t and fps):
+                        db.finish_gen_job(j["id"], "failed")
+                        continue
+                    import json as _jj
+                    meta = _jj.loads(j.get("meta") or "{}")
+                    files2 = []
+                    for fp in fps:
+                        with open(fp, "rb") as f:
+                            files2.append((f.read(), os.path.basename(fp)[3:] or "photo.jpg"))
+                    _lgj.getLogger("shopcast.jobs").warning(
+                        "[gen-job] 🔄 재시작 복구: job=%s tenant=%s 사진 %d장", j["id"][:8], t.name, len(files2))
+                    db.set_gen_progress(t.id, "start", "이어서 만드는 중", "재시작 복구", 0.05, new=True)
+                    from app.services.ingest import ingest_upload as _iu
+                    made = _iu(t, files2, meta.get("note") or "", target_kw=meta.get("target_kw") or "",
+                               angle=meta.get("angle") or "",
+                               intake={}, pre_cleaned_idx=set(meta.get("pre_idx") or []) or None)
+                    db.finish_gen_job(j["id"], "done" if made else "failed",
+                                      asset_id=(made[0].asset_id if made else ""))
+                    import shutil as _shj2
+                    _shj2.rmtree(j["spool_dir"], ignore_errors=True)
+                except Exception:
+                    _lgj.getLogger("shopcast.jobs").exception("[gen-job] 복구 실패 job=%s", j.get("id"))
+                    db.finish_gen_job(j.get("id") or "", "failed")
+        import threading as _thj
+        _thj.Thread(target=_resume_jobs, daemon=True).start()
+    except Exception:
+        import logging
+        logging.exception("[startup] 잡 복구 스레드 시작 실패")
     try:                                # 경쟁사 일일 자동 스캔(apscheduler 미설치 시 graceful)
         from app import scheduler
         scheduler.start()
@@ -9344,10 +9382,26 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
     _record_usage(owner)                           # 쿼터 선예약 — 동시 업로드로 한도 우회 방지(B7)
 
     def _bg_generate():
+        nonlocal target_kw, angle
+        # 💾 죽지 않는 잡: 입력을 스풀에 보존 + 잡 기록 — 배포·재시작으로 스레드가 죽어도
+        #   부팅 시 이어하기(사고 4회의 근본책, 2026-07-29 사장님 승인)
+        _job_id = str(__import__("uuid").uuid4())
+        try:
+            _spool = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"),
+                                  tenant.id, "_jobspool", _job_id)
+            os.makedirs(_spool, exist_ok=True)
+            for _ji, (_jb, _jn) in enumerate(files):
+                with open(os.path.join(_spool, f"{_ji:02d}_{os.path.basename(_jn)[:40]}"), "wb") as _jf:
+                    _jf.write(_jb)
+            db.save_gen_job(_job_id, tenant.id, _spool,
+                            {"note": full_note, "target_kw": (target_kw or "").strip()[:40],
+                             "angle": (angle or "").strip(),
+                             "pre_idx": sorted(_pre_idx or [])})
+        except Exception:
+            logging.getLogger("shopcast.jobs").exception("[gen-job] 스풀 실패(생성은 계속)")
         try:
             _prune_old_media(tenant.id, keep_recent=5)   # 생성 전 오래된 영상 정리(디스크 확보)
             # 자동 글감(auto): 타겟 미지정 업로드면 큐가 다음 글감(키워드·앵글)을 결정한다
-            nonlocal target_kw, angle
             _q_claim = None
             if not (target_kw or "").strip():
                 try:
@@ -9401,8 +9455,16 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
                 _db3.rollback_writing(_q_claim["id"])
             if not made:
                 _refund_usage(owner)               # 생성 결과 없음 → 예약 원복
+            db.finish_gen_job(_job_id, "done" if made else "failed",
+                              asset_id=(made[0].asset_id if made else ""))
+            try:
+                import shutil as _shj
+                _shj.rmtree(_spool, ignore_errors=True)   # 완료된 잡 스풀 정리(디스크)
+            except Exception:
+                pass
         except Exception:
             _refund_usage(owner)                   # 실패 → 예약 원복
+            db.finish_gen_job(_job_id, "failed")
             import logging, traceback
             logging.exception("[upload-bg] 생성 실패 tenant=%s", tenant.id)
             try:      # 조용한 실패 금지 — 사유를 진행률에 기록(사용자 안내 + 진단)

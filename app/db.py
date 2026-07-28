@@ -2419,3 +2419,55 @@ def create_publication(content_id: str, channel: Channel, external_id: str,
                   "VALUES(?,?,?,?,?,?,?)",
                   (str(uuid.uuid4()), content_id, channel.value, external_id, _now(),
                    json.dumps(result, ensure_ascii=False), error))
+
+
+# ── 💾 죽지 않는 잡(gen_jobs) — 배포·재시작에도 생성이 유실되지 않게(2026-07-29 사장님 승인) ──
+def _ensure_gen_jobs(c) -> None:
+    c.execute("CREATE TABLE IF NOT EXISTS gen_jobs("
+              "id TEXT PRIMARY KEY, tenant_id TEXT, spool_dir TEXT, meta TEXT, "
+              "status TEXT DEFAULT 'running', asset_id TEXT DEFAULT '', "
+              "created_at TEXT, updated_at TEXT)")
+
+
+def save_gen_job(job_id: str, tenant_id: str, spool_dir: str, meta: dict) -> None:
+    import json as _j
+    try:
+        with _conn() as c:
+            _ensure_gen_jobs(c)
+            c.execute("INSERT OR REPLACE INTO gen_jobs(id, tenant_id, spool_dir, meta, status, created_at, updated_at) "
+                      "VALUES(?,?,?,?, 'running', ?, ?)",
+                      (job_id, tenant_id, spool_dir, _j.dumps(meta, ensure_ascii=False), _now(), _now()))
+    except sqlite3.OperationalError:
+        pass
+
+
+def finish_gen_job(job_id: str, status: str = "done", asset_id: str = "") -> None:
+    try:
+        with _conn() as c:
+            _ensure_gen_jobs(c)
+            c.execute("UPDATE gen_jobs SET status=?, asset_id=?, updated_at=? WHERE id=?",
+                      (status, asset_id, _now(), job_id))
+    except sqlite3.OperationalError:
+        pass
+
+
+def pending_gen_jobs(max_age_hours: int = 6) -> list[dict]:
+    """재시작으로 죽은 진행 중 잡 — 부팅 시 이어하기 대상(너무 낡은 건 제외)."""
+    from datetime import datetime, timedelta
+    try:
+        with _conn() as c:
+            _ensure_gen_jobs(c)
+            rows = c.execute("SELECT * FROM gen_jobs WHERE status='running'").fetchall()
+        out = []
+        for r in rows:
+            try:
+                if datetime.utcnow() - datetime.fromisoformat((r["created_at"] or "")[:19]) \
+                        <= timedelta(hours=max_age_hours):
+                    out.append(dict(r))
+                else:
+                    finish_gen_job(r["id"], "expired")
+            except Exception:
+                continue
+        return out
+    except sqlite3.OperationalError:
+        return []
