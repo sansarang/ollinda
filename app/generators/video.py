@@ -685,11 +685,18 @@ def _script_from_body(body: str, n: int, kw_nat: str, source: str, tone: str = "
     import logging as _lg
     log = _lg.getLogger("shopcast.video")
     from app import llm as _llm
+    # 🎬 스토리 아크(2026-07-28 사장님 지시: '목차 낭독' 폐지) — 요약 나열이 아니라 하나의 이야기:
+    #   질문 훅 → 사진이 증거가 되며 궁금증을 하나씩 풀되, 각 씬 끝이 다음 씬을 부르게 → 답 확정 → 행동.
     _struct = ("- 구조: [훅(핵심 숫자·반전을 맨 앞)] → 전개 2~3 → 마무리. 첫 줄은 스크롤 멈추는 강한 훅.\n"
                "- 톤: 도달형(짧고 리듬감 있는 구어체 허용). 단 과장·보장('짱짱·끝납니다·최고·완벽·무조건') 금지, 경쟁 저격 금지.\n"
                if tone == "reach" else
-               "- 구조: 핵심 내용(본문 등장 순서 유지) → 뒤쪽에 단점·한계 등 정직한 고지 1개.\n"
-               "- 어미는 씬마다 변화(명사 종결·질문·청유 혼용, '~입니다' 연속 금지). 과장·보장 표현 금지.\n")
+               "- 구조(스토리 아크 — 본문 순서를 그대로 따라가지 말 것): ①첫 씬=시청자가 진짜 궁금한 질문 하나 "
+               "②중간 씬들=그 질문에 사진이 증거가 되도록 하나씩 답하되, 씬마다 '작은 확인→다음 궁금증'으로 "
+               "연결(예: '실주행은 확인됐죠. 그럼 내부는?') ③끝에서 두 번째=단점·한계 정직 고지 1개 "
+               "④마지막=처음 질문에 대한 한 줄 답. 전체가 질문 하나를 푸는 한 편의 이야기여야 한다.\n"
+               "- 어미는 씬마다 변화(명사 종결·질문·청유 혼용, '~입니다' 연속 금지). 과장·보장 표현 금지.\n"
+               "- 소제목·목차식 씬 금지(예: '외관부터 솔직하게 – 전면·후면' 같은 제목형 문장 금지) — "
+               "모든 씬은 사람이 말하는 문장이어야 한다.\n")
     _allow_region = (biz_type or "local") not in ("seller", "hybrid")   # 매장 전용만 지역 허용
     _hook_rule = (
         "- 첫 줄(훅)은 검색자의 실제 궁금증으로 새로 써라. 소재는 "
@@ -1548,7 +1555,12 @@ class ShortVideoGenerator(Generator):
             opening = f"{_hk_kw}, 궁금하셨죠?" if _hk_kw else "지금 확인해 보세요"
             if _hook_gate(opening, kw_nat, _biz, _reg):        # 폴백 훅도 게이트 — 위반이면 업종만
                 opening = f"{(getattr(tenant,'industry','') or '').split(',')[0].strip() or '지금'}, 궁금하셨죠?"
-            sent = ([_cut_word(h, 30) for h in heads] + caps)[:6]
+            # 목차 낭독 방지(2026-07-28): 폴백도 소제목(제목형 문장)보다 본문 발췌(사람 말) 우선 —
+            # 발췌가 3개 미만일 때만 소제목으로 보충
+            if len(caps) >= 3:
+                sent = (caps + [_cut_word(h, 30) for h in heads])[:6]
+            else:
+                sent = ([_cut_word(h, 30) for h in heads] + caps)[:6]
             sent = _to_spoken(sent, _fact_src)
             sent = _dedup_lines(sent)                 # 폴백도 서사 정제 — 내용없는 예고('단점부터 말씀드릴게요')·중복 제거
         # 클로징 다양화 — 고정 템플릿 대신 글 CTA '사실' 기반 선택(본문에 근거 있는 패턴만, 없으면 현행 유지)
@@ -2496,7 +2508,9 @@ class ShortVideoGenerator(Generator):
             for k in range(1, len(clips)):
                 off += durs[k - 1]
                 lab = f"[x{k}]" if k < len(clips) - 1 else "[v]"
-                fc += f"{prev}[n{k}]xfade=transition=fade:duration={XFADE}:offset={off:.2f}{lab};"
+                # 전환 다양화(디자인 레이어 2026-07-28): 단조로운 fade 반복 → 절제된 3종 순환(말끔한 리듬)
+                _tr = ("fade", "smoothleft", "smoothup")[k % 3]
+                fc += f"{prev}[n{k}]xfade=transition={_tr}:duration={XFADE}:offset={off:.2f}{lab};"
                 prev = lab
             cmd += ["-filter_complex", fc.rstrip(";"), "-map", "[v]", "-r", str(FPS),
                     "-fps_mode", "cfr", "-pix_fmt", "yuv420p", "-c:v", "libx264",
