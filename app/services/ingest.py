@@ -379,6 +379,23 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
     except Exception:
         import logging as _lgq
         _lgq.getLogger("shopcast.ingest").exception("[self-review] 실패(글은 그대로 진행)")
+    # 📮 발행 게이트(2026-07-28 사장님 결정) — 80점 미달이면 감점 사유로 자동 재작성 2회,
+    #   그래도 미달이면 발행 버튼 봉인(publish_blocked_score). 미달 글은 발행 대상으로 안 보이게.
+    try:
+        if pieces and os.environ.get("SHOPCAST_SCORE_GATE", "1") != "0":
+            _prog("polish", "상위노출 기준 맞추는 중", "", 0.94)
+            from app.services import qualitycheck as _qc2
+            _sg = _qc2.score_gate(pieces[0].asset_id, source=asset.note or "")
+            if _sg:
+                import logging as _lgs
+                _lgs.getLogger("shopcast.ingest").info("[score-gate] %s", _sg)
+            _fresh2 = {p.id: p for p in db.get_set_pieces(pieces[0].asset_id)}
+            for _i, _p in enumerate(pieces):
+                if _p.id in _fresh2:
+                    pieces[_i].payload = _fresh2[_p.id].payload
+    except Exception:
+        import logging as _lgq2
+        _lgq2.getLogger("shopcast.ingest").exception("[score-gate] 실패(글은 그대로 진행)")
     # 네이버 플레이스 연동 — 매장(local/hybrid)이면 블로그에 플레이스 키워드 + 리뷰요청 문구 첨부 (#플레이스전략)
     try:
         if (getattr(tenant, "biz_type", "local") or "local") in ("local", "hybrid"):

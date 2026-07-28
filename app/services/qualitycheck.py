@@ -123,6 +123,54 @@ def _revise_text(text: str, problems: list[str], is_blog: bool) -> str:
         return text
 
 
+PUBLISH_MIN = 80    # 발행 게이트 기준선(2026-07-28 사장님 결정: 미달 글은 발행 버튼 자체를 봉인)
+
+
+def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
+    """📮 발행 게이트 — ranking_audit<80이면 감점 사유를 피드백으로 자동 재작성(최대 2회,
+    사실·마커·구조 보존). 그래도 미달이면 payload.publish_blocked_score 봉인 플래그(발행 버튼 숨김).
+    '상위노출 안 되는 글을 알면서 올릴 필요 없다' — 미달 글은 사장님 눈에 발행 대상으로 안 보이게."""
+    from app import seo
+    try:
+        pieces = db.get_set_pieces(asset_id)
+    except Exception:
+        return {}
+    blog = _get(pieces, ContentKind.BLOG)
+    if not blog:
+        return {}
+    pl = blog.payload or {}
+    au = pl.get("ranking_audit") or {}
+    score = au.get("score")
+    rounds = 0
+    while isinstance(score, int) and score < PUBLISH_MIN and rounds < max_rounds:
+        rounds += 1
+        warns = "; ".join((au.get("warnings") or [])[:6]) or "감점 사유 미상"
+        body = pl.get("body") or ""
+        try:
+            from app.generators.text_claude import _call_llm
+            new = (_call_llm(
+                "아래 블로그 글이 상위노출 채점에서 감점됐다. '감점 사유'에 해당하는 부분만 정확히 고쳐 "
+                "전체 본문을 다시 출력하라. 소제목(##)·표·FAQ·[사진N] 마커·링크·숫자·사실은 그대로 유지, "
+                "내용 추가·삭제 금지. 설명 없이 결과 본문만.\n"
+                f"[감점 사유] {warns}\n\n[본문]\n{body}", max_tokens=6000) or "").strip()
+            if (len(new) >= len(body) * 0.7
+                    and len(re.findall(r"\[사진\d+\]", new)) == len(re.findall(r"\[사진\d+\]", body))):
+                pl["body"] = new
+            else:
+                break                                    # 안전 게이트 위반 → 원문 유지·중단
+        except Exception:
+            break
+        au = seo.quality_audit(blog.channel.value, blog.kind.value, pl, source=source)
+        pl["ranking_audit"] = au
+        score = au.get("score")
+        db.save_piece(blog)
+    blocked = isinstance(score, int) and score < PUBLISH_MIN
+    pl["publish_blocked_score"] = (score if blocked else None)
+    pl["score_gate"] = {"rounds": rounds, "final": score}
+    db.save_piece(blog)
+    return {"rounds": rounds, "final": score, "blocked": blocked}
+
+
 def self_review(asset_id: str, max_rounds: int = 1) -> dict:
     """📏 글올리기 전 자체 검사 AI(2026-07-28 사장님 결정) — 터미널 에이전트 방식 그대로:
     생성 직후 스스로 검사 → 걸린 것만 스스로 고침 → 재검사. 통과한 글만 사장님 눈에 닿는다.

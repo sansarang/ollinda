@@ -5342,7 +5342,15 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                      + f"<div class='max-h-72 overflow-y-auto'>{_blog_body(pl.get('body',''))}</div>"
                      + f"<textarea id='cb{sid}' data-body=\"{esc(body_part)}\" class='hidden'>{esc(blog_copy)}</textarea>"
                      + _result_naver_video(pieces, asset_id)
-                     + f"<div class='mt-4 space-y-2'>{naver_btn}"
+                     + "<div class='mt-4 space-y-2'>"
+                     # 📮 발행 게이트: 80점 미달 글은 발행 버튼 봉인 — 재작성 버튼만(주방 철학: 미달 글 비노출)
+                     + ((f"<form method='post' action='/kit/{asset_id}/regen-blog'>"
+                         "<button class='block w-full text-center py-3 rounded-xl text-white text-sm font-extrabold "
+                         "bg-amber-500 hover:brightness-110 active:scale-[.99] transition shadow-md'>"
+                         "🔧 품질 기준 미달 — AI가 다시 쓰기</button>"
+                         "<div class='text-[11px] text-slate-400 text-center mt-1.5'>상위노출 기준(80점)에 못 미쳐 "
+                         "발행을 잠시 막아뒀어요. 버튼을 누르면 AI가 다시 씁니다 (1~2분)</div></form>")
+                        if (pl or {}).get("publish_blocked_score") else naver_btn)
                      + f"<div class='flex gap-2'>{pack_btn(p.id, bool(_set_naver_video(pieces)))}<button type=button onclick=\"cp('cb{sid}',this)\" class='px-3.5 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold rounded-xl transition'>글 복사</button></div></div></div>")
         elif k == "x_post":
             xt = pl.get("text", "")
@@ -6096,6 +6104,25 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
         "try{await omCopy(p.value);done('✅ 글 복사됨(이 폰은 평문 — 붙여넣고 소제목만 굵게)');}catch(e2){done('길게 눌러 복사');}}"
         "</script>")
     return HTMLResponse(_subscriber_page("네이버 블로그", body))
+
+
+@app.post("/kit/{asset_id}/regen-blog")
+def kit_regen_blog(request: Request, asset_id: str):
+    """(사용자용) 📮 발행 게이트 재작성 — 80점 미달로 봉인된 블로그를 소유자가 버튼 한 번으로 재생성.
+    완료 후 결과 화면 복귀(점수 재계산·게이트 재판정 포함)."""
+    u = auth.current_user(request)
+    pieces = _owned_pieces(u, asset_id) if u else None
+    if not pieces:
+        return HTMLResponse(status_code=404)
+    try:
+        admin_regen_blog(asset_id)                     # 동기 재생성(1~2분) — 사진·다른 채널 불변
+        from app.services import qualitycheck as _qcg
+        _blog0 = next((p for p in db.get_set_pieces(asset_id) if p.kind.value == "blog"), None)
+        _src0 = (_blog0.payload.get("gen_source") if _blog0 else "") or ""
+        _qcg.score_gate(asset_id, source=_src0)        # 재생성본도 게이트 재판정(미달이면 다시 봉인)
+    except Exception:
+        logging.getLogger("shopcast.ingest").exception("[kit-regen-blog] 실패 asset=%s", asset_id)
+    return RedirectResponse(f"/me?view={asset_id}", status_code=303)
 
 
 @app.post("/kit/{asset_id}/regen-naver")
