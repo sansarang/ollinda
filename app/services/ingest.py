@@ -495,6 +495,19 @@ def _spawn_photo_edit(tenant: Tenant, asset_id: str, paths: list, pre_set: set, 
             from app.media import photo_boost
             photo_boost.enhance_all(paths, tenant.industry, meta, pre_cleaned=pre_set,
                                     recheck=recheck)
+            # 🛡 2차 검증 마스킹(침묵 실패 봉합 2026-07-28 실사고): 1차 때 탐지 워커 콜드스타트·
+            #   일시 장애로 번호판이 조용히 통과한 사진을 재탐지·재마스킹. 이미 가려진 사진은
+            #   재탐지돼도 0건(멱등)이라 안전. n>0이면 1차 미탐이 있었다는 뜻 — 경보 로그.
+            import time as _tvf
+            _tvf.sleep(3)
+            for p in paths:
+                try:
+                    _n2 = photo_boost.mask_personal_info(p)
+                    if _n2 > 0:
+                        logging.getLogger("shopcast.ingest").error(
+                            "[photo-edit] ⚠️ 2차 패스에서 PII %d건 추가 마스킹(1차 미탐): %s", _n2, p)
+                except Exception:
+                    pass
             for p in paths:                     # 보정본으로 R2 재미러(업로드 시 원본 미러를 덮음)
                 try:
                     storage.mirror_to_r2(p)
