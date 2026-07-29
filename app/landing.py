@@ -739,14 +739,17 @@ def _pricing() -> str:
         pi = "무제한" if d["print_items"] == -1 else f"월 {d['print_items']}장"
         _ = (cm, pi)                     # (UI 정리) 경쟁사·인쇄물 행 제거 — 백엔드 한도는 유지
         return []
-    plans = [("베이직", f"월 {b:,}원", f"월 8건 · 처음 시작용 · 연결제 시 월 {by:,}원",
-              ["사진만 올리면 5채널 생성", "검색 상위노출에 유리한 구조로 작성", "사진 자동 보정 + 이미지 SEO"] + _flim("basic"),
+    plans = [("라이트", f"월 {b:,}원", f"월 6세트 · 처음 시작용 · 연결제 시 월 {by:,}원",
+              ["월 콘텐츠 6세트(블로그+인스타+X)", "영상 2편 포함", "검색 상위노출 구조 + 품질 자동검사",
+               "사진 자동 보정 + 번호판·개인정보 가림"] + _flim("basic"),
               "basic", False),
-             ("프로", f"월 {p:,}원", f"무제한 · 성과까지 · 연결제 시 월 {py:,}원",
-              ["콘텐츠 무제한 생성", "순위 성장 추적", "성과 실측(QR·유입 집계)", "우선 생성 · 다중 가게"] + _flim("pro"),
+             ("스탠다드", f"월 {p:,}원", f"월 12세트 · 성과까지 · 연결제 시 월 {py:,}원",
+              ["월 콘텐츠 12세트 + 영상 8편", "순위 성장 추적 · 미노출 자동 개선",
+               "성과 실측(QR·유입 집계)", "이길 키워드 자동 선정(승산 분석)"] + _flim("pro"),
               "pro", True),
-             ("대행", f"월 {af//10000}만원~", "사진만 보내면 발행까지 대행",
-              ["카톡으로 사진만 보내면 끝", "올린다 팀이 발행까지 운영 대행", "정기 발행 · 성과 리포트"] + _flim("agency"),
+             ("프로", f"월 {af:,}원", "월 20세트 · 영상 무제한 · 최우선",
+              ["월 콘텐츠 20세트 + 영상 무제한", "우선 생성 · 다중 가게",
+               "전담 지원(카톡 우선 응대)"] + _flim("agency"),
               "agency", False)]
     cards = ""
     for name, price, sub, feats, key, hot in plans:
@@ -755,10 +758,10 @@ def _pricing() -> str:
                if hot else "")
         lis = "".join(f"<li class='flex gap-2 items-start'><span class='text-indigo-500 mt-0.5'>{_icon('check', 'w-4 h-4')}</span><span>{f}</span></li>" for f in feats)
         btn = "bg-indigo-600 hover:bg-indigo-700 text-white" if hot else "bg-slate-100 hover:bg-slate-200 text-slate-700"
-        href = "#contact" if key == "agency" else f"/billing?plan={key}"
-        cta = "카톡으로 신청" if key == "agency" else "구독 시작"
+        href = f"/billing?plan={key}"
+        cta = "구독 시작"
         # 연결제(약 30%↓) 보조 링크 — basic/pro만
-        annual = ("" if key == "agency" else
+        annual = ("" if False else
                   f"<a href='/billing?plan={key}_yearly' class='block text-center text-xs text-indigo-600 font-bold mt-2 hover:underline'>연 결제로 30% 아끼기 →</a>")
         cards += (f"<div class='reveal {wrap} bg-white rounded-2xl p-8 flex flex-col'>{tag}"
                   f"<div class='font-bold text-lg text-slate-500'>{name}</div>"
@@ -768,7 +771,7 @@ def _pricing() -> str:
                   f"<a href='{href}' class='{btn} mt-7 text-center px-4 py-3.5 rounded-xl font-bold transition'>{cta}</a>{annual}</div>")
     return (f"<section id='pricing' class='bg-[#F9FAFB] py-24'><div class='max-w-5xl mx-auto px-5'>"
             f"<h2 class='reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900'>합리적인 요금</h2>"
-            f"<p class='reveal text-center text-slate-500 mb-14'>대행사 1/5 가격 — 손님 2~3명만 더 와도 본전.</p>"
+            f"<p class='reveal text-center text-slate-500 mb-14'>사람 대행 시세(월 30~50만)보다 싸게, 대행이 못 하는 물량(글 12세트+영상 8편)을 — 손님 2~3명만 더 와도 본전.</p>"
             f"<div class='grid sm:grid-cols-3 gap-6 items-stretch pt-3'>{cards}</div></div></section>")
 
 

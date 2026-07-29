@@ -7,9 +7,9 @@ from __future__ import annotations
 import os
 
 # ── 월 요금(원) ─────────────────────────────────────────
-PRICE_BASIC = int(os.environ.get("SHOPCAST_PRICE_BASIC", "29000"))    # 미끼 진입 티어(기존 39,000 → 인하)
-PRICE_PRO = int(os.environ.get("SHOPCAST_PRICE_PRO", "79000"))        # 메인 · 순위추적·성과실측
-AGENCY_FROM = int(os.environ.get("SHOPCAST_PRICE_AGENCY", "150000"))  # 대행 시작가(월 15만~25만)
+PRICE_BASIC = int(os.environ.get("SHOPCAST_PRICE_BASIC", "129000"))   # 라이트(2026-07-29 원가 실측 기반 개편)
+PRICE_PRO = int(os.environ.get("SHOPCAST_PRICE_PRO", "199000"))       # 스탠다드(주력) · 순위추적·성과실측
+AGENCY_FROM = int(os.environ.get("SHOPCAST_PRICE_AGENCY", "299000"))  # 프로(최상위) — 대행 포지션 흡수
 AGENCY_TO = int(os.environ.get("SHOPCAST_PRICE_AGENCY_TO", "250000"))
 
 YEARLY_DISCOUNT = 0.30    # 연 결제 할인율(약 30%)
@@ -32,10 +32,11 @@ def yearly_monthly_equiv(monthly: int) -> int:
 
 # 플랜 정의 — pay.PLANS·billing·landing 공용 소스
 PLANS = {
-    "basic":  {"name": "베이직", "price": PRICE_BASIC, "monthly": 8},   # 월 8건
-    "pro":    {"name": "프로", "price": PRICE_PRO, "monthly": 0},       # 무제한 + 성과기능
-    "self":   {"name": "프로", "price": PRICE_PRO, "monthly": 0},
-    "agency": {"name": "대행", "price": AGENCY_FROM, "monthly": 0},     # 사진만 보내면 발행까지 대행
+    # 2026-07-29 개편(원가 실측 ₩1.5~3.5천/세트 기반, 마진 75%+): 라이트/스탠다드/프로
+    "basic":  {"name": "라이트", "price": PRICE_BASIC, "monthly": 6},     # 월 6세트 + 영상 2
+    "pro":    {"name": "스탠다드", "price": PRICE_PRO, "monthly": 12},    # 월 12세트 + 영상 8(주력)
+    "self":   {"name": "스탠다드", "price": PRICE_PRO, "monthly": 12},
+    "agency": {"name": "프로", "price": AGENCY_FROM, "monthly": 20},      # 월 20세트 + 영상 무제한 + 우선
 }
 
 # 성과형(1페이지 진입 시 과금) — 스텁: 임계 순위 도달 이벤트 기록용
