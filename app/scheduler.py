@@ -115,6 +115,14 @@ def _fresh_index_check() -> None:
         lessons.sweep()                     # 🧪 미노출 자동 개선 — 격차 진단→교훈 적재→검증(UI 0개)
     except Exception:
         logging.getLogger("shopcast.lessons").exception("[lessons] 크론 실패")
+    try:  # 🗼 서버 자가진단 — 대시보드가 꺼져 있어도 이상을 텔레그램으로 통보(2026-07-29)
+        from app.services import watchtower
+        watchtower.check()
+        import datetime as _dtw
+        if 22 <= _dtw.datetime.utcnow().hour <= 23:      # KST 아침 7~8시 = UTC 22~23시
+            watchtower.daily_summary()
+    except Exception:
+        logging.getLogger("shopcast.watchtower").exception("[watchtower] 크론 실패")
 
 
 def _rss_autosync() -> None:

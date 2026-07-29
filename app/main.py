@@ -539,6 +539,17 @@ def admin_remask(asset_id: str, apply: int = 0, file: str = ""):
     return JSONResponse({"ok": True, "apply": bool(apply), "n": len(out), "photos": out})
 
 
+@app.api_route("/admin/watchtower", methods=["GET", "POST"])
+def admin_watchtower(test: int = 0):
+    """🗼 자가진단 수동 실행 — test=1이면 텔레그램 연결 테스트 메시지도 발송."""
+    from app.services import watchtower as _wt
+    out = {"ok": True, "telegram_configured": _wt.configured()}
+    if test:
+        out["test_sent"] = _wt.send("✅ 올린다 알림 연결 테스트 — 이 메시지가 보이면 정상입니다.")
+    out["result"] = _wt.check()
+    return JSONResponse(out)
+
+
 @app.get("/admin/biz-metrics")
 def admin_biz_metrics(days: int = 30):
     """📊 사업 지표 단일 API(맥북 사령탑용, 읽기 전용) — 고객·매출·시스템 건강·마진.
