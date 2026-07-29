@@ -67,6 +67,7 @@ class Tenant:
     marketplace: str = ""     # seller: coupang/11st/smartstore/gmarket/self
     buy_url: str = ""         # seller: 상세페이지/스토어 URL(직링크 가능 시)
     search_kw: str = ""       # seller: "쿠팡에서 OO 검색" 유도용 키워드
+    blog_signature: str = ""  # 블로그 글 끝 서명(이웃 피드 자동 홍보 — 비면 미삽입)
     brand_name: str = ""      # seller: SNS 노출 브랜드/스토어명
     publish_schedule: int = 0  # 대행 운영: 주간 발행 목표 횟수(0=미설정)
     lat: Optional[float] = None  # 가게 위도(사진 GPS 지오태그)

@@ -539,6 +539,19 @@ def admin_remask(asset_id: str, apply: int = 0, file: str = ""):
     return JSONResponse({"ok": True, "apply": bool(apply), "n": len(out), "photos": out})
 
 
+@app.post("/admin/set-signature/{tenant_id}")
+async def admin_set_signature(request: Request, tenant_id: str):
+    """블로그 서명 설정(form: text) — 빈 값이면 해제."""
+    t = db.get_tenant(tenant_id)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    form = await request.form()
+    txt = str(form.get("text") or "").strip()[:200]
+    with db._conn() as c:
+        c.execute("UPDATE tenants SET blog_signature=? WHERE id=?", (txt, tenant_id))
+    return JSONResponse({"ok": True, "signature": txt})
+
+
 @app.get("/admin/set-cost/{asset_id}")
 def admin_set_cost(asset_id: str, regate: int = 0):
     """💰 세트 실측 비용·점수 조회(+regate=1이면 발행 게이트 재실행 — 봉인 세트 소액 재판정)."""

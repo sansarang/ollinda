@@ -409,6 +409,17 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
                                              _cost["usd"], _cost["calls"], tenant.id)
     except Exception:
         pass
+    # ✍️ 블로그 서명 자동 삽입(2026-07-29 사장님 승인) — 이웃 새글 피드 = 합법 자동 홍보 채널.
+    #   tenant.blog_signature 설정 시 모든 블로그 글 끝에 1줄(쪽지 자동화 대체 — 리스크 0).
+    try:
+        _sig = (getattr(tenant, "blog_signature", "") or "").strip()
+        if _sig:
+            _bsig = next((p for p in pieces if p.kind == ContentKind.BLOG), None)
+            if _bsig and _sig not in (_bsig.payload.get("body") or ""):
+                _bsig.payload["body"] = (_bsig.payload.get("body") or "").rstrip() + "\n\n---\n" + _sig
+                db.save_piece(_bsig)
+    except Exception:
+        pass
     # 네이버 플레이스 연동 — 매장(local/hybrid)이면 블로그에 플레이스 키워드 + 리뷰요청 문구 첨부 (#플레이스전략)
     try:
         if (getattr(tenant, "biz_type", "local") or "local") in ("local", "hybrid"):

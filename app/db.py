@@ -62,7 +62,7 @@ def init_db() -> None:
         for col, ddl in [("phone", "TEXT"), ("address", "TEXT"), ("hours", "TEXT"),
                          ("map_url", "TEXT"), ("autonomy", "INTEGER DEFAULT 0"),
                          ("biz_type", "TEXT DEFAULT 'local'"), ("marketplace", "TEXT"),
-                         ("buy_url", "TEXT"), ("search_kw", "TEXT"), ("brand_name", "TEXT"),
+                         ("buy_url", "TEXT"), ("search_kw", "TEXT"), ("brand_name", "TEXT"), ("blog_signature", "TEXT"),
                          ("publish_schedule", "INTEGER DEFAULT 0"), ("is_demo", "INTEGER DEFAULT 0"),
                          ("lat", "REAL"), ("lon", "REAL"),        # 가게 좌표(사진 GPS 지오태그)
                          ("topic_axis", "TEXT"),                  # 전문 주제 축(C-Rank 주제 집중, 성장 PHASE 7)
@@ -252,7 +252,7 @@ def _row_to_tenant(r: sqlite3.Row) -> Tenant:
                   autonomy=g("autonomy", 0) or 0,
                   biz_type=g("biz_type", "local") or "local",
                   marketplace=g("marketplace"), buy_url=g("buy_url"),
-                  search_kw=g("search_kw"), brand_name=g("brand_name"),
+                  search_kw=g("search_kw"), brand_name=g("brand_name"), blog_signature=g("blog_signature"),
                   publish_schedule=g("publish_schedule", 0) or 0,
                   lat=(r["lat"] if "lat" in keys else None), lon=(r["lon"] if "lon" in keys else None),
                   topic_axis=g("topic_axis"),
