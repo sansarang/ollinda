@@ -637,6 +637,69 @@ def admin_watchtower(test: int = 0):
     return JSONResponse(out)
 
 
+@app.post("/me/feedback")
+async def my_feedback(request: Request):
+    """🗣 결과 화면 피드백 — 👍👎 + 한 줄. '취향'은 즉시 그 가게 교훈으로 반영(배포 불필요)."""
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"ok": False}, status_code=401)
+    form = await request.form()
+    aid = str(form.get("asset_id") or "")[:64]
+    vote = str(form.get("vote") or "")[:8]
+    txt = str(form.get("text") or "").strip()[:400]
+    t0 = db.get_tenant(getattr(u, "tenant_id", "") or "")
+    if not t0:
+        return JSONResponse({"ok": False}, status_code=404)
+    db.add_feedback(t0.id, aid, vote=vote, text=txt)
+    # 취향형(문체·길이·표현)은 그 가게 교훈으로 즉시 반영 — 다음 글부터 조용히 적용
+    applied = False
+    if txt and len(txt) >= 4:
+        try:
+            from app.generators.text_claude import _call_llm
+            v = (_call_llm(
+                "사장님이 AI가 쓴 글에 남긴 의견이다. 이게 '이 가게 글쓰기 취향'으로 바꿀 수 있는 "
+                "것이면 다음 글부터 적용할 지시문 한 문장(20~60자, 명령형)으로 만들고, "
+                "버그·오류·기능요청이면 NO 만 출력하라.\n"
+                f"[의견] {txt}", model="claude-sonnet-5", max_tokens=100) or "").strip()
+            v = " ".join(v.split())
+            if v and "NO" not in v.upper() and 8 <= len(v) <= 90:
+                db.add_lesson(t0.id, v, source_kw="", source_piece_id=f"fb:{aid[:8]}",
+                              cause="user_feedback", status="active")
+                applied = True
+        except Exception:
+            pass
+    return JSONResponse({"ok": True, "applied": applied})
+
+
+@app.get("/admin/feedback")
+def admin_feedback(limit: int = 80, group: int = 1):
+    """🗣 고객 목소리 집계(사령탑용) — 긴급/개선/패턴으로 분류. group=1이면 유사 의견 묶기."""
+    rows = db.list_feedback(limit=limit)
+    urgent, wish, quiet = [], [], []
+    for r in rows:
+        item = {"id": r.get("id"), "tenant": r.get("tenant"), "text": (r.get("text") or "")[:160],
+                "vote": r.get("vote"), "signal": r.get("signal"),
+                "at": (r.get("created_at") or "")[:16], "status": r.get("status")}
+        if r.get("signal"):
+            quiet.append(item)
+        elif r.get("vote") == "down" or any(k in (r.get("text") or "")
+                                            for k in ("안 돼", "안돼", "오류", "안나", "못", "이상")):
+            urgent.append(item)
+        else:
+            wish.append(item)
+    # 패턴: 같은 키워드가 3건 이상
+    import re as _rf
+    from collections import Counter as _C
+    words = _C()
+    for r in rows:
+        for w in _rf.findall(r"[가-힣]{2,6}", (r.get("text") or "")):
+            if w not in ("그리고", "하는", "해서", "합니다", "있는", "같아", "너무"):
+                words[w] += 1
+    pattern = [{"word": w, "n": n} for w, n in words.most_common(6) if n >= 3]
+    return JSONResponse({"ok": True, "n": len(rows), "urgent": urgent[:12], "wish": wish[:12],
+                         "quiet": quiet[:8], "pattern": pattern})
+
+
 @app.get("/admin/biz-metrics")
 def admin_biz_metrics(days: int = 30):
     """📊 사업 지표 단일 API(맥북 사령탑용, 읽기 전용) — 고객·매출·시스템 건강·마진.
@@ -5627,6 +5690,17 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                          "<div class='text-[11px] text-slate-400 text-center mt-1.5'>상위노출 기준(80점)에 못 미쳐 "
                          "발행을 잠시 막아뒀어요. 버튼을 누르면 AI가 다시 씁니다 (1~2분)</div></form>")
                         if (pl or {}).get("publish_blocked_score") else naver_btn)
+                     + ("<div class='mt-3 pt-3 border-t border-slate-100 text-center' id='fb%s'>"
+                        "<span class='text-xs text-slate-400 mr-2'>이 글 어땠나요?</span>"
+                        "<button type=button onclick=\"fbv('%s','up')\" class='px-3 py-1.5 rounded-lg "
+                        "border border-slate-200 hover:bg-slate-50 text-sm'>👍</button> "
+                        "<button type=button onclick=\"fbv('%s','down')\" class='px-3 py-1.5 rounded-lg "
+                        "border border-slate-200 hover:bg-slate-50 text-sm'>👎</button>"
+                        "<div id='fbi%s' class='hidden mt-2'><input id='fbt%s' placeholder='한 줄만 남겨주세요 "
+                        "(예: 문장이 너무 길어요)' class='w-full border border-slate-200 rounded-lg px-3 py-2 "
+                        "text-sm'><button type=button onclick=\"fbs('%s')\" class='mt-1.5 w-full py-2 "
+                        "bg-slate-800 text-white rounded-lg text-xs font-bold'>보내기</button></div></div>")
+                       % (asset_id, asset_id, asset_id, asset_id, asset_id, asset_id)
                      + f"<div class='flex gap-2'>{pack_btn(p.id, bool(_set_naver_video(pieces)))}<button type=button onclick=\"cp('cb{sid}',this)\" class='px-3.5 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold rounded-xl transition'>글 복사</button></div></div></div>")
         elif k == "x_post":
             xt = pl.get("text", "")
@@ -5769,6 +5843,17 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
     js = ("<script>"
           "function omCopy(text){if(navigator.clipboard&&navigator.clipboard.writeText){return navigator.clipboard.writeText(text);}"
           "return new Promise(function(res,rej){var ta=document.createElement('textarea');ta.value=text;ta.setAttribute('readonly','');ta.style.position='fixed';ta.style.top='0';ta.style.opacity='0';document.body.appendChild(ta);ta.focus();ta.select();ta.setSelectionRange(0,text.length);var ok=false;try{ok=document.execCommand('copy');}catch(e){}document.body.removeChild(ta);ok?res():rej();});}"
+          "function fbv(a,v){var i=document.getElementById('fbi'+a);"
+          "if(v==='down'){i.classList.remove('hidden');}"
+          "fetch('/me/feedback',{method:'POST',body:new URLSearchParams({asset_id:a,vote:v})})"
+          ".then(function(){if(v==='up'){document.getElementById('fb'+a).innerHTML="
+          "'<span class=\'text-xs text-emerald-600 font-bold\'>감사합니다! 다음 글에 반영할게요 🙌</span>';}});}"
+          "function fbs(a){var t=document.getElementById('fbt'+a).value;"
+          "fetch('/me/feedback',{method:'POST',body:new URLSearchParams({asset_id:a,vote:'down',text:t})})"
+          ".then(function(r){return r.json();}).then(function(d){"
+          "document.getElementById('fb'+a).innerHTML='<span class=\'text-xs text-indigo-600 font-bold\'>'"
+          "+(d.applied?'접수했어요 — 다음 글부터 바로 반영됩니다 ✅':'접수했어요. 확인 후 개선할게요 🙏')"
+          "+'</span>';});}"
           "function cp(id,btn){var t=document.getElementById(id);var o=btn.textContent;"
           "omCopy(t.value).then(function(){btn.textContent='✅ 복사됨';}).catch(function(){btn.textContent='길게 눌러 복사';});setTimeout(function(){btn.textContent=o;},1500);}"
           "async function copyRich(id,btn){var el=document.getElementById(id);var o=btn.textContent;"

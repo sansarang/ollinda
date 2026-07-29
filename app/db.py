@@ -2471,3 +2471,49 @@ def pending_gen_jobs(max_age_hours: int = 6) -> list[dict]:
         return out
     except sqlite3.OperationalError:
         return []
+
+
+# ── 🗣 고객 목소리(feedback) — 결과 화면 👍👎 + 한 줄, 무언의 신호까지(2026-07-29 사장님 승인) ──
+def _ensure_feedback(c) -> None:
+    c.execute("CREATE TABLE IF NOT EXISTS feedback("
+              "id TEXT PRIMARY KEY, tenant_id TEXT, asset_id TEXT, kind TEXT, "
+              "vote TEXT, text TEXT, signal TEXT, status TEXT DEFAULT 'new', "
+              "category TEXT DEFAULT '', created_at TEXT)")
+
+
+def add_feedback(tenant_id: str, asset_id: str, vote: str = "", text: str = "",
+                 signal: str = "", kind: str = "blog") -> None:
+    import uuid as _u
+    try:
+        with _conn() as c:
+            _ensure_feedback(c)
+            c.execute("INSERT INTO feedback(id, tenant_id, asset_id, kind, vote, text, signal, "
+                      "created_at) VALUES(?,?,?,?,?,?,?,?)",
+                      (str(_u.uuid4()), tenant_id, asset_id, kind, vote, (text or "")[:400],
+                       signal, _now()))
+    except sqlite3.OperationalError:
+        pass
+
+
+def list_feedback(limit: int = 100, status: str = "") -> list[dict]:
+    try:
+        with _conn() as c:
+            _ensure_feedback(c)
+            q = "SELECT f.*, t.name AS tenant FROM feedback f LEFT JOIN tenants t ON f.tenant_id=t.id"
+            if status:
+                q += " WHERE f.status=?"
+            q += " ORDER BY f.created_at DESC LIMIT ?"
+            rows = c.execute(q, ((status, limit) if status else (limit,))).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.OperationalError:
+        return []
+
+
+def set_feedback_status(fid: str, status: str, category: str = "") -> None:
+    try:
+        with _conn() as c:
+            _ensure_feedback(c)
+            c.execute("UPDATE feedback SET status=?, category=? WHERE id=?",
+                      (status, category, fid))
+    except sqlite3.OperationalError:
+        pass
