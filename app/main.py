@@ -5397,7 +5397,10 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                      + _result_naver_video(pieces, asset_id)
                      + "<div class='mt-4 space-y-2'>"
                      # 📮 발행 게이트: 80점 미달 글은 발행 버튼 봉인 — 재작성 버튼만(주방 철학: 미달 글 비노출)
-                     + ((f"<form method='post' action='/kit/{asset_id}/regen-blog'>"
+                     + ((f"<form method='post' action='/kit/{asset_id}/regen-blog' "
+                         "onsubmit=\"var b=this.querySelector('button');b.disabled=true;"
+                         "b.innerHTML='⏳ AI가 다시 쓰는 중… 1~2분 걸려요 (이 화면 그대로 두세요)';"
+                         "b.classList.add('opacity-70','animate-pulse');\">"
                          "<button class='block w-full text-center py-3 rounded-xl text-white text-sm font-extrabold "
                          "bg-amber-500 hover:brightness-110 active:scale-[.99] transition shadow-md'>"
                          "🔧 품질 기준 미달 — AI가 다시 쓰기</button>"
