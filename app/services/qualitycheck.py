@@ -92,7 +92,9 @@ def run_checks(asset_id: str) -> dict:
              str((x.payload or {}).get("subject_check")))
 
     n_ok = sum(1 for c in checks if c["ok"])
-    return {"asset_id": asset_id, "pass": n_ok, "fail": len(checks) - n_ok, "checks": checks}
+    _cost = (blog.payload or {}).get("api_cost") if blog else None
+    return {"asset_id": asset_id, "pass": n_ok, "fail": len(checks) - n_ok, "checks": checks,
+            "api_cost": _cost}
 
 
 # 자체 수정 가능 항목(문장 '표면'만 — 사실·구조·마커·링크 불변 원칙)
@@ -103,13 +105,14 @@ def _revise_text(text: str, problems: list[str], is_blog: bool) -> str:
     """걸린 항목만 고치는 표면 수정 1콜 — 실패·빈 응답이면 원문 유지(안전)."""
     try:
         from app.generators.text_claude import _call_llm
+        from app.llm import SONNET as _SN
         keep = ("소제목(##)·표·FAQ·[사진N] 마커·링크·숫자·사실 전부 그대로 유지, "
                 if is_blog else "해시태그·사실·숫자 그대로 유지, ")
         out = _call_llm(
             "아래 글의 '문제'만 고쳐서 전체를 다시 출력하라. 문장 표현만 다듬고 "
             + keep + "내용 추가·삭제 금지. 설명 없이 결과 텍스트만.\n"
             f"[문제] {'; '.join(problems)}\n\n[글]\n{text}",
-            max_tokens=(6000 if is_blog else 900))
+            model=_SN, max_tokens=(6000 if is_blog else 900))
         out = (out or "").strip()
         # 안전 게이트: 지나친 축소·마커 소실이면 원문 유지
         if is_blog:
@@ -148,11 +151,12 @@ def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
         body = pl.get("body") or ""
         try:
             from app.generators.text_claude import _call_llm
+            from app.llm import SONNET as _SN2
             new = (_call_llm(
                 "아래 블로그 글이 상위노출 채점에서 감점됐다. '감점 사유'에 해당하는 부분만 정확히 고쳐 "
                 "전체 본문을 다시 출력하라. 소제목(##)·표·FAQ·[사진N] 마커·링크·숫자·사실은 그대로 유지, "
                 "내용 추가·삭제 금지. 설명 없이 결과 본문만.\n"
-                f"[감점 사유] {warns}\n\n[본문]\n{body}", max_tokens=6000) or "").strip()
+                f"[감점 사유] {warns}\n\n[본문]\n{body}", model=_SN2, max_tokens=6000) or "").strip()
             if (len(new) >= len(body) * 0.7
                     and len(re.findall(r"\[사진\d+\]", new)) == len(re.findall(r"\[사진\d+\]", body))):
                 pl["body"] = new

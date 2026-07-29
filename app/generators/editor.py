@@ -44,7 +44,7 @@ def polish(tenant, piece, threshold: int = 80) -> bool:
                 "[추가섹션]\n(누락 지적된 필수 섹션(FAQ·표·요약)이 있으면 그 섹션 전체 마크다운, 없으면 '없음')\n"
                 "[문단수정]\n(고칠 문단이 있으면 반복 —\n<<<원문 문단의 첫 6어절 그대로>>>\n교체할 새 문단\n— 없으면 '없음')"
             )
-            raw = _call_llm(prompt, max_tokens=1400)
+            raw = _call_llm(prompt, "claude-sonnet-5", 1400)
             d = _parse_sections(raw, ["제목", "추가섹션", "문단수정"])
             import re as _r
             changed = False
@@ -95,7 +95,7 @@ def polish(tenant, piece, threshold: int = 80) -> bool:
                 f"[핵심 키워드] {kw}\n[검수 지적사항]\n{issues}\n\n[원본]\n{piece.payload.get('text','')}\n\n"
                 "재작성한 캡션만 출력(머리표 없이)."
             )
-            new = _call_llm(prompt, max_tokens=1200).strip()
+            new = _call_llm(prompt, "claude-sonnet-5", 1200).strip()
             if len(new) < 20:
                 return False
             piece.payload["text"] = new

@@ -742,7 +742,7 @@ def subject_match(text: str, note: str, kw: str) -> "bool | None":
             "흠집·상태 묘사) 서술하면 NO. 분석이 일반적으로 묘사한 대상(빵·꽃·차량 등)을 글이 자연스러운 "
             "구체 명칭으로 부르는 정도는 일치(YES)로 본다. 지역·업종·일반 조언·비유 언급은 판단에서 제외. YES/NO 한 단어만.\n"
             f"[타깃 키워드] {kw}\n[사진 분석(발췌)]\n{(note or '')[:2500]}\n\n[글]\n{(text or '')[:1200]}",
-            max_tokens=10)
+            model="claude-haiku-4-5-20251001", max_tokens=10)
         s = (v or "").strip().upper()
         if "NO" in s and "YES" not in s:
             return False

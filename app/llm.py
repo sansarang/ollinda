@@ -84,6 +84,7 @@ def call(prompt: str, model: str = MODEL, max_tokens: int = 1200, cache_prefix: 
     if _u is not None:
         LAST_USAGE = {"in": getattr(_u, "input_tokens", 0) or 0,
                       "out": getattr(_u, "output_tokens", 0) or 0, "model": model}
+        _track_cost(model, LAST_USAGE.get("in", 0), LAST_USAGE.get("out", 0))
         USAGE["anthropic"]["in"] = USAGE["anthropic"].get("in", 0) + LAST_USAGE["in"]
         USAGE["anthropic"]["out"] = USAGE["anthropic"].get("out", 0) + LAST_USAGE["out"]
     import logging
@@ -122,6 +123,31 @@ def ping() -> bool:
 # env: LLM_VISION / LLM_CAPTION / LLM_BODY = "provider:model" (예: gemini:gemini-flash-latest)
 # 미설정 시 기본값 = 현행 Anthropic 경로 그대로(변수 없어도 기존과 동일 동작 — 배포 안전).
 USAGE = {"gemini": {"n": 0, "in": 0, "out": 0}, "anthropic": {"n": 0}}
+
+# 💰 세트별 비용 계측(2026-07-29 실측 $4/세트 사고 후) — 모델 단가($/M tokens)로 근사 집계.
+#   ingest가 세트 시작 시 reset, 종료 시 snapshot을 blog payload(api_cost)에 기록.
+_PRICES = {"claude-opus": (15.0, 75.0), "claude-sonnet": (3.0, 15.0),
+           "claude-haiku": (1.0, 5.0), "gemini": (0.30, 2.50)}
+COST = {"usd": 0.0, "calls": 0}
+
+
+def _track_cost(model: str, tin: int, tout: int) -> None:
+    try:
+        for k, (a, b) in _PRICES.items():
+            if (model or "").startswith(k):
+                COST["usd"] += tin / 1e6 * a + tout / 1e6 * b
+                COST["calls"] += 1
+                return
+    except Exception:
+        pass
+
+
+def cost_reset() -> None:
+    COST.update({"usd": 0.0, "calls": 0})
+
+
+def cost_snapshot() -> dict:
+    return {"usd": round(COST["usd"], 4), "calls": COST["calls"]}
 LAST_ROUTE: dict = {}   # {task: {"provider","model","fallback","error"}} — payload 기록용(원가 추적)
 
 
@@ -167,6 +193,8 @@ def _gemini_generate(parts: list, model: str, max_tokens: int) -> str:
     USAGE["gemini"]["n"] += 1
     USAGE["gemini"]["in"] += u.get("promptTokenCount", 0)
     USAGE["gemini"]["out"] += u.get("candidatesTokenCount", 0) + u.get("thoughtsTokenCount", 0)
+    _track_cost("gemini", u.get("promptTokenCount", 0),
+                u.get("candidatesTokenCount", 0) + u.get("thoughtsTokenCount", 0))
     try:
         return d["candidates"][0]["content"]["parts"][0]["text"].strip()
     except Exception:

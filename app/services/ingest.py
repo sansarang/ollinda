@@ -263,6 +263,8 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
         pass
     brief_public = {k: v for k, v in brief.items() if not k.startswith("_")}
     _prog("body", "본문 작성 중", "", 0.6)
+    from app import llm as _llmc
+    _llmc.cost_reset()                                  # 💰 세트별 비용 계측 시작(실측 $4/세트 사고 후)
     pieces = generate_for(tenant, asset, kinds, images=paths)   # ✍️ 카피라이터·🎬 영상감독
     # 블로그(=상태 저장소)가 실패하면 channel_status·video_job·워치독 전부 실명 → 즉시 1회 재시도(단일점 봉합)
     if ContentKind.BLOG in kinds and not any(p.kind == ContentKind.BLOG for p in pieces):
@@ -396,6 +398,17 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
     except Exception:
         import logging as _lgq2
         _lgq2.getLogger("shopcast.ingest").exception("[score-gate] 실패(글은 그대로 진행)")
+    try:  # 💰 세트 비용 실측 기록(분석~게이트 전 구간) — blog payload.api_cost, 로그로도 남김
+        _cost = _llmc.cost_snapshot()
+        _bc = next((p for p in pieces if p.kind == ContentKind.BLOG), None)
+        if _bc:
+            _bc.payload["api_cost"] = _cost
+            db.save_piece(_bc)
+        import logging as _lgc
+        _lgc.getLogger("shopcast.cost").info("[cost] 세트 완료 $%.3f (%d콜) tenant=%s",
+                                             _cost["usd"], _cost["calls"], tenant.id)
+    except Exception:
+        pass
     # 네이버 플레이스 연동 — 매장(local/hybrid)이면 블로그에 플레이스 키워드 + 리뷰요청 문구 첨부 (#플레이스전략)
     try:
         if (getattr(tenant, "biz_type", "local") or "local") in ("local", "hybrid"):
