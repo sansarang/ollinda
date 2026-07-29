@@ -671,6 +671,27 @@ async def my_feedback(request: Request):
     return JSONResponse({"ok": True, "applied": applied})
 
 
+@app.post("/admin/feedback-purge")
+def admin_feedback_purge(asset_id: str = "test-asset", tenant_id: str = ""):
+    """🧹 테스트 피드백·교훈 정리 — asset_id(기본 test-asset) 피드백과 fb:test 교훈 삭제."""
+    n_fb = n_ls = 0
+    try:
+        with db._conn() as c:
+            db._ensure_feedback(c)
+            cur = c.execute("DELETE FROM feedback WHERE asset_id=?" +
+                            (" AND tenant_id=?" if tenant_id else ""),
+                            ((asset_id, tenant_id) if tenant_id else (asset_id,)))
+            n_fb = cur.rowcount or 0
+            db._ensure_lessons_table(c)
+            cur2 = c.execute("DELETE FROM tenant_lessons WHERE source_piece_id LIKE 'fb:%'" +
+                             (" AND tenant_id=?" if tenant_id else ""),
+                             ((tenant_id,) if tenant_id else ()))
+            n_ls = cur2.rowcount or 0
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": repr(e)[:120]}, status_code=500)
+    return JSONResponse({"ok": True, "feedback_deleted": n_fb, "lessons_deleted": n_ls})
+
+
 @app.post("/admin/feedback-test")
 async def admin_feedback_test(request: Request):
     """🗣 고객 목소리 경로 진단 — 사용자 제출과 동일한 로직(분류→교훈 반영→기록)을 실행."""
@@ -713,8 +734,11 @@ def admin_feedback(limit: int = 80, group: int = 1):
                 "at": (r.get("created_at") or "")[:16], "status": r.get("status")}
         if r.get("signal"):
             quiet.append(item)
-        elif r.get("vote") == "down" or any(k in (r.get("text") or "")
-                                            for k in ("안 돼", "안돼", "오류", "안나", "못", "이상")):
+        elif (any(k in (r.get("text") or "")
+                  for k in ("안 돼", "안돼", "오류", "안나", "못", "이상", "별로", "실패", "틀"))
+              or (r.get("vote") == "down"
+                  and not any(k in (r.get("text") or "")
+                              for k in ("좋", "마음에", "감사", "만족", "훌륭", "최고")))):
             urgent.append(item)
         else:
             wish.append(item)
