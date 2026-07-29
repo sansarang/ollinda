@@ -23,7 +23,7 @@ def env() -> str:
 
 
 def configured() -> bool:
-    return bool(os.environ.get("PADDLE_CLIENT_TOKEN") and os.environ.get("PADDLE_PRICE_SELF"))
+    return bool(os.environ.get("PADDLE_CLIENT_TOKEN") and any(os.environ.get("PADDLE_PRICE_" + k) for k in ("SELF", "BASIC", "PRO", "AGENCY")))
 
 
 def client_token() -> str:
