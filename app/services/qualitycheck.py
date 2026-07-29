@@ -150,19 +150,34 @@ def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
         warns = "; ".join((au.get("warnings") or [])[:6]) or "감점 사유 미상"
         body = pl.get("body") or ""
         try:
-            from app.generators.text_claude import _call_llm
-            from app.llm import SONNET as _SN2
-            new = (_call_llm(
-                "아래 블로그 글이 상위노출 채점에서 감점됐다. '감점 사유'에 해당하는 부분만 정확히 고쳐 "
-                "전체 본문을 다시 출력하라. 소제목(##)·표·FAQ·[사진N] 마커·링크·숫자·사실은 그대로 유지, "
-                "내용 추가·삭제 금지. 설명 없이 결과 본문만.\n"
-                f"[감점 사유] {warns}\n\n[본문]\n{body}", model=_SN2, max_tokens=6000) or "").strip()
+            from app.generators.text_claude import _call_llm, _parse_sections
+            from app.llm import SONNET as _SN2, MODEL as _OP
+            # 2026-07-29 개선: ①제목 감점도 고치게 [제목] 출력 포함 ②2라운드는 Opus 승격
+            #   ③펜스·머리말 세척 후 안전 게이트 ④중단 사유 기록(70점 정체 조사 재발 방지)
+            _title0 = pl.get("title") or ""
+            raw = (_call_llm(
+                "아래 블로그가 상위노출 채점에서 감점됐다. '감점 사유'를 정확히 고쳐라. "
+                "소제목(##)·표·FAQ·[사진N] 마커·링크·숫자·사실은 그대로 유지, 내용 추가·삭제 금지.\n"
+                "출력 형식(머리표 유지, 설명 금지):\n[제목]\n(고친 제목 — 문제 없으면 원래 제목 그대로)\n"
+                "[본문]\n(고친 전체 본문)\n\n"
+                f"[감점 사유] {warns}\n[제목] {_title0}\n\n[본문]\n{body}",
+                model=(_SN2 if rounds == 1 else _OP), max_tokens=6000) or "").strip()
+            d = _parse_sections(raw, ["제목", "본문"])
+            new = (d.get("본문") or raw).strip()
+            new = re.sub(r"^```[a-z]*\n?|\n?```$", "", new).strip()      # 코드펜스 세척
+            _nt = " ".join((d.get("제목") or "").split())
             if (len(new) >= len(body) * 0.7
                     and len(re.findall(r"\[사진\d+\]", new)) == len(re.findall(r"\[사진\d+\]", body))):
                 pl["body"] = new
+                if 12 <= len(_nt) <= 50:
+                    pl["title"] = _nt
             else:
+                pl.setdefault("score_gate_stops", []).append(
+                    f"r{rounds}: 안전게이트(len {len(new)}/{len(body)}, 마커 "
+                    f"{len(re.findall(chr(91)+'사진'+chr(92)+'d+'+chr(93), new))})")
                 break                                    # 안전 게이트 위반 → 원문 유지·중단
-        except Exception:
+        except Exception as _e:
+            pl.setdefault("score_gate_stops", []).append(f"r{rounds}: 예외 {repr(_e)[:60]}")
             break
         au = seo.quality_audit(blog.channel.value, blog.kind.value, pl, source=source)
         pl["ranking_audit"] = au

@@ -540,12 +540,16 @@ def admin_remask(asset_id: str, apply: int = 0, file: str = ""):
 
 
 @app.get("/admin/set-cost/{asset_id}")
-def admin_set_cost(asset_id: str):
-    """💰 세트 실측 비용·점수 조회 — blog payload의 api_cost·ranking_audit·score_gate 요약."""
+def admin_set_cost(asset_id: str, regate: int = 0):
+    """💰 세트 실측 비용·점수 조회(+regate=1이면 발행 게이트 재실행 — 봉인 세트 소액 재판정)."""
     pieces = db.get_set_pieces(asset_id)
     blog = next((p for p in pieces if p.kind.value == "blog"), None)
     if not blog:
         return JSONResponse({"ok": False, "error": "블로그 없음"}, status_code=404)
+    if regate:
+        from app.services import qualitycheck as _qcg
+        _qcg.score_gate(asset_id, source=(blog.payload or {}).get("gen_source") or "")
+        blog = next((p for p in db.get_set_pieces(asset_id) if p.kind.value == "blog"), None)
     pl = blog.payload or {}
     return JSONResponse({"ok": True, "api_cost": pl.get("api_cost"),
                          "score": (pl.get("ranking_audit") or {}).get("score"),
