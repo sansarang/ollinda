@@ -539,6 +539,20 @@ def admin_remask(asset_id: str, apply: int = 0, file: str = ""):
     return JSONResponse({"ok": True, "apply": bool(apply), "n": len(out), "photos": out})
 
 
+@app.get("/admin/set-cost/{asset_id}")
+def admin_set_cost(asset_id: str):
+    """💰 세트 실측 비용·점수 조회 — blog payload의 api_cost·ranking_audit·score_gate 요약."""
+    pieces = db.get_set_pieces(asset_id)
+    blog = next((p for p in pieces if p.kind.value == "blog"), None)
+    if not blog:
+        return JSONResponse({"ok": False, "error": "블로그 없음"}, status_code=404)
+    pl = blog.payload or {}
+    return JSONResponse({"ok": True, "api_cost": pl.get("api_cost"),
+                         "score": (pl.get("ranking_audit") or {}).get("score"),
+                         "score_gate": pl.get("score_gate"),
+                         "blocked": pl.get("publish_blocked_score")})
+
+
 @app.get("/admin/kw-audit")
 def admin_kw_audit(limit: int = 30):
     """키워드-소재 정합 전수 검사(캐스퍼/토레스 실사고 후속) — 세트별로
