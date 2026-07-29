@@ -539,6 +539,97 @@ def admin_remask(asset_id: str, apply: int = 0, file: str = ""):
     return JSONResponse({"ok": True, "apply": bool(apply), "n": len(out), "photos": out})
 
 
+@app.get("/admin/biz-metrics")
+def admin_biz_metrics(days: int = 30):
+    """📊 사업 지표 단일 API(맥북 사령탑용, 읽기 전용) — 고객·매출·시스템 건강·마진.
+    결제(구독) 데이터는 있으면 집계, 없으면 0 — 패들 연동 후 자동으로 채워진다."""
+    from datetime import datetime, timedelta
+    now = datetime.utcnow()
+    since = (now - timedelta(days=days)).isoformat()
+    users, subs, err = [], [], []
+    try:
+        users = db.list_users()
+    except Exception:
+        pass
+    paid = trial = new_today = 0
+    today = now.date().isoformat()
+    for u in users:
+        pl = (u.get("plan") or "free").lower()
+        if pl in ("basic", "pro", "self", "agency"):
+            paid += 1
+        elif (u.get("free_used") or 0) > 0:
+            trial += 1
+        if (u.get("created_at") or "")[:10] == today:
+            new_today += 1
+    # 구독·결제(테이블 있으면)
+    revenue_mrr = 0
+    pay_today = []
+    try:
+        with db._conn() as c:
+            rows = c.execute("SELECT * FROM subscriptions").fetchall()
+        from app import config as _cfg
+        for r in rows:
+            d = dict(r)
+            if (d.get("status") or "") in ("active", "trialing"):
+                revenue_mrr += (_cfg.PLANS.get(d.get("plan") or "", {}) or {}).get("price", 0)
+            if (d.get("updated_at") or d.get("created_at") or "")[:10] == today:
+                pay_today.append({"plan": d.get("plan"), "status": d.get("status"),
+                                  "user": (d.get("user_id") or "")[:8]})
+            subs.append(d)
+    except Exception:
+        pass
+    # 시스템 건강 + 원가
+    tenants, gen_fail, gen_run, cost_usd, cost_n, blocked = [], 0, 0, 0.0, 0, 0
+    try:
+        tenants = db.list_tenants()
+    except Exception:
+        pass
+    heavy = []
+    for t in (tenants or [])[:40]:
+        try:
+            p = db.get_gen_progress(t.id) or {}
+            if p.get("status") == "failed":
+                gen_fail += 1
+                err.append({"tenant": t.name, "error": (p.get("error") or "")[:120]})
+            elif p.get("status") == "running":
+                gen_run += 1
+            tc, tn = 0.0, 0
+            for s in db.list_sets(tenant_id=t.id, limit=12):
+                if (s.get("created") or "") < since[:10].replace("-", "-"):
+                    pass
+                for pc in db.get_set_pieces(s["asset_id"]):
+                    if pc.kind.value != "blog":
+                        continue
+                    ac = (pc.payload or {}).get("api_cost") or {}
+                    if ac.get("usd"):
+                        tc += float(ac["usd"]); tn += 1
+                    if (pc.payload or {}).get("publish_blocked_score"):
+                        blocked += 1
+            cost_usd += tc; cost_n += tn
+            if tc > 0:
+                heavy.append({"tenant": t.name, "usd": round(tc, 2), "sets": tn})
+        except Exception:
+            continue
+    heavy.sort(key=lambda x: -x["usd"])
+    # 잡 복구 이력
+    jobs_pending = 0
+    try:
+        jobs_pending = len(db.pending_gen_jobs())
+    except Exception:
+        pass
+    return JSONResponse({
+        "ok": True, "ts": now.isoformat(),
+        "customers": {"total_users": len(users), "paid": paid, "trial": trial,
+                      "new_today": new_today, "tenants": len(tenants or [])},
+        "revenue": {"mrr_krw": revenue_mrr, "subs": len(subs), "pay_today": pay_today},
+        "health": {"gen_failed": gen_fail, "gen_running": gen_run, "errors": err[:5],
+                   "jobs_pending": jobs_pending, "blocked_posts": blocked},
+        "unit_economics": {"api_usd": round(cost_usd, 2), "sets": cost_n,
+                           "avg_usd": round(cost_usd / cost_n, 3) if cost_n else 0,
+                           "heavy": heavy[:3]},
+    })
+
+
 @app.post("/admin/set-signature/{tenant_id}")
 async def admin_set_signature(request: Request, tenant_id: str):
     """블로그 서명 설정(form: text) — 빈 값이면 해제."""
