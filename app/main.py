@@ -539,6 +539,58 @@ def admin_remask(asset_id: str, apply: int = 0, file: str = ""):
     return JSONResponse({"ok": True, "apply": bool(apply), "n": len(out), "photos": out})
 
 
+@app.get("/admin/lead-scout")
+def admin_lead_scout(region: str = "", biz: str = "", n: int = 20):
+    """🎯 영업 리드 정찰(공식 검색 API만) — 지역 업체 목록 + 각 업체의 블로그 활동 상태.
+    블로그가 없거나 오래 방치된 곳 = 올린다가 필요한 곳(우선 타깃). 크롤링 아님."""
+    import re as _rl
+    from datetime import datetime as _dtl
+    from app.services.blogrank import _search_blog as _sb, configured as _cfg2
+    if not (region.strip() and biz.strip()):
+        return JSONResponse({"ok": False, "error": "region·biz 필요"}, status_code=400)
+    if not _cfg2():
+        return JSONResponse({"ok": False, "error": "네이버 API 키 미설정"}, status_code=503)
+    import os as _os, requests as _rq
+    out, seen = [], set()
+    _hdr = {"X-Naver-Client-Id": _os.environ["NAVER_CLIENT_ID"],
+            "X-Naver-Client-Secret": _os.environ["NAVER_CLIENT_SECRET"]}
+    for start in range(1, min(max(n, 5), 50) + 1, 5):
+        try:
+            r = _rq.get("https://openapi.naver.com/v1/search/local.json",
+                        params={"query": f"{region} {biz}", "display": 5, "start": start},
+                        headers=_hdr, timeout=8)
+            items = r.json().get("items", []) if r.status_code == 200 else []
+        except Exception:
+            items = []
+        for it in items:
+            name = _rl.sub(r"<[^>]+>", "", it.get("title") or "").strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            blog, last, age = "", "", None
+            try:
+                b = _sb(name, 1)
+                if b:
+                    blog = b[0].get("bloggerlink") or ""
+                    last = b[0].get("postdate") or ""
+                    if len(last) == 8:
+                        age = (_dtl.utcnow() - _dtl.strptime(last, "%Y%m%d")).days
+            except Exception:
+                pass
+            # 우선순위: 블로그 없음(100) > 오래 방치(일수) > 활발(0)
+            pri = 100 if not blog else (age if age is not None else 50)
+            out.append({"name": name, "phone": it.get("telephone") or "",
+                        "address": _rl.sub(r"<[^>]+>", "", it.get("roadAddress") or ""),
+                        "category": _rl.sub(r"<[^>]+>", "", it.get("category") or ""),
+                        "blog": blog, "blog_last": last, "blog_age_days": age, "priority": pri})
+            if len(out) >= n:
+                break
+        if len(out) >= n:
+            break
+    out.sort(key=lambda x: -x["priority"])
+    return JSONResponse({"ok": True, "region": region, "biz": biz, "n": len(out), "leads": out})
+
+
 @app.api_route("/admin/watchtower", methods=["GET", "POST"])
 def admin_watchtower(test: int = 0):
     """🗼 자가진단 수동 실행 — test=1이면 텔레그램 연결 테스트 메시지도 발송."""
