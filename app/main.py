@@ -540,9 +540,44 @@ def admin_remask(asset_id: str, apply: int = 0, file: str = ""):
 
 
 @app.get("/admin/lead-scout")
-def admin_lead_scout(region: str = "", biz: str = "", n: int = 20):
-    """🎯 영업 리드 정찰(공식 검색 API만) — 지역 업체 목록 + 각 업체의 블로그 활동 상태.
-    블로그가 없거나 오래 방치된 곳 = 올린다가 필요한 곳(우선 타깃). 크롤링 아님."""
+def admin_lead_scout(region: str = "", biz: str = "", n: int = 20, mode: str = "place",
+                     kw: str = ""):
+    """🎯 영업 리드 정찰(공식 검색 API만).
+    mode=place : 지역 업체 + 블로그 활동 상태(기존)
+    mode=blog  : 키워드로 '블로그를 실제 운영하는 사장님'을 찾는다(전국·업종 무관) —
+                 글은 쓰는데 뜸하거나 오래된 블로거 = 올린다가 가장 필요한 사람."""
+    if mode == "blog":
+        import re as _rb
+        from datetime import datetime as _dtb
+        from app.services.blogrank import _search_blog as _sbb, configured as _cfb
+        q = (kw or f"{region} {biz}").strip()
+        if not q:
+            return JSONResponse({"ok": False, "error": "kw 또는 region+biz 필요"}, status_code=400)
+        if not _cfb():
+            return JSONResponse({"ok": False, "error": "네이버 API 키 미설정"}, status_code=503)
+        rows, seen = [], set()
+        for it in _sbb(q, min(max(n * 2, 20), 100)):
+            bid = (it.get("bloggerlink") or "").rstrip("/").split("/")[-1]
+            nm = _rb.sub(r"<[^>]+>", "", it.get("bloggername") or "").strip()
+            if not bid or bid in seen:
+                continue
+            seen.add(bid)
+            pd, age = it.get("postdate") or "", None
+            try:
+                age = (_dtb.utcnow() - _dtb.strptime(pd, "%Y%m%d")).days
+            except Exception:
+                pass
+            # 우선순위: 오래 방치(needs help) > 최근(경쟁 강함). 30일↑ 방치 = 최우선
+            pri = (age if age is not None else 60)
+            rows.append({"name": nm or bid, "blog_id": bid,
+                         "blog": f"https://blog.naver.com/{bid}",
+                         "last_title": _rb.sub(r"<[^>]+>", "", it.get("title") or "")[:60],
+                         "blog_last": pd, "blog_age_days": age, "priority": pri,
+                         "phone": "", "address": "", "category": q})
+            if len(rows) >= n:
+                break
+        rows.sort(key=lambda x: -x["priority"])
+        return JSONResponse({"ok": True, "mode": "blog", "query": q, "n": len(rows), "leads": rows})
     import re as _rl
     from datetime import datetime as _dtl
     from app.services.blogrank import _search_blog as _sb, configured as _cfg2
