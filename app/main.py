@@ -671,6 +671,37 @@ async def my_feedback(request: Request):
     return JSONResponse({"ok": True, "applied": applied})
 
 
+@app.post("/admin/feedback-test")
+async def admin_feedback_test(request: Request):
+    """🗣 고객 목소리 경로 진단 — 사용자 제출과 동일한 로직(분류→교훈 반영→기록)을 실행."""
+    form = await request.form()
+    tid = str(form.get("tenant_id") or "")
+    txt = str(form.get("text") or "").strip()[:400]
+    vote = str(form.get("vote") or "down")[:8]
+    t0 = db.get_tenant(tid)
+    if not t0:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    db.add_feedback(t0.id, "test-asset", vote=vote, text=txt)
+    applied, lesson = False, ""
+    if txt and len(txt) >= 4:
+        try:
+            from app.generators.text_claude import _call_llm
+            v = (_call_llm(
+                "사장님이 AI가 쓴 글에 남긴 의견이다. 이게 '이 가게 글쓰기 취향'으로 바꿀 수 있는 "
+                "것이면 다음 글부터 적용할 지시문 한 문장(20~60자, 명령형)으로 만들고, "
+                "버그·오류·기능요청이면 NO 만 출력하라.\n"
+                f"[의견] {txt}", model="claude-sonnet-5", max_tokens=100) or "").strip()
+            v = " ".join(v.split())
+            if v and "NO" not in v.upper() and 8 <= len(v) <= 90:
+                db.add_lesson(t0.id, v, source_kw="", source_piece_id="fb:test",
+                              cause="user_feedback", status="active")
+                applied, lesson = True, v
+        except Exception as e:
+            lesson = repr(e)[:80]
+    return JSONResponse({"ok": True, "applied": applied, "lesson": lesson,
+                         "note": "취향이면 교훈 반영(배포 불필요), 버그면 사령탑 표시"})
+
+
 @app.get("/admin/feedback")
 def admin_feedback(limit: int = 80, group: int = 1):
     """🗣 고객 목소리 집계(사령탑용) — 긴급/개선/패턴으로 분류. group=1이면 유사 의견 묶기."""
