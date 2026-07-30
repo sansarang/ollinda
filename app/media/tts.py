@@ -14,7 +14,7 @@ import uuid
 
 GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
 GEMINI_VOICE = os.environ.get("GEMINI_TTS_VOICE", "Kore")   # 차분한 한국어 보이스
-EL_DEFAULT_VOICE = os.environ.get("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")   # George — 따뜻한 스토리텔러(사람 느낌)
+EL_DEFAULT_VOICE = os.environ.get("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb").strip()   # George — 따뜻한 스토리텔러(사람 느낌)
 LAST_ERR = ""   # 진단용 — 마지막 TTS 실패 원인
 
 
@@ -60,11 +60,11 @@ def _chars_to_words(chars: list, starts: list, ends: list) -> list:
 
 
 def _elevenlabs_timed(text: str, out_dir: str) -> "tuple[str, list] | None":
-    key = os.environ.get("ELEVENLABS_API_KEY")
+    key = (os.environ.get("ELEVENLABS_API_KEY") or "").strip()
     if not key:
         return None
     import requests
-    voice = os.environ.get("ELEVENLABS_VOICE_ID", EL_DEFAULT_VOICE)
+    voice = os.environ.get("ELEVENLABS_VOICE_ID", EL_DEFAULT_VOICE).strip()
     out = os.path.join(out_dir, f"tts_{uuid.uuid4().hex}.mp3")
     global LAST_ERR
     try:
@@ -135,11 +135,11 @@ def _gemini(text: str, out_dir: str) -> str | None:
 
 
 def _elevenlabs(text: str, out_dir: str) -> str | None:
-    key = os.environ.get("ELEVENLABS_API_KEY")
+    key = (os.environ.get("ELEVENLABS_API_KEY") or "").strip()
     if not key:
         return None
     import requests
-    voice = os.environ.get("ELEVENLABS_VOICE_ID", EL_DEFAULT_VOICE)
+    voice = os.environ.get("ELEVENLABS_VOICE_ID", EL_DEFAULT_VOICE).strip()
     out = os.path.join(out_dir, f"tts_{uuid.uuid4().hex}.mp3")
     try:
         r = requests.post(f"https://api.elevenlabs.io/v1/text-to-speech/{voice}",
