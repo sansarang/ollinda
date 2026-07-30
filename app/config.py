@@ -10,6 +10,11 @@ import os
 PRICE_BASIC = int(os.environ.get("SHOPCAST_PRICE_BASIC", "129000"))   # 라이트(2026-07-29 원가 실측 기반 개편)
 PRICE_PRO = int(os.environ.get("SHOPCAST_PRICE_PRO", "199000"))       # 스탠다드(주력) · 순위추적·성과실측
 AGENCY_FROM = int(os.environ.get("SHOPCAST_PRICE_AGENCY", "299000"))  # 프로(최상위) — 대행 포지션 흡수
+# 정가(표시용, 2026-07-30 AI 무빙 전면 적용 개편) — 판매가(PRICE_*)는 '런칭가'로 표기.
+# 나중에 인상할 땐 PRICE_*를 LIST_*로 올리기만 하면 됨(기존 구독자는 결제 시점 가격 유지).
+LIST_BASIC = int(os.environ.get("SHOPCAST_LIST_BASIC", "149000"))
+LIST_PRO = int(os.environ.get("SHOPCAST_LIST_PRO", "249000"))
+LIST_AGENCY = int(os.environ.get("SHOPCAST_LIST_AGENCY", "399000"))
 AGENCY_TO = int(os.environ.get("SHOPCAST_PRICE_AGENCY_TO", "250000"))
 
 YEARLY_DISCOUNT = 0.30    # 연 결제 할인율(약 30%)

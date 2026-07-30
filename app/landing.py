@@ -696,7 +696,7 @@ def _modes() -> str:
 def _features() -> str:
     """핵심 4개는 크게, 나머지 8개는 한 줄 리스트로 압축(12카드 밋밋함 해소)."""
     core = [("camera", "사진 한 장 → 5채널", "인스타·네이버·유튜브·릴스·X를 한 번에."),
-            ("video", "글 → 영상 + 단어자막", "문장이 곧 장면. 말하는 단어가 차오르는 카라오케 자막·AI음성·켄번스 자동."),
+            ("video", "사진 → 실사 무빙 영상", "정지 사진이 촬영 영상처럼 움직입니다(AI 카메라워크). 사람 목소리급 나레이션 + 단어 카라오케 자막까지 자동."),
             ("target", "검색 상위노출 + 점수", "C-Rank·D.I.A·릴스 알고리즘 반영, 100점 점검."),
             ("chart", "순위 성장 추적", "네이버 순위가 오르는 걸 매주 ‘5위→2위’로 확인.")]
     rest = [("image", "인스타 캐러셀 자동", "사진 1장 → 정보 슬라이드(저장·도달↑)"),
@@ -732,6 +732,7 @@ def _pricing() -> str:
     b, p = _cfg.PRICE_BASIC, _cfg.PRICE_PRO
     by, py = _cfg.yearly_monthly_equiv(b), _cfg.yearly_monthly_equiv(p)   # 연결제 월 환산가(약 30%↓)
     af = _cfg.AGENCY_FROM
+    lb, lp, la = _cfg.LIST_BASIC, _cfg.LIST_PRO, _cfg.LIST_AGENCY        # 정가(취소선) — 판매가는 런칭가
     L = _cfg.PLAN_LIMITS
     def _flim(plan):   # 신규기능 한도 표기(-1=무제한)
         d = L.get(plan, L["free"])
@@ -739,16 +740,21 @@ def _pricing() -> str:
         pi = "무제한" if d["print_items"] == -1 else f"월 {d['print_items']}장"
         _ = (cm, pi)                     # (UI 정리) 경쟁사·인쇄물 행 제거 — 백엔드 한도는 유지
         return []
-    plans = [("라이트", f"월 {b:,}원", f"월 6세트 · 처음 시작용 · 연결제 시 월 {by:,}원",
-              ["월 콘텐츠 6세트(블로그+인스타+X)", "영상 2편 포함", "검색 상위노출 구조 + 품질 자동검사",
+    def _pr(list_won: int, sale_won: int) -> str:      # 정가 취소선 + 런칭가(2026-07-30 개편)
+        return (f"<span class='line-through text-slate-300 text-lg font-semibold mr-1.5'>{list_won:,}원</span>"
+                f"월 {sale_won:,}원")
+    plans = [("라이트", _pr(lb, b), f"월 6세트 · 처음 시작용 · 연결제 시 월 {by:,}원",
+              ["월 콘텐츠 6세트(블로그+인스타+X)", "실사 무빙 영상 2편(사진이 촬영 영상처럼 움직임)",
+               "검색 상위노출 구조 + 품질 자동검사",
                "사진 자동 보정 + 번호판·개인정보 가림"] + _flim("basic"),
               "basic", False),
-             ("스탠다드", f"월 {p:,}원", f"월 12세트 · 성과까지 · 연결제 시 월 {py:,}원",
-              ["월 콘텐츠 12세트 + 영상 8편", "순위 성장 추적 · 미노출 자동 개선",
+             ("스탠다드", _pr(lp, p), f"월 12세트 · 성과까지 · 연결제 시 월 {py:,}원",
+              ["월 콘텐츠 12세트 + 실사 무빙 영상 8편", "사람 목소리급 나레이션(단어 단위 자막 싱크)",
+               "순위 성장 추적 · 미노출 자동 개선",
                "성과 실측(QR·유입 집계)", "이길 키워드 자동 선정(승산 분석)"] + _flim("pro"),
               "pro", True),
-             ("프로", f"월 {af:,}원", "월 20세트 · 영상 무제한 · 최우선",
-              ["월 콘텐츠 20세트 + 영상 무제한", "우선 생성 · 다중 가게",
+             ("프로", _pr(la, af), "월 20세트 · 영상 무제한 · 최우선",
+              ["월 콘텐츠 20세트 + 실사 무빙 영상 무제한", "우선 생성 · 다중 가게",
                "전담 지원(카톡 우선 응대)"] + _flim("agency"),
               "agency", False)]
     cards = ""
@@ -770,8 +776,9 @@ def _pricing() -> str:
                   f"<ul class='space-y-2.5 text-sm text-slate-600 flex-1 mt-2'>{lis}</ul>"
                   f"<a href='{href}' class='{btn} mt-7 text-center px-4 py-3.5 rounded-xl font-bold transition'>{cta}</a>{annual}</div>")
     return (f"<section id='pricing' class='bg-[#F9FAFB] py-24'><div class='max-w-5xl mx-auto px-5'>"
-            f"<h2 class='reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900'>합리적인 요금</h2>"
-            f"<p class='reveal text-center text-slate-500 mb-14'>사람 대행 시세(월 30~50만)보다 싸게, 대행이 못 하는 물량(글 12세트+영상 8편)을 — 손님 2~3명만 더 와도 본전.</p>"
+            f"<h2 class='reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900'>합리적인 요금 <span class='text-indigo-600 text-xl align-middle'>런칭 특가</span></h2>"
+            f"<p class='reveal text-center text-slate-500 mb-14'>홍보 영상 외주는 편당 5~15만원, 블로그 대행은 월 30~50만원 — "
+            f"올린다는 실사 무빙 영상까지 통째로, 지금 가격은 런칭 기간 한정입니다.</p>"
             f"<div class='grid sm:grid-cols-3 gap-6 items-stretch pt-3'>{cards}</div></div></section>")
 
 

@@ -9537,6 +9537,10 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
         <div id=up_preview class='grid grid-cols-3 sm:grid-cols-4 gap-2'></div>
         <input type=file name=photos id=up_photos accept='image/*' multiple required class='hidden'>
         <p class='text-xs text-slate-400 mt-1.5'><b class='text-slate-500'>＋</b> 로 여러 장 추가(최대 30장) · <b class='text-slate-500'>사진은 내용에 맞는 위치에 AI가 자동 배치해요</b> — 순서 신경 안 쓰셔도 돼요</p>
+        <p class='text-xs text-slate-400 mt-1'><b class='text-amber-500'>★</b> 를 누르면 그 사진이 <b class='text-slate-500'>영상 대표 사진</b>이 돼요 (안 고르면 AI가 선택)</p>
+        <label class='flex items-center gap-2 text-sm text-slate-600 mt-2 cursor-pointer'>
+          <input type=checkbox id=pg_overlay_cb checked class='w-4 h-4 rounded accent-indigo-600'>
+          사진 속 문구·워터마크 지우기 <span class='text-[11px] text-slate-400'>(번호판·개인정보 가림은 항상 자동)</span></label>
         <p class='text-[11px] text-slate-400 mt-1'>※ <b class='text-slate-500'>본인이 촬영했거나 사용 권리를 가진 사진</b>만 올려주세요.</p></div>
       <div><label class='{lb}'>4. 목적 <span class='text-slate-400 font-normal text-xs'>(선택)</span></label>
         <div class='flex flex-wrap gap-2'>{chips}</div></div>
@@ -9545,6 +9549,7 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
         <input type=hidden name=confirmed id=pg_confirmed><input type=hidden name=intent id=pg_intent><input type=hidden name=vision_analysis id=pg_vision>
         <input type=hidden name=answers id=pg_answers><input type=hidden name=experience id=pg_experience>
         <input type=hidden name=stash_keys id=pg_stashkeys>
+        <input type=hidden name=hero_idx id=pg_hero><input type=hidden name=clean_overlay id=pg_overlay value=1>
         <div id=pg_guess class='mb-2'></div>
         <div id=pg_questions class='mb-2'></div>
         <input name=note maxlength=50 oninput="var c=document.getElementById('reqc');if(c)c.textContent=this.value.length+'/50';" placeholder='꼭 반영할 요청 (예: 급매 강조 / 차분한 톤)' class='{inp}'>
@@ -9557,7 +9562,8 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
           "var q=document.getElementById('lk_q'),h=document.getElementById('lk_hint2');"
           "if(v==='seller'){if(q)q.placeholder='내 상품/스토어 링크 붙여넣기 (또는 상품명)';if(h)h.innerHTML='내 상품 링크를 붙이면 그게 손님이 갈 <b>판매 링크</b>가 돼요. 링크 없으면 상품명으로 검색(정보만) 후 <b>내 링크는 직접 입력</b>.';}"
           "else{if(q)q.placeholder='가게 이름 (자동 인식)';if(h)h.innerHTML='';}}"
-          "var PM={f:[],drag:-1};"
+          "var PM={f:[],drag:-1,hero:-1};"
+          "function pmHero(i){PM.hero=(PM.hero===i)?-1:i;pmRender();}"
           + f"var UPTOK='{token}';"
           # 사진 보정 선행(개선 ③): 사진이 목록에 들어오는 즉시 원본을 서버에 선업로드 → 서버가
           # 백그라운드로 워터마크 제거·개인정보 가림을 미리 실행. 제출 시 키를 돌려줘 보정본 재사용.
@@ -9567,9 +9573,9 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
           "PM.sk.set(f,(d&&d.ok&&d.key)?d.key:'');}catch(e){PM.sk.set(f,'');}}"
           "function pmStashAll(){PM.f.forEach(function(x){if(!PM.sk.has(x)){PM.sk.set(x,'pending');pmStash(x);}});}"
           "function pmSync(){var dt=new DataTransfer();PM.f.forEach(function(x){dt.items.add(x);});document.getElementById('up_photos').files=dt.files;pmStashAll();}"
-          "function pmDel(i){PM.f.splice(i,1);pmRender();if(typeof pdOffer==='function')pdOffer();}"
+          "function pmDel(i){PM.f.splice(i,1);if(PM.hero===i)PM.hero=-1;else if(PM.hero>i)PM.hero--;pmRender();if(typeof pdOffer==='function')pdOffer();}"
           "function pmAdd(){document.getElementById('up_photos').click();}"
-          "function pmDrop(target){if(PM.drag<0)return;var it=PM.f.splice(PM.drag,1)[0];if(target>PM.f.length)target=PM.f.length;if(target<0)target=0;PM.f.splice(target,0,it);PM.drag=-1;pmRender();}"
+          "function pmDrop(target){if(PM.drag<0)return;var hf=(PM.hero>=0)?PM.f[PM.hero]:null;var it=PM.f.splice(PM.drag,1)[0];if(target>PM.f.length)target=PM.f.length;if(target<0)target=0;PM.f.splice(target,0,it);PM.drag=-1;if(hf)PM.hero=PM.f.indexOf(hf);pmRender();}"
           "function pmRender(){var pv=document.getElementById('up_preview');pv.innerHTML='';"
           "PM.f.forEach(function(x,i){var d=document.createElement('div');d.className='relative aspect-square cursor-move';d.draggable=true;"
           "d.ondragstart=function(e){PM.drag=i;e.dataTransfer.effectAllowed='move';};"
@@ -9579,7 +9585,9 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
           "var im=document.createElement('img');im.src=URL.createObjectURL(x);im.className='w-full h-full object-cover rounded-xl border border-slate-100 pointer-events-none';d.appendChild(im);"
           "d.insertAdjacentHTML('beforeend',"
           "\"<div class='absolute top-1 left-1 w-5 h-5 rounded-full bg-black/60 text-white text-[10px] font-bold flex items-center justify-center pointer-events-none'>\"+(i+1)+\"</div>\"+"
-          "\"<button type=button onclick='pmDel(\"+i+\")' class='absolute top-1 right-1 w-5 h-5 rounded-full bg-rose-500 text-white text-xs leading-none flex items-center justify-center'>&times;</button>\");"
+          "\"<button type=button onclick='pmDel(\"+i+\")' class='absolute top-1 right-1 w-5 h-5 rounded-full bg-rose-500 text-white text-xs leading-none flex items-center justify-center'>&times;</button>\"+"
+          "\"<button type=button onclick='pmHero(\"+i+\")' title='영상 대표 사진' class='absolute bottom-1 left-1 w-6 h-6 rounded-full \"+(PM.hero===i?'bg-amber-400 text-white':'bg-black/40 text-white/80')+\" text-xs leading-none flex items-center justify-center'>\\u2605</button>\"+"
+          "(PM.hero===i?\"<div class='absolute bottom-1 right-1 bg-amber-400 text-white text-[9px] font-bold px-1.5 py-0.5 rounded pointer-events-none'>영상 대표</div>\":''));"
           "pv.appendChild(d);});"
           "var add=document.createElement('button');add.type='button';add.onclick=pmAdd;"
           "add.className='aspect-square rounded-xl border-2 border-dashed border-slate-300 text-slate-400 hover:border-indigo-400 hover:text-indigo-500 flex flex-col items-center justify-center transition';"
@@ -9643,6 +9651,8 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
           "if(f)f.addEventListener('submit',function(e){var b=document.getElementById('pd_submit');if(b&&b.disabled){e.preventDefault();return;}var a=document.getElementById('pg_answers');if(a)a.value=JSON.stringify(window.__intakeAnswers||{});"
           "var sk=document.getElementById('pg_stashkeys');"
           "if(sk)sk.value=JSON.stringify(PM.f.map(function(x){var k=PM.sk.get(x);return (k&&k!=='pending')?k:'';}));"
+          "var hh=document.getElementById('pg_hero');if(hh)hh.value=(PM.hero>=0)?String(PM.hero):'';"
+          "var ov=document.getElementById('pg_overlay'),cb=document.getElementById('pg_overlay_cb');if(ov&&cb)ov.value=cb.checked?'1':'0';"
           "var e1=document.getElementById('pg_exp'),e2=document.getElementById('pg_experience');if(e1&&e2)e2.value=e1.value||'';});})();"
           "function fillStore(d){document.getElementById('s_name').value=d.name||'';document.getElementById('s_industry').value=d.industry||'';"
           "var bz=(d.type==='seller')?'seller':'local';document.getElementById('s_biz').value=bz;bizFields(bz);"
@@ -9735,7 +9745,8 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
                  s_search: str = Form(""), target_kw: str = Form(""), angle: str = Form(""),
                  confirmed: str = Form(""), vision_analysis: str = Form(""),
                  answers: str = Form(""), experience: str = Form(""), intent: str = Form(""),
-                 stash_keys: str = Form("")):
+                 stash_keys: str = Form(""), hero_idx: str = Form(""),
+                 clean_overlay: str = Form("1")):
     tenant, _ = db.get_tenant_by_token(token)
     if not tenant:
         return HTMLResponse("<p>잘못된 링크입니다.</p>", status_code=404)
@@ -9762,8 +9773,11 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
         return HTMLResponse("<p>이미지 파일을 한 장 이상 올려주세요. (jpg·png·webp·heic, 최대 25MB)</p>", status_code=400)
     # 선행 보정(개선 ③) 회수: stash가 이미 정리(워터마크·개인정보)한 장은 보정본 바이트로 대체하고
     # 인덱스를 표시 — ingest가 그 장의 느린 정리를 스킵. 미완료·실패·불일치는 원본 그대로(안전 폴백).
+    # 워터마크 제거를 끈 경우 stash 보정본을 쓰지 않음(이미 오버레이가 제거돼 있어 되돌릴 수 없음) —
+    # 원본으로 진행하고 ingest가 PII 마스킹만 실행(개인정보 가림은 사용자 선택과 무관하게 항상).
+    _overlay_on = clean_overlay.strip() != "0"
     _pre_idx: set = set()
-    if stash_keys.strip():
+    if stash_keys.strip() and _overlay_on:
         try:
             import json as _sj
             _keys = _sj.loads(stash_keys)
@@ -9847,7 +9861,8 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
                        "analysis": (vision_analysis or "").strip()[:12000],
                        "answers": _si.parse_answers(answers),
                        "experience": experience.strip()[:200],
-                       "intent": intent.strip()[:40]}
+                       "intent": intent.strip()[:40],
+                       "clean_overlay": _overlay_on}
             if intent.strip():                          # (vision-intent 3-2) 선택 이력 학습
                 try:
                     from app import db as _dbi
@@ -9865,6 +9880,16 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
                                  target_kw=target_kw.strip()[:40],
                                  angle=(angle.strip() if angle.strip() in ("review", "howto", "price") else ""),
                                  intake=_intake, pre_cleaned_idx=_pre_idx)
+            # ⭐ 영상 대표 사진(사용자 선택) — 블로그 payload에 basename 영속(온디맨드 영상이 재정렬에 사용)
+            try:
+                _hi = int(hero_idx)
+            except (TypeError, ValueError):
+                _hi = -1
+            if made and _hi >= 0:
+                _hbp = next((p for p in made if p.kind.value == "blog"), None)
+                _hips = (_hbp.payload.get("image_paths") if _hbp else None) or []
+                if _hbp and _hi < len(_hips):
+                    db.update_piece_payload(_hbp.id, {"hero_photo": os.path.basename(_hips[_hi])})
             if made and _q_claim:
                 _bp = next((p for p in made if p.kind.value == "blog"), None)
                 from app import db as _db3

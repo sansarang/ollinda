@@ -60,6 +60,8 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
             pass
     # 사진 EXIF 메타(검색노출) + 선행 보정(stash) 집합 — 보정 실행은 아래 트랙 분기에서.
     _pre_set = {paths[i] for i in (pre_cleaned_idx or set()) if 0 <= i < len(paths)}
+    # 워터마크·문구 제거 사용자 선택(2026-07-30) — False면 오버레이 제거만 생략, PII 마스킹은 항상.
+    _overlay_ok = bool(intake.get("clean_overlay", True))
     try:
         _kws = seo.target_keywords(tenant.industry, tenant.region, note, limit=6)
     except Exception:
@@ -88,6 +90,7 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
             _pre_n = len(_pre_set)
             _lab_edit = (f"미리 보정 {_pre_n}장 재사용 · " if _pre_n else "") + "워터마크 제거·개인정보 가림"
             photo_boost.enhance_all(paths, tenant.industry, _meta, pre_cleaned=_pre_set,
+                                    overlay=_overlay_ok,
                                     progress_cb=lambda d, t: _prog(
                                         "photo_edit", "사진 보정 중",
                                         f"{d}/{t}장 · {_lab_edit}", 0.04 + 0.26 * (d / max(t, 1))))
@@ -132,8 +135,11 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
                     _recheck.add(paths[_ir])
         except Exception:
             _recheck = set()
+        if not _overlay_ok:
+            _recheck = set()                       # 사용자가 워터마크 제거를 껐으면 재검도 생략
         # 🖌 두 번째 트랙 가동 — 보정은 글쓰기와 병렬. 끝나면 R2 재미러(끼워 맞추기 = 같은 경로의 파일 완성).
-        _spawn_photo_edit(tenant, asset.id, paths, _pre_set, _meta, recheck=_recheck)
+        _spawn_photo_edit(tenant, asset.id, paths, _pre_set, _meta, recheck=_recheck,
+                          overlay=_overlay_ok)
     elif _pre_an and _marks and len(_missing) < _pcount:
         # 부분 재사용 — 업로드 확인이 일부 장수만 분석한 경우(구버전 페이지 6장 등): 있는 분석은
         # 버리지 않고 빠진 장수만 추가 분석해 병합(같은 사진 재분석 0 원칙 유지).
@@ -511,10 +517,11 @@ def photo_edit_pending(asset_id: str, tenant_id: str = "") -> bool:
 
 
 def _spawn_photo_edit(tenant: Tenant, asset_id: str, paths: list, pre_set: set, meta: dict,
-                      recheck: "set | None" = None) -> None:
+                      recheck: "set | None" = None, overlay: bool = True) -> None:
     """보정(워터마크 제거·개인정보 가림·화질·EXIF)을 별도 스레드로 — 글쓰기를 막지 않는다.
     플래그 파일 선기록: 재시작으로 스레드가 죽어도 크론 스윕이 마무리(개인정보 마스킹 보증).
-    recheck: 분석이 로고·표식을 언급한 사진 — 선행 보정분도 제거 검사 1회 강제."""
+    recheck: 분석이 로고·표식을 언급한 사진 — 선행 보정분도 제거 검사 1회 강제.
+    overlay=False: 워터마크 제거 생략(사용자 선택) — PII 마스킹은 항상."""
     import json as _j
     import threading
     import time as _tm
@@ -523,7 +530,7 @@ def _spawn_photo_edit(tenant: Tenant, asset_id: str, paths: list, pre_set: set, 
         os.makedirs(os.path.dirname(flag), exist_ok=True)
         with open(flag, "w") as f:
             _j.dump({"paths": paths, "pre": sorted(pre_set), "industry": tenant.industry,
-                     "recheck": sorted(recheck or set()),
+                     "recheck": sorted(recheck or set()), "overlay": overlay,
                      "meta": {k: v for k, v in (meta or {}).items() if isinstance(v, (str, int, float))},
                      "ts": _tm.time()}, f)
     except Exception:
@@ -535,7 +542,7 @@ def _spawn_photo_edit(tenant: Tenant, asset_id: str, paths: list, pre_set: set, 
         try:
             from app.media import photo_boost
             photo_boost.enhance_all(paths, tenant.industry, meta, pre_cleaned=pre_set,
-                                    recheck=recheck)
+                                    recheck=recheck, overlay=overlay)
             # 🛡 2차 검증 마스킹(침묵 실패 봉합 2026-07-28 실사고): 1차 때 탐지 워커 콜드스타트·
             #   일시 장애로 번호판이 조용히 통과한 사진을 재탐지·재마스킹. 이미 가려진 사진은
             #   재탐지돼도 0건(멱등)이라 안전. n>0이면 1차 미탐이 있었다는 뜻 — 경보 로그.
@@ -589,7 +596,8 @@ def photo_edit_sweep() -> None:
                     from app.media import photo_boost
                     photo_boost.enhance_all(paths2, d.get("industry") or "", d.get("meta") or None,
                                             pre_cleaned=set(d.get("pre") or ()),
-                                            recheck=set(d.get("recheck") or ()))
+                                            recheck=set(d.get("recheck") or ()),
+                                            overlay=bool(d.get("overlay", True)))
                     for p in paths2:
                         try:
                             storage.mirror_to_r2(p)
@@ -923,6 +931,10 @@ def request_video_bundle(tenant: Tenant, asset_id: str, want: set[str]) -> tuple
     paths = _restore_media(tenant.id, blog.payload.get("image_paths") or [])
     if not paths:
         return False, "사진 원본을 찾을 수 없어 영상을 만들 수 없어요"
+    # ⭐ 영상 대표 사진(사용자 선택, 2026-07-30) — 맨 앞으로(훅 배경·첫 씬·AI 무빙 우선). 안정 정렬이라 나머지 순서 보존.
+    _hero = os.path.basename((blog.payload.get("hero_photo") or "").strip())
+    if _hero:
+        paths.sort(key=lambda p: 0 if os.path.basename(p) == _hero else 1)
     _set_video_job(asset_id, "registered")
     _set_channel_status(asset_id, {ch: {"status": "generating"} for ch in want})
     _spawn_video_bundle(tenant, asset, paths, blog.payload.get("brief") or {}, want=frozenset(want))

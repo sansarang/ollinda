@@ -91,13 +91,14 @@ def auto_enhance(src: str, out: str | None = None, industry: str = "", meta: dic
         return src
 
 
-def preclean(path: str) -> list:
+def preclean(path: str, overlay: bool = True) -> list:
     """느린 정리(vision 경유)만 — 워터마크 인페인트 + 개인정보 마스킹. 업로드 직후 선행(개선 ③)용.
     ★ 순서 고정: 오버레이 인페인트 → PII 모자이크. 반대로 하면 vision이 방금 씌운
       번호판 모자이크를 '오버레이'로 오인해 LaMa가 그 위를 복원(마스킹 무효화) — 실측 재발 방지.
+    overlay=False: 워터마크·문구 제거 생략(사용자 선택, 2026-07-30) — PII 마스킹은 항상 실행(안전).
     반환: 부착물(attached) 사진 basename 목록(UI 경고용)."""
     attached = []
-    if os.environ.get("SHOPCAST_OVERLAY_REMOVE", "1") != "0":   # 기본 ON. 끄려면 =0
+    if overlay and os.environ.get("SHOPCAST_OVERLAY_REMOVE", "1") != "0":   # 기본 ON. 끄려면 =0
         try:                                                     # 유형 a 국소 오버레이(신뢰도 게이트)
             _r = remove_overlay(path)
             if _r.get("attached"):                               # 부착물 가림막 잔존 → UI 경고 대상
@@ -109,7 +110,7 @@ def preclean(path: str) -> list:
 
 
 def enhance_all(paths: list[str], industry: str = "", meta: dict | None = None,
-                progress_cb=None, pre_cleaned=None, recheck=None) -> int:
+                progress_cb=None, pre_cleaned=None, recheck=None, overlay: bool = True) -> int:
     """여러 장 일괄 보정(제자리) + 개인정보 자동 모자이크 + EXIF·GPS 삽입. 보정 성공 개수 반환.
     ★ 마스킹은 신뢰도 게이트 통과 박스만(오폭 방지). 부착물(type-c)은 미제거 + attached 플래그(UI 경고).
     progress_cb(done,total): 장수 진행 콜백(정직한 표시). 사진별 병렬(기본 4 — 워터마크 vision 콜 대기 겹침).
@@ -129,11 +130,11 @@ def enhance_all(paths: list[str], industry: str = "", meta: dict | None = None,
 
     def _one(p):
         if p not in _pre:                                        # 선행 보정분은 느린 정리 스킵
-            _att = preclean(p)
+            _att = preclean(p, overlay=overlay)
             if _att:
                 with _lock:
                     attached_photos.extend(_att)
-        elif p in _rc:
+        elif p in _rc and overlay:
             # 분석 앵커 재검(실측: 탐지 비결정성으로 벽면 브랜딩 잔존) — 사진 분석이 로고·표식을
             # 언급한 사진은 선행 보정을 거쳤어도 제거 검사를 한 번 더(마스킹은 재실행 안 함).
             try:
