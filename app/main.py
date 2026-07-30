@@ -429,6 +429,47 @@ async def admin_dwell_test(request: Request):
                          "body": fixed_body})
 
 
+@app.get("/admin/tts-test")
+def admin_tts_test():
+    """운영 진단 — 지금 이 서버에서 어떤 TTS 엔진이 실제로 동작하는지 확인(짧은 한 문장 실합성).
+    ElevenLabs(JayK) 키 등록 검증용(2026-07-30). 비용: 수십 자 1회."""
+    import tempfile
+    from app.media import tts as _tts
+    out = {"ok": True, "elevenlabs_key": bool(os.environ.get("ELEVENLABS_API_KEY")),
+           "voice_id": os.environ.get("ELEVENLABS_VOICE_ID", "")[:22] or "(기본값)",
+           "gemini_key": bool(os.environ.get("GEMINI_API_KEY"))}
+    with tempfile.TemporaryDirectory() as td:
+        p, words = _tts.synthesize_timed("올린다 나레이션 엔진 점검입니다.", td)
+        out["engine"] = ("elevenlabs+실측싱크" if (p and words) else
+                         "elevenlabs/gemini(싱크없음)" if p else "없음(무음 영상)")
+        out["audio_ok"] = bool(p and os.path.exists(p))
+        out["word_timestamps"] = len(words or [])
+        out["last_err"] = _tts.LAST_ERR[:200]
+    return JSONResponse(out)
+
+
+@app.get("/admin/aiclip-test")
+def admin_aiclip_test(tenant: str = "", fname: str = ""):
+    """운영 진단 — AI 카메라워크(Veo) 단건 실행: 저장된 사진 1장으로 생성+원본대조 QC까지.
+    느림(1~3분)·과금(편당 약 900원) — 검증용으로만. 결과 클립은 /admin/media로 확인."""
+    from app.media import ai_clip as _aic
+    if not _aic.enabled():
+        return JSONResponse({"ok": False, "error": "비활성(GEMINI_API_KEY 없음 또는 VEO_CLIP=0)"})
+    t = db.get_tenant(tenant)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    path = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), tenant, os.path.basename(fname))
+    if not os.path.exists(path):
+        return JSONResponse({"ok": False, "error": "사진 없음", "path_tried": os.path.basename(path)},
+                            status_code=404)
+    b = _aic.ClipBudget(max_new=1)
+    clip = b.get(path)
+    return JSONResponse({"ok": True, "stats": b.stats(),
+                         "clip": f"/admin/media/{tenant}/{os.path.basename(clip)}" if clip else None,
+                         "verdict": "통과(캐시/생성)" if clip else
+                                    ("QC 탈락(켄번스 폴백)" if b.stats()["qc_fail"] else "생성 실패/상한")})
+
+
 @app.post("/admin/gen-progress-close/{tenant_id}")
 def admin_gen_progress_close(request: Request, tenant_id: str):
     """stale 'running' 진행률 잔상 수동 종료(운영 복구용) — 단건 재생성 경로가 남긴 잔상 정리.

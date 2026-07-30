@@ -1829,6 +1829,8 @@ class ShortVideoGenerator(Generator):
             _dc_i = 0
             # 1) 본문 씬들 — 자막은 ASS 카라오케로 별도(여기선 영상+켄번스+색보정만)
             #    ElevenLabs with-timestamps 실측 단어 타이밍(있으면) → 카라오케 싱크 정확(영상강화 PHASE 2)
+            from app.media import ai_clip as _aic
+            _clip_budget = _aic.ClipBudget()             # 편당 신규 생성 상한(비용) — 캐시는 무제한
             for i, text in enumerate(sentences):
                 img = visuals[i % len(visuals)]
                 text, _emph = _parse_emphasis(text)          # TTS·카드엔 마킹 없는 원문(음성-화면 일치)
@@ -1836,7 +1838,9 @@ class ShortVideoGenerator(Generator):
                 td = _probe_dur(seg_tts) if seg_tts else 0
                 # 음성이 있으면 씬 길이 = 음성 길이(+여유). 9초로 자르지 않음 → 긴 문장 나레이션 끊김·자막불일치 방지
                 sdur = min(15.0, max(MIN_SCENE, td + 0.4)) if td > 0.3 else self._clamp(len(text) * 0.13 + 1.2)
-                v = self._scene_video(img, sdur, i, os.path.join(work, f"v{i}.mp4"), tail=XFADE)
+                _ac = _clip_budget.get(img)                  # AI 카메라워크(QC 통과분만) — 없으면 켄번스
+                v = self._scene_video(img, sdur, i, os.path.join(work, f"v{i}.mp4"), tail=XFADE,
+                                      ai_clip=_ac)
                 aw = self._audio_segment(seg_tts, sdur, os.path.join(work, f"a{i}.wav"))
                 if v and aw:
                     ass_scenes.append((t, sdur, text, word_times, _emph))
@@ -1934,7 +1938,8 @@ class ShortVideoGenerator(Generator):
                     f"xfade 전환 · 켄번스+색보정 · 진행바(워터마크 없음) · "
                     f"{'TTS싱크' if tts_lib.configured() else '무음'}"
                     f"{' · AI이미지' if len(visuals) > len(imgs) else ''}"
-                    f"{f' · 씬탈락 {dropped}' if dropped else ''}")
+                    f"{f' · 씬탈락 {dropped}' if dropped else ''}"
+                    f"{(' · AI무빙 ' + str(_clip_budget.stats())) if _clip_budget.used or _clip_budget.generated else ''}")
             return final, note, round(total), cover
         except Exception as e:
             try:
@@ -1976,6 +1981,8 @@ class ShortVideoGenerator(Generator):
             scenes = sb["scenes"]
             vclips, awavs, durs, ass_scenes, compare = [], [], [], [], []
             t, dropped = 0.0, 0
+            from app.media import ai_clip as _aic
+            _clip_budget = _aic.ClipBudget()             # 편당 신규 생성 상한(비용) — 캐시는 무제한
             for i, s in enumerate(scenes):
                 role = s.get("role", "")
                 line = (s.get("line") or "").strip()
@@ -2022,9 +2029,10 @@ class ShortVideoGenerator(Generator):
                         dropped += 1
                         compare.append({**spec_line, "실행": "탈락(사진 없음)", "dur": 0})
                         continue
+                    _ac = _clip_budget.get(img)          # AI 카메라워크(QC 통과분만) — 없으면 켄번스
                     v = self._scene_video(img, sdur, i, os.path.join(work, f"v{i}.mp4"),
-                                          tail=XFADE, crop=crop)
-                    exec_desc = f"사진 렌더 crop={crop}"
+                                          tail=XFADE, crop=crop, ai_clip=_ac)
+                    exec_desc = f"사진 렌더 crop={crop}" + ("+AI무빙" if _ac else "")
                 elif "card" in sh:                               # data_card → 기존 타이포 카드 렌더러
                     cv = str((sh["card"] or {}).get("value", "")).strip()
                     cl = str((sh["card"] or {}).get("label", "")).strip()
@@ -2100,7 +2108,8 @@ class ShortVideoGenerator(Generator):
                 pass
             note = (f"디렉터판(콘티 render_v1) · 씬 {len(vclips)}개 · xfade · 켄번스+색보정 · "
                     f"단어자막(ASS) · {'TTS싱크' if tts_lib.configured() else '무음'}"
-                    f"{f' · 씬탈락 {dropped}' if dropped else ''}")
+                    f"{f' · 씬탈락 {dropped}' if dropped else ''}"
+                    f"{(' · AI무빙 ' + str(_clip_budget.stats())) if _clip_budget.used or _clip_budget.generated else ''}")
             return final, note, round(total), cover, compare
         except Exception as e:
             try:
@@ -2436,11 +2445,17 @@ class ShortVideoGenerator(Generator):
             return ""
         return f",fade=t=in:st=0:d=0.22,fade=t=out:st={max(0.0, dur - 0.25):.2f}:d=0.22"
 
-    def _scene_video(self, img, dur, idx, out, tail: float = 0.0, crop: str = "full") -> str | None:
+    def _scene_video(self, img, dur, idx, out, tail: float = 0.0, crop: str = "full",
+                     ai_clip: str | None = None) -> str | None:
         """이미지 → 켄번스 + 색보정(통일감), 정확히 dur(+tail)초 무음 영상. 자막은 ASS로 별도.
         tail>0 = xfade 전환용 여유 꼬리(전환에 소모돼 체감 길이는 dur) — 페이드 없음(검은 플래시 제거).
-        crop='closeup' = 콘티 지정 클로즈업 — 기존 zoompan을 더 타이트하게 파라미터화(새 렌더 로직 아님)."""
+        crop='closeup' = 콘티 지정 클로즈업 — 기존 zoompan을 더 타이트하게 파라미터화(새 렌더 로직 아님).
+        ai_clip = QC 통과한 AI 카메라워크 클립(mp4) — 켄번스 대신 실사 무빙, 실패 시 켄번스 폴백."""
         total_t = dur + max(0.0, tail)
+        if ai_clip and os.path.exists(ai_clip):
+            r = self._scene_video_from_clip(ai_clip, total_t, dur, tail, out, idx)
+            if r:
+                return r                              # AI 클립 렌더 실패 시 아래 켄번스로 폴백
         frames = max(1, int(total_t * FPS))
         # ★ 가로 사진 판별(2026-07-27 실사고): 가로 차 사진을 9:16 커버 크롭하면 가운데 세로 띠만 남아
         #   차가 잘려나감(트렁크만 보이는 정체불명 화면). 가로는 '통째로 + 블러 패드'로 렌더.
@@ -2479,6 +2494,42 @@ class ShortVideoGenerator(Generator):
                    "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", "-an", out]
         r = _run_ff(cmd, 120, f"scene{idx}")
         return out if (r and os.path.exists(out)) else None
+
+    def _scene_video_from_clip(self, clip, total_t, dur, tail, out, idx) -> str | None:
+        """AI 카메라워크 클립(가로 720p 등) → 세로 캔버스 무음 씬. 켄번스 문법과 동일한
+        색보정·블러패드·페이드를 적용해 다른 씬과 톤이 이어지게 한다.
+        씬이 클립보다 길면 슬로모(setpts)로 늘림 — 프레임 정지보다 자연스러움(실사 무빙 유지)."""
+        try:
+            src_dur = _probe_dur(clip)
+            if src_dur < 1.0:
+                return None
+            ratio = max(1.0, total_t / src_dur)        # 빠르게 줄이진 않음(움직임 과속 방지)
+            cw = ch = 0
+            pr = subprocess.run(["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+                                 "-show_entries", "stream=width,height", "-of", "csv=p=0", clip],
+                                capture_output=True, text=True, timeout=20)
+            try:
+                cw, ch = (int(x) for x in (pr.stdout or "").strip().split(",")[:2])
+            except ValueError:
+                pass
+            _eq = "eq=contrast=1.06:saturation=1.12:brightness=0.02"
+            _fade = "" if tail > 0 else self._fade(dur)
+            if cw and ch and cw > ch:                  # 가로 클립 → 블러 패드(커버 크롭 금지 원칙)
+                vf = (f"[0:v]setpts={ratio:.4f}*PTS,split=2[a][b];"
+                      f"[b]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=22:2[bg];"
+                      f"[a]scale={W}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,"
+                      f"{_eq},fps={FPS}{_fade}[v]")
+            else:                                      # 세로 클립 → 커버 스케일
+                vf = (f"[0:v]setpts={ratio:.4f}*PTS,scale={W}:{H}:force_original_aspect_ratio=increase,"
+                      f"crop={W}:{H},setsar=1,{_eq},fps={FPS}{_fade}[v]")
+            cmd = ["ffmpeg", "-y", "-i", clip, "-filter_complex", vf, "-map", "[v]",
+                   "-t", f"{total_t:.2f}", "-r", str(FPS), "-pix_fmt", "yuv420p",
+                   "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", "-an", out]
+            r = _run_ff(cmd, 120, f"aiclip{idx}")
+            return out if (r and os.path.exists(out)) else None
+        except Exception:
+            __import__("logging").getLogger("shopcast.video").exception("[aiclip] 씬 렌더 실패 — 켄번스 폴백")
+            return None
 
     def _scene_card_video(self, png, dur, out, punch=False, fade_in=True, tail: float = 0.0,
                           fade_out=True) -> str | None:
