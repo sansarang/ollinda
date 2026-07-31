@@ -49,8 +49,14 @@ def call(prompt: str, model: str = MODEL, max_tokens: int = 1200, cache_prefix: 
         return _dummy(prompt)
     import time as _t
     import anthropic
-    client = anthropic.Anthropic(timeout=90.0, max_retries=0)  # SDK 자동재시도 끄고(중복 방지) 아래서 명시 제어
-    _kw = {} if "haiku" in model else {"thinking": {"type": "adaptive"}}   # Haiku는 adaptive thinking 미지원(400)
+    # 타임아웃은 출력 예산에 비례(2026-07-31 실사고: 90초 고정 → 6000토큰 재작성이 APITimeoutError로
+    # 개선 라운드째 사망). 5000tk≈190초, 6000tk≈210초, 상한 600초.
+    _to = min(600.0, 90.0 + max_tokens * 0.02)
+    client = anthropic.Anthropic(timeout=_to, max_retries=0)  # SDK 자동재시도 끄고(중복 방지) 아래서 명시 제어
+    # thinking은 대형 생성에만(2026-07-31 실사고: 700토큰 판단 호출까지 thinking이 예산을 잠식해
+    # max_tokens 절단 유발). Haiku는 adaptive thinking 미지원(400).
+    _kw = ({"thinking": {"type": "adaptive"}}
+           if ("haiku" not in model and max_tokens >= 2000) else {})
     _msgs = _messages(prompt, cache_prefix)
 
     def _create(mt):
@@ -76,8 +82,10 @@ def call(prompt: str, model: str = MODEL, max_tokens: int = 1200, cache_prefix: 
         raise last
 
     resp = _create(max_tokens)
-    if getattr(resp, "stop_reason", "") == "max_tokens":   # thinking이 예산을 잠식해 본문이 잘림 → 2배로 1회 재시도
-        resp = _create(max_tokens * 2)
+    _mt2 = max_tokens
+    while getattr(resp, "stop_reason", "") == "max_tokens" and _mt2 < min(max_tokens * 4, 16000):
+        _mt2 = min(_mt2 * 2, 16000)                        # 절단 → 예산 2배 확대 재시도(×2→×4, 상한 16k)
+        resp = _create(_mt2)
     global last_finish_reason, LAST_USAGE
     last_finish_reason = getattr(resp, "stop_reason", "") or ""
     _u = getattr(resp, "usage", None)                     # 실측 토큰(원가 추적) — resp.usage

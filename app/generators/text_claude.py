@@ -429,6 +429,8 @@ class BlogDraftGenerator(Generator):
         raw = _call_llm(prompt, self.model,
                         7500 if _len_competitive else (5500 if _ctype == "info" else 5000),
                         cache_prefix=(cache_prefix_for(asset) if _ctype != "info" else ""))
+        _body_finish = _last_finish()   # ★ 본문 호출 '직후' 절단 기록(2026-07-31 실사고: 뒤의 소형
+        #   판단 호출 stop_reason이 덮어써 '본문 미완결' 오탐 → 채점 감점·재작성 루프 유발)
         d = _parse_sections(raw, ["제목후보", "제목", "메타설명", "본문", "이미지배치", "키워드"])
         # ① 제목 3안 → 상위노출 최적 1개 자동 선택 ([제목]으로 준 경우도 흡수)
         title_cands = [t.strip().lstrip("-*·0123456789.) ").strip()
@@ -521,7 +523,7 @@ class BlogDraftGenerator(Generator):
                      "citation_count": None,                # 3층 성과: AI 브리핑 인용수(캡처 판독으로 채움 — 자리 예약)
                      "business_name": tenant.name,      # 게이트 업체명 정합 검사용(재검증 STEP 1-2a)
                      "brand_name": getattr(tenant, "brand_name", "") or "",
-                     "gen_finish": _last_finish(),      # stop_reason 기록(절단 검증 V1)
+                     "gen_finish": _body_finish,        # 본문 호출의 stop_reason(절단 검증 V1 — 오탐 수정 2026-07-31)
                      "title_pick": {"candidates": title_cands[:3], "picked": title,
                                     "why": _pick_why},          # 제목 3안 내부 선택 로그(CTR 4-2 — 유저 비노출)
                      "gen_source": (asset.note or "")[:8000],   # 입력 스냅샷 — [사진N] 전수 보존(kit 캡션·매칭 재사용, 재분석 0)
