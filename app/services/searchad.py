@@ -104,6 +104,24 @@ def sweet_spot_keywords(hints: list[str], lo: int = 500, hi: int = 5000, limit: 
                     v["opp"] *= 0.7
                 elif v.get("comp") == "중간":
                     v["opp"] *= 0.85
+            # ② 상승 추세(2026-08-01 사장님 승인): 오르는 키워드 가점·내리는 키워드 감점(중립=무변화)
+            try:
+                from app.services import datalab as _dl
+                _gr = _dl.growth([v["keyword"] for v in head])
+                for v in head:
+                    g = _gr.get(v["keyword"])
+                    v["trend"] = g
+                    if g is not None:
+                        if g >= 0.30:
+                            v["opp"] *= 1.4            # 급상승 — 선점 가치 큼
+                        elif g >= 0.10:
+                            v["opp"] *= 1.15
+                        elif g <= -0.30:
+                            v["opp"] *= 0.75           # 식는 중 — 뒷북 위험
+                        elif g <= -0.10:
+                            v["opp"] *= 0.9
+            except Exception:
+                pass
             _zone = lambda v: 0 if lo <= v["total"] <= hi else (1 if v["total"] > hi else 2)
             head.sort(key=lambda v: (_zone(v), -v["opp"]))   # 스위트스팟 우선은 유지, 구간 안에서 기회지수순
             ordered = head + ordered[12:]

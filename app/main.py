@@ -466,10 +466,13 @@ def admin_kw_supply(hints: str = ""):
     if not hs:
         return JSONResponse({"ok": False, "error": "hints=키워드,키워드 필요"}, status_code=400)
     vols = [v for v in _sa.keyword_volumes(hs, limit=80) if _sa._relevant(v["keyword"], hs)][:12]
+    from app.services import datalab as _dl
+    _gr = _dl.growth([v["keyword"] for v in vols])
     for v in vols:
         d = _br.doc_count(v["keyword"])
         v["docs"] = d
         v["opp"] = round(v["total"] / d, 4) if d and d > 0 else None
+        v["trend"] = _gr.get(v["keyword"])             # 성장률(0.2=+20%) | None=중립/미설정
     return JSONResponse({"ok": True, "picked": _sa.sweet_spot_keywords(hs),
                          "candidates": sorted(vols, key=lambda v: -(v["opp"] or 0))})
 
