@@ -101,6 +101,40 @@ def _post_metrics(html_txt: str, kw: str) -> "dict | None":
             "heads": heads, "kw_hits": kw_hits}
 
 
+def _blog_vitals(blog_id: str) -> "str | None":
+    """블로그 계정 활동성 판정(③ 상대 전력, 2026-08-01 사장님 승인) — 공개 RSS만 사용(크롤 아님).
+    weak=방치(마지막 발행 120일+ 또는 월 1편 미만) / strong=활발(주 2편+·최근 3주 내) / mid=중간.
+    판정 불가(비공개 RSS 등)는 None(중립)."""
+    if not blog_id:
+        return None
+    try:
+        import requests
+        from datetime import datetime, timezone
+        from email.utils import parsedate_to_datetime
+        r = requests.get(f"https://rss.blog.naver.com/{blog_id}.xml", headers=_UA, timeout=8)
+        if r.status_code != 200:
+            return None
+        dates = []
+        for m in re.finditer(r"<pubDate>([^<]+)</pubDate>", r.text):
+            try:
+                dates.append(parsedate_to_datetime(m.group(1)))
+            except Exception:
+                pass
+        if not dates:
+            return "weak"                              # 글이 안 잡히는 RSS = 사실상 방치
+        now = datetime.now(timezone.utc)
+        dates = [d if d.tzinfo else d.replace(tzinfo=timezone.utc) for d in dates]
+        last_days = (now - max(dates)).days
+        per_week = sum(1 for d in dates if (now - d).days <= 56) / 8.0
+        if last_days > 120 or per_week < 0.25:
+            return "weak"
+        if per_week >= 2 and last_days <= 21:
+            return "strong"
+        return "mid"
+    except Exception:
+        return None
+
+
 def anatomize(keyword: str, top_n: int = 5) -> "dict | None":
     """상위 top_n 글 해부(동기·저속) — 집계만 저장. 캐시 있으면 즉시 반환."""
     kw = " ".join((keyword or "").split())
@@ -108,9 +142,23 @@ def anatomize(keyword: str, top_n: int = 5) -> "dict | None":
     if hit is not None:
         return hit
     from app.services import blogrank
-    items = blogrank._search_blog(kw, max(top_n, 5))[:top_n]
+    items = blogrank._search_blog(kw, 10)              # 계정 판정은 상위 10개 기준(③)
     if not items:
         return None
+    # ③ 상위 10개 글의 '블로그 계정' 수준 — 약체가 섞여 있으면 비집고 들어갈 틈(상위 블로거 루틴)
+    vitals = []
+    seen_bid = set()
+    for it in items[:10]:
+        _m = re.search(r"blog\.naver\.com/([A-Za-z0-9_-]+)", it.get("bloggerlink") or it.get("link") or "")
+        bid = _m.group(1) if _m else ""
+        if not bid or bid in seen_bid:
+            continue
+        seen_bid.add(bid)
+        v = _blog_vitals(bid)
+        if v:
+            vitals.append(v)
+        time.sleep(1.0)                                # 저속 원칙 유지
+    items = items[:top_n]
     rows, ages = [], []
     from datetime import datetime
     for it in items:
@@ -133,7 +181,11 @@ def anatomize(keyword: str, top_n: int = 5) -> "dict | None":
            "video_pct": round(100 * sum(1 for r in rows if r["video"]) / len(rows)),
            "table_pct": round(100 * sum(1 for r in rows if r["table"]) / len(rows)),
            "avg_kw_hits": _avg("kw_hits"),
-           "age_days_median": (sorted(ages)[len(ages) // 2] if ages else None)}
+           "age_days_median": (sorted(ages)[len(ages) // 2] if ages else None),
+           # ③ 상대 전력(계정 수준) — weak=방치/저활동, strong=활발 운영(승산 스코어가 사용)
+           "blogs_checked": len(vitals),
+           "weak_blogs": sum(1 for v in vitals if v == "weak"),
+           "strong_blogs": sum(1 for v in vitals if v == "strong")}
     try:
         with db._conn() as c:
             _ensure(c)

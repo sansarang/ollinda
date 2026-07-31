@@ -84,6 +84,20 @@ def score(tenant_id: str, keyword: str) -> dict:
             pts += 5; factors.append(f"표 있는 글 {an['table_pct']}% — 구조 우위 +5")
     else:
         pts += 20; factors.append("해부 데이터 예열 중 +20(중립)")
+    # ②b 상대 전력(2026-08-01 사장님 승인 ③) — 상위 10개 글의 '블로그 계정' 수준(RSS 활동성).
+    #   약체(방치·저활동)가 섞여 있으면 비집고 들어갈 틈 — 상위 블로거의 판 고르기 루틴.
+    if an and an.get("blogs_checked"):
+        _wk, _stg = an.get("weak_blogs", 0), an.get("strong_blogs", 0)
+        if _wk >= 3:
+            pts += 15; factors.append(f"상위권 약체 블로그 {_wk}개 — 열린 판 +15")
+        elif _wk == 2:
+            pts += 10; factors.append("상위권 약체 블로그 2개 +10")
+        elif _wk == 1:
+            pts += 5; factors.append("상위권 약체 블로그 1개 +5")
+        elif _stg >= 7:
+            factors.append(f"상위권 활발 블로그 {_stg}개 — 치열한 판 +0")
+        else:
+            pts += 3; factors.append("상위권 계정 보통 +3")
     # ③ 내 전적 — 실측 승률
     tr = _my_track(tenant_id)
     if tr["top10"] >= 2:
