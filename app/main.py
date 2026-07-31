@@ -1051,8 +1051,11 @@ def me_gen_progress(request: Request):
 
 
 @app.post("/me/video/make")
-async def me_video_make(request: Request, asset_id: str = Form(""), platforms: str = Form("")):
-    """영상 온디맨드 — 홈에서 플랫폼(shorts·reels·naver) 골라 요청 → 백그라운드 렌더."""
+async def me_video_make(request: Request, asset_id: str = Form(""), platforms: str = Form(""),
+                        hero: str = Form("")):
+    """영상 온디맨드 — 홈에서 플랫폼(shorts·reels·naver) 골라 요청 → 백그라운드 렌더.
+    hero: 영상 대표 사진 파일명(선택, 2026-07-31) — 만들기 시점에 골라도 반영(구세트 포함).
+    빈값은 '기존 선택 유지', 'auto'는 'AI가 알아서'로 초기화."""
     u = auth.current_user(request)
     if not u:
         return JSONResponse({"ok": False, "error": "로그인이 필요해요"}, status_code=401)
@@ -1060,9 +1063,36 @@ async def me_video_make(request: Request, asset_id: str = Form(""), platforms: s
     a = db.get_asset(asset_id)
     if not a or getattr(a, "tenant_id", None) != t.id:
         return JSONResponse({"ok": False, "error": "내 콘텐츠가 아니에요"}, status_code=404)
+    hero = os.path.basename((hero or "").strip())
+    if hero:
+        blog = next((p for p in db.get_set_pieces(asset_id) if p.kind.value == "blog"), None)
+        if blog:
+            _names = {os.path.basename(p) for p in (blog.payload.get("image_paths") or [])}
+            if hero == "auto":
+                db.update_piece_payload(blog.id, {"hero_photo": ""})
+            elif hero in _names:
+                db.update_piece_payload(blog.id, {"hero_photo": hero})
     from app.services.ingest import request_video_bundle
     ok2, err2 = request_video_bundle(t, asset_id, {x.strip() for x in platforms.split(",") if x.strip()})
     return JSONResponse({"ok": ok2, "error": err2})
+
+
+@app.get("/me/video/photos")
+def me_video_photos(request: Request, asset_id: str = ""):
+    """영상 만들기 직전 사진 선택 UI용 — 세트 사진 목록(+현재 대표). 소유 검증."""
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"ok": False}, status_code=401)
+    t = _ensure_user_tenant(u)
+    a = db.get_asset(asset_id)
+    if not a or getattr(a, "tenant_id", None) != t.id:
+        return JSONResponse({"ok": False}, status_code=404)
+    blog = next((p for p in db.get_set_pieces(asset_id) if p.kind.value == "blog"), None)
+    ips = (blog.payload.get("image_paths") if blog else None) or []
+    photos = [{"name": os.path.basename(p), "url": f"/dl/{asset_id}/{os.path.basename(p)}"}
+              for p in ips]
+    return JSONResponse({"ok": True, "photos": photos,
+                         "hero": os.path.basename((blog.payload.get("hero_photo") or "")) if blog else ""})
 
 
 @app.get("/me/video/status")
@@ -2840,10 +2870,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 "var sel=[].slice.call(document.querySelectorAll(\"input[name=vp_\"+aid+\"]:checked\"))"
                 ".map(function(x){return x.value;});"
                 "if(!sel.length){alert('만들 플랫폼을 선택해 주세요');return;}"
-                "var fd=new FormData();fd.append('asset_id',aid);fd.append('platforms',sel.join(','));"
-                "try{var d=await (await fetch('/me/video/make',{method:'POST',body:fd})).json();"
-                "if(!d.ok){alert(d.error||'요청에 실패했어요');return;}"
-                "location.reload();}catch(e){alert('요청에 실패했어요');}}"
+                "window.vmPick(null,aid,sel.join(','));}"     # ⭐ 대표 사진 고르기 모달 경유(구세트 포함)
                 "(function(){var rows=document.querySelectorAll('[data-vgenrow]');if(!rows.length)return;"
                 "var iv=setInterval(async function(){var busy=false;"
                 "for(var i=0;i<rows.length;i++){var aid=rows[i].getAttribute('data-vgenrow');"
@@ -2852,7 +2879,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 "if(st.shorts==='generating'||st.reels==='generating'||st.naver==='generating')busy=true;"
                 "}catch(e){busy=true;}}"
                 "if(!busy){clearInterval(iv);location.reload();}},8000);})();"
-                "</script>")
+                "</script>" + _VMPICK_JS)
     else:
         hist = "<p class='text-slate-400 text-sm py-6 text-center'>아직 만든 콘텐츠가 없어요. 위에서 사진 올려 만들어보세요.</p>"
     # ── 최초 1회 온보딩 vs 작동 대시보드 ──
@@ -5583,27 +5610,54 @@ def _result_naver_video(pieces, asset_id: str) -> str:
                     + (f"<div class='text-[11px] text-slate-400 mb-2'>{esc((vj.get('error') or '')[:80])}</div>" if vj.get("error") else "")
                     + "<button type='button' class='w-full px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-900 "
                     "text-white text-sm font-bold transition' "
-                    "onclick=\"(async function(b){b.disabled=true;var fd=new FormData();"
-                    "fd.append('asset_id','" + esc(asset_id) + "');fd.append('platforms','naver');"
-                    "try{var d=await (await fetch('/me/video/make',{method:'POST',body:fd})).json();"
-                    "if(d.ok){location.reload();}else{alert(d.error||'요청에 실패했어요');b.disabled=false;}}"
-                    "catch(e){alert('요청에 실패했어요');b.disabled=false;}})(this)\">"
-                    "🎬 네이버 영상 다시 만들기</button></div>")
+                    "onclick=\"vmPick(this,'" + esc(asset_id) + "','naver')\">"
+                    "🎬 네이버 영상 다시 만들기</button>" + _VMPICK_JS + "</div>")
         # 영상 온디맨드 — 네이버 영상은 블로그 카드 안이 자리(별도 채널 카드 없음) → 여기서 바로 생성 버튼
         if _cs_nv == "not_requested":
             return ("<div class='mt-3'><div class='text-xs font-bold text-slate-400 mb-1'>네이버용 영상 (블로그 첨부 · 클립 겸용)</div>"
                     "<div class='text-xs text-slate-500 mb-2'>영상은 필요할 때만 만들어요 — 글은 이미 완성!</div>"
                     "<button type='button' class='w-full px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-900 "
                     "text-white text-sm font-bold transition' "
-                    "onclick=\"(async function(b){b.disabled=true;var fd=new FormData();"
-                    "fd.append('asset_id','" + esc(asset_id) + "');fd.append('platforms','naver');"
-                    "try{var d=await (await fetch('/me/video/make',{method:'POST',body:fd})).json();"
-                    "if(d.ok){location.reload();}else{alert(d.error||'요청에 실패했어요');b.disabled=false;}}"
-                    "catch(e){alert('요청에 실패했어요');b.disabled=false;}})(this)\">"
-                    "🎬 네이버 영상 만들기</button></div>")
+                    "onclick=\"vmPick(this,'" + esc(asset_id) + "','naver')\">"
+                    "🎬 네이버 영상 만들기</button>" + _VMPICK_JS + "</div>")
         return ""
     except Exception:
         return ""
+
+
+# 🎬 영상 만들기 직전 '대표 사진 고르기' 모달(2026-07-31, 사장님 지시) — 구세트 포함 모든 진입점 공용.
+#   사진 로드 실패·0장이면 기존 동작(바로 생성)으로 조용히 폴백. 선택 안 하면 hero='auto'(AI 자동).
+_VMPICK_JS = ("<script>if(!window.vmMake){"
+              "window.vmMake=async function(b,a,p,h){if(b)b.disabled=true;var fd=new FormData();"
+              "fd.append('asset_id',a);fd.append('platforms',p);if(h)fd.append('hero',h);"
+              "try{var d=await (await fetch('/me/video/make',{method:'POST',body:fd})).json();"
+              "if(d.ok){location.reload();}else{alert(d.error||'요청에 실패했어요');if(b)b.disabled=false;}}"
+              "catch(e){alert('요청에 실패했어요');if(b)b.disabled=false;}};"
+              "window.vmPick=async function(b,a,p){var d=null;"
+              "try{d=await (await fetch('/me/video/photos?asset_id='+encodeURIComponent(a))).json();}catch(e){}"
+              "if(!d||!d.ok||!(d.photos||[]).length){window.vmMake(b,a,p,'');return;}"
+              "var sel=d.hero||'';"
+              "var ov=document.createElement('div');"
+              "ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';"
+              "var box=document.createElement('div');"
+              "box.style.cssText='background:#fff;border-radius:20px;max-width:420px;width:100%;max-height:80vh;overflow:auto;padding:20px';"
+              "function render(){var g='';d.photos.forEach(function(ph){var on=(sel===ph.name);"
+              "g+='<div data-n=\"'+ph.name+'\" style=\"position:relative;cursor:pointer;border-radius:12px;overflow:hidden;border:3px solid '+(on?'#f59e0b':'transparent')+'\">'"
+              "+'<img src=\"'+ph.url+'\" style=\"width:100%;aspect-ratio:1;object-fit:cover;display:block\">'"
+              "+(on?'<div style=\"position:absolute;top:6px;left:6px;background:#f59e0b;color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px\">\\u2605 영상 대표</div>':'')"
+              "+'</div>';});"
+              "box.innerHTML='<div style=\"font-weight:800;font-size:16px;color:#0f172a;margin-bottom:4px\">영상 대표 사진 고르기</div>'"
+              "+'<div style=\"font-size:12px;color:#94a3b8;margin-bottom:12px\">고른 사진이 영상 첫 장면과 움직임의 중심이 돼요 — 안 고르면 AI가 알아서 골라요</div>'"
+              "+'<div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px\">'+g+'</div>'"
+              "+'<button id=\"vmGo\" style=\"width:100%;padding:13px;border-radius:12px;background:#4f46e5;color:#fff;font-weight:800;border:0;font-size:14px;cursor:pointer\">'+(sel?'\\u2605 이 사진으로 영상 만들기':'AI가 알아서 만들기')+'</button>'"
+              "+'<button id=\"vmX\" style=\"width:100%;padding:10px;background:none;border:0;color:#94a3b8;font-size:12px;margin-top:4px;cursor:pointer\">취소</button>';"
+              "box.querySelectorAll('[data-n]').forEach(function(el){el.onclick=function(){"
+              "sel=(sel===el.getAttribute('data-n'))?'':el.getAttribute('data-n');render();};});"
+              "box.querySelector('#vmGo').onclick=function(){ov.remove();window.vmMake(b,a,p,sel||'auto');};"
+              "box.querySelector('#vmX').onclick=function(){ov.remove();};}"
+              "render();ov.appendChild(box);"
+              "ov.onclick=function(e){if(e.target===ov)ov.remove();};document.body.appendChild(ov);};}"
+              "</script>")
 
 
 def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "← 내 작업실"):
@@ -5776,10 +5830,18 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                      + _result_naver_video(pieces, asset_id)
                      + "<div class='mt-4 space-y-2'>"
                      # 📮 발행 게이트: 80점 미달 글은 발행 버튼 봉인 — 재작성 버튼만(주방 철학: 미달 글 비노출)
-                     + ((f"<form method='post' action='/kit/{asset_id}/regen-blog' "
+                     # 다시쓰기는 백그라운드(2026-07-31 upstream error 실사고) — running이면 폴링 배너
+                     + (("<div class='flex items-center gap-2 text-sm text-amber-700 bg-amber-50 rounded-xl p-3'>"
+                         "<span class='inline-block w-4 h-4 border-2 border-amber-300 border-t-amber-600 rounded-full animate-spin flex-shrink-0'></span>"
+                         "<b>AI가 글을 다시 쓰는 중이에요</b> — 1~2분 뒤 자동으로 새 글이 나타나요 (화면 안 닫아도 돼요)</div>"
+                         f"<script>(function(){{var n=0;var iv=setInterval(async function(){{n++;if(n>60){{clearInterval(iv);return;}}"
+                         f"try{{var d=await (await fetch('/me/rewrite-status?asset_id={esc(asset_id)}')).json();"
+                         "if(d&&(d.status==='done'||d.status==='failed')){clearInterval(iv);location.reload();}"
+                         "}catch(_){}},5000);})();</script>")
+                        if ((pl or {}).get("rewrite_job") or {}).get("status") == "running" else
+                        (f"<form method='post' action='/kit/{asset_id}/regen-blog' "
                          "onsubmit=\"var b=this.querySelector('button');b.disabled=true;"
-                         "b.innerHTML='⏳ AI가 다시 쓰는 중… 1~2분 걸려요 (이 화면 그대로 두세요)';"
-                         "b.classList.add('opacity-70','animate-pulse');\">"
+                         "b.innerHTML='⏳ 접수 중…';b.classList.add('opacity-70','animate-pulse');\">"
                          "<button class='block w-full text-center py-3 rounded-xl text-white text-sm font-extrabold "
                          "bg-amber-500 hover:brightness-110 active:scale-[.99] transition shadow-md'>"
                          "🔧 품질 기준 미달 — AI가 다시 쓰기</button>"
@@ -5917,11 +5979,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
             _inner = ("<div class='text-sm text-slate-500 mb-2'>영상은 필요할 때만 만들어요 — 글은 이미 완성!</div>"
                       "<button type='button' class='px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 "
                       "text-white text-xs font-bold transition' "
-                      "onclick=\"(async function(b){b.disabled=true;var fd=new FormData();"
-                      "fd.append('asset_id','" + esc(asset_id) + "');fd.append('platforms','" + _ch + "');"
-                      "try{var d=await (await fetch('/me/video/make',{method:'POST',body:fd})).json();"
-                      "if(d.ok){location.reload();}else{alert(d.error||'요청에 실패했어요');b.disabled=false;}}"
-                      "catch(e){alert('요청에 실패했어요');b.disabled=false;}})(this)\">"
+                      "onclick=\"vmPick(this,'" + esc(asset_id) + "','" + _ch + "')\">"
                       "🎬 이 영상 만들기</button>")
         elif int(_st.get("retries") or 0) >= 2:
             _inner = ("<div class='text-sm text-slate-500'>만들지 못했어요 — 아래 사유를 확인해 주세요</div>"
@@ -5936,7 +5994,8 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
         if _ch in rendered_ch and (_st or {}).get("status") == "failed" and _ch != "naver":
             logging.getLogger("shopcast.kit").warning(
                 "[정합] 렌더 블록은 있는데 channel_status=failed asset=%s ch=%s", asset_id, _ch)
-    js = ("<script>"
+    js = (_VMPICK_JS +          # ⭐ 대표 사진 고르기 모달(영상 만들기 버튼 공용)
+          "<script>"
           "function omCopy(text){if(navigator.clipboard&&navigator.clipboard.writeText){return navigator.clipboard.writeText(text);}"
           "return new Promise(function(res,rej){var ta=document.createElement('textarea');ta.value=text;ta.setAttribute('readonly','');ta.style.position='fixed';ta.style.top='0';ta.style.opacity='0';document.body.appendChild(ta);ta.focus();ta.select();ta.setSelectionRange(0,text.length);var ok=false;try{ok=document.execCommand('copy');}catch(e){}document.body.removeChild(ta);ok?res():rej();});}"
           "function fbv(a,v){var i=document.getElementById('fbi'+a);"
@@ -6566,20 +6625,57 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
 @app.post("/kit/{asset_id}/regen-blog")
 def kit_regen_blog(request: Request, asset_id: str):
     """(사용자용) 📮 발행 게이트 재작성 — 80점 미달로 봉인된 블로그를 소유자가 버튼 한 번으로 재생성.
-    완료 후 결과 화면 복귀(점수 재계산·게이트 재판정 포함)."""
+    ★ 백그라운드 전환(2026-07-31 실사고): 동기 1~2분 재생성이 Railway 게이트웨이 타임아웃('upstream
+    error')에 걸림 — 글은 만들어지는데 사용자에겐 오류로 보이고 재클릭하면 비용 중복. 즉시 303 반환,
+    진행 상태는 blog.payload.rewrite_job + /me/rewrite-status 폴링으로 표시."""
     u = auth.current_user(request)
     pieces = _owned_pieces(u, asset_id) if u else None
     if not pieces:
         return HTMLResponse(status_code=404)
-    try:
-        admin_regen_blog(asset_id)                     # 동기 재생성(1~2분) — 사진·다른 채널 불변
-        from app.services import qualitycheck as _qcg
-        _blog0 = next((p for p in db.get_set_pieces(asset_id) if p.kind.value == "blog"), None)
-        _src0 = (_blog0.payload.get("gen_source") if _blog0 else "") or ""
-        _qcg.score_gate(asset_id, source=_src0)        # 재생성본도 게이트 재판정(미달이면 다시 봉인)
-    except Exception:
-        logging.getLogger("shopcast.ingest").exception("[kit-regen-blog] 실패 asset=%s", asset_id)
+    blog = next((p for p in pieces if p.kind.value == "blog"), None)
+    if not blog:
+        return RedirectResponse(f"/me?view={asset_id}", status_code=303)
+    if (blog.payload.get("rewrite_job") or {}).get("status") == "running":
+        return RedirectResponse(f"/me?view={asset_id}", status_code=303)   # 중복 클릭 = 무시(비용 보호)
+    from datetime import datetime as _dt
+    db.update_piece_payload(blog.id, {"rewrite_job": {"status": "running",
+                                                      "ts": _dt.utcnow().isoformat()}})
+
+    def _bg_rewrite():
+        st = "failed"
+        try:
+            admin_regen_blog(asset_id)                 # 재생성 — 사진·다른 채널 불변
+            from app.services import qualitycheck as _qcg
+            _blog0 = next((p for p in db.get_set_pieces(asset_id) if p.kind.value == "blog"), None)
+            _src0 = (_blog0.payload.get("gen_source") if _blog0 else "") or ""
+            _qcg.score_gate(asset_id, source=_src0)    # 재생성본도 게이트 재판정(미달이면 다시 봉인)
+            st = "done"
+        except Exception:
+            logging.getLogger("shopcast.ingest").exception("[kit-regen-blog] 실패 asset=%s", asset_id)
+        finally:
+            try:
+                _b2 = next((p for p in db.get_set_pieces(asset_id) if p.kind.value == "blog"), None)
+                if _b2:
+                    db.update_piece_payload(_b2.id, {"rewrite_job": {"status": st,
+                                                                     "ts": _dt.utcnow().isoformat()}})
+            except Exception:
+                pass
+    import threading as _th_rw
+    _th_rw.Thread(target=_bg_rewrite, daemon=True).start()
     return RedirectResponse(f"/me?view={asset_id}", status_code=303)
+
+
+@app.get("/me/rewrite-status")
+def me_rewrite_status(request: Request, asset_id: str = ""):
+    """다시쓰기 진행 폴링 — running/done/failed (소유 검증)."""
+    u = auth.current_user(request)
+    pieces = _owned_pieces(u, asset_id) if u else None
+    if not pieces:
+        return JSONResponse({"ok": False}, status_code=404)
+    blog = next((p for p in pieces if p.kind.value == "blog"), None)
+    return JSONResponse({"ok": True,
+                         "status": ((blog.payload.get("rewrite_job") or {}).get("status") or "")
+                         if blog else ""})
 
 
 @app.post("/kit/{asset_id}/regen-naver")
@@ -6590,14 +6686,16 @@ def kit_regen_naver(request: Request, asset_id: str):
     pieces = _owned_pieces(u, asset_id) if u else None
     if not pieces:
         return HTMLResponse(status_code=404)
+    # ★ 비동기 전환(2026-07-31 upstream error 실사고): 동기 렌더(1~2분+)가 게이트웨이 타임아웃에
+    #   걸리던 것을 기존 온디맨드 영상 머신(request_video_bundle: 백그라운드+진행 표시+폴링)으로 교체.
     ok = False
     try:
-        import json as _j
-        resp = admin_regen_naver(asset_id)          # 동기 재생성(1~2분) — 글·사진 산출물 불변
-        ok = bool(_j.loads(bytes(resp.body or b"{}")).get("ok"))
+        _t = db.get_tenant(pieces[0].tenant_id)
+        from app.services.ingest import request_video_bundle
+        ok, _err = request_video_bundle(_t, asset_id, {"naver"}) if _t else (False, "tenant 없음")
     except Exception:
-        ok = False
-    msg = ("ok=네이버 영상을 다시 만들었어요 — 아래에서 받으세요"
+        logging.getLogger("shopcast.ingest").exception("[kit-regen-naver] 실패 asset=%s", asset_id)
+    msg = ("ok=네이버 영상을 만드는 중이에요 — 1~2분 뒤 이 페이지에 자동으로 나타나요"
            if ok else "err=영상 다시 만들기에 실패했어요 — 잠시 후 다시 시도해 주세요")
     return RedirectResponse(f"/kit/{asset_id}/naver?{msg}", status_code=303)
 
