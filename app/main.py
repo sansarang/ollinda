@@ -455,8 +455,13 @@ def admin_busy():
             busy.append({"type": "rewrite", "tenant": s.get("tenant"), "asset": aid[:8]})
         vj = pl.get("video_job") or {}
         if vj.get("status") in ("registered", "running", "retrying"):
-            busy.append({"type": "video", "tenant": s.get("tenant"), "asset": aid[:8],
-                         "stage": vj.get("stage", "")})
+            try:      # 유령 잡 필터(실측: 7/24부터 'running' 잔존) — 2시간 넘으면 죽은 것
+                _age = (_d.utcnow() - _d.fromisoformat(vj.get("ts", ""))).total_seconds()
+            except Exception:
+                _age = 1e9
+            if _age < 7200:
+                busy.append({"type": "video", "tenant": s.get("tenant"), "asset": aid[:8],
+                             "stage": vj.get("stage", "")})
     return JSONResponse({"ok": True, "busy": busy, "safe_to_deploy": not busy,
                          "ts": _d.utcnow().isoformat()})
 
