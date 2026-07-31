@@ -457,6 +457,29 @@ def public_docs(name: str):
     return FileResponse(ap, media_type=mt, filename=fname)
 
 
+@app.get("/admin/shop-perf")
+def admin_shop_perf():
+    """사령탑 가게별 성적(2026-08-01 사장님 지시) — 사용자에겐 비노출(주방 철학), 운영자만.
+    발행 편수·10/30위 진입·진입률. winscore._my_track 재사용(단일 소스)."""
+    from app.services import winscore as _ws
+    out, seen = [], set()
+    for s in db.list_sets(limit=200):
+        tid = s.get("tenant_id")
+        if not tid or tid in seen:
+            continue
+        seen.add(tid)
+        if _tenant_is_demo(tid):
+            continue
+        tr = _ws._my_track(tid)
+        if not tr["total"]:
+            continue
+        out.append({"tenant": s.get("tenant"), "tid": tid[:8],
+                    "published": tr["total"], "top10": tr["top10"], "top30": tr["top30"],
+                    "rate10": round(100 * tr["top10"] / tr["total"])})
+    out.sort(key=lambda r: (-r["published"], -r["rate10"]))
+    return JSONResponse({"ok": True, "shops": out})
+
+
 @app.get("/admin/kw-supply")
 def admin_kw_supply(hints: str = ""):
     """운영 진단 — 공급 신호 키워드 선정 확인(2026-08-01): 후보별 검색량·문서수·기회지수·광고경쟁·최종 선정."""
@@ -2670,10 +2693,7 @@ def _perf_report(tenant_id: str) -> str:
               "try{var r=await fetch('/me/rank');var d=await r.json();"
               "if(!d.configured){b.innerHTML='<span class=\"text-slate-400 text-xs\">네이버 키를 등록하면 순위 조회가 켜집니다.</span>';return;}"
               "if(!d.items||!d.items.length){b.innerHTML='<span class=\"text-slate-400 text-xs\">타겟 키워드가 아직 없어요.</span>';return;}"
-              "var pf=d.blog_perf||{};var perf=(pf.published?'<div class=\"flex items-center gap-2 bg-indigo-50 rounded-xl px-3 py-2 mb-2 text-xs\">"
-              "<span class=\"font-bold text-indigo-700\">내 블로그 성적</span><span class=\"text-slate-600\">발행 '+pf.published+'편 · 10위 안 '+pf.top10+'편"
-              "'+(pf.rate10!==null?' (진입률 '+pf.rate10+'%)':'')+' · 30위 안 '+(pf.top10+pf.top30)+'편</span></div>':'');"
-              "b.innerHTML=perf+d.items.map(function(it){var s=(it.rank===null)?'조회불가':(it.rank>=1?('네이버 지역 '+it.rank+'위 ✅'):'상위 5위 밖');"
+              "b.innerHTML=d.items.map(function(it){var s=(it.rank===null)?'조회불가':(it.rank>=1?('네이버 지역 '+it.rank+'위 ✅'):'상위 5위 밖');"
               "return '<div class=\"flex justify-between border-b border-slate-100 py-1.5 text-sm\"><span class=\"text-slate-600\">'+it.kw+'</span><span class=\"font-bold text-slate-800\">'+s+'</span></div>';}).join('');"
               "}catch(e){b.innerHTML='<span class=\"text-rose-400 text-xs\">조회 실패</span>';}}</script>"
             + "<p class='text-xs text-slate-400 mt-3'>※ 순위는 참고용(위치·기기별로 달라요). 실시간 자동추적은 로드맵.</p></div>")
@@ -4940,14 +4960,10 @@ def my_rank(request: Request):
             item["blog_url"] = br["url"]
             db.save_rank_snapshot(t.id, k, br["rank"], kind="blog_search")
         items.append(item)
-    # 📊 가게 성과 요약(2026-08-01 사장님 지시: 측정은 사령탑이 아니라 각 가게 도구에서) —
-    #   발행 글의 10위/30위 진입률. winscore의 실측 전적 계산을 그대로 재사용(단일 소스).
-    from app.services import winscore as _ws
-    _tr = _ws._my_track(t.id)
-    blog_perf = {"published": _tr["total"], "top10": _tr["top10"], "top30": _tr["top30"],
-                 "rate10": (round(100 * _tr["top10"] / _tr["total"]) if _tr["total"] else None)}
+    # (주방 철학, 2026-08-01 사장님 정정) 진입률 등 성적 지표는 사용자에게 비노출 —
+    # 운영자 확인은 /admin/shop-perf(사령탑 패널)로.
     return JSONResponse({"items": items, "configured": place.configured(),
-                         "blog_connected": bool(bid), "blog_perf": blog_perf})
+                         "blog_connected": bool(bid)})
 
 
 @app.get("/me/experience", response_class=HTMLResponse)
