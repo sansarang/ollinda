@@ -514,7 +514,9 @@ def admin_audit(asset_id: str):
                          "score_gate": pl.get("score_gate"),
                          "score_gate_stops": pl.get("score_gate_stops"),
                          "rewrite_job": pl.get("rewrite_job"),
+                         "battle_plan": pl.get("battle_plan"),   # 작전 감사(2026-08-01)
                          "title": pl.get("title"), "body_len": len(pl.get("body") or ""),
+                         "body": pl.get("body"),                 # 운영 진단·전후 비교용(admin 전용)
                          "photos": len(pl.get("image_paths") or [])})
 
 
