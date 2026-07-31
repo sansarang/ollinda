@@ -429,6 +429,24 @@ async def admin_dwell_test(request: Request):
                          "body": fixed_body})
 
 
+@app.get("/admin/audit/{asset_id}")
+def admin_audit(asset_id: str):
+    """운영 진단 — 블로그 상위노출 채점 상세(점수·감점 사유·재작성 이력). '왜 80이 안 되나' 가시화."""
+    blog = next((p for p in db.get_set_pieces(asset_id) if p.kind.value == "blog"), None)
+    if not blog:
+        return JSONResponse({"ok": False, "error": "블로그 없음"}, status_code=404)
+    pl = blog.payload or {}
+    au = pl.get("ranking_audit") or {}
+    return JSONResponse({"ok": True, "score": au.get("score"),
+                         "warnings": au.get("warnings"), "checks": au.get("checks"),
+                         "publish_blocked_score": pl.get("publish_blocked_score"),
+                         "score_gate": pl.get("score_gate"),
+                         "score_gate_stops": pl.get("score_gate_stops"),
+                         "rewrite_job": pl.get("rewrite_job"),
+                         "title": pl.get("title"), "body_len": len(pl.get("body") or ""),
+                         "photos": len(pl.get("image_paths") or [])})
+
+
 @app.get("/admin/busy")
 def admin_busy():
     """배포 전 통합 점검(배포 규율 확장 2026-07-31) — 재시작에 죽는 진행 작업 전수:
