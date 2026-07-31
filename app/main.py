@@ -429,6 +429,7 @@ async def admin_dwell_test(request: Request):
                          "body": fixed_body})
 
 
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # CWD 무관(배포 404 실측)
 _DOCS = {"guide.pdf": ("assets/docs/ollinda_guide.pdf", "application/pdf", "올린다_제품설명서.pdf"),
          "intro.mp4": ("assets/docs/ollinda_intro.mp4", "video/mp4", "올린다_소개영상.mp4")}
 
@@ -440,9 +441,10 @@ def public_docs(name: str):
     if not ent:
         return HTMLResponse(status_code=404)
     path, mt, fname = ent
-    if not os.path.exists(path):
+    ap = os.path.join(_REPO_ROOT, path)
+    if not os.path.exists(ap):
         return HTMLResponse(status_code=404)
-    return FileResponse(path, media_type=mt, filename=fname)
+    return FileResponse(ap, media_type=mt, filename=fname)
 
 
 @app.get("/admin/audit/{asset_id}")
@@ -461,6 +463,27 @@ def admin_audit(asset_id: str):
                          "rewrite_job": pl.get("rewrite_job"),
                          "title": pl.get("title"), "body_len": len(pl.get("body") or ""),
                          "photos": len(pl.get("image_paths") or [])})
+
+
+@app.get("/admin/users")
+def admin_users():
+    """운영 진단 — 가입자 명단(이메일 앞부분 마스킹·플랜·무료사용·가게명). '43명이 누구냐' 가시화(2026-07-31)."""
+    out = []
+    for u in db.list_users():
+        em = (u.get("email") or "")
+        t = None
+        try:
+            t = db.get_tenant(u.get("tenant_id") or "")
+        except Exception:
+            pass
+        out.append({"email": (em[:3] + "***" + em[em.find("@"):]) if "@" in em else em[:6],
+                    "owner": _is_owner(u), "plan": u.get("plan") or "free",
+                    "free_used": u.get("free_used") or 0,
+                    "tenant": getattr(t, "name", "") if t else "",
+                    "demo_tenant": bool(getattr(t, "is_demo", 0)) if t else False,
+                    "created": (u.get("created_at") or "")[:10]})
+    out.sort(key=lambda r: r["created"], reverse=True)
+    return JSONResponse({"ok": True, "n": len(out), "users": out})
 
 
 @app.get("/admin/busy")
@@ -883,13 +906,25 @@ def admin_biz_metrics(days: int = 30):
     except Exception:
         pass
     paid = trial = new_today = 0
+    real_total = real_trial = 0                        # 실가입자(운영자·테스트 제외, 2026-07-31 사장님 지적)
     today = now.date().isoformat()
     for u in users:
         pl = (u.get("plan") or "free").lower()
+        _real = not _is_owner(u)
+        try:                                           # 운영자 소유 tenant(주안모터스 등 테스트 가게)도 제외
+            _t = db.get_tenant(u.get("tenant_id") or "")
+            if _t is not None and getattr(_t, "is_demo", 0):
+                _real = False
+        except Exception:
+            pass
         if pl in ("basic", "pro", "self", "agency"):
             paid += 1
         elif (u.get("free_used") or 0) > 0:
             trial += 1
+            if _real:
+                real_trial += 1
+        if _real:
+            real_total += 1
         if (u.get("created_at") or "")[:10] == today:
             new_today += 1
     # 구독·결제(테이블 있으면)
@@ -951,6 +986,7 @@ def admin_biz_metrics(days: int = 30):
     return JSONResponse({
         "ok": True, "ts": now.isoformat(),
         "customers": {"total_users": len(users), "paid": paid, "trial": trial,
+                      "real_users": real_total, "real_trial": real_trial,   # 운영자·테스트 제외
                       "new_today": new_today, "tenants": len(tenants or [])},
         "revenue": {"mrr_krw": revenue_mrr, "subs": len(subs), "pay_today": pay_today},
         "health": {"gen_failed": gen_fail, "gen_running": gen_run, "errors": err[:5],
