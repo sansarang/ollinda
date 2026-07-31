@@ -81,7 +81,9 @@ def _relevant(kw: str, hints: list[str]) -> bool:
 
 
 def sweet_spot_keywords(hints: list[str], lo: int = 500, hi: int = 5000, limit: int = 8) -> list[str]:
-    """검색량 500~5,000 롱테일 우선(경쟁↓·전환↑) → 그 밖은 후순위. 힌트와 무관한 연관어는 제외."""
+    """검색량 500~5,000 롱테일 우선(경쟁↓·전환↑) → 그 밖은 후순위. 힌트와 무관한 연관어는 제외.
+    ★ 공급 신호(2026-08-01 사장님 승인 — 상위 블로거 루틴 자동화): 같은 구간 안에서는
+    '기회지수 = 검색량 ÷ 발행 문서 수'가 큰(수요 대비 공급 부족) 키워드 우선 + 광고 경쟁도 감점."""
     vols = [v for v in keyword_volumes(hints, limit=80) if _relevant(v["keyword"], hints)]
     if not vols:
         return []
@@ -89,6 +91,24 @@ def sweet_spot_keywords(hints: list[str], lo: int = 500, hi: int = 5000, limit: 
     high = sorted([v for v in vols if v["total"] > hi], key=lambda v: v["total"])      # 너무 큰 건(경쟁↑) 뒤로
     low = sorted([v for v in vols if 0 < v["total"] < lo], key=lambda v: -v["total"])
     ordered = inzone + high + low
+    try:
+        from app.services import blogrank as _br
+        if _br.configured() and ordered:
+            head = ordered[:12]                        # 문서 수 조회는 상위 후보 12개만(쿼터 보호, 24h 캐시)
+            for v in head:
+                d = _br.doc_count(v["keyword"])
+                v["docs"] = d
+                # 기회지수: 문서수 미상(-1/0)은 중립(검색량 기반 유사값) — 데이터 없다고 벌 주지 않음
+                v["opp"] = (v["total"] / d) if d and d > 0 else (v["total"] / 20000.0)
+                if v.get("comp") == "높음":            # 광고 경쟁 치열 = 상업 키워드 레드오션 신호
+                    v["opp"] *= 0.7
+                elif v.get("comp") == "중간":
+                    v["opp"] *= 0.85
+            _zone = lambda v: 0 if lo <= v["total"] <= hi else (1 if v["total"] > hi else 2)
+            head.sort(key=lambda v: (_zone(v), -v["opp"]))   # 스위트스팟 우선은 유지, 구간 안에서 기회지수순
+            ordered = head + ordered[12:]
+    except Exception:
+        pass                                           # 공급 조회 실패 = 기존 검색량 순서 그대로(안전)
     seen, out = set(), []
     for v in ordered:
         k = v["keyword"]

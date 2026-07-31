@@ -56,6 +56,36 @@ def _search_blog(keyword: str, display: int = TOP_N) -> list[dict]:
         return []
 
 
+_DOC_CACHE: dict = {}   # kw → (ts, total) — 문서 수는 하루면 충분히 신선(쿼터 보호)
+
+
+def doc_count(keyword: str) -> int:
+    """키워드의 블로그 발행 문서 수(공급 신호, 2026-08-01 사장님 승인) — 검색 API total.
+    상위 블로거 루틴 '수요는 큰데 공급(문서)이 적은 틈새'의 공급 축. 실패/무키 -1. 24h 캐시."""
+    import time as _t
+    keyword = (keyword or "").strip()
+    if not (configured() and keyword):
+        return -1
+    hit = _DOC_CACHE.get(keyword)
+    if hit and _t.time() - hit[0] < 86400:
+        return hit[1]
+    try:
+        r = requests.get(
+            "https://openapi.naver.com/v1/search/blog.json",
+            params={"query": keyword, "display": 1},
+            headers={"X-Naver-Client-Id": os.environ["NAVER_CLIENT_ID"],
+                     "X-Naver-Client-Secret": os.environ["NAVER_CLIENT_SECRET"]},
+            timeout=8)
+        total = int(r.json().get("total", -1)) if r.status_code == 200 else -1
+    except Exception:
+        total = -1
+    if total >= 0:
+        _DOC_CACHE[keyword] = (_t.time(), total)
+        if len(_DOC_CACHE) > 3000:                     # 메모리 상한
+            _DOC_CACHE.pop(next(iter(_DOC_CACHE)), None)
+    return total
+
+
 def top_staleness_days(keyword: str, top_n: int = 5) -> int:
     """상위 글 노후도(일) — 상위 top_n 글 발행일의 중앙값 나이. 실전 검증된 '최신성 공략' 신호:
     상위권이 낡은 키워드 = 신규 블로그가 최신성으로 이길 수 있는 문이 열린 키워드.
