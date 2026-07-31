@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN python -m playwright install --with-deps chromium || echo "playwright chromium 설치 건너뜀(런타임 graceful)"
 
 COPY app ./app
+COPY assets ./assets
 
 # 영속 데이터(가능하면 디스크 마운트). 기본은 컨테이너 내부.
 ENV SHOPCAST_DB=/data/shopcast.sqlite \

@@ -910,7 +910,9 @@ def admin_biz_metrics(days: int = 30):
     today = now.date().isoformat()
     for u in users:
         pl = (u.get("plan") or "free").lower()
-        _real = not _is_owner(u)
+        _em = (u.get("email") or "").lower()
+        # 실측(2026-07-31): 43명 전원이 @ollinda.test/@ollinda.guest 개발 계정이었음 — 합성 도메인 제외
+        _real = not (_is_owner(u) or _em.endswith("@ollinda.test") or _em.endswith("@ollinda.guest"))
         try:                                           # 운영자 소유 tenant(주안모터스 등 테스트 가게)도 제외
             _t = db.get_tenant(u.get("tenant_id") or "")
             if _t is not None and getattr(_t, "is_demo", 0):
