@@ -1107,10 +1107,11 @@ def me_gen_progress(request: Request):
 
 @app.post("/me/video/make")
 async def me_video_make(request: Request, asset_id: str = Form(""), platforms: str = Form(""),
-                        hero: str = Form("")):
+                        hero: str = Form(""), photos: str = Form("")):
     """영상 온디맨드 — 홈에서 플랫폼(shorts·reels·naver) 골라 요청 → 백그라운드 렌더.
     hero: 영상 대표 사진 파일명(선택, 2026-07-31) — 만들기 시점에 골라도 반영(구세트 포함).
-    빈값은 '기존 선택 유지', 'auto'는 'AI가 알아서'로 초기화."""
+    빈값은 '기존 선택 유지', 'auto'는 'AI가 알아서'로 초기화.
+    photos: 영상에 쓸 사진 선택(쉼표 파일명, 2026-07-31 사장님 지시) — 'all'/빈값=전체."""
     u = auth.current_user(request)
     if not u:
         return JSONResponse({"ok": False, "error": "로그인이 필요해요"}, status_code=401)
@@ -1119,14 +1120,24 @@ async def me_video_make(request: Request, asset_id: str = Form(""), platforms: s
     if not a or getattr(a, "tenant_id", None) != t.id:
         return JSONResponse({"ok": False, "error": "내 콘텐츠가 아니에요"}, status_code=404)
     hero = os.path.basename((hero or "").strip())
-    if hero:
-        blog = next((p for p in db.get_set_pieces(asset_id) if p.kind.value == "blog"), None)
-        if blog:
-            _names = {os.path.basename(p) for p in (blog.payload.get("image_paths") or [])}
-            if hero == "auto":
-                db.update_piece_payload(blog.id, {"hero_photo": ""})
-            elif hero in _names:
-                db.update_piece_payload(blog.id, {"hero_photo": hero})
+    blog = next((p for p in db.get_set_pieces(asset_id) if p.kind.value == "blog"), None)
+    if blog:
+        _names = {os.path.basename(p) for p in (blog.payload.get("image_paths") or [])}
+        _upd = {}
+        if hero == "auto":
+            _upd["hero_photo"] = ""
+        elif hero and hero in _names:
+            _upd["hero_photo"] = hero
+        _ph = (photos or "").strip()
+        if _ph == "all":
+            _upd["video_photos"] = []                  # 전체 사용(선택 해제)
+        elif _ph:
+            _sel = [os.path.basename(x.strip()) for x in _ph.split(",") if x.strip()]
+            _sel = [x for x in _sel if x in _names]
+            if _sel:
+                _upd["video_photos"] = _sel
+        if _upd:
+            db.update_piece_payload(blog.id, _upd)
     from app.services.ingest import request_video_bundle
     ok2, err2 = request_video_bundle(t, asset_id, {x.strip() for x in platforms.split(",") if x.strip()})
     return JSONResponse({"ok": ok2, "error": err2})
@@ -1147,6 +1158,7 @@ def me_video_photos(request: Request, asset_id: str = ""):
     photos = [{"name": os.path.basename(p), "url": f"/dl/{asset_id}/{os.path.basename(p)}"}
               for p in ips]
     return JSONResponse({"ok": True, "photos": photos,
+                         "video_photos": (blog.payload.get("video_photos") or []) if blog else [],
                          "hero": os.path.basename((blog.payload.get("hero_photo") or "")) if blog else ""})
 
 
@@ -5696,32 +5708,46 @@ def _rewrite_running(pl: dict) -> bool:
 # 🎬 영상 만들기 직전 '대표 사진 고르기' 모달(2026-07-31, 사장님 지시) — 구세트 포함 모든 진입점 공용.
 #   사진 로드 실패·0장이면 기존 동작(바로 생성)으로 조용히 폴백. 선택 안 하면 hero='auto'(AI 자동).
 _VMPICK_JS = ("<script>if(!window.vmMake){"
-              "window.vmMake=async function(b,a,p,h){if(b)b.disabled=true;var fd=new FormData();"
+              "window.vmMake=async function(b,a,p,h,ph){if(b)b.disabled=true;var fd=new FormData();"
               "fd.append('asset_id',a);fd.append('platforms',p);if(h)fd.append('hero',h);"
+              "if(ph)fd.append('photos',ph);"
               "try{var d=await (await fetch('/me/video/make',{method:'POST',body:fd})).json();"
               "if(d.ok){location.reload();}else{alert(d.error||'요청에 실패했어요');if(b)b.disabled=false;}}"
               "catch(e){alert('요청에 실패했어요');if(b)b.disabled=false;}};"
               "window.vmPick=async function(b,a,p){var d=null;"
               "try{d=await (await fetch('/me/video/photos?asset_id='+encodeURIComponent(a))).json();}catch(e){}"
-              "if(!d||!d.ok||!(d.photos||[]).length){window.vmMake(b,a,p,'');return;}"
-              "var sel=d.hero||'';"
+              "if(!d||!d.ok||!(d.photos||[]).length){window.vmMake(b,a,p,'','');return;}"
+              "var hero=d.hero||'';"
+              "var inc={};d.photos.forEach(function(ph){inc[ph.name]=true;});"   # 기본: 전부 포함
+              "if((d.video_photos||[]).length){d.photos.forEach(function(ph){inc[ph.name]=false;});"
+              "d.video_photos.forEach(function(n){inc[n]=true;});}"              # 이전 선택 복원
               "var ov=document.createElement('div');"
               "ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';"
               "var box=document.createElement('div');"
               "box.style.cssText='background:#fff;border-radius:20px;max-width:420px;width:100%;max-height:80vh;overflow:auto;padding:20px';"
-              "function render(){var g='';d.photos.forEach(function(ph){var on=(sel===ph.name);"
-              "g+='<div data-n=\"'+ph.name+'\" style=\"position:relative;cursor:pointer;border-radius:12px;overflow:hidden;border:3px solid '+(on?'#f59e0b':'transparent')+'\">'"
+              "function n_sel(){return d.photos.filter(function(ph){return inc[ph.name];}).length;}"
+              "function render(){var g='';d.photos.forEach(function(ph){var IN=!!inc[ph.name];var H=(hero===ph.name)&&IN;"
+              "g+='<div data-n=\"'+ph.name+'\" style=\"position:relative;cursor:pointer;border-radius:12px;overflow:hidden;border:3px solid '+(H?'#f59e0b':(IN?'#4f46e5':'transparent'))+';opacity:'+(IN?'1':'.35')+'\">'"
               "+'<img src=\"'+ph.url+'\" style=\"width:100%;aspect-ratio:1;object-fit:cover;display:block\">'"
-              "+(on?'<div style=\"position:absolute;top:6px;left:6px;background:#f59e0b;color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px\">\\u2605 영상 대표</div>':'')"
+              "+(IN?'':'<div style=\"position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,.35);color:#fff;font-size:12px;font-weight:700\">제외됨</div>')"
+              "+(H?'<div style=\"position:absolute;top:6px;left:6px;background:#f59e0b;color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px\">\\u2605 대표</div>':'')"
+              "+(IN?'<button data-star=\"'+ph.name+'\" style=\"position:absolute;bottom:6px;left:6px;width:26px;height:26px;border-radius:999px;border:0;cursor:pointer;background:'+(H?'#f59e0b':'rgba(15,23,42,.45)')+';color:#fff;font-size:13px\">\\u2605</button>':'')"
               "+'</div>';});"
-              "box.innerHTML='<div style=\"font-weight:800;font-size:16px;color:#0f172a;margin-bottom:4px\">영상 대표 사진 고르기</div>'"
-              "+'<div style=\"font-size:12px;color:#94a3b8;margin-bottom:12px\">고른 사진이 영상 첫 장면과 움직임의 중심이 돼요 — 안 고르면 AI가 알아서 골라요</div>'"
+              "box.innerHTML='<div style=\"font-weight:800;font-size:16px;color:#0f172a;margin-bottom:4px\">영상에 쓸 사진 고르기</div>'"
+              "+'<div style=\"font-size:12px;color:#94a3b8;margin-bottom:12px\">사진을 누르면 <b>넣고/빼고</b>, \\u2605를 누르면 <b>첫 장면 대표</b>가 돼요. 그대로 두면 AI가 알아서 골라요.</div>'"
               "+'<div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px\">'+g+'</div>'"
-              "+'<button id=\"vmGo\" style=\"width:100%;padding:13px;border-radius:12px;background:#4f46e5;color:#fff;font-weight:800;border:0;font-size:14px;cursor:pointer\">'+(sel?'\\u2605 이 사진으로 영상 만들기':'AI가 알아서 만들기')+'</button>'"
+              "+'<button id=\"vmGo\" style=\"width:100%;padding:13px;border-radius:12px;background:#4f46e5;color:#fff;font-weight:800;border:0;font-size:14px;cursor:pointer\">'+n_sel()+'장으로 영상 만들기'+(hero&&inc[hero]?' (\\u2605 대표 지정됨)':'')+'</button>'"
               "+'<button id=\"vmX\" style=\"width:100%;padding:10px;background:none;border:0;color:#94a3b8;font-size:12px;margin-top:4px;cursor:pointer\">취소</button>';"
-              "box.querySelectorAll('[data-n]').forEach(function(el){el.onclick=function(){"
-              "sel=(sel===el.getAttribute('data-n'))?'':el.getAttribute('data-n');render();};});"
-              "box.querySelector('#vmGo').onclick=function(){ov.remove();window.vmMake(b,a,p,sel||'auto');};"
+              "box.querySelectorAll('[data-n]').forEach(function(el){el.onclick=function(ev){"
+              "if(ev.target&&ev.target.getAttribute&&ev.target.getAttribute('data-star'))return;"
+              "var n=el.getAttribute('data-n');"
+              "if(inc[n]&&n_sel()<=1){alert('사진 1장은 있어야 영상을 만들 수 있어요');return;}"
+              "inc[n]=!inc[n];if(!inc[n]&&hero===n)hero='';render();};});"
+              "box.querySelectorAll('[data-star]').forEach(function(el){el.onclick=function(ev){"
+              "ev.stopPropagation();var n=el.getAttribute('data-star');hero=(hero===n)?'':n;render();};});"
+              "box.querySelector('#vmGo').onclick=function(){var names=d.photos.filter(function(ph){return inc[ph.name];}).map(function(ph){return ph.name;});"
+              "var all=(names.length===d.photos.length);ov.remove();"
+              "window.vmMake(b,a,p,hero||'auto',all?'all':names.join(','));};"
               "box.querySelector('#vmX').onclick=function(){ov.remove();};}"
               "render();ov.appendChild(box);"
               "ov.onclick=function(e){if(e.target===ov)ov.remove();};document.body.appendChild(ov);};}"

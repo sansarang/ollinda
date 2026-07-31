@@ -931,6 +931,12 @@ def request_video_bundle(tenant: Tenant, asset_id: str, want: set[str]) -> tuple
     paths = _restore_media(tenant.id, blog.payload.get("image_paths") or [])
     if not paths:
         return False, "사진 원본을 찾을 수 없어 영상을 만들 수 없어요"
+    # ⭐ 영상 사진 선택(사용자, 2026-07-31) — 고른 사진만 영상에 사용(빈 목록 = 전체).
+    _sel = {os.path.basename(x) for x in (blog.payload.get("video_photos") or [])}
+    if _sel:
+        _filtered = [p for p in paths if os.path.basename(p) in _sel]
+        if _filtered:                                  # 파일 소실로 0장이 되면 전체 폴백(영상 불능 방지)
+            paths = _filtered
     # ⭐ 영상 대표 사진(사용자 선택, 2026-07-30) — 맨 앞으로(훅 배경·첫 씬·AI 무빙 우선). 안정 정렬이라 나머지 순서 보존.
     _hero = os.path.basename((blog.payload.get("hero_photo") or "").strip())
     if _hero:
