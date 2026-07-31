@@ -429,6 +429,38 @@ async def admin_dwell_test(request: Request):
                          "body": fixed_body})
 
 
+@app.get("/admin/busy")
+def admin_busy():
+    """배포 전 통합 점검(배포 규율 확장 2026-07-31) — 재시작에 죽는 진행 작업 전수:
+    ①생성 진행률 running ②다시쓰기 running(10분 내) ③영상 잡 registered/running.
+    busy=[]일 때만 배포. (실사고: 배포가 다시쓰기 스레드를 죽여 상태 고착+비용 낭비)"""
+    from datetime import datetime as _d
+    busy = []
+    seen_t = set()
+    for s in db.list_sets(limit=40):
+        tid, aid = s.get("tenant_id"), s.get("asset_id")
+        if tid and tid not in seen_t:
+            seen_t.add(tid)
+            pr = db.get_gen_progress(tid) or {}
+            if pr.get("status") == "running":
+                busy.append({"type": "gen", "tenant": s.get("tenant"), "stage": pr.get("stage")})
+        if not aid:
+            continue
+        try:
+            blog = next((p for p in db.get_set_pieces(aid) if p.kind.value == "blog"), None)
+        except Exception:
+            continue
+        pl = (blog.payload or {}) if blog else {}
+        if _rewrite_running(pl):
+            busy.append({"type": "rewrite", "tenant": s.get("tenant"), "asset": aid[:8]})
+        vj = pl.get("video_job") or {}
+        if vj.get("status") in ("registered", "running", "retrying"):
+            busy.append({"type": "video", "tenant": s.get("tenant"), "asset": aid[:8],
+                         "stage": vj.get("stage", "")})
+    return JSONResponse({"ok": True, "busy": busy, "safe_to_deploy": not busy,
+                         "ts": _d.utcnow().isoformat()})
+
+
 @app.get("/admin/tts-test")
 def admin_tts_test():
     """운영 진단 — 지금 이 서버에서 어떤 TTS 엔진이 실제로 동작하는지 확인(짧은 한 문장 실합성).
@@ -5625,6 +5657,19 @@ def _result_naver_video(pieces, asset_id: str) -> str:
         return ""
 
 
+def _rewrite_running(pl: dict) -> bool:
+    """다시쓰기 진행 판정 + 죽은 잡 자동 해제(2026-07-31 실사고: 배포 재시작이 스레드를 죽여
+    'running'이 영영 남음 → 배너 고착·재시도 불가). 10분 넘은 running은 죽은 것으로 본다."""
+    rj = (pl or {}).get("rewrite_job") or {}
+    if rj.get("status") != "running":
+        return False
+    try:
+        from datetime import datetime as _d
+        return (_d.utcnow() - _d.fromisoformat(rj.get("ts", ""))).total_seconds() < 600
+    except Exception:
+        return False                                   # ts 불명 = 구식 기록 → 죽은 것으로
+
+
 # 🎬 영상 만들기 직전 '대표 사진 고르기' 모달(2026-07-31, 사장님 지시) — 구세트 포함 모든 진입점 공용.
 #   사진 로드 실패·0장이면 기존 동작(바로 생성)으로 조용히 폴백. 선택 안 하면 hero='auto'(AI 자동).
 _VMPICK_JS = ("<script>if(!window.vmMake){"
@@ -5838,7 +5883,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                          f"try{{var d=await (await fetch('/me/rewrite-status?asset_id={esc(asset_id)}')).json();"
                          "if(d&&(d.status==='done'||d.status==='failed')){clearInterval(iv);location.reload();}"
                          "}catch(_){}},5000);})();</script>")
-                        if ((pl or {}).get("rewrite_job") or {}).get("status") == "running" else
+                        if _rewrite_running(pl) else
                         (f"<form method='post' action='/kit/{asset_id}/regen-blog' "
                          "onsubmit=\"var b=this.querySelector('button');b.disabled=true;"
                          "b.innerHTML='⏳ 접수 중…';b.classList.add('opacity-70','animate-pulse');\">"
@@ -6635,14 +6680,18 @@ def kit_regen_blog(request: Request, asset_id: str):
     blog = next((p for p in pieces if p.kind.value == "blog"), None)
     if not blog:
         return RedirectResponse(f"/me?view={asset_id}", status_code=303)
-    if (blog.payload.get("rewrite_job") or {}).get("status") == "running":
+    if _rewrite_running(blog.payload):
         return RedirectResponse(f"/me?view={asset_id}", status_code=303)   # 중복 클릭 = 무시(비용 보호)
     from datetime import datetime as _dt
     db.update_piece_payload(blog.id, {"rewrite_job": {"status": "running",
                                                       "ts": _dt.utcnow().isoformat()}})
 
+    import copy as _cp
+    _old_pl = _cp.deepcopy(blog.payload or {})         # 📸 재작성 전 스냅샷 — 더 나빠지면 되돌림
+    _old_score = ((_old_pl.get("ranking_audit") or {}).get("score"))
+
     def _bg_rewrite():
-        st = "failed"
+        st, note = "failed", ""
         try:
             admin_regen_blog(asset_id)                 # 재생성 — 사진·다른 채널 불변
             from app.services import qualitycheck as _qcg
@@ -6650,13 +6699,28 @@ def kit_regen_blog(request: Request, asset_id: str):
             _src0 = (_blog0.payload.get("gen_source") if _blog0 else "") or ""
             _qcg.score_gate(asset_id, source=_src0)    # 재생성본도 게이트 재판정(미달이면 다시 봉인)
             st = "done"
+            # ★ 더 나은 판 유지(2026-07-31 실사고: 재작성이 75→71점 — 나쁜 판으로 교체됐음):
+            #   새 점수 < 기존 점수면 스냅샷 복원(비용은 이미 썼지만 글은 안 나빠지게).
+            #   채널·영상 상태는 복원에서 제외(재작성 중 변했을 수 있는 라이브 상태).
+            _b1 = next((p for p in db.get_set_pieces(asset_id) if p.kind.value == "blog"), None)
+            _new_score = (((_b1.payload or {}).get("ranking_audit") or {}).get("score")) if _b1 else None
+            if (_b1 and isinstance(_old_score, int) and isinstance(_new_score, int)
+                    and _new_score < _old_score):
+                _keep = {k: (_b1.payload or {}).get(k)
+                         for k in ("channel_status", "video_job", "image_paths") if k in (_b1.payload or {})}
+                _b1.payload = {**_old_pl, **_keep}
+                db.save_piece(_b1)
+                note = f"재작성 {_new_score}점 < 기존 {_old_score}점 — 기존 글을 유지했어요"
+                logging.getLogger("shopcast.ingest").warning(
+                    "[kit-regen-blog] 재작성 점수 하락(%s→%s) — 스냅샷 복원 asset=%s",
+                    _old_score, _new_score, asset_id)
         except Exception:
             logging.getLogger("shopcast.ingest").exception("[kit-regen-blog] 실패 asset=%s", asset_id)
         finally:
             try:
                 _b2 = next((p for p in db.get_set_pieces(asset_id) if p.kind.value == "blog"), None)
                 if _b2:
-                    db.update_piece_payload(_b2.id, {"rewrite_job": {"status": st,
+                    db.update_piece_payload(_b2.id, {"rewrite_job": {"status": st, "note": note,
                                                                      "ts": _dt.utcnow().isoformat()}})
             except Exception:
                 pass
@@ -6673,9 +6737,12 @@ def me_rewrite_status(request: Request, asset_id: str = ""):
     if not pieces:
         return JSONResponse({"ok": False}, status_code=404)
     blog = next((p for p in pieces if p.kind.value == "blog"), None)
-    return JSONResponse({"ok": True,
-                         "status": ((blog.payload.get("rewrite_job") or {}).get("status") or "")
-                         if blog else ""})
+    if not blog:
+        return JSONResponse({"ok": True, "status": ""})
+    _st = (blog.payload.get("rewrite_job") or {}).get("status") or ""
+    if _st == "running" and not _rewrite_running(blog.payload):
+        _st = "failed"                                 # 죽은 잡 — 폴링 화면이 새로고침해 버튼 복구
+    return JSONResponse({"ok": True, "status": _st})
 
 
 @app.post("/kit/{asset_id}/regen-naver")
