@@ -634,11 +634,18 @@ def admin_gen_progress_close(request: Request, tenant_id: str):
 
 
 @app.get("/admin/anatomy")
-def admin_anatomy(kw: str = ""):
-    """🔬 상위 글 해부 진단 — 동기 크롤(키워드당 상위 5개, 저속)·구조 지표 집계 반환(원문 미저장)."""
+def admin_anatomy(kw: str = "", force: str = ""):
+    """🔬 상위 글 해부 진단 — 동기 크롤(키워드당 상위 5개, 저속)·구조 지표 집계 반환(원문 미저장).
+    force=1: 캐시 무시하고 재해부(스키마 갱신·검증용)."""
     if not kw.strip():
         return JSONResponse({"ok": False, "error": "kw 필요"}, status_code=400)
     from app.services import bloganatomy
+    if force == "1":
+        try:
+            with db._conn() as c:
+                c.execute("DELETE FROM kw_anatomy WHERE keyword=?", (" ".join(kw.split()),))
+        except Exception:
+            pass
     return JSONResponse({"ok": True, "anatomy": bloganatomy.anatomize(kw.strip())})
 
 

@@ -349,9 +349,14 @@ class BlogDraftGenerator(Generator):
         _recent_open = _recent_openers(tenant.id)
         # 🔬 상위 글 실측 기준선(캐시만 — 크롤 대기 0초, 없으면 백그라운드 예열) — 전 업종 공통
         _anat_line = ""
+        _battle_meta: dict = {}
         try:
             from app.services import bloganatomy as _ba
             _anat_line = _ba.baseline_line(kw0)
+            # 🗺 판 유형별 작전 지시서(2026-08-01) — 4신호를 글쓰기 작전으로(치열한 판=각도 전환,
+            #   열린 판=속전속결·최신성, 상승 추세=시의성 톤). 신호 없으면 빈 문자열(기존 그대로).
+            _bp_line, _battle_meta = _ba.battle_plan(kw0)
+            _anat_line = _anat_line + _bp_line
         except Exception:
             pass
         prompt = (
@@ -534,6 +539,7 @@ class BlogDraftGenerator(Generator):
                      "gen_source": (asset.note or "")[:8000],   # 입력 스냅샷 — [사진N] 전수 보존(kit 캡션·매칭 재사용, 재분석 0)
                      "request_check": request_check,            # '꼭 반영할 요청' 셀프체크(1-3d)
                      "dwell_gate": _dwell_rep,                  # 체류 장치 발현률 게이트 감사 기록
+                     "battle_plan": _battle_meta,               # 판 분석·작전(2026-08-01) 감사 기록
                      "win_score": _win_rec,                     # 🎲 쓰기 전 승산 실측(근거 포함)
                      "subject_check": ("" if _subj_b is None else ("ok" if _subj_b else "miss")),
 

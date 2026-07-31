@@ -145,6 +145,17 @@ def anatomize(keyword: str, top_n: int = 5) -> "dict | None":
     items = blogrank._search_blog(kw, 10)              # 계정 판정은 상위 10개 기준(③)
     if not items:
         return None
+    # 지배 각도 감지(작전 지시서용) — 제목의 '유형'만 집계(원문·제목 비저장 원칙 유지)
+    _ANGLES = [("후기", re.compile(r"후기|시공기|다녀왔|사용기|해봤|받았")),
+               ("가격", re.compile(r"가격|비용|얼마|만원|견적")),
+               ("방법", re.compile(r"방법|하는 ?법|셀프|고르는|체크|주의")),
+               ("추천", re.compile(r"추천|잘하는 ?곳|업체|비교|순위|BEST|톱|TOP", re.I))]
+    angles = {a: 0 for a, _ in _ANGLES}
+    angles["정보"] = 0
+    for it in items[:10]:
+        t_ = it.get("title") or ""
+        hit_ = next((a for a, rx in _ANGLES if rx.search(t_)), None)
+        angles[hit_ or "정보"] += 1
     # ③ 상위 10개 글의 '블로그 계정' 수준 — 약체가 섞여 있으면 비집고 들어갈 틈(상위 블로거 루틴)
     vitals = []
     seen_bid = set()
@@ -185,7 +196,8 @@ def anatomize(keyword: str, top_n: int = 5) -> "dict | None":
            # ③ 상대 전력(계정 수준) — weak=방치/저활동, strong=활발 운영(승산 스코어가 사용)
            "blogs_checked": len(vitals),
            "weak_blogs": sum(1 for v in vitals if v == "weak"),
-           "strong_blogs": sum(1 for v in vitals if v == "strong")}
+           "strong_blogs": sum(1 for v in vitals if v == "strong"),
+           "angles": angles}                            # 지배 각도 분포(작전 지시서 — 각도 전환용)
     try:
         with db._conn() as c:
             _ensure(c)
@@ -195,6 +207,76 @@ def anatomize(keyword: str, top_n: int = 5) -> "dict | None":
     except Exception:
         pass
     return out
+
+
+def battle_plan(keyword: str) -> "tuple[str, dict]":
+    """🗺 판 유형별 작전 지시서(2026-08-01 사장님 승인) — 4신호(공급·추세·상대전력·해부)를
+    글쓰기 작전으로 변환해 프롬프트에 주입. 반환 (프롬프트 블록, 감사용 meta).
+    신호가 없으면 빈 문자열(기존 글쓰기 그대로) — 파이프라인을 절대 막지 않는다."""
+    kw = " ".join((keyword or "").split())
+    if not kw:
+        return "", {}
+    meta: dict = {"kw": kw}
+    try:
+        from app.services import blogrank as _br
+        from app.services import datalab as _dl
+        an = cached(kw)
+        if an is None:
+            ensure_async(kw)
+        docs = _br.doc_count(kw)
+        growth = (_dl.growth([kw]) or {}).get(kw)
+        meta.update({"docs": docs, "trend": growth,
+                     "weak": (an or {}).get("weak_blogs"), "strong": (an or {}).get("strong_blogs"),
+                     "age_median": (an or {}).get("age_days_median"),
+                     "angles": (an or {}).get("angles")})
+        # ── 판 판정 ──
+        wk = (an or {}).get("weak_blogs") or 0
+        stg = (an or {}).get("strong_blogs") or 0
+        checked = (an or {}).get("blogs_checked") or 0
+        age = (an or {}).get("age_median") if an else None
+        contested = bool(checked and (stg >= 6 or (wk <= 1 and (age is not None and age <= 60))))
+        open_field = bool((checked and wk >= 3) or (age is not None and age >= 180))
+        rising = growth is not None and growth >= 0.10
+        falling = growth is not None and growth <= -0.10
+        meta["plan"] = ("치열한 판" if contested else "열린 판" if open_field else "보통 판") + \
+                       (" · 상승 추세" if rising else " · 하락 추세" if falling else "")
+        lines = [f"[판 분석 — '{kw}' 전장 실측]"]
+        sig = []
+        if docs and docs > 0:
+            sig.append(f"발행 문서 {docs:,}개")
+        if growth is not None:
+            sig.append(f"최근 3개월 검색 추세 {growth:+.0%}")
+        if checked:
+            sig.append(f"상위권 블로그: 활발 {stg}·약체 {wk}")
+        if age is not None:
+            sig.append(f"상위 글 나이 중앙값 {age}일")
+        if sig:
+            lines.append(" · ".join(sig))
+        # ── 작전 ──
+        if contested:
+            ang = (an or {}).get("angles") or {}
+            dom = max(ang, key=ang.get) if ang else ""
+            gap = min((k for k in ("가격", "방법", "추천", "후기") if k != dom),
+                      key=lambda k: ang.get(k, 0)) if ang else ""
+            lines.append(f"[작전 — 치열한 판: 정면 승부 금지, 각도를 틀어라] 상위권은 활발한 블로그 위주"
+                         + (f"이고 지배 각도는 '{dom}형'({ang.get(dom, 0)}개)" if dom else "") + ". "
+                         + (f"이 글은 '{gap}형' 각도로 진입하라 — 제목·소제목·구성을 그 검색 의도에 맞춰라. " if gap else "")
+                         + "정보 우위가 필수: 상위 기준선보다 실측 수치·표·FAQ를 한 단계 더 갖춰라"
+                         "(단, 입력 사실 안에서만 — 날조 금지·허사로 분량 불리기 금지).")
+        elif open_field:
+            lines.append("[작전 — 열린 판: 정공법·속전속결] 상위권이 낡았거나 약체다. 기준선을 확실히 넘기되 "
+                         "과투자하지 마라(기준선 +10% 정도면 충분). 최신성이 무기다 — 올해 기준·최근 작업임이 "
+                         "드러나는 표현을 도입부에 자연스럽게 써라.")
+        else:
+            lines.append("[작전 — 보통 판] 기준선 충족 + 이 가게만의 실측·경험 디테일로 차별화하라.")
+        if rising:
+            lines.append("[톤 — 상승 수요] 요즘 찾는 사람이 늘어난 주제다 — 도입부에 시의성(최근 문의 증가·시즌 "
+                         "맥락)을 자연스럽게 한 문장 녹여라(과장·날조 금지, 사실 프레임만).")
+        elif falling:
+            lines.append("[톤 — 에버그린] 유행 표현을 피하고 오래 읽힐 기본기형으로 써라(시점 표현 최소화).")
+        return "\n".join(lines) + "\n", meta
+    except Exception:
+        return "", meta
 
 
 def baseline_line(keyword: str) -> str:
