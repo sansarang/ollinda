@@ -129,6 +129,48 @@ def _revise_text(text: str, problems: list[str], is_blog: bool) -> str:
 PUBLISH_MIN = 80    # 발행 게이트 기준선(2026-07-28 사장님 결정: 미달 글은 발행 버튼 자체를 봉인)
 
 
+_EMOJI_RE = re.compile("[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F900-\U0001F9FF❤️]")
+
+
+def _trim_emoji(body: str, keep: int = 1) -> str:
+    """이모지 초과분 기계 삭제(0원) — 채점 기준(네이버 0~1개)에 맞춤. 언어 원리, 업종 무관."""
+    seen = [0]
+
+    def _r(m):
+        seen[0] += 1
+        return m.group(0) if seen[0] <= keep else ""
+    return _EMOJI_RE.sub(_r, body or "")
+
+
+def _surface_fix(pl: dict, warns: list) -> "str | None":
+    """표면 감점(클리셰·도입 훅·동어반복·문단 리듬)만 고치는 소형 콜 1회 — 전체 재작성($0.7)의
+    1/10 비용. 감점 문장은 '이 글 자신'에서 추출된 것(하드코딩 0). 안전게이트(길이·마커 불변) 동일."""
+    body = pl.get("body") or ""
+    if not body:
+        return None
+    from app.generators.text_claude import _call_llm
+    from app.llm import SONNET as _SN
+    _n_mk = len(re.findall(r"\[사진\d+\]", body))
+    raw = (_call_llm(
+        "아래 블로그에서 '지적된 표면 문제'만 최소 수정으로 고쳐라 — 문장 다듬기 수준이며 "
+        "내용·사실·수치·구조는 그대로다.\n"
+        "규칙: ①소제목(##)·표·FAQ·링크 유지 ②[사진N] 마커는 정확히 "
+        f"{_n_mk}개 그대로(추가·삭제 금지, 위치 이동은 허용) ③새 정보·과장 추가 금지 "
+        "④지적 안 된 문장은 손대지 마라.\n"
+        "고치는 법: 클리셰 표현은 그 자리에서 자연스러운 말로 교체 / '도입에 끝까지 읽을 이유 없음'은 "
+        "첫 문단에 이 글이 답할 것을 예고하는 한 문장 추가(본문에 이미 있는 내용만 예고) / "
+        "동어반복 문단은 겹치는 쪽을 압축 / 텍스트 문단 연속은 기존 [사진N] 마커 위치 재배치나 "
+        "소제목 삽입으로 리듬을 끊어라.\n"
+        "출력: 고친 전체 본문만(머리말·설명 금지).\n\n"
+        f"[지적된 표면 문제]\n- " + "\n- ".join(w[:120] for w in warns[:5]) + f"\n\n[본문]\n{body}",
+        model=_SN, max_tokens=min(6000, max(2500, int(len(body) * 0.9)))) or "").strip()
+    raw = re.sub(r"^```[a-z]*\n?|\n?```$", "", raw).strip()
+    if (len(raw) >= len(body) * 0.75
+            and len(re.findall(r"\[사진\d+\]", raw)) == _n_mk):
+        return raw
+    return None
+
+
 def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
     """📮 발행 게이트 — ranking_audit<80이면 감점 사유를 피드백으로 자동 재작성(최대 2회,
     사실·마커·구조 보존). 그래도 미달이면 payload.publish_blocked_score 봉인 플래그(발행 버튼 숨김).
@@ -145,6 +187,28 @@ def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
     au = pl.get("ranking_audit") or {}
     score = au.get("score")
     rounds = 0
+    # 🧹 표면 수선 패스(2026-08-01 사장님 승인 — '한 번에 80점' 2겹): 값비싼 전체 재작성 전에
+    #   ①기계 수선(이모지 초과 = regex, 0원) ②표면 감점만 고치는 소형 콜 1회.
+    #   전부 업종·가게 무관 언어/구조 원리 — 하드코딩 0. 실패는 조용히(기존 루프 그대로 진행).
+    if isinstance(score, int) and score < PUBLISH_MIN:
+        try:
+            _body0 = pl.get("body") or ""
+            _fixed = _trim_emoji(_body0, keep=1)
+            if _fixed != _body0:
+                pl["body"] = _fixed
+            _sw = [w for w in (au.get("warnings") or [])
+                   if any(t in w for t in ("클리셰", "도입", "동어반복", "문단 연속", "연속(시각요소"))]
+            if _sw:
+                _sfx = _surface_fix(pl, _sw)
+                if _sfx:
+                    pl["body"] = _sfx
+            au = seo.quality_audit(blog.channel.value, blog.kind.value, pl, source=source)
+            pl["ranking_audit"] = au
+            score = au.get("score")
+            pl["surface_pass"] = {"applied": bool(_sw) or (_fixed != _body0), "after": score}
+            db.save_piece(blog)
+        except Exception as _e:
+            pl.setdefault("score_gate_stops", []).append(f"surface: 예외 {repr(_e)[:60]}")
     while isinstance(score, int) and score < PUBLISH_MIN and rounds < max_rounds:
         rounds += 1
         warns = "; ".join((au.get("warnings") or [])[:6]) or "감점 사유 미상"
@@ -154,10 +218,14 @@ def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
             from app.llm import SONNET as _SN2, MODEL as _OP
             # 2026-07-29 개선: ①제목 감점도 고치게 [제목] 출력 포함 ②2라운드는 Opus 승격
             #   ③펜스·머리말 세척 후 안전 게이트 ④중단 사유 기록(70점 정체 조사 재발 방지)
+            _n_mk = len(re.findall(r"\[사진\d+\]", body))
             _title0 = pl.get("title") or ""
             raw = (_call_llm(
                 "아래 블로그가 상위노출 채점에서 감점됐다. '감점 사유'를 정확히 고쳐라. "
                 "소제목(##)·표·FAQ·[사진N] 마커·링크·숫자·사실은 그대로 유지, 내용 추가·삭제 금지.\n"
+                f"★[사진N] 마커는 지금 정확히 {_n_mk}개다 — 새 마커 추가 절대 금지, 삭제 금지"
+                "(개수·번호 불변). '시각요소 부족' 감점은 마커 삽입이 아니라 기존 마커 위치 재배치와 "
+                "소제목(##)·표 삽입으로만 해결하라(2026-08-01 실사고: 마커 수십 개 날조 → 보정 전체 폐기).\n"
                 "출력 형식(머리표 유지, 설명 금지):\n[제목]\n(고친 제목 — 문제 없으면 원래 제목 그대로)\n"
                 "[본문]\n(고친 전체 본문)\n\n"
                 f"[감점 사유] {warns}\n[제목] {_title0}\n\n[본문]\n{body}",
