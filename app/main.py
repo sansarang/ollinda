@@ -1500,7 +1500,8 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
             html = _teaser_html(pieces, brief, _a, remaining,
                                 target_kw=target_kw, target_vol=target_vol_n, enrichment=_level)
             with _demo_jobs_lock:
-                _demo_jobs[job] = {"status": "done", "html": html, "ts": _time.time()}
+                _demo_jobs[job] = {"status": "done", "html": html, "ts": _time.time(),
+                                   "tenant": _t}   # 이관 청구권용(가입 시 결과물 인계)
         except Exception as e:
             if not _dev:
                 db.decr_demo_ip(ip)                  # 선예약 환불 — 실패는 한도 미소모(공정)
@@ -1548,7 +1549,11 @@ def api_demo_result(job: str):
                "rate": "지금 생성이 몰렸어요. 1~2분 뒤 다시 시도해 주세요."}.get(
             cat, "생성에 문제가 있었어요. 잠시 후 다시 시도해 주세요.")
         return JSONResponse({"error": msg, "retry": True, "code": cat})
-    return JSONResponse({"ready": True, "teaser": True, "teaser_html": j.get("html", "")})
+    _resp = JSONResponse({"ready": True, "teaser": True, "teaser_html": j.get("html", "")})
+    if j.get("tenant"):   # 🎁 티저 이관(2026-07-31): 가입 시 이 결과물을 그대로 넘겨받는 청구권 쿠키
+        _resp.set_cookie("demo_claim", j["tenant"], max_age=86400, samesite="lax",
+                         secure=auth.cookie_secure())
+    return _resp
 
 
 def _img_thumb_data_uri(path, max_px: int = 640) -> str:
@@ -2719,6 +2724,26 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
     u = auth.current_user(request)
     if not u:
         return RedirectResponse("/login", status_code=303)
+    # 🎁 티저 이관(전환 개선 ②, 2026-07-31 사장님 승인): 미가입 체험에서 만든 결과물을 가입 즉시
+    #   '내 작업실'에 그대로 — 재생성 없이 데모 tenant를 통째로 인계(사진·글·점수 전부 보존).
+    #   조건: 청구권 쿠키 + 대상이 아직 데모 + 내 가게가 비어 있을 때만(기존 콘텐츠 덮어쓰기 방지).
+    import re as _re_cl
+    _claim = (request.cookies.get("demo_claim") or "").strip()
+    if _claim and _re_cl.fullmatch(r"[0-9a-f-]{16,64}", _claim):
+        try:
+            _dt = db.get_tenant(_claim)
+            if _dt is not None and getattr(_dt, "is_demo", 0):
+                _mine = db.get_tenant(u.get("tenant_id") or "") if u.get("tenant_id") else None
+                if _mine is None or not db.list_sets(tenant_id=_mine.id, limit=1):
+                    _nm = ((_dt.name or "").replace("미리보기", "").strip() or "내 가게")
+                    with db._conn() as _c:
+                        _c.execute("UPDATE tenants SET is_demo=0, name=? WHERE id=?", (_nm, _claim))
+                    db.set_user_tenant(u["id"], _claim)
+                    db.link_store(u["id"], _claim)
+                    u["tenant_id"] = _claim
+                    ok = ok or "미가입 체험에서 만든 콘텐츠를 그대로 가져왔어요 — 아래 '내 콘텐츠'에서 완성본을 확인하세요!"
+        except Exception:
+            logging.getLogger("shopcast.demo").exception("[demo-claim] 이관 실패")
     t = _ensure_user_tenant(u)
     tok = db.tenant_token(t.id)
     inp = "w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
@@ -3061,6 +3086,31 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                    "<a href='/billing?plan=basic' class='flex-1 text-center bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition'>베이직 시작</a>"
                    f"<a href='/billing?plan=pro' class='flex-1 text-center bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-xl transition'>프로 (월 {_cfg2.PRICE_PRO:,}원)</a></div>"
                    "<p class='text-xs text-slate-400 mt-2'>연 결제 시 약 30% 할인 · 언제든 해지 가능</p></div>")
+    # 📈 성과 기반 업셀(전환 개선 ③, 2026-07-31 사장님 승인) — '한도 소진'보다 강한 트리거:
+    #   추적 키워드가 상위 20위 안에 들어온 순간, 그 순위를 근거로 제안(손실 회피 프레임).
+    _rank_hook = ""
+    if (not _is_owner(u)) and _plan == "free" and not _upsell:
+        try:
+            _best = None
+            for _kw0 in db.tracked_keywords(t.id, 5):
+                _h0 = db.rank_history(t.id, _kw0, limit=30)
+                _r0 = _h0[-1].get("rank") if _h0 else None
+                if isinstance(_r0, int) and 1 <= _r0 <= 20 and (_best is None or _r0 < _best[1]):
+                    _best = (_kw0, _r0)
+            if _best:
+                from app import config as _cfg3
+                _rank_hook = (
+                    "<div class='bg-white border-2 border-emerald-200 rounded-2xl p-5 mb-4'>"
+                    f"<div class='font-extrabold text-slate-900 mb-1'>🎉 사장님 글이 '<span class='text-emerald-600'>{esc(_best[0])}</span>' "
+                    f"검색 <span class='text-emerald-600'>{_best[1]}위</span>에 있어요</div>"
+                    "<p class='text-sm text-slate-500 mb-3'>순위는 새 글이 계속 올라와야 유지되고 올라갑니다 — "
+                    "여기서 멈추면 경쟁 가게 글이 자리를 채워요.</p>"
+                    "<div class='flex gap-2'>"
+                    f"<a href='/billing?plan=pro' class='flex-1 text-center bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl transition'>스탠다드로 계속 밀어올리기 (월 {_cfg3.PRICE_PRO:,}원)</a>"
+                    f"<a href='/billing?plan=basic' class='flex-1 text-center bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-xl transition'>라이트 (월 {_cfg3.PRICE_BASIC:,}원)</a>"
+                    "</div></div>")
+        except Exception:
+            pass
     _sname = t.name if (t.name and t.name not in ("카카오회원", "구글회원", "회원", "내 가게")) else ""
     greeting = ("<div class='mb-6'>"
                 + (f"<div class='inline-flex items-center gap-1.5 bg-[#EEF2FF] text-indigo-700 text-sm font-bold px-3 py-1.5 rounded-full mb-3'>{_ic('store', 'w-3.5 h-3.5')} {esc(_sname)}</div>" if _sname else "")
@@ -3261,7 +3311,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                           "{var _td=document.getElementById('tools');if(_td)_td.setAttribute('open','');}</script>")
             except Exception:
                 _tools = ""
-            main_inner = (greeting + _conv_card + _upsell + _task + _notice_html
+            main_inner = (greeting + _conv_card + _upsell + _rank_hook + _task + _notice_html
                           + _guide + _blog_nudge + upload_section
                           + "<div class='mt-5'></div>" + _store_info_card(t) + _tools)
     # 🆕 새로 추가한 '빈 새 가게'면 실수 대비 '뒤로가기(취소)' 배너
