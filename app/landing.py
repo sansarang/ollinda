@@ -789,6 +789,21 @@ _QA = [("정말 사진만 올리면 되나요?", "네. 사진과 한 줄 설명�
        ("업종이 특이해도 되나요?", "어떤 업종이든 AI가 맞춤 프로필을 자동 생성합니다.")]
 
 
+def _docs_download() -> str:
+    """제품설명서 PDF·소개 영상 다운로드 스트립(2026-07-31 사장님 지시) — 영업·검토용 자료 제공."""
+    return (
+        "<section class='bg-white py-14'><div class='max-w-3xl mx-auto px-5'>"
+        "<div class='reveal bg-[#EEF2FF] border border-indigo-100 rounded-3xl p-8 text-center'>"
+        "<h3 class='text-xl font-bold text-slate-900 mb-2'>천천히 검토하고 싶으세요?</h3>"
+        "<p class='text-sm text-slate-500 mb-6'>제품설명서와 1분 소개 영상을 받아서 보시고, 팀·가족과 상의 후 시작하셔도 됩니다.</p>"
+        "<div class='flex flex-wrap justify-center gap-3'>"
+        "<a href='/docs/guide.pdf' class='px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold transition'>"
+        "📄 제품설명서 PDF 받기</a>"
+        "<a href='/docs/intro.mp4' class='px-5 py-3 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-sm font-bold transition'>"
+        "🎬 1분 소개 영상 받기</a>"
+        "</div></div></div></section>")
+
+
 def _faq() -> str:
     items = "".join(f"<details class='reveal card p-5'><summary class='font-semibold cursor-pointer text-slate-800'>{q}</summary><p class='text-slate-500 text-sm mt-2'>{a}</p></details>" for q, a in _QA)
     return f"<section id='faq' class='bg-white py-24'><div class='max-w-3xl mx-auto px-5'><h2 class='reveal text-3xl sm:text-4xl font-bold text-center mb-12 text-slate-900'>자주 묻는 질문</h2><div class='space-y-3'>{items}</div></div></section>"
@@ -1047,7 +1062,7 @@ def render() -> str:
             + _why_rank() + _rank_loop() + _briefing_sell()
             + _results() + _honesty()
             + _stats() + _features() + _modes()
-            + _pricing() + _faq() + _contact() + _cta() + _footer()
+            + _pricing() + _docs_download() + _faq() + _contact() + _cta() + _footer()
             + _sticky_cta() + _FOOT)
 
 

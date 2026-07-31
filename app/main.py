@@ -429,6 +429,22 @@ async def admin_dwell_test(request: Request):
                          "body": fixed_body})
 
 
+_DOCS = {"guide.pdf": ("assets/docs/ollinda_guide.pdf", "application/pdf", "올린다_제품설명서.pdf"),
+         "intro.mp4": ("assets/docs/ollinda_intro.mp4", "video/mp4", "올린다_소개영상.mp4")}
+
+
+@app.get("/docs/{name}")
+def public_docs(name: str):
+    """랜딩 다운로드 자료(제품설명서 PDF·소개 영상) — 화이트리스트 파일만(2026-07-31 사장님 지시)."""
+    ent = _DOCS.get(name)
+    if not ent:
+        return HTMLResponse(status_code=404)
+    path, mt, fname = ent
+    if not os.path.exists(path):
+        return HTMLResponse(status_code=404)
+    return FileResponse(path, media_type=mt, filename=fname)
+
+
 @app.get("/admin/audit/{asset_id}")
 def admin_audit(asset_id: str):
     """운영 진단 — 블로그 상위노출 채점 상세(점수·감점 사유·재작성 이력). '왜 80이 안 되나' 가시화."""
@@ -459,6 +475,9 @@ def admin_busy():
         tid, aid = s.get("tenant_id"), s.get("asset_id")
         if tid and tid not in seen_t:
             seen_t.add(tid)
+            _t = db.get_tenant(tid)
+            if _t is not None and getattr(_t, "is_demo", 0):
+                continue                               # 랜딩 데모 tenant — 티저가 진행률을 안 닫아 유령행 남음(실측)
             pr = db.get_gen_progress(tid) or {}
             if pr.get("status") == "running":
                 busy.append({"type": "gen", "tenant": s.get("tenant"), "stage": pr.get("stage")})
