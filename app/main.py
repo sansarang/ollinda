@@ -429,6 +429,16 @@ async def admin_dwell_test(request: Request):
                          "body": fixed_body})
 
 
+def _tenant_is_demo(tid: str) -> bool:
+    """tenants.is_demo 직접 조회 — Tenant 모델에 is_demo 필드가 없어 getattr은 항상 0(실측 버그 2026-07-31)."""
+    try:
+        with db._conn() as c:
+            r = c.execute("SELECT is_demo FROM tenants WHERE id=?", (tid,)).fetchone()
+        return bool(r and r["is_demo"])
+    except Exception:
+        return False
+
+
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # CWD 무관(배포 404 실측)
 _DOCS = {"guide.pdf": ("assets/docs/ollinda_guide.pdf", "application/pdf", "올린다_제품설명서.pdf"),
          "intro.mp4": ("assets/docs/ollinda_intro.mp4", "video/mp4", "올린다_소개영상.mp4")}
@@ -480,7 +490,7 @@ def admin_users():
                     "owner": _is_owner(u), "plan": u.get("plan") or "free",
                     "free_used": u.get("free_used") or 0,
                     "tenant": getattr(t, "name", "") if t else "",
-                    "demo_tenant": bool(getattr(t, "is_demo", 0)) if t else False,
+                    "demo_tenant": _tenant_is_demo(u.get("tenant_id") or ""),
                     "created": (u.get("created_at") or "")[:10]})
     out.sort(key=lambda r: r["created"], reverse=True)
     return JSONResponse({"ok": True, "n": len(out), "users": out})
@@ -498,8 +508,7 @@ def admin_busy():
         tid, aid = s.get("tenant_id"), s.get("asset_id")
         if tid and tid not in seen_t:
             seen_t.add(tid)
-            _t = db.get_tenant(tid)
-            if _t is not None and getattr(_t, "is_demo", 0):
+            if _tenant_is_demo(tid):
                 continue                               # 랜딩 데모 tenant — 티저가 진행률을 안 닫아 유령행 남음(실측)
             pr = db.get_gen_progress(tid) or {}
             if pr.get("status") == "running":
@@ -913,12 +922,8 @@ def admin_biz_metrics(days: int = 30):
         _em = (u.get("email") or "").lower()
         # 실측(2026-07-31): 43명 전원이 @ollinda.test/@ollinda.guest 개발 계정이었음 — 합성 도메인 제외
         _real = not (_is_owner(u) or _em.endswith("@ollinda.test") or _em.endswith("@ollinda.guest"))
-        try:                                           # 운영자 소유 tenant(주안모터스 등 테스트 가게)도 제외
-            _t = db.get_tenant(u.get("tenant_id") or "")
-            if _t is not None and getattr(_t, "is_demo", 0):
-                _real = False
-        except Exception:
-            pass
+        if _real and _tenant_is_demo(u.get("tenant_id") or ""):
+            _real = False                              # 데모 tenant 소유 = 테스트 계정
         if pl in ("basic", "pro", "self", "agency"):
             paid += 1
         elif (u.get("free_used") or 0) > 0:
@@ -2732,7 +2737,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
     if _claim and _re_cl.fullmatch(r"[0-9a-f-]{16,64}", _claim):
         try:
             _dt = db.get_tenant(_claim)
-            if _dt is not None and getattr(_dt, "is_demo", 0):
+            if _dt is not None and _tenant_is_demo(_claim):
                 _mine = db.get_tenant(u.get("tenant_id") or "") if u.get("tenant_id") else None
                 if _mine is None or not db.list_sets(tenant_id=_mine.id, limit=1):
                     _nm = ((_dt.name or "").replace("미리보기", "").strip() or "내 가게")
