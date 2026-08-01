@@ -379,6 +379,9 @@ def blocks_ingest(tenant_id: str, rows: list) -> dict:
     return {"ok": True, "saved": saved}
 
 
+_MIN_SCAN_VOLUME = 100     # 월검색량 하한 — 이 아래는 지면을 훑어도 유입이 없다(정찰 기준과 동일)
+
+
 def scout_plan(tenant_id: str, limit: int = 30, ttl_days: int = 7) -> list:
     """🗺 지면 정찰 계획(2026-08-01 사장님 승인 ①) — 이 가게에서 '지면을 확인해야 할 키워드' 목록.
 
@@ -395,10 +398,26 @@ def scout_plan(tenant_id: str, limit: int = 30, ttl_days: int = 7) -> list:
     if not t:
         return []
     cands: list = []
+    from app import seo as _seo
+
+    def _worthy(k: str) -> bool:
+        """훑을 값어치가 있는 '검색어'인가 — 글 문장 조각·과잉 어절을 배제(언어 규칙만).
+        실측 2026-08-01: 타깃 키워드 데이터에 '신차라면 이것도 같이 보세요', '부산 기장에서
+        전국으로' 같은 제목 조각이 섞여 있었다. 사람은 이렇게 검색하지 않는다."""
+        if not (2 <= len(k) <= 22) or len(k.split()) > 4:
+            return False
+        if re.search(r"[,·—\-–…?!]|\.\.\.", k):
+            return False
+        if re.search(r"(요|다|죠|까|네|고|만)$", k) and len(k.split()) >= 2:
+            return False        # 서술형 종결 = 문장 조각
+        if re.search(r"(에서|으로|까지|부터|처럼|보다|에게|한테|이나|라면|하면)$", k):
+            return False        # 조사·연결어미로 끝남 = 검색어가 아니라 문장 일부
+        return bool(re.search(r"[가-힣]{2,}", k))
 
     def _add(k):
-        k = " ".join((k or "").split())
-        if k and 2 <= len(k) <= 30 and k not in cands:
+        # 행정구역 풀네임은 구어형으로(실측: '부산광역시 썬팅' 검색량 0) — 전 표면 단일 소스 재사용
+        k = " ".join((_seo._kw_shorten(k or "")).split())
+        if _worthy(k) and k not in cands:
             cands.append(k)
 
     try:
@@ -449,6 +468,18 @@ def scout_plan(tenant_id: str, limit: int = 30, ttl_days: int = 7) -> list:
             return (0, "")
     todo = [k for k in cands if _age(k)[0] == 0]
     todo.sort(key=lambda k: _age(k)[1])        # 오래된 것부터
+    todo = todo[:max(1, limit) * 2]            # 검색량 관문 통과분을 채우기 위해 여유를 둔다
+    # 🔎 검색량 관문 — 아무도 안 치는 말의 지면을 훑는 건 시간 낭비다(queryscout와 동일 기준).
+    #   키가 없거나 조회 실패면 통과(막지 않는다 — 기존 동작).
+    try:
+        from app.services import searchad as _sa
+        if _sa.configured() and todo:
+            vols = _sa.volume_map(todo) or {}
+            _kept = [k for k in todo if int(vols.get(k.replace(" ", "")) or 0) >= _MIN_SCAN_VOLUME]
+            if _kept:
+                todo = _kept
+    except Exception:
+        pass
     return todo[:max(1, limit)]
 
 
