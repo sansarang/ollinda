@@ -175,12 +175,42 @@ def diagnose(tenant_id: str) -> dict:
     except Exception:
         pass
     _map = (getattr(t, "map_url", "") or "").strip()
-    if (getattr(t, "biz_type", "local") or "local") != "seller" and not _map:
-        rx.append({"level": "mid", "area": "플레이스",
-                   "msg": "네이버 플레이스(지도) 링크가 등록돼 있지 않습니다 — 지도→블로그 유입 경로가 끊깁니다."})
+    _is_local = (getattr(t, "biz_type", "local") or "local") != "seller"
+    place: dict = {}
+    if _is_local:
+        try:
+            place = place_audit(t)
+        except Exception:
+            place = {}
+        if not _map:
+            rx.append({"level": "mid", "area": "플레이스",
+                       "msg": "네이버 플레이스(지도) 링크가 등록돼 있지 않습니다 — 지도→블로그 유입 경로가 끊깁니다."})
+        if place.get("configured") and place.get("registered") is False:
+            rx.append({"level": "high", "area": "플레이스 등록",
+                       "msg": f"'{t.name}'이(가) 네이버 지역검색에 안 잡힙니다 — 통합검색 첫 화면의 "
+                              "플레이스 자리를 통째로 놓치고 있습니다. 네이버 스마트플레이스에 "
+                              "업체 등록(무료)이 최우선입니다."})
+        elif place.get("registered"):
+            if place.get("has_tel") is False:
+                rx.append({"level": "mid", "area": "플레이스 정보",
+                           "msg": "플레이스에 전화번호가 비어 있습니다 — 전화 문의 전환이 끊깁니다."})
+            elif place.get("tel_match") is False:
+                rx.append({"level": "high", "area": "플레이스 정보",
+                           "msg": f"플레이스 전화번호가 가게 정보와 다릅니다(등록: {place.get('listed',{}).get('tel')}) "
+                                  "— 손님이 다른 번호로 겁니다. 즉시 수정하세요."})
+            _rr = place.get("region_rank")
+            if _rr == 0:
+                rx.append({"level": "high", "area": "플레이스 순위",
+                           "msg": f"'{place.get('region_kw')}' 지역검색 상위 5곳 안에 없습니다"
+                                  f"(1위: {place.get('leader') or '?'}). 플레이스 사진·소개·영업정보·"
+                                  "리뷰를 채우는 것이 블로그 글 한 편보다 유입 효과가 큽니다."})
+            elif isinstance(_rr, int) and _rr >= 2 and place.get("rival"):
+                rx.append({"level": "mid", "area": "플레이스 순위",
+                           "msg": f"'{place.get('region_kw')}' {_rr}위 — 바로 위는 '{place.get('rival')}'입니다. "
+                                  "사진·리뷰·정보 완성도로 추월 가능한 거리입니다."})
     return {"ok": True, "tenant": t.name, "profile": prof, "theme_fit": fit,
             "posts_per_week": per_week, "last_post_days": last_days,
-            "external": ext, "prescriptions": rx}
+            "external": ext, "place": place, "prescriptions": rx}
 
 
 def external_reach(blog_id: str, post_url: str = "", keyword: str = "") -> dict:
@@ -217,6 +247,46 @@ def external_reach(blog_id: str, post_url: str = "", keyword: str = "") -> dict:
                 out["image_rank"] = None
         except Exception:
             out["image_rank"] = None
+    return out
+
+
+def place_audit(tenant) -> dict:
+    """📍 플레이스 진단(2026-08-01) — 지역 업종의 실질 1지면. 공식 지역검색 API만 사용(크롤 0).
+    확인: ①등록 여부(상호 검색으로 잡히는가) ②등록 정보 정합(업종·주소·전화) ③지역+업종 노출 순위.
+    실측 배경: 통합검색 첫 화면을 플레이스가 차지하는 판이 많아 블로그보다 이쪽이 실효가 크다."""
+    from app.services import place as _pl
+    out: dict = {"configured": _pl.configured()}
+    if not _pl.configured():
+        return out
+    name = (getattr(tenant, "name", "") or "").strip()
+    if not name:
+        return out
+    hits = _pl.search(name, 5) or []
+    mine = next((h for h in hits if _pl._name_match(name, h.get("name", ""))), None)
+    out["registered"] = bool(mine)
+    if mine:
+        out["listed"] = {k: mine.get(k) for k in ("name", "category", "address", "tel")}
+        # 정보 정합 — 우리가 아는 값과 다르면 손님이 헷갈리고 신뢰 신호도 약해진다
+        _tel = re.sub(r"[^0-9]", "", (getattr(tenant, "phone", "") or ""))
+        _ltel = re.sub(r"[^0-9]", "", mine.get("tel") or "")
+        out["tel_match"] = (not _tel) or (not _ltel) or (_tel[-8:] == _ltel[-8:])
+        out["has_tel"] = bool(_ltel)
+    # 지역+업종 노출 — canonical 지역 토큰으로(전 표면 단일 소스 재사용)
+    try:
+        from app import seo as _seo
+        reg = _seo.canonical_region(getattr(tenant, "region", "") or "",
+                                    getattr(tenant, "biz_type", "local") or "local",
+                                    getattr(tenant, "industry", "") or "")
+        ind = ((getattr(tenant, "industry", "") or "").replace("/", ",").split(",")[0] or "").strip()
+        kw = " ".join(x for x in (reg, ind) if x).strip()
+        if kw:
+            d = _pl.rank_detail(kw, name, 5)
+            out["region_kw"] = kw
+            out["region_rank"] = d.get("rank")            # 0=상위5 밖
+            out["leader"] = d.get("leader")
+            out["rival"] = d.get("rival")
+    except Exception:
+        pass
     return out
 
 
