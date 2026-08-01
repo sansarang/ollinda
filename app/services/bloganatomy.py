@@ -168,8 +168,11 @@ def _query_phrases(seg: str, text: str) -> list:
         w = _norm_token(w)
         if len(w) >= 2:
             words.append(w)
-    for w in words:                                    # 단일 도메인 용어('성능점검기록부','유리막코팅')
-        if len(w) >= 3 and re.search(r"[가-힣]{3,}", w):
+    # 단일 도메인 용어('성능점검기록부','유리막코팅','주행거리') — 동사·부사 활용형은 제외.
+    # 한국어 명사는 아래 어미로 끝나지 않는다는 언어 규칙만 사용(업종 어휘 하드코딩 0).
+    _VERB_TAIL = re.compile(r"(요|다|고|서|지|나|까|네|죠|히|며|면|든|랑|께|든지|니|든가)$")
+    for w in words:
+        if len(w) >= 3 and re.search(r"[가-힣]{3,}", w) and not _VERB_TAIL.search(w):
             _push(w)
     for n in (2, 3):
         for i in range(len(words) - n + 1):
