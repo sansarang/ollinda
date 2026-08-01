@@ -480,6 +480,31 @@ def admin_shop_perf():
     return JSONResponse({"ok": True, "shops": out})
 
 
+@app.get("/admin/kw-region")
+def admin_kw_region(kw: str = "", region: str = ""):
+    """운영 진단 — 지역 정합 게이트 단건 판정(2026-08-01): 키워드가 가게 지역과 충돌하는가."""
+    from app import seo as _seo
+    if not (kw.strip() and region.strip()):
+        return JSONResponse({"ok": False, "error": "kw·region 필요"}, status_code=400)
+    return JSONResponse({"ok": True, "kw": kw, "region": region,
+                         "conflict": _seo.region_conflict(kw, region)})
+
+
+@app.post("/admin/score-gate/{asset_id}")
+def admin_score_gate(asset_id: str):
+    """운영 진단 — 발행 게이트(표면 수선 포함) 단독 재실행. 미달 글의 수선 효과 실측용."""
+    blog = next((p for p in db.get_set_pieces(asset_id) if p.kind.value == "blog"), None)
+    if not blog:
+        return JSONResponse({"ok": False, "error": "블로그 없음"}, status_code=404)
+    from app.services import qualitycheck as _qc
+    _before = ((blog.payload.get("ranking_audit") or {}).get("score"))
+    r = _qc.score_gate(asset_id, source=(blog.payload.get("gen_source") or ""))
+    blog2 = next((p for p in db.get_set_pieces(asset_id) if p.kind.value == "blog"), None)
+    return JSONResponse({"ok": True, "before": _before, "result": r,
+                         "surface_pass": (blog2.payload.get("surface_pass") if blog2 else None),
+                         "stops": (blog2.payload.get("score_gate_stops") if blog2 else None)})
+
+
 @app.get("/admin/kw-supply")
 def admin_kw_supply(hints: str = ""):
     """운영 진단 — 공급 신호 키워드 선정 확인(2026-08-01): 후보별 검색량·문서수·기회지수·광고경쟁·최종 선정."""

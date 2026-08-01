@@ -379,6 +379,41 @@ def parent_keyword(kw: str, region: str = "", address: str = "") -> str:
     return cands[0]
 
 
+def region_conflict(kw: str, region: str) -> bool:
+    """키워드가 '가게 지역과 다른 지역'을 겨냥하는지 판정(지역 정합 게이트, 2026-08-01).
+    지역 사전 하드코딩 없음 — LLM YES/NO, (키워드|지역) 7일 캐시. 무키·실패 False(막지 않음)."""
+    kw = " ".join((kw or "").split())
+    reg = " ".join((region or "").split())
+    if not (kw and reg):
+        return False
+    try:
+        from app import ratelimit as _rl
+        _ck = f"kwregion:{kw}|{reg}"
+        _hit = _rl.cache_get(_ck, 7 * 86400)
+        if _hit is not None:
+            return bool(_hit.get("conflict", False))
+    except Exception:
+        _rl = None
+        _ck = ""
+    try:
+        from app import llm as _llm
+        v = _llm.call(
+            f"키워드: '{kw}' / 가게 소재지: '{reg}'\n"
+            "이 키워드 안에 한국의 지역명(시·군·구·동네)이 포함되어 있고, 그 지역이 가게 소재지와 "
+            "명백히 다른 생활권이면 YES. 지역명이 없거나, 가게 소재지와 같은 지역(상위 광역 포함 — "
+            "예: 가게가 '부산 동구'면 '부산'은 같은 지역)이면 NO. YES 또는 NO 한 단어만.",
+            max_tokens=10)
+        conflict = "YES" in (v or "").strip().upper()[:8]
+    except Exception:
+        conflict = False
+    try:
+        if _rl and _ck:
+            _rl.cache_set(_ck, {"conflict": conflict})
+    except Exception:
+        pass
+    return conflict
+
+
 def keyword_intent_ok(kw: str, industry: str, biz: str, content_type: str, note: str = "") -> bool:
     """키워드-소재 의도 정합 검증(제목 개선 ①) — 검색량이 커도 '이 글이 그 검색의 답이 되는' 키워드만.
     실측 결함: '자동차판매순위'(브랜드 판매량 통계 의도)가 중고 매물 글 타깃으로 선정 → 제목 어색 + 이탈 유발.
@@ -435,6 +470,14 @@ def resolve_target_keyword(industry: str, region: str, note: str, biz: str = "lo
     kplan = keyword_plan(prof_name, region, note, axis=keyword_axis, brand=brand)
     kw0 = kplan.get("headline") or (kws[0] if kws else prof_name)
     tkw = (target_kw_override or "").strip()
+    # 🗺 지역 정합 게이트(2026-08-01 사장님 지시 — '김해썬팅' 실사고): 수동 지정 키워드가
+    #   가게 지역과 다른 지역을 겨냥하면 무시하고 자동 선정으로 폴백(다른 지역 검색자에게 미끼 글 방지).
+    #   지역 사전 하드코딩 없이 LLM YES/NO + 7일 캐시(의도 게이트와 동일 패턴). 무키·실패 = 통과(기존 동작).
+    if tkw and (region or "").strip() and region_conflict(tkw, region):
+        import logging as _lgrc
+        _lgrc.getLogger("shopcast.seo").warning(
+            "[지역게이트] 수동 키워드 %r ↛ 가게 지역 %r — 무시하고 자동 선정", tkw, region)
+        tkw = ""
     if tkw:
         kw0 = tkw
         kws = list(dict.fromkeys([tkw] + kws))[:10]
