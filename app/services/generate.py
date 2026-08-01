@@ -48,9 +48,13 @@ def generate_for(tenant: Tenant, asset: Asset, kinds: list[ContentKind],
                 asset.target_kw = _kw0
         except Exception:
             pass
-    # ★ 병렬화 기본 OFF(긴급 롤백) — 채널 병렬 생성이 행(hang) 유발 실측(타임아웃 없는 LLM 호출이 블록).
-    #   순차로 복귀(모델 하이브리드 Haiku/Sonnet는 유지 → 속도 이득 대부분 보존). 타임아웃 보강 후 재활성.
-    if len(kinds) <= 1 or os.environ.get("SHOPCAST_GEN_PARALLEL", "0") == "0":
+    # ★ 병렬화 재활성(2026-08-01) — 원래 껐던 이유는 '타임아웃 없는 LLM 호출이 블록'이었고,
+    #   그 조건이 해소됐다: llm.call이 출력 예산에 비례한 클라이언트 타임아웃 + 재시도 상한 3을
+    #   갖고, 빈 응답도 예외로 올린다(무한 대기 경로 없음). 실측 근거: 본문 68.6초 → 캡션 21.1초
+    #   → X 5.3초를 줄줄이 기다려 95초. 서로 의존이 없으므로 동시에 돌리면 68초로 줄어든다.
+    #   (캡션·X는 '현재 블로그 피스'를 읽지 않는다 — 참고하는 건 이전 세트의 도입부뿐.)
+    #   되돌리려면 SHOPCAST_GEN_PARALLEL=0.
+    if len(kinds) <= 1 or os.environ.get("SHOPCAST_GEN_PARALLEL", "1") == "0":
         return _generate_sequential(tenant, asset, kinds, images)
 
     from concurrent.futures import ThreadPoolExecutor
@@ -64,6 +68,12 @@ def generate_for(tenant: Tenant, asset: Asset, kinds: list[ContentKind],
             logging.exception("[generate] %s 생성 실패", kind)
             return (kind, None, repr(e)[:200])
 
+    try:   # 병렬에선 채널별 라벨을 순차로 갱신할 수 없다 — 한 번에 정직하게 표시
+        from app import db as _dbp
+        if len(kinds) > 1:
+            _dbp.set_gen_progress(tenant.id, "body", "글·캡션 동시에 쓰는 중", "", 0.6)
+    except Exception:
+        pass
     _cc = min(len(kinds), int(os.environ.get("SHOPCAST_GEN_CONCURRENCY", "4")))
     with ThreadPoolExecutor(max_workers=max(1, _cc)) as ex:
         results = list(ex.map(_one, kinds))            # 입력 순서 보존

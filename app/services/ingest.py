@@ -330,7 +330,13 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
             p.payload["geo_audit"] = seo.geo_audit(
                 "blog", p.payload, name=tenant.name, industry=tenant.industry,
                 region=tenant.region or "", biz_type=getattr(tenant, "biz_type", "local") or "local")
-        polish(tenant, p)                                       # 🔍 SEO 편집장(저점수만 부분 수정)
+        # 🔍 SEO 편집장(저점수만 부분 수정) — ★ 블로그는 제외한다(2026-08-01 실측).
+        #   같은 감점 목록을 여기서 한 번(115초), 뒤의 발행 게이트에서 표면수선+재작성으로 또 한 번
+        #   고치고 있었다. 중복 보정은 시간·비용을 두 배로 쓰면서 서로의 결과를 덮어쓴다.
+        #   블로그 수선은 발행 게이트가 단독 책임진다(그쪽이 채점→수선→재채점 루프를 갖는다).
+        #   캡션은 게이트가 손대지 않으므로 여기서 계속 고친다.
+        if p.kind != ContentKind.BLOG:
+            polish(tenant, p)
         try:                                                    # 콘텐츠별 추적링크 자동 포함(추적 P1)
             from app.services import tracklinks                 # polish 뒤 — 리라이트로 링크 유실 방지
             tracklinks.inject(tenant, p)
@@ -380,12 +386,64 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
         else:
             _cs[_ch] = {"status": "failed", "error": _LE.get(str(_k), "생성 실패(로그 참조)")}
     _set_channel_status(asset.id, _cs)
+    # ⚡ 텍스트 완성 = 사장님 체감 완료(2026-08-01 실측 개선). 실측 712초 중 품질 보정이 496초로
+    #   70%였는데 그동안 사장님은 빈 화면을 봤다. 글은 3분 30초면 다 나온다 → 여기서 바로 열어주고
+    #   품질 보정은 백그라운드로 넘긴다. 점수는 끝나는 대로 화면에서 알아서 올라간다.
+    try:
+        db.record_gen_duration(tenant.id, max(0.0, _tprog.time() - _t_start))
+    except Exception:
+        pass
+    try:
+        db.set_gen_progress(tenant.id, "done", "콘텐츠 완성",
+                            "영상은 목록에서 원하는 플랫폼을 골라 만들 수 있어요", 1.0, status="done")
+    except Exception:
+        pass
+    _polish_async(tenant, asset, pieces)
+    return pieces
+
+
+def _polish_async(tenant: Tenant, asset, pieces: list) -> None:
+    """품질 보정을 백그라운드로 — 사장님은 기다리지 않는다(2026-08-01).
+    ★ 내부 순서는 기존과 동일하게 유지한다(자체검사 → 발행게이트 → 비용 → 서명 → 플레이스 →
+      자동발행). 서명·플레이스 문구를 게이트보다 먼저 붙이면 재작성이 그것들을 지운다."""
+    if not pieces:
+        return
+    _aid = pieces[0].asset_id
+
+    def _flag(status: str, note: str = "") -> None:
+        try:
+            from datetime import datetime as _dpf
+            _b = next((p for p in db.get_set_pieces(_aid) if p.kind == ContentKind.BLOG), None)
+            if _b:
+                db.update_piece_payload(_b.id, {"polish_job": {
+                    "status": status, "note": note, "ts": _dpf.utcnow().isoformat()}})
+        except Exception:
+            pass
+
+    import logging as _lgp
+
+    def _run() -> None:
+        _flag("running", "상위노출 기준 맞추는 중")
+        try:
+            _polish_body(tenant, asset, pieces)
+        finally:
+            _flag("done")
+        try:
+            _autopilot(tenant, pieces)
+        except Exception:
+            _lgp.getLogger("shopcast.ingest").exception("[autopilot] 실패")
+    import threading as _th_pol
+    _th_pol.Thread(target=_run, daemon=True).start()
+
+
+def _polish_body(tenant: Tenant, asset, pieces: list) -> None:
+    """(백그라운드) 자체검사 → 발행게이트 → 비용 기록 → 서명 → 플레이스 문구."""
+    from app import llm as _llmc
     # 📏 글올리기 전 자체 검사 AI(2026-07-28 사장님 결정) — 터미널 에이전트 방식: 스스로 검사 →
     #   걸린 항목만 표면 수정 → 재검사. 통과한 글만 사장님 눈에 닿는다(사장님=QA 구조 종식).
     #   끄기: SHOPCAST_SELF_REVIEW=0. 검사 자체는 비용 0(기계 채점), 수정은 걸렸을 때만 LLM 1~3콜.
     try:
         if os.environ.get("SHOPCAST_SELF_REVIEW", "1") != "0" and pieces:
-            _prog("polish", "자체 검사·퇴고 중", "", 0.9)
             from app.services import qualitycheck as _qc
             _sr = _qc.self_review(pieces[0].asset_id, max_rounds=1)
             _blog_sr = next((p for p in pieces if p.kind == ContentKind.BLOG), None)
@@ -405,7 +463,6 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
     #   그래도 미달이면 발행 버튼 봉인(publish_blocked_score). 미달 글은 발행 대상으로 안 보이게.
     try:
         if pieces and os.environ.get("SHOPCAST_SCORE_GATE", "1") != "0":
-            _prog("polish", "상위노출 기준 맞추는 중", "", 0.94)
             from app.services import qualitycheck as _qc2
             _sg = _qc2.score_gate(pieces[0].asset_id, source=asset.note or "")
             if _sg:
@@ -452,21 +509,7 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
                 db.save_piece(blog_piece)
     except Exception:
         pass
-    # 🎬 영상 온디맨드 — 자동 생성 폐지: 글이 먼저 완성되고, 영상은 사용자가 홈에서 플랫폼(숏폼·릴스·네이버)을
-    #   골라 요청할 때 생성(request_video_bundle). 렌더 대기·vision/LLM 경합이 글 완성 시간을 늘리지 않는다.
-    #   채널 상태는 not_requested — 워치독은 video_job이 있는 세트만 살피므로 미요청 세트를 부활시키지 않는다.
-    # 텍스트 완성 — 이 시점까지가 체감 소요. 실측 기록(범위 자동 갱신) + '영상 준비 중'(비동기 렌더).
-    try:
-        db.record_gen_duration(tenant.id, max(0.0, _tprog.time() - _t_start))
-    except Exception:
-        pass
-    try:   # 글 완성 = 생성 완료(영상은 온디맨드) — 진행률 즉시 종료
-        db.set_gen_progress(tenant.id, "done", "콘텐츠 완성",
-                            "영상은 목록에서 원하는 플랫폼을 골라 만들 수 있어요", 1.0, status="done")
-    except Exception:
-        pass
-    _autopilot(tenant, pieces)
-    return pieces
+    # 🎬 영상은 온디맨드(자동 생성 폐지) — 사용자가 홈에서 플랫폼을 골라 요청할 때 생성한다.
 
 
 def _autopilot(tenant: Tenant, pieces: list[ContentPiece]) -> None:

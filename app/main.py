@@ -785,6 +785,14 @@ def admin_busy():
         pl = (blog.payload or {}) if blog else {}
         if _rewrite_running(pl):
             busy.append({"type": "rewrite", "tenant": s.get("tenant"), "asset": aid[:8]})
+        _pj = pl.get("polish_job") or {}               # ⚡ 백그라운드 품질 보정(2026-08-01)
+        if _pj.get("status") == "running":
+            try:
+                _pa = (_d.utcnow() - _d.fromisoformat(_pj.get("ts", ""))).total_seconds()
+            except Exception:
+                _pa = 1e9
+            if _pa < 900:                              # 15분 넘으면 죽은 잡 — 배포를 막지 않는다
+                busy.append({"type": "polish", "tenant": s.get("tenant"), "asset": aid[:8]})
         vj = pl.get("video_job") or {}
         if vj.get("status") in ("registered", "running", "retrying"):
             try:      # 유령 잡 필터(실측: 7/24부터 'running' 잔존) — 2시간 넘으면 죽은 것
@@ -6252,6 +6260,16 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
             cls = ("bg-emerald-100 text-emerald-700" if sc >= 85 else
                    "bg-amber-100 text-amber-700" if sc >= 70 else "bg-slate-100 text-slate-600")
             badge = f"<span class='ml-2 text-[11px] font-bold px-2 py-0.5 rounded-full {cls}'>상위노출 {sc}점</span>"
+            # ⚡ 품질 보정은 백그라운드(2026-08-01) — 글은 먼저 열리고 점수는 뒤에서 올라간다.
+            #   끝나면 자동 새로고침해서 최종 점수를 보여준다(사장님이 새로고침할 필요 없음).
+            if ((pl or {}).get("polish_job") or {}).get("status") == "running":
+                badge += ("<span class='ml-1 text-[11px] font-bold text-indigo-500 bg-indigo-50 "
+                          "px-2 py-0.5 rounded-full'>다듬는 중… 점수 더 올라가요</span>"
+                          "<script>(function(){var n=0;var iv=setInterval(async function(){n++;"
+                          "if(n>120){clearInterval(iv);return;}try{var d=await (await "
+                          "fetch('/me/polish-status?asset_id=" + esc(asset_id) + "')).json();"
+                          "if(d&&d.status==='done'){clearInterval(iv);location.reload();}}"
+                          "catch(_){}},5000);})();</script>")
             why = _score_why(au)
             if why and sc < 100:
                 badge += (f"<details class='inline-block ml-1 align-middle'><summary class='text-[11px] text-slate-400 cursor-pointer list-none'>왜?</summary>"
@@ -7210,6 +7228,27 @@ def me_rewrite_status(request: Request, asset_id: str = ""):
     _st = (blog.payload.get("rewrite_job") or {}).get("status") or ""
     if _st == "running" and not _rewrite_running(blog.payload):
         _st = "failed"                                 # 죽은 잡 — 폴링 화면이 새로고침해 버튼 복구
+    return JSONResponse({"ok": True, "status": _st})
+
+
+@app.get("/me/polish-status")
+def me_polish_status(request: Request, asset_id: str = ""):
+    """품질 보정(백그라운드) 진행 폴링 — running/done (소유 검증).
+    2026-08-01: 글은 텍스트 완성 즉시 열리고 보정은 뒤에서 돈다 → 끝나면 화면이 스스로 갱신."""
+    u = auth.current_user(request)
+    pieces = _owned_pieces(u, asset_id) if u else None
+    if not pieces:
+        return JSONResponse({"ok": False}, status_code=404)
+    blog = next((p for p in pieces if p.kind.value == "blog"), None)
+    pj = ((blog.payload if blog else {}) or {}).get("polish_job") or {}
+    _st = pj.get("status") or "done"                   # 기록 없음 = 옛 세트 → 진행 중 아님
+    if _st == "running":                               # 죽은 잡(배포 재시작 등) 자동 해제 — 15분
+        try:
+            from datetime import datetime as _dps
+            if (_dps.utcnow() - _dps.fromisoformat(pj.get("ts", ""))).total_seconds() > 900:
+                _st = "done"
+        except Exception:
+            _st = "done"
     return JSONResponse({"ok": True, "status": _st})
 
 
