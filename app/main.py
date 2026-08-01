@@ -866,6 +866,28 @@ def admin_users():
     return JSONResponse({"ok": True, "n": len(out), "users": out})
 
 
+@app.post("/admin/set/{asset_id}/clear-video-status")
+def admin_clear_video_status(asset_id: str):
+    """🧹 낡은 영상 상태 정리(운영 복구) — 죽은 잡·지난 실패 기록이 화면에 '만드는 중'으로 남는 문제.
+    영상 파일이 실제로 있는 채널만 done, 나머지는 not_requested로 되돌린다(요청 이력 초기화).
+    글·사진·영상 파일 자체는 건드리지 않는다."""
+    from app.domain.models import ContentKind as _CKv
+    ps = db.get_set_pieces(asset_id)
+    blog = next((p for p in ps if p.kind == _CKv.BLOG), None)
+    if not blog:
+        return JSONResponse({"ok": False, "error": "블로그 피스 없음"}, status_code=404)
+    short = next((p for p in ps if p.kind == _CKv.SHORT and (p.payload or {}).get("video_path")), None)
+    _nv = ((short.payload.get("naver_video") or {}) if short else {})
+    cs = dict(blog.payload.get("channel_status") or {})
+    for ch, ok in (("shorts", bool(short and short.payload.get("video_path"))),
+                   ("reels", bool(short and (short.payload.get("video_variants") or {}))),
+                   ("naver", bool(_nv.get("path"))),
+                   ("clip", bool((_nv.get("clip") or {}).get("path")))):
+        cs[ch] = {"status": "done"} if ok else {"status": "not_requested"}
+    db.update_piece_payload(blog.id, {"channel_status": cs, "video_job": {}})
+    return JSONResponse({"ok": True, "channel_status": cs})
+
+
 @app.post("/admin/credit-reset")
 def admin_credit_reset():
     """💳 크레딧 충전 후 즉시 재개(운영 복구용) — 30분 자동 해제를 기다리지 않는다."""
@@ -3420,7 +3442,9 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                     _retry = " 다시" if stt == "failed" else ""
                     chips += ("<label class='text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 "
                               "rounded-full cursor-pointer inline-flex items-center gap-1'>"
-                              f"<input type='checkbox' name='vp_{aid}' value='{ch}' checked "
+                              # ★ 기본 해제(2026-08-01 사장님 지시) — 셋 다 켜져 있어 '영상 만들기'만
+                              #   누르면 요청하지 않은 쇼츠·릴스까지 만들어졌다(API 크레딧 소모).
+                              f"<input type='checkbox' name='vp_{aid}' value='{ch}' "
                               f"class='w-3 h-3 accent-indigo-600'>{lab}{_retry}</label>")
             btn = (("<button type='button' onclick=\"vdMake('" + aid + "')\" "
                     "class='text-[10px] font-bold text-white bg-slate-800 hover:bg-slate-900 "

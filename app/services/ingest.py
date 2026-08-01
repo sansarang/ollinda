@@ -694,11 +694,15 @@ def _restore_media(tenant_id: str, paths: list) -> list:
 
 def video_watchdog() -> None:
     """(영상 증발 재발 방지) 죽은 영상 잡 감지·1회 자동 재시도 — 기존 30분 크론(fresh_index)에 얹힘.
+    ★ 기본 OFF(2026-08-01 사장님 지시) — 자동 재시도가 사용자가 요청하지 않은 렌더를 돌려
+      API 크레딧을 소모했다. 켜려면 SHOPCAST_VIDEO_WATCHDOG=1.
     판정: 최근 24h 세트에 블로그는 있는데 SHORT가 없고, video_job이 done/failed 어느 쪽도 아니며
     30분 이상 경과 → 죽은 잡(스레드 사망·배포 킬·기록 이전 구건). retried 1회 제한(폭주 금지)."""
     import logging
     import os as _os
     from datetime import datetime, timedelta
+    if _os.environ.get("SHOPCAST_VIDEO_WATCHDOG", "0") != "1":
+        return                       # 자동 영상 재시도 전면 중지(사용자가 누를 때만 만든다)
     log = logging.getLogger("shopcast.video")
     try:
         for row in db.recent_blog_piece_rows(hours=24, limit=50):
