@@ -535,6 +535,53 @@ def admin_quality_check_all(request: Request):
     return JSONResponse({"ok": True, "results": out})
 
 
+@app.post("/admin/inflow-ingest")
+async def admin_inflow_ingest(request: Request):
+    """📊 유입 검색어 수집 반영(2026-08-01 사장님 지시 D) — 맥 로컬 수집기(insight/inflow.py)가 POST.
+    블로그 channel_id로 가게를 찾아 ①이미 순위가 잡히는 검색어는 추적 편입 ②검색량 있는데 밖인 것은
+    글감 큐 적재. 판단은 기존 신호(검색량·문서수) 재사용 — 하드코딩 0."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "JSON 필요"}, status_code=400)
+    from app.services import blogrank as _br
+    from app.services import searchad as _sa
+    from app.services import blogsync as _bs
+    out = []
+    for row in (body.get("rows") or [])[:20]:
+        cid = _bs.normalize_blog_id(str(row.get("channel_id") or ""))
+        t = next((x for x in db.list_tenants_with_blog()
+                  if _bs.normalize_blog_id(getattr(x, "blog_id", "") or "") == cid), None)
+        if not t:
+            out.append({"channel": cid, "skip": "연결된 가게 없음"})
+            continue
+        kws = [str(k.get("keyword") or "").strip() for k in (row.get("keywords") or [])][:40]
+        kws = [k for k in kws if 2 <= len(k) <= 40]
+        tracked = queued = 0
+        vols = {}
+        try:
+            vols = {v["keyword"].replace(" ", ""): v.get("total", 0)
+                    for v in _sa.keyword_volumes(kws[:20], limit=60)}
+        except Exception:
+            pass
+        for k in kws[:20]:
+            vol = vols.get(k.replace(" ", ""), 0)
+            try:
+                r = _br.blog_rank(k, cid)
+                rank = r.get("rank")
+            except Exception:
+                rank = None
+            if isinstance(rank, int) and rank >= 1:      # 이미 노출 중 → 추적 편입(성과 관측)
+                db.save_rank_snapshot(t.id, k, rank, kind="blog_search")
+                tracked += 1
+            elif vol >= 100:                             # 수요는 있는데 밖 → 글감 큐(기회)
+                if db.enqueue_writing(t.id, "inflow", k, "review",
+                                      f"실유입 검색어(월 {vol:,}회) — 아직 상위 미노출"):
+                    queued += 1
+        out.append({"tenant": t.name, "keywords": len(kws), "tracked": tracked, "queued": queued})
+    return JSONResponse({"ok": True, "result": out})
+
+
 @app.get("/admin/publish-pairs")
 def admin_publish_pairs(tenant: str = ""):
     """운영 진단(읽기 전용) — 채점기↔실순위 검증용: 발행 글마다 (제목·URL·매칭·우리점수·타깃kw·최고순위).
