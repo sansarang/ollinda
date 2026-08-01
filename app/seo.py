@@ -452,10 +452,14 @@ def searcher_term(industry: str) -> str:
     base = " ".join((industry or "").split())
     if len(base) < 3:
         return base
-    cands = [base]
-    for t in _SUPPLIER_TAIL:
-        if base.endswith(t) and len(base) - len(t) >= 2:
-            cands.append(base[: -len(t)].strip())
+    cands, cur = [base], base
+    while True:                    # ★ '중고차판매업' → '중고차판매' → '중고차'까지 벗긴다
+        nxt = next((cur[: -len(t)].strip() for t in _SUPPLIER_TAIL
+                    if cur.endswith(t) and len(cur) - len(t) >= 2), "")
+        if not nxt or nxt in cands:
+            break
+        cands.append(nxt)
+        cur = nxt
     cands = list(dict.fromkeys([c for c in cands if len(c) >= 2]))
     if len(cands) < 2:
         return base
@@ -480,13 +484,15 @@ def searcher_term(industry: str) -> str:
             v = int(vols.get(c.replace(" ", "")) or 0)
             if v <= 0:
                 continue
-            d = 0
             try:
                 d = int(_br.doc_count(c) or 0)
             except Exception:
-                pass
+                d = -1
+            if d <= 0:
+                continue          # ★ doc_count는 실패 시 -1 — '공급 0'으로 읽으면 기회지수가
+                                  #   폭등해 오답이 30일 캐시된다(검토 지적). 실패 후보는 버린다.
             # 기회지수 = 검색량 / 문서수(공급) — 검색량만 크고 이미 포화된 말은 이기지 못한다
-            scored.append((v / max(d, 1), v, c))
+            scored.append((v / d, v, c))
         if scored:
             scored.sort(reverse=True)
             best = scored[0][2]
@@ -646,7 +652,8 @@ def resolve_target_keyword(industry: str, region: str, note: str, biz: str = "lo
                         _slog.info("[resolve-kw] 확장 키워드 방향 불일치 제외: %r", _c)
                 except Exception:
                     _keep.append(_c)
-            kws = list(dict.fromkeys(_keep))[:10]
+            _rest = [k for k in kws if k not in _keep][5:]   # 검사 범위 밖은 삭제하지 않고 보존
+            kws = list(dict.fromkeys(_keep + _rest))[:10]
         except Exception:
             pass
     return kw0, kws
@@ -1095,7 +1102,9 @@ def hard_block_hits(text: str) -> list[str]:
 #   언어 규칙일 뿐 업종·가게 하드코딩이 아니다.
 #   ★ '이나/나'는 제외하지 않는다 — "보증금 3만원이나 5만원"처럼 실제 금액 범위를 잇는
 #     '또는'으로 훨씬 자주 쓰인다. 놓치면 진짜 날조를 통과시킨다.
-_RHETORIC_TAIL = re.compile(r"^\s*(이니|이라느니|라느니|이라던|라던|이든지|든지|이든|든)")
+#   ★ '이니까' 같은 이유 어미는 나열이 아니다 → '이니' 뒤에 '까'가 오면 제외하지 않는다.
+#     1글자 '든'도 뺀다 — "5만 든든하게" 같은 다음 어절을 잘못 삼켰다(검토 지적).
+_RHETORIC_TAIL = re.compile(r"^(이니(?!까)|이라느니|라느니|이라던|라던|이든지|이든)")
 
 
 def _money_nums(s: str) -> set:
@@ -1105,7 +1114,7 @@ def _money_nums(s: str) -> set:
         '2022원'을 날조로 잡았다(쉼표·공백 건너뛰기가 원인) → 숫자 바로 뒤만 인정.
       ② 수사적 나열("3만이니 5만이니")은 주장이 아니다 → 제외."""
     out = set()
-    for m in re.finditer(r"(\d[\d,]*)(원|만원|%|퍼센트|만|천원|시간|분)", s or ""):
+    for m in re.finditer(r"(\d+(?:,\d{3})*)(원|만원|%|퍼센트|만|천원|시간|분)", s or ""):
         tail = (s or "")[m.end():m.end() + 6]
         if _RHETORIC_TAIL.match(tail):
             continue
@@ -1344,8 +1353,10 @@ def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> d
         #     검색하는 업종어가 있다(검색량 승부로 이미 검증된 말). 키워드 밖에서 가게 시점 표현이
         #     새어 들어온 경우만 잡는다. 조어 검사(검수기 등)는 오탐이 커서 프롬프트 지침으로만 다룬다.
         _tkw0 = " ".join((payload.get("target_keywords") or [""])[:3])
-        _sup_hit = [t for t in _SUPPLIER_TAIL
-                    if len(t) >= 2 and t in title and t not in _tkw0]
+        #   ★ '전문'⊂'전문가', '제조'⊂'제조사'처럼 다른 낱말의 앞부분으로 더 자주 쓰이는 토큰은
+        #     제목 검사에서 뺀다(검토 지적 — 정상 제목이 -6점 먹었다). 축약 로직에는 그대로 쓴다.
+        _sup_hit = [t for t in ("판매", "시공", "납품", "매입", "도매", "소매")
+                    if t in title and t not in _tkw0]
         if _sup_hit:
             warnings.append(f"제목이 가게 시점 용어({_sup_hit[0]}) — 읽는 사람은 손님이다. "
                             "손님 행동어(구매·고르기·맡기기)로 바꿔라")

@@ -198,7 +198,7 @@ def diagnose(tenant_id: str) -> dict:
                            "msg": f"'{t.name}'이(가) 네이버 지역검색에 안 잡힙니다 — 통합검색 첫 화면의 "
                                   "플레이스 자리를 통째로 놓치고 있습니다. 네이버 스마트플레이스에 "
                                   "업체 등록(무료)이 최우선입니다."})
-        elif place.get("registered") is None:             # 지역 일부만 일치 — 단정하지 않고 확인 요청
+        elif place.get("ambiguous"):                      # 지역 일부만 일치 — 단정하지 않고 확인 요청
             _amb = place.get("ambiguous") or {}
             rx.append({"level": "mid", "area": "플레이스 확인",
                        "msg": f"'{t.name}' 지역검색 결과가 등록 지역과 어긋납니다"
@@ -286,7 +286,17 @@ def place_audit(tenant) -> dict:
         """주소에 우리 지역 토큰이 몇 개 맞는가. '부산'만 맞고 '기장'이 안 맞으면 남의 가게다
         (실측: 부산 토큰 하나로 남구 동명이 업체가 통과했다). 구·군·시 표기 흔들림은 흡수."""
         addr = (h.get("address") or "") + " " + (h.get("jibun") or "")
-        return sum(1 for t in _rtoks if t in addr or t.rstrip("시군구") in addr)
+        n = 0
+        for t in _rtoks:
+            if t in addr:
+                n += 1
+                continue
+            _short = t.rstrip("시군구")          # 표기 흔들림 흡수(부산광역시↔부산광역)
+            # ★ 단, 2글자가 1글자로 줄면 쓰지 않는다 — '동구'→'동'은 '동대신동'에도 걸려
+            #   다른 구의 동명이 업체를 우리 가게로 단정한다(검토 지적).
+            if len(_short) >= 2 and _short in addr:
+                n += 1
+        return n
 
     hits, mine, near = [], None, None
     for q in ([f"{region} {name}", name] if region else [name]):

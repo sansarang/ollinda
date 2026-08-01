@@ -6,8 +6,17 @@
 from __future__ import annotations
 
 import os
+import threading as _thl
 
 MODEL = "claude-opus-4-8"
+
+_TL = _thl.local()          # 스레드별 stop_reason(병렬 채널 생성 오염 차단)
+
+
+def last_finish() -> str:
+    """이 스레드가 마지막으로 받은 stop_reason — 전역보다 우선."""
+    return getattr(_TL, "finish", "") or last_finish_reason
+
 
 last_finish_reason = ""   # 직전 호출의 stop_reason(생성 절단 검증 V1) — 생성기가 payload에 기록
 LAST_SLOW_TS = 0.0        # 직전 재시도(느림) 시각 — 진행률이 사용자에게 사유 안내
@@ -99,6 +108,9 @@ def call(prompt: str, model: str = MODEL, max_tokens: int = 1200, cache_prefix: 
         resp = _create(_mt2)
     global last_finish_reason, LAST_USAGE
     last_finish_reason = getattr(resp, "stop_reason", "") or ""
+    # ★ 채널 병렬 생성(2026-08-01 재활성)에서 전역 하나를 공유하면 X의 절단이 본문 결과로
+    #   기록돼 멀쩡한 글이 -15점을 먹는다(검토 지적). 스레드별로도 따로 남긴다.
+    _TL.finish = last_finish_reason
     _u = getattr(resp, "usage", None)                     # 실측 토큰(원가 추적) — resp.usage
     if _u is not None:
         LAST_USAGE = {"in": getattr(_u, "input_tokens", 0) or 0,
@@ -117,6 +129,7 @@ def call(prompt: str, model: str = MODEL, max_tokens: int = 1200, cache_prefix: 
             _kw = {}
             resp = _create(max_tokens)
             last_finish_reason = getattr(resp, "stop_reason", "") or ""
+            _TL.finish = last_finish_reason
             _text = _txt(resp)
             logging.getLogger("shopcast.llm").warning("[llm] 빈 응답 → thinking 끄고 재시도: %d자",
                                                       len(_text))

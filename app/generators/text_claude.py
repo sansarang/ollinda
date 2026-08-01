@@ -242,11 +242,14 @@ class CaptionGenerator(Generator):
         _subj_state = ""
         _subj = seo.subject_match(text, asset.note or "", (kws[0] if kws else ""))
         if _subj is False:
-            _re2 = _llm.call_task(
-                "caption", self._prompt(tenant, asset, len(imgs), kws)
-                + "\n[재작성 — 소재 고정] 직전 초안이 사진 분석에 없는 차종·제품을 실물처럼 서술해 폐기됐다. "
-                  "이번 소재는 위 [사진N] 분석에서 확인되는 것만이다. 사진과 다른 차종·모델명은 언급 자체를 "
-                  "하지 마라.", 1200, default_model=self.model, cache_prefix=cache_prefix_for(asset))
+            try:   # 빈 응답 예외로 '멀쩡한 초안'까지 폐기되지 않게(검토 지적)
+                _re2 = _llm.call_task(
+                    "caption", self._prompt(tenant, asset, len(imgs), kws)
+                    + "\n[재작성 — 소재 고정] 직전 초안이 사진 분석에 없는 차종·제품을 실물처럼 서술해 폐기됐다. "
+                      "이번 소재는 위 [사진N] 분석에서 확인되는 것만이다. 사진과 다른 차종·모델명은 언급 자체를 "
+                      "하지 마라.", 1200, default_model=self.model, cache_prefix=cache_prefix_for(asset))
+            except Exception:
+                _re2 = ""
             if (_re2 or "").strip():
                 text = _re2
             _subj = seo.subject_match(text, asset.note or "", (kws[0] if kws else ""))
@@ -586,7 +589,9 @@ def _last_finish() -> str:
     """직전 LLM 호출의 stop_reason(절단 검증 V1) — 무키 더미 등은 빈 문자열."""
     try:
         from app import llm
-        return llm.last_finish_reason
+        # ★ 스레드별 값을 우선 읽는다(2026-08-01 검토 지적) — 채널 병렬 생성에서 전역 하나를
+        #   공유하면 X·캡션의 절단이 본문 기록으로 새어 멀쩡한 글이 -15점을 먹는다.
+        return llm.last_finish()
     except Exception:
         return ""
 

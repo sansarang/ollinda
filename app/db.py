@@ -1590,12 +1590,17 @@ def delete_set(asset_id: str, tenant_id: str) -> None:
     ★ 묘비(tombstone)를 남긴다(2026-08-01 실사고): 삭제 시점에 다시쓰기·영상 같은 백그라운드
     스레드가 이미 이 글의 사본을 메모리에 들고 있으면, 몇 분 뒤 그 스레드가 저장하면서
     지운 글이 되살아난다(save_piece가 INSERT OR REPLACE라 행이 없으면 새로 만든다).
-    실측: 13:41 삭제 → 13:47:33 다시쓰기 완료 → 삭제한 글이 80점으로 부활."""
+    실측: 13:41 삭제 → 13:47:33 다시쓰기 완료 → 삭제한 글이 80점으로 부활.
+    ★★ 묘비는 '실제로 내 것을 지웠을 때만' 남긴다(2026-08-01 검토 지적). 소유 검증 없이 먼저
+    넣으면 로그인한 누구나 남의 asset_id로 삭제를 쏴서 그 세트를 영구 동결시킬 수 있다
+    (DELETE는 0행이지만 묘비가 남아 이후 모든 저장이 조용히 버려짐)."""
     with _conn() as c:
         _ensure_tombstones(c)
-        c.execute("INSERT OR REPLACE INTO deleted_assets VALUES(?,?,?)",
-                  (asset_id, tenant_id, _now()))
-        c.execute("DELETE FROM content_pieces WHERE asset_id=? AND tenant_id=?", (asset_id, tenant_id))
+        n = c.execute("DELETE FROM content_pieces WHERE asset_id=? AND tenant_id=?",
+                      (asset_id, tenant_id)).rowcount
+        if n > 0:
+            c.execute("INSERT OR REPLACE INTO deleted_assets VALUES(?,?,?)",
+                      (asset_id, tenant_id, _now()))
 
 
 def is_set_deleted(asset_id: str) -> bool:

@@ -47,10 +47,13 @@ class XPostGenerator(Generator):
         _subj_state = ""
         _subj = seo.subject_match(text, asset.note or "", (kws[0] if kws else ""))
         if _subj is False:
-            _re2 = _call_llm(prompt + "\n[재작성 — 소재 고정] 직전 초안이 사진 분석에 없는 차종·제품을 "
-                             "실물처럼 서술해 폐기됐다. 위 [사진N] 분석에서 확인되는 소재만 서술하고, 사진과 "
-                             "다른 차종·모델명은 언급 자체를 하지 마라.",
-                             self.model, 400, cache_prefix=cache_prefix_for(asset))[:280]
+            try:   # 빈 응답은 이제 예외다(llm.call) — 재작성 실패로 '멀쩡한 초안'까지 버리지 않는다
+                _re2 = _call_llm(prompt + "\n[재작성 — 소재 고정] 직전 초안이 사진 분석에 없는 차종·제품을 "
+                                 "실물처럼 서술해 폐기됐다. 위 [사진N] 분석에서 확인되는 소재만 서술하고, 사진과 "
+                                 "다른 차종·모델명은 언급 자체를 하지 마라.",
+                                 self.model, 400, cache_prefix=cache_prefix_for(asset))[:280]
+            except Exception:
+                _re2 = ""
             if (_re2 or "").strip():
                 text = _re2
             _subj = seo.subject_match(text, asset.note or "", (kws[0] if kws else ""))

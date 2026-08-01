@@ -117,14 +117,16 @@ def _fresh_index_check() -> None:
         logging.getLogger("shopcast.lessons").exception("[lessons] 크론 실패")
     try:  # 🌐 유입 경로 진단(2026-08-01) — 주제·이웃·플레이스·외부 통로(하루 1회, 새벽)
         import datetime as _dtb
-        if _dtb.datetime.utcnow().hour == 19:            # KST 새벽 4시
+        _nb = _dtb.datetime.utcnow()
+        if _nb.hour == 19 and _nb.minute < 30:           # KST 새벽 4시 — 30분 잡이라 분까지 봐야 1회
             from app.services import blogreach
             blogreach.sweep()
     except Exception:
         logging.getLogger("shopcast.blogreach").exception("[blogreach] 크론 실패")
     try:  # 🔎 검색어 정찰(2026-08-01) — 발행 글이 실제로 잡히는 검색어 실측(자격증명 0·검색 API만)
         import datetime as _dtq
-        if _dtq.datetime.utcnow().hour % 6 == 0:         # 6시간마다(쿼터 보호)
+        _nq = _dtq.datetime.utcnow()
+        if _nq.hour % 6 == 0 and _nq.minute < 30:        # 6시간마다(쿼터 보호) — 중복 실행 방지
             from app.services import queryscout
             queryscout.sweep()
     except Exception:

@@ -429,7 +429,12 @@ def _polish_async(tenant: Tenant, asset, pieces: list) -> None:
         finally:
             _flag("done")
         try:
-            _autopilot(tenant, pieces)
+            # ★ 보정 중 사장님이 세트를 지웠으면 자동 발행하지 않는다(검토 지적).
+            #   묘비는 DB 부활만 막을 뿐, 메모리 사본으로 외부 채널에 발행되는 건 못 막는다.
+            if db.is_set_deleted(_aid):
+                _lgp.getLogger("shopcast.ingest").info("[autopilot] 삭제된 세트 — 자동 발행 생략 %s", _aid[:8])
+            else:
+                _autopilot(tenant, pieces)
         except Exception:
             _lgp.getLogger("shopcast.ingest").exception("[autopilot] 실패")
     import threading as _th_pol

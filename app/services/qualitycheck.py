@@ -185,6 +185,22 @@ def _surface_fix(pl: dict, warns: list) -> "str | None":
     return None
 
 
+# ★ 백그라운드 보정은 '옛 스냅샷으로 행 전체'를 덮어쓰면 안 된다(2026-08-01 검토 지적, 높음).
+#   save_piece는 INSERT OR REPLACE라 병합이 아니다. 보정이 도는 수 분 사이 사장님이 영상을
+#   요청하면 video_job·channel_status가 블로그 피스에 기록되는데, 뒤늦게 끝난 보정이 그걸
+#   통째로 지운다(중복 렌더·워치독 추적 상실·진행표시 실종). 보정이 실제로 바꾼 키만 병합 저장한다.
+_GATE_KEYS = ("body", "title", "ranking_audit", "surface_pass", "score_gate",
+              "score_gate_stops", "publish_blocked_score")
+
+
+def _save_gate_fields(blog, pl: dict) -> None:
+    """보정이 건드린 키만 최신 행에 병합 — 동시에 들어온 사용자 상태(영상 잡 등)를 보존."""
+    try:
+        db.update_piece_payload(blog.id, {k: pl[k] for k in _GATE_KEYS if k in pl})
+    except Exception:
+        db.save_piece(blog)                    # 병합 실패 시에도 결과는 남긴다(기존 동작)
+
+
 def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
     """📮 발행 게이트 — ranking_audit<80이면 감점 사유를 피드백으로 자동 재작성(최대 2회,
     사실·마커·구조 보존). 그래도 미달이면 payload.publish_blocked_score 봉인 플래그(발행 버튼 숨김).
@@ -226,7 +242,7 @@ def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
             pl["ranking_audit"] = au
             score = au.get("score")
             pl["surface_pass"] = {"applied": bool(_sw) or (_fixed != _body0), "after": score}
-            db.save_piece(blog)
+            _save_gate_fields(blog, pl)
         except Exception as _e:
             pl.setdefault("score_gate_stops", []).append(f"surface: 예외 {repr(_e)[:60]}")
     # 라운드는 '새로 시작'할 때만 상한을 검사한다(진행 중인 콜은 끊지 않는다 — 지불한 비용 보존).
@@ -275,11 +291,11 @@ def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
         au = seo.quality_audit(blog.channel.value, blog.kind.value, pl, source=source)
         pl["ranking_audit"] = au
         score = au.get("score")
-        db.save_piece(blog)
+        _save_gate_fields(blog, pl)
     blocked = isinstance(score, int) and score < PUBLISH_MIN
     pl["publish_blocked_score"] = (score if blocked else None)
     pl["score_gate"] = {"rounds": rounds, "final": score}
-    db.save_piece(blog)
+    _save_gate_fields(blog, pl)
     return {"rounds": rounds, "final": score, "blocked": blocked}
 
 

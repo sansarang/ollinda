@@ -3333,8 +3333,15 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             _ebadge = _expose_badge(ps)
             # 진행 중 판정(삭제 잠금용) — 다시쓰기 running 또는 영상 잡 진행 중
             _bpl = next((p.payload or {} for p in ps if p.kind.value == "blog"), {})
-            s["busy"] = bool(_rewrite_running(_bpl)
-                             or (_bpl.get("video_job") or {}).get("status") in ("registered", "running", "retrying"))
+            _vj_b = _bpl.get("video_job") or {}
+            _vj_live = False
+            if _vj_b.get("status") in ("registered", "running", "retrying"):
+                try:      # 유령 잡 필터(admin/busy와 동일 기준) — 2시간 넘으면 죽은 것으로 본다.
+                    from datetime import datetime as _dvb
+                    _vj_live = (_dvb.utcnow() - _dvb.fromisoformat(_vj_b.get("ts", ""))).total_seconds() < 7200
+                except Exception:
+                    _vj_live = False          # ts 불명 = 구식 기록 → 잠그지 않는다(삭제 영구 봉인 방지)
+            s["busy"] = bool(_rewrite_running(_bpl) or _vj_live)
             thumb = ""
             for p in ps:
                 ips = p.payload.get("image_paths") or ([p.payload.get("image_path")] if p.payload.get("image_path") else [])
@@ -6420,7 +6427,14 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                          "🔧 품질 기준 미달 — AI가 다시 쓰기</button>"
                          "<div class='text-[11px] text-slate-400 text-center mt-1.5'>상위노출 기준(80점)에 못 미쳐 "
                          "발행을 잠시 막아뒀어요. 버튼을 누르면 AI가 다시 씁니다 (1~2분)</div></form>")
-                        if (pl or {}).get("publish_blocked_score") else naver_btn)
+                        if (pl or {}).get("publish_blocked_score") else
+                        # ⏳ 품질 보정이 아직 도는 중이면 발행 판정이 안 끝났다(2026-08-01 검토 지적).
+                        #   글은 먼저 열어주되, 미달 글이 봉인 전에 발행되는 창은 막는다.
+                        ("<div class='block w-full text-center py-3 rounded-xl text-sm font-extrabold "
+                         "bg-slate-100 text-slate-400'>⏳ 상위노출 기준 확인 중 — 곧 발행할 수 있어요</div>"
+                         "<div class='text-[11px] text-slate-400 text-center mt-1.5'>"
+                         "AI가 점수를 마저 올리는 중입니다 (보통 1~3분)</div>")
+                        if ((pl or {}).get("polish_job") or {}).get("status") == "running" else naver_btn)
                      + ("<div class='mt-3 pt-3 border-t border-slate-100 text-center' id='fb%s'>"
                         "<span class='text-xs text-slate-400 mr-2'>이 글 어땠나요?</span>"
                         "<button type=button onclick=\"fbv('%s','up')\" class='px-3 py-1.5 rounded-lg "
