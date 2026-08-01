@@ -205,10 +205,10 @@ def diagnose(tenant_id: str) -> dict:
                               f"(잡힌 주소: {_amb.get('address') or '?'}). 같은 상호의 다른 업체이거나 "
                               "플레이스 주소가 옛 주소일 수 있어 진단을 보류했습니다 — 확인이 필요합니다."})
         elif place.get("registered"):
-            if place.get("has_tel") is False:
-                rx.append({"level": "mid", "area": "플레이스 정보",
-                           "msg": "플레이스에 전화번호가 비어 있습니다 — 전화 문의 전환이 끊깁니다."})
-            elif place.get("tel_match") is False:
+            # ★ '전화번호 비어 있음' 처방 삭제(2026-08-01 사장님 지적 — 실제로는 등록돼 있었다).
+            #   지역검색 API의 telephone 필드는 네이버가 값을 내려주지 않는 사실상 폐기 필드라,
+            #   빈 값 = 미등록이 아니다. API가 번호를 '줬는데 다를 때'만 경고한다(그건 실측이다).
+            if place.get("tel_match") is False:
                 rx.append({"level": "high", "area": "플레이스 정보",
                            "msg": f"플레이스 전화번호가 가게 정보와 다릅니다(등록: {place.get('listed',{}).get('tel')}) "
                                   "— 손님이 다른 번호로 겁니다. 즉시 수정하세요."})
@@ -319,7 +319,8 @@ def place_audit(tenant) -> dict:
         _tel = re.sub(r"[^0-9]", "", (getattr(tenant, "phone", "") or ""))
         _ltel = re.sub(r"[^0-9]", "", mine.get("tel") or "")
         out["tel_match"] = (not _tel) or (not _ltel) or (_tel[-8:] == _ltel[-8:])
-        out["has_tel"] = bool(_ltel)
+        # has_tel은 판정하지 않는다(2026-08-01 사장님 지적) — 지역검색 API의 telephone은
+        # 실제 등록 여부와 무관하게 빈 값으로 오는 폐기 필드다. '비어 있음' 오진의 원인이었다.
     # 지역+업종 노출 — canonical 지역 토큰으로(전 표면 단일 소스 재사용)
     try:
         from app import seo as _seo
