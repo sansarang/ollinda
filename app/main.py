@@ -842,7 +842,8 @@ def admin_audit(asset_id: str):
                          "battle_plan": pl.get("battle_plan"),   # 작전 감사(2026-08-01)
                          "title": pl.get("title"), "body_len": len(pl.get("body") or ""),
                          "body": pl.get("body"),                 # 운영 진단·전후 비교용(admin 전용)
-                         "photos": len(pl.get("image_paths") or [])})
+                         "photos": len(pl.get("image_paths") or []),
+                         "gen_source": pl.get("gen_source") or ""})   # 사진 묘사 원문(자막 재료 진단)
 
 
 @app.get("/admin/users")
