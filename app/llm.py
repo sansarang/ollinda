@@ -81,9 +81,20 @@ def call(prompt: str, model: str = MODEL, max_tokens: int = 1200, cache_prefix: 
                 _t.sleep(min(2 ** _try * 1.5, 12))         # 지수 백오프(상한 12초)
         raise last
 
+    def _txt(r) -> str:
+        return next((b.text for b in getattr(r, "content", []) or [] if b.type == "text"), "")
+
     resp = _create(max_tokens)
     _mt2 = max_tokens
     while getattr(resp, "stop_reason", "") == "max_tokens" and _mt2 < min(max_tokens * 4, 16000):
+        # ★ 텍스트가 0바이트인 절단은 '예산 부족'이 아니라 thinking이 예산을 통째로 삼킨 것이다
+        #   (2026-08-01 실사고). 이때 예산을 2배씩 늘리면 매번 같은 결과를 더 비싸고 더 느리게
+        #   받는다 — 실측: 6000→12000→16000 확대에 재시도까지 겹쳐 한 콜이 10분 넘게 걸렸고
+        #   최종 결과는 빈 문자열이었다. 예산이 아니라 thinking을 끄는 것이 답이다.
+        if _kw and not _txt(resp).strip():
+            _kw = {}
+            resp = _create(max_tokens)
+            continue
         _mt2 = min(_mt2 * 2, 16000)                        # 절단 → 예산 2배 확대 재시도(×2→×4, 상한 16k)
         resp = _create(_mt2)
     global last_finish_reason, LAST_USAGE
@@ -97,7 +108,21 @@ def call(prompt: str, model: str = MODEL, max_tokens: int = 1200, cache_prefix: 
         USAGE["anthropic"]["out"] = USAGE["anthropic"].get("out", 0) + LAST_USAGE["out"]
     import logging
     logging.getLogger("shopcast.llm").info("[llm] stop_reason=%s max_tokens=%s", last_finish_reason, max_tokens)
-    return next((b.text for b in resp.content if b.type == "text"), "")
+    _text = _txt(resp)
+    # ★ 빈 응답을 조용히 돌려주지 않는다(2026-08-01 실사고: 주안모터스 재작성이 0바이트로 돌아와
+    #   호출부가 '안전게이트 위반(len 0)'으로 오해하고 보정을 포기 → 77점 고착).
+    #   위 루프에서 thinking을 이미 껐다면 여기선 진짜 실패다 → 예외로 올려 사유를 남긴다.
+    if not _text.strip():
+        if _kw:                                            # 절단이 아닌 사유로 비었어도 한 번은 더
+            _kw = {}
+            resp = _create(max_tokens)
+            last_finish_reason = getattr(resp, "stop_reason", "") or ""
+            _text = _txt(resp)
+            logging.getLogger("shopcast.llm").warning("[llm] 빈 응답 → thinking 끄고 재시도: %d자",
+                                                      len(_text))
+        if not _text.strip():
+            raise RuntimeError(f"빈 응답(stop_reason={last_finish_reason}, max_tokens={max_tokens})")
+    return _text
 
 
 LAST_USAGE: dict = {"in": 0, "out": 0, "model": ""}   # 마지막 Anthropic 콜 실측 토큰
