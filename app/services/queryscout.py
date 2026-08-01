@@ -90,9 +90,9 @@ def candidates(payload: dict, region: str = "", industry: str = "", limit: int =
         c = _clean(t)
         if c and c not in _STOP and (re.search(r"[0-9A-Za-z]", c) or len(c) >= 3) and c != _reg0:
             _seeds.append(c)
-    # ★ 시장 도메인 용어를 씨앗에 합류(2026-08-01) — 상위 글들이 공통으로 쓰는 단일 용어
-    #   ('유리막코팅','성능점검기록부')를 검색광고에 물으면 그 판의 실검색어가 대량으로 나온다.
-    #   (실측: 중고차 판은 2~3어절 교차만으로는 후보가 2개뿐이었다)
+    # ★ 시장 도메인 용어(2026-08-01) — 상위 글들이 공통으로 쓰는 단일 용어('유리막코팅','주행거리').
+    #   ①검색광고 씨앗으로 던져 그 판의 실검색어를 확장하고 ②관련성 판정 어휘로도 쓴다.
+    #   (실측: 업종명 정확 문자열만 요구하면 '중고차판매' 업종에서 '중고차 시세'가 전부 탈락)
     _mkt_terms: list = []
     try:
         from app.services import bloganatomy as _ba1
@@ -110,7 +110,7 @@ def candidates(payload: dict, region: str = "", industry: str = "", limit: int =
         rel = _sa0.keyword_volumes(_seed_all[:5], limit=120) if _seed_all else []
     except Exception:
         rel = []
-    _axis_tokens = {t for t in (_reg0, _ind0, brand.strip()) if t}
+    _axis_tokens = {t for t in (_reg0, _ind0, brand.strip()) if t} | set(_mkt_terms[:6])
     # ★ 3번째 공급원(2026-08-01 사장님 설계): 상위 글 본문에서 뽑힌 '시장 공통 검색 의도 구절'.
     #   검색광고 연관어는 씨앗과 글자가 겹치는 것만 주는 한계가 있어(실측: 주안모터스 후보 2개),
     #   이 판에서 실제로 통하는 표현을 상위 글들의 교차 등장으로 가져온다(캐시만 — 크롤 대기 0).
