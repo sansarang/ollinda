@@ -948,6 +948,79 @@ def _apply_video_grammar(lines: list, imgs: list, orig_imgs: list, gen_source: s
         return imgs
 
 
+def _lines_for_photos(imgs: list, gen_source: str, cand_lines: list, gate=None) -> tuple:
+    """📺 화면-자막 일치 보장(2026-08-01 사장님 불변 원칙 ①) — 방향을 뒤집는다.
+
+    기존: 자막을 먼저 만들고 사진을 맞춘다 → 지시어 없는 자막은 '남은 사진 아무거나'가 배정돼
+          차 후면 사진에 '고민 끝. 이 글이면 충분'이 붙었다(실측).
+    변경: 사진을 먼저 놓고, 그 사진의 vision 묘사와 겹치는 본문 문장을 고른다. 겹치는 문장이
+          없으면 묘사 자체를 짧게 다듬어 쓴다 — 어느 쪽이든 자막은 그 사진에 대한 말이 된다.
+
+    gate(line) → 사유 문자열(통과 시 빈 값). 걸린 후보는 건너뛰고 다음 후보를 본다.
+    반환 (사진들, 자막들) — 길이 동일, 순서 대응. 묘사가 없으면 ([], [])로 호출부가 기존 경로 유지.
+    업종·지명 하드코딩 0(대조 재료는 그 세트의 사진 묘사와 본문뿐)."""
+    import re as _r
+    raws = {}
+    for m in _r.finditer(r"\[사진(\d+)\]\s*([^\n]+)", gen_source or ""):
+        i = int(m.group(1)) - 1
+        if 0 <= i < len(imgs):
+            raws[i] = (m.group(2) or "").strip()
+    if not raws:
+        return [], []
+
+    def _tok(t):
+        return {w for w in _r.findall(r"[가-힣A-Za-z0-9]{2,}", t or "")}
+
+    def _short(desc):
+        """묘사 → 자막 한 줄(라벨·군더더기 제거 후 어절 경계 절단)."""
+        d = _r.sub(r"^(무엇이 보이는가|보이는 것|피사체|차종|해석|분석)\s*[:：]?\s*", "", desc or "")
+        d = _r.sub(r"\s*\([^)]*\)", "", d).strip(" .·—-")
+        d = _r.sub(r"(입니다|이다|입니다\.|이에요|예요)$", "", d).strip()
+        return _cut_word(d, 26)
+
+    # 🛒 구매로 이어지는 순서(사장님 불변 원칙 ③) — 손님이 사기로 마음먹는 순서대로 보여준다.
+    #   ①전체 모습(뭘 파는지) ②근거 서류·수치(믿을 만한가) ③속·부품 상태(꼼꼼한가) ④나머지.
+    #   판정 근거는 그 세트의 vision 묘사뿐이다 — 업종·상품 하드코딩 0.
+    #   '서류·수치'는 숫자나 문서형 낱말이 묘사에 있는가로, '전체 모습'은 부분 묘사가 아닌가로 본다.
+    _DOCW = ("서류", "기록부", "증명", "등록증", "점검", "보증", "검인", "명세", "영수")
+    _PARTW = ("내부", "부품", "엔진", "실내", "시트", "타이어", "휠", "계기", "콘솔", "핸들",
+              "도어", "트렁크", "배선", "하부", "패널", "필름", "시공", "마감", "표면")
+
+    def _rank(desc: str) -> int:
+        d = desc or ""
+        if any(w in d for w in _DOCW) or _r.search(r"\d{2,}", d):
+            return 1                                   # 근거(서류·수치)
+        if any(w in d for w in _PARTW):
+            return 2                                   # 상태(속·부품)
+        return 0                                       # 전체 모습(외관·전경)
+
+    _ordered = sorted(raws, key=lambda i: (_rank(raws[i]), i))
+    out_imgs, out_lines, used = [], [], set()
+    for i in _ordered:
+        desc = raws[i]
+        dt = _tok(desc)
+        best, best_s = None, 0.0
+        for li, ln in enumerate(cand_lines or []):
+            if li in used:
+                continue
+            s = len(dt & _tok(ln)) / max(1, len(dt | _tok(ln)))
+            if s > best_s:
+                best, best_s = li, s
+        line = ""
+        if best is not None and best_s >= 0.12:
+            _c = cand_lines[best]
+            if not (gate and gate(_c)):
+                line, _mark = _c, used.add(best)
+        if not line:                                  # 겹치는 문장이 없거나 게이트 탈락 → 묘사에서 직접
+            _d = _short(desc)
+            if _d and len(_d) >= 6 and not (gate and gate(_d)):
+                line = _d
+        if line:
+            out_imgs.append(imgs[i])
+            out_lines.append(line)
+    return out_imgs, out_lines
+
+
 def _match_photos(lines: list, imgs: list, gen_source: str, log_tag: str = "",
                   drops: "list | None" = None, axis_vocab: "set | None" = None,
                   subject_vocab: "set | None" = None) -> list:
@@ -1625,6 +1698,7 @@ class ShortVideoGenerator(Generator):
         # 대본 단위 생성(구조 전환) — 대본 첫 줄이 훅(고정 템플릿 폐기), 훅 게이트(키워드 원형·지역) 경유.
         # 실패 시 기존 씬별 발췌+구어화 폴백(영상 흐름 불차단).
         # 30초+ 하한(상위노출 v2 1-4): 정보 씬 8~9개(씬당 ~4초 + 훅·아웃트로 ≈ 30~40초). 허사 아닌 본문 내용으로.
+        _photo_locked = False                      # 사진↔자막 짝이 확정되면 뒤의 재매칭을 건너뛴다
         _n_scenes = min(9, max(7, len(vid_imgs)))
         _rs = _script_from_body(body, _n_scenes, kw_nat, _fact_src, tone="info", biz_type=_biz,
                                 region=_reg, title=(pl.get("title") or ""))
@@ -1698,6 +1772,23 @@ class ShortVideoGenerator(Generator):
                 _clean_sent = _fin
             if len(_clean_sent) >= 3:                 # 남은 줄이 너무 적으면 원본 유지(영상 불차단)
                 sent = _clean_sent
+            # ★ 화면-자막 일치(사장님 불변 원칙 ①) — 사진을 먼저 놓고 그 사진에 대한 말을 고른다.
+            #   지시어 없는 자막에 '남은 사진 아무거나'가 배정되던 구조를 뒤집는다.
+            def _fb_gate(_ln: str) -> str:
+                if _SELFREF.search(_ln):
+                    return "자기참조"
+                if _UNFIN.search(_ln.rstrip(" .…")):
+                    return "미완결"
+                return _subtitle_gate(SceneScript(hook="", sentences=[_ln], outro="",
+                                                  source="body_excerpt", evidence=_fact_src),
+                                      _fact_src, getattr(tenant, "name", "") or "") or ""
+            _pairs_i, _pairs_l = _lines_for_photos(vid_imgs, pl.get("gen_source") or "",
+                                                   list(sent) + list(caps), gate=_fb_gate)
+            if len(_pairs_l) >= 3:
+                _nlog.warning("[naver-video] 화면-자막 일치 재구성: %d씬(사진 기준)", len(_pairs_l))
+                sent = _cap_lines(_pairs_l[:9])
+                vid_imgs = _pairs_i[:len(sent)]
+                _photo_locked = True
         # 클로징 다양화 — 고정 템플릿 대신 글 CTA '사실' 기반 선택(본문에 근거 있는 패턴만, 없으면 현행 유지)
         if any(k in body for k in ("성능점검", "서류", "점검기록부")):
             _cta_line = "서류까지 본문에서 확인하세요"          # 매물형 — 본문이 서류 확인을 다룰 때만
@@ -1708,7 +1799,7 @@ class ShortVideoGenerator(Generator):
         outro = f"{tenant.name} · {region_short}\n{_cta_line}"
         sent = _cap_lines([_strip_labels(s) for s in sent])   # 서식 세척 + 3줄 초과 강제 분할(캡 후 최종 sent로 1회만 매칭)
         _gen_src2 = pl.get("gen_source") or ""
-        if _gen_src2 and sent:
+        if _gen_src2 and sent and not _photo_locked:
             _drops = []
             _axv = set()
             try:                                              # 스키마 attribute_axes 토큰 → 지시어 소스(데이터 유래)
