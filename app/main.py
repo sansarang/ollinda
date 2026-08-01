@@ -1670,9 +1670,21 @@ def admin_video_status(asset_id: str):
     blog = next((p for p in ps if p.kind.value == "blog"), None)
     if not blog:
         return JSONResponse({"ok": False, "error": "블로그 피스 없음"}, status_code=404)
+    # 🔍 실패 사유 표면화(2026-08-01) — payload에는 남는데 어디서도 안 보여 원인 추적 때마다
+    #   조각을 일일이 뒤져야 했다. 진단 경로에서 바로 읽히게 한다(쇼츠 조각 전부 나열 — 중복 감지용).
+    _shorts = [p for p in ps if p.kind.value == "short"]
+    _rows = []
+    for _sp in _shorts:
+        _nv = _sp.payload.get("naver_video") or {}
+        _rows.append({"piece": _sp.id[:8],
+                      "naver_ok": bool(_nv.get("path")),
+                      "naver_note": _nv.get("_build_note") or "",
+                      "shorts_ok": bool(_sp.payload.get("video_path")),
+                      "scene_note": (_sp.payload.get("_scene_note") or "")[:200],
+                      "assemble_note": (_sp.payload.get("assemble_note") or "")[:200]})
     return JSONResponse({"ok": True, "video_job": blog.payload.get("video_job") or {},
                          "channel_status": blog.payload.get("channel_status") or {},
-                         "has_short": any(p.kind.value == "short" for p in ps)})
+                         "has_short": bool(_shorts), "shorts_n": len(_shorts), "shorts": _rows})
 
 
 @app.post("/admin/gowatch/seed-demo")

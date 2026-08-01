@@ -965,6 +965,9 @@ def _set_video_job(asset_id: str, status: str, error: str = "", retried: bool | 
 VIDEO_PLATFORMS = ("shorts", "reels", "naver")
 
 
+_VIDEO_MAX_PHOTOS = int(os.environ.get("SHOPCAST_VIDEO_MAX_PHOTOS", "9"))   # 씬 상한과 동일(초과분 미사용)
+
+
 def request_video_bundle(tenant: Tenant, asset_id: str, want: set[str]) -> tuple[bool, str]:
     """영상 온디맨드 진입점 — 홈에서 플랫폼(숏폼·릴스·네이버) 선택 요청을 검증 후 백그라운드 렌더.
     이미 만든 숏폼 렌더는 재사용(릴스 추가 요청 등은 재렌더 없이 빠르게)."""
@@ -994,6 +997,14 @@ def request_video_bundle(tenant: Tenant, asset_id: str, want: set[str]) -> tuple
     _hero = os.path.basename((blog.payload.get("hero_photo") or "").strip())
     if _hero:
         paths.sort(key=lambda p: 0 if os.path.basename(p) == _hero else 1)
+    # 🎬 영상용 사진 상한(2026-08-01 사장님 지시) — 네이버 영상 씬은 어차피 최대 9개다
+    #   (_n_scenes = min(9, max(7, len))). 17장을 넘겨도 9장만 쓰이고 나머지는 버려지는데,
+    #   렌더 전 다운스케일은 전부에 걸려 시간만 태운다. 대표 사진은 위에서 맨 앞으로 정렬돼 보존된다.
+    if len(paths) > _VIDEO_MAX_PHOTOS:
+        import logging as _lgvp
+        _lgvp.getLogger("shopcast.video").info(
+            "[video] 사진 %d장 → 상한 %d장으로 제한(초과분은 어차피 미사용)", len(paths), _VIDEO_MAX_PHOTOS)
+        paths = paths[:_VIDEO_MAX_PHOTOS]
     _set_video_job(asset_id, "registered")
     _set_channel_status(asset_id, {ch: {"status": "generating"} for ch in want})
     _spawn_video_bundle(tenant, asset, paths, blog.payload.get("brief") or {}, want=frozenset(want))
@@ -1025,12 +1036,23 @@ def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: di
     want = set(want) or set(VIDEO_PLATFORMS)
     # 기존 숏폼 렌더 재사용(온디맨드 추가 요청) — 네이버 영상까지 충족되면 재렌더 생략, 아니면 기존 피스 id로 대체 저장
     _pre = db.get_set_pieces(asset.id)
-    short = next((p for p in _pre if p.kind == ContentKind.SHORT
-                  and p.channel == Channel.YOUTUBE and p.payload.get("video_path")), None)
+    _shorts_all = [p for p in _pre if p.kind == ContentKind.SHORT and p.channel == Channel.YOUTUBE]
+    short = next((p for p in _shorts_all if p.payload.get("video_path")), None)
+    # ★ 실패한 조각도 '대체 대상'으로 잡는다(2026-08-01 실사고 — 사장님 지적으로 발견).
+    #   기존에는 재사용 대상 조건에 video_path를 요구해, 렌더가 실패해 파일이 없는 조각은
+    #   '없는 것'으로 간주됐다 → 새 ID로 조각이 하나 더 생기고, 실패할 때마다 중복이 쌓였다.
+    #   더 나쁜 건 화면·상태 판정이 next()로 아무거나 먼저 잡아 옛 실패 기록을 보여준 것이다.
+    _reuse = short or (_shorts_all[0] if _shorts_all else None)
     _need_naver = "naver" in want and not (short and (short.payload.get("naver_video") or {}).get("path"))
     if short is None or _need_naver:
         asset._want_naver = "naver" in want            # 🎬 영상감독이 네이버 렌더 생략 여부 판단(온디맨드)
-        _old_id = short.id if short else ""
+        _old_id = _reuse.id if _reuse else ""
+        for _dup in _shorts_all:                       # 잉여 중복 조각 정리(대체 대상 1개만 남긴다)
+            if _reuse and _dup.id != _reuse.id:
+                try:
+                    db.delete_piece(_dup.id, _dup.tenant_id)
+                except Exception:
+                    pass
         shorts = generate_for(tenant, asset, [ContentKind.SHORT], images=paths)   # 🎬 영상감독
         for p in shorts:
             p.payload.setdefault("image_path", paths[0])
