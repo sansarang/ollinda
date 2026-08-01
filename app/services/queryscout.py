@@ -96,6 +96,20 @@ def candidates(payload: dict, region: str = "", industry: str = "", limit: int =
     except Exception:
         rel = []
     _axis_tokens = {t for t in (_reg0, _ind0, brand.strip()) if t}
+    # ★ 3번째 공급원(2026-08-01 사장님 설계): 상위 글 본문에서 뽑힌 '시장 공통 검색 의도 구절'.
+    #   검색광고 연관어는 씨앗과 글자가 겹치는 것만 주는 한계가 있어(실측: 주안모터스 후보 2개),
+    #   이 판에서 실제로 통하는 표현을 상위 글들의 교차 등장으로 가져온다(캐시만 — 크롤 대기 0).
+    try:
+        from app.services import bloganatomy as _ba0
+        for _seed in _seeds[:2]:
+            _an = _ba0.cached(_seed)
+            if _an is None:
+                _ba0.ensure_async(_seed)               # 없으면 예열만(다음 회차부터 반영)
+                continue
+            for cp in (_an.get("common_phrases") or [])[:10]:
+                _add(cp.get("p") or "")
+    except Exception:
+        pass
     for v in sorted(rel, key=lambda x: -(x.get("total") or 0)):
         kw, vol = (v.get("keyword") or "").strip(), (v.get("total") or 0)
         if vol < MIN_VOLUME or not kw:

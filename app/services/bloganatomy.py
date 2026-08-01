@@ -98,7 +98,44 @@ def _post_metrics(html_txt: str, kw: str) -> "dict | None":
     if chars < 200:                                   # 파싱 실패로 보이면 지표 무효
         return None
     return {"chars": chars, "imgs": imgs, "video": video, "table": table,
-            "heads": heads, "kw_hits": kw_hits}
+            "heads": heads, "kw_hits": kw_hits,
+            "phrases": _query_phrases(seg, text)}     # 검색 의도 구절(원문 아님 — 짧은 구절만)
+
+
+_Q_STOP = ("합니다", "습니다", "했어요", "드립니다", "때문", "그리고", "하지만", "저희", "우리",
+           "오늘", "이번", "여기", "정도", "경우", "생각")
+_Q_MARK = re.compile(r"(어떻게|어디|얼마|무엇|뭐가|왜|언제|추천|비교|후기|방법|가격|비용|차이|"
+                     r"기준|확인|주의|고르|선택|필요|가능)")
+
+
+def _query_phrases(seg: str, text: str) -> list:
+    """상위 글에서 '검색 의도 구절'만 추출(2026-08-01 사장님 승인) — 원문 저장 금지 원칙 유지:
+    문장을 담지 않고, 소제목·FAQ 질문·의도어 포함 짧은 구절(2~6어절)만 남긴다.
+    업종·지명 하드코딩 0 — 의도 표지어(어떻게·가격·비교…)라는 언어 신호만 사용."""
+    out: list = []
+
+    def _push(s: str):
+        s = " ".join(re.sub(r"<[^>]+>", " ", s or "").split())
+        s = re.sub(r"^[#\-•\d.\)\s]+", "", s).strip(" ?!·|·…")
+        if not (4 <= len(s) <= 30):
+            return
+        w = s.split()
+        if not (2 <= len(w) <= 6):
+            return
+        if any(t in s for t in _Q_STOP):              # 서술 문장(원문 조각)은 배제 — 구절만
+            return
+        if s not in out:
+            out.append(s)
+
+    for m in re.findall(r"<h[23][^>]*>(.*?)</h[23]>", seg, re.S)[:12]:      # 소제목
+        _push(m)
+    for m in re.findall(r"se-section-quotation[^>]*>(.*?)</div>", seg, re.S)[:12]:
+        _push(m[:120])
+    for sent in re.split(r"[.!?\n]", text)[:400]:                            # 의도어 포함 짧은 구절
+        s = sent.strip()
+        if 4 <= len(s) <= 30 and _Q_MARK.search(s):
+            _push(s)
+    return out[:20]
 
 
 def _blog_vitals(blog_id: str) -> "str | None":
@@ -171,11 +208,16 @@ def anatomize(keyword: str, top_n: int = 5) -> "dict | None":
         time.sleep(1.0)                                # 저속 원칙 유지
     items = items[:top_n]
     rows, ages = [], []
+    phrase_blogs: dict = {}                            # 구절 → 그 구절을 쓴 블로그 수(교차 등장 = 시장 공통 수요)
     from datetime import datetime
     for it in items:
         met = _post_metrics(_fetch_post_html(it.get("link", "")), kw)
         if met:
             rows.append(met)
+            _bid = re.search(r"blog\.naver\.com/([A-Za-z0-9_-]+)", it.get("link") or "")
+            _who = _bid.group(1) if _bid else (it.get("bloggername") or "?")
+            for ph in met.pop("phrases", []) or []:     # 지표에서 분리(집계만 남기고 구절은 폐기)
+                phrase_blogs.setdefault(ph, set()).add(_who)
         pd = (it.get("postdate") or "").strip()
         try:
             ages.append((datetime.utcnow() - datetime.strptime(pd, "%Y%m%d")).days)
@@ -197,7 +239,12 @@ def anatomize(keyword: str, top_n: int = 5) -> "dict | None":
            "blogs_checked": len(vitals),
            "weak_blogs": sum(1 for v in vitals if v == "weak"),
            "strong_blogs": sum(1 for v in vitals if v == "strong"),
-           "angles": angles}                            # 지배 각도 분포(작전 지시서 — 각도 전환용)
+           "angles": angles,                           # 지배 각도 분포(작전 지시서 — 각도 전환용)
+           # 🔎 시장 공통 검색 의도 구절 — 2개 이상 블로그가 함께 쓴 것만(한 명만 쓰면 개인 취향).
+           #    검색어 정찰의 후보 공급원(원문 아님, 짧은 구절 + 등장 블로그 수만 보관).
+           "common_phrases": [{"p": p, "blogs": len(b)}
+                              for p, b in sorted(phrase_blogs.items(), key=lambda x: -len(x[1]))
+                              if len(b) >= 2][:15]}
     try:
         with db._conn() as c:
             _ensure(c)
