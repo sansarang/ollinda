@@ -557,8 +557,7 @@ def admin_queryscout(tenant: str = "", posts: int = 3, per: int = 10, debug: str
                                    industry=getattr(t, "industry", "") or "")
             vols = {}
             try:
-                vols = {v["keyword"].replace(" ", ""): v.get("total", 0)
-                        for v in _sa.keyword_volumes(cands[:20], limit=60)}
+                vols = _sa.volume_map(cands[:24])
             except Exception:
                 pass
             out.append({"post": (pub.get("post_title") or "")[:40],

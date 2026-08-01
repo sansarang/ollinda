@@ -118,8 +118,7 @@ def scout(tenant_id: str, max_posts: int = 3, per_post: int = 10) -> dict:
         if not (_sa and words):
             return {}
         try:
-            return {v["keyword"].replace(" ", ""): v.get("total", 0)
-                    for v in _sa.keyword_volumes(words[:20], limit=60)}
+            return _sa.volume_map(words[:24])            # 5개씩 배치 조회(정확 매칭)
         except Exception:
             return {}
 

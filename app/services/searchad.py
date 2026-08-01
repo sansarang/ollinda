@@ -69,6 +69,24 @@ def keyword_volumes(hints: list[str], limit: int = 40) -> list[dict]:
         return []
 
 
+def volume_map(words: list[str], chunk: int = 5) -> dict:
+    """요청한 키워드들의 '정확 매칭' 월검색량 {정규화kw: total}.
+    ★ API는 hintKeywords를 5개까지만 받는다(실측 2026-08-01: 20개를 넘기면 앞 5개만 조회돼
+      나머지가 전부 0으로 보였음) → 5개씩 나눠 묻고 병합. 없으면 0."""
+    out: dict = {}
+    ws = [w for w in (words or []) if w and w.strip()]
+    for i in range(0, len(ws), chunk):
+        part = ws[i:i + chunk]
+        want = {w.replace(" ", "") for w in part}
+        for v in keyword_volumes(part, limit=200):
+            k = (v.get("keyword") or "").replace(" ", "")
+            if k in want:                                # 연관어가 아니라 '물어본 것'만
+                out[k] = v.get("total", 0)
+        for w in want:
+            out.setdefault(w, 0)
+    return out
+
+
 def _relevant(kw: str, hints: list[str]) -> bool:
     """힌트와 2글자 이상 겹치는 키워드만 = 무관한 연관어(직업전문학교 등) 노이즈 제거."""
     kw = kw.replace(" ", "")
