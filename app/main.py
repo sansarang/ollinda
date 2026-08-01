@@ -480,6 +480,61 @@ def admin_shop_perf():
     return JSONResponse({"ok": True, "shops": out})
 
 
+@app.api_route("/admin/global-lessons", methods=["GET", "POST"])
+def admin_global_lessons(run: str = ""):
+    """운영 진단 — 전역 감점 교훈(3겹 루프) 목록 + run=1이면 스윕 즉시 실행."""
+    from app.services import lessons as _les
+    if run == "1":
+        _les.sweep_global()
+    with db._conn() as c:
+        _les._ensure_global(c)
+        rows = [dict(r) for r in c.execute(
+            "SELECT * FROM global_lessons ORDER BY created_at DESC LIMIT 20").fetchall()]
+    return JSONResponse({"ok": True, "lessons": rows})
+
+
+@app.api_route("/admin/golden-refs", methods=["GET", "POST"])
+async def admin_golden_refs(request: Request):
+    """다업종 골든셋 레지스트리(4겹) — 코드 하드코딩 없이 운영 데이터로 관리.
+    POST tenant_id·asset_id·label 등록 / GET 목록. 일괄 회귀는 /admin/quality-check-all."""
+    with db._conn() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS golden_refs(asset_id TEXT PRIMARY KEY,"
+                  "tenant_id TEXT, label TEXT, added TEXT)")
+        if request.method == "POST":
+            form = await request.form()
+            aid = str(form.get("asset_id") or "").strip()
+            tid = str(form.get("tenant_id") or "").strip()
+            lab = str(form.get("label") or "").strip()[:40]
+            if aid and tid and db.get_tenant(tid):
+                from datetime import datetime as _d
+                c.execute("INSERT OR REPLACE INTO golden_refs VALUES(?,?,?,?)",
+                          (aid, tid, lab, _d.utcnow().isoformat()))
+        rows = [dict(r) for r in c.execute("SELECT * FROM golden_refs").fetchall()]
+    return JSONResponse({"ok": True, "refs": rows})
+
+
+@app.post("/admin/quality-check-all")
+def admin_quality_check_all(request: Request):
+    """다업종 골든셋 일괄 회귀(4겹) — 등록된 참조 세트 전부로 실생성·채점. 느림·과금(세트당 ~$1.3),
+    프롬프트 개편 후 수동 실행용. 업종별 결과로 '한 업종만 좋아지는 편향'을 잡는다."""
+    with db._conn() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS golden_refs(asset_id TEXT PRIMARY KEY,"
+                  "tenant_id TEXT, label TEXT, added TEXT)")
+        refs = [dict(r) for r in c.execute("SELECT * FROM golden_refs").fetchall()]
+    if not refs:
+        return JSONResponse({"ok": False, "error": "golden_refs 비어 있음 — /admin/golden-refs로 등록"})
+    out = []
+    for r in refs:
+        try:
+            resp = admin_quality_check(request, tenant_id=r["tenant_id"], src_asset=r["asset_id"])
+            import json as _j
+            d = _j.loads(bytes(resp.body or b"{}"))
+            out.append({"label": r.get("label"), "pass": d.get("pass"), "fail": d.get("fail")})
+        except Exception as e:
+            out.append({"label": r.get("label"), "error": repr(e)[:80]})
+    return JSONResponse({"ok": True, "results": out})
+
+
 @app.get("/admin/kw-region")
 def admin_kw_region(kw: str = "", region: str = ""):
     """운영 진단 — 지역 정합 게이트 단건 판정(2026-08-01): 키워드가 가게 지역과 충돌하는가."""

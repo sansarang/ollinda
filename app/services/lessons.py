@@ -186,16 +186,138 @@ def sweep() -> None:
                 _log.exception("[lessons] 가게 스윕 실패 t=%s", getattr(t, "id", "?"))
     except Exception:
         _log.exception("[lessons] 스윕 실패")
+    try:
+        sweep_global()
+    except Exception:
+        _log.exception("[lessons] 전역 감점 교훈 스윕 실패")
+
+
+# ── 🌐 전역 감점 교훈 루프(2026-08-01 사장님 승인 — '한 번에 80점' 3겹) ──────────────
+# 원칙: 상수 0 — 반복 감점 '패턴'을 데이터에서 발견 → LLM이 업종·가게 무관 원칙으로 일반화 →
+# 전 가게 생성에 주입 → 첫 통과율로 검증 → 효과 없으면 자동 폐기. 루마의 감점이 꽃집 글을 지킨다.
+
+_GL_MAX_ACTIVE = 5
+_GL_MIN_REPEAT = 3          # 7일 내 3회 반복돼야 '패턴'
+
+
+def _ensure_global(c) -> None:
+    c.execute("CREATE TABLE IF NOT EXISTS global_lessons("
+              "id TEXT PRIMARY KEY, pattern TEXT, lesson TEXT, created_at TEXT,"
+              "wins INTEGER DEFAULT 0, fails INTEGER DEFAULT 0, status TEXT DEFAULT 'active')")
+
+
+def _warn_pattern(w: str) -> str:
+    """감점 문구 → 일반화된 패턴 키(숫자·꼬리 제거) — '텍스트 7문단 연속…' → '텍스트 N문단 연속'."""
+    import re as _re
+    head = (w or "").split("→")[0].strip()
+    return _re.sub(r"\d+", "N", head)[:60]
+
+
+def _recent_blog_payloads(days: int = 7, limit: int = 120) -> list:
+    from datetime import datetime, timedelta
+    since = (datetime.utcnow() - timedelta(days=days)).isoformat()
+    out = []
+    try:
+        for s in db.list_sets(limit=limit):
+            try:
+                blog = next((p for p in db.get_set_pieces(s["asset_id"]) if p.kind.value == "blog"), None)
+                if blog and (getattr(blog, "created_at", "") or s.get("created", "")) >= since[:10]:
+                    out.append(blog.payload or {})
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
+
+def sweep_global() -> None:
+    """반복 감점 패턴 → 전역 교훈 적재(스윕당 LLM 1콜 상한) + 첫통과율 검증·자동 폐기."""
+    from collections import Counter
+    from datetime import datetime
+    import uuid
+    with db._conn() as c:
+        _ensure_global(c)
+        rows = [dict(r) for r in c.execute("SELECT * FROM global_lessons").fetchall()]
+    active = [r for r in rows if r["status"] == "active"]
+    pls = _recent_blog_payloads()
+    # ① 패턴 집계(감점 문구는 채점기가 만든 것 — 특정 가게 텍스트 아님)
+    cnt: Counter = Counter()
+    sample: dict = {}
+    for pl in pls:
+        for w in ((pl.get("ranking_audit") or {}).get("warnings") or []):
+            k = _warn_pattern(w)
+            if k:
+                cnt[k] += 1
+                sample.setdefault(k, w)
+    known = {r["pattern"] for r in rows}
+    # ② 신규 패턴 1개만 교훈화(스윕당 LLM 1콜 상한 — 비용 통제)
+    if len(active) < _GL_MAX_ACTIVE:
+        for k, n in cnt.most_common():
+            if n < _GL_MIN_REPEAT or k in known:
+                continue
+            try:
+                from app import llm as _llm
+                lesson = (_llm.call(
+                    "블로그 자동 생성에서 아래 감점이 여러 가게에 반복된다. 다음 글부터 이 감점을 예방할 "
+                    "'생성 지시' 한 문장을 써라. 규칙: 특정 업종·가게·키워드 언급 금지(어느 가게에나 "
+                    "적용되는 글쓰기 원칙만), 60자 이내, 명령형.\n"
+                    f"[반복 감점] {sample.get(k, k)} (7일간 {n}회)",
+                    max_tokens=100) or "").strip().strip('"')
+                if 8 <= len(lesson) <= 90:
+                    with db._conn() as c:
+                        _ensure_global(c)
+                        c.execute("INSERT OR REPLACE INTO global_lessons(id, pattern, lesson, created_at) "
+                                  "VALUES(?,?,?,?)",
+                                  (uuid.uuid4().hex[:12], k, lesson, datetime.utcnow().isoformat()))
+                    _log.info("[전역교훈] 적재: %r ← %r(%d회)", lesson, k, n)
+            except Exception:
+                _log.exception("[전역교훈] 일반화 실패 %r", k)
+            break                                       # 스윕당 1개만
+    # ③ 검증: 교훈 이후 생성된 글의 '첫 통과'(80+ & 보정 0라운드) 실적으로 폐기 판단
+    for r in active:
+        wins = fails = 0
+        for pl in pls:
+            if (pl.get("created_at") or "9999") < r["created_at"]:
+                continue
+            sc = (pl.get("ranking_audit") or {}).get("score")
+            rounds = (pl.get("score_gate") or {}).get("rounds", 0)
+            if isinstance(sc, int):
+                if sc >= 80 and not rounds:
+                    wins += 1
+                elif sc < 80:
+                    fails += 1
+        with db._conn() as c:
+            if fails >= 4 and wins == 0:                # 효과 없음 — 자동 폐기(지식 청소)
+                c.execute("UPDATE global_lessons SET status='retired', wins=?, fails=? WHERE id=?",
+                          (wins, fails, r["id"]))
+                _log.info("[전역교훈] 폐기: %r (win %d/fail %d)", r["lesson"], wins, fails)
+            else:
+                c.execute("UPDATE global_lessons SET wins=?, fails=? WHERE id=?", (wins, fails, r["id"]))
+
+
+def global_note_block() -> str:
+    """전 가게 공통 주입 블록 — note_block이 합쳐서 반환."""
+    try:
+        with db._conn() as c:
+            _ensure_global(c)
+            rows = c.execute("SELECT lesson FROM global_lessons WHERE status='active' "
+                             "ORDER BY created_at DESC LIMIT 3").fetchall()
+        if not rows:
+            return ""
+        return ("\n[글쓰기 공통 교훈 — 전 가게 감점 실측에서 배운 원칙] "
+                + " / ".join(r["lesson"] for r in rows))
+    except Exception:
+        return ""
 
 
 def note_block(tenant_id: str) -> str:
     """생성 주입용 교훈 블록 — ingest가 모든 생성에서 호출(조용한 반영, UI 없음)."""
     try:
         ls = db.active_lessons(tenant_id, limit=3)
-        if not ls:
-            return ""
-        return ("\n[글쓰기 교훈 — 이 가게 글의 실측 분석] 아래 교훈을 이번 글에 자연스럽게 반영하라"
-                "(교훈 문장 자체를 글에 옮기지 마라): "
-                + " / ".join(l["lesson"] for l in ls))
+        tb = ("" if not ls else
+              ("\n[글쓰기 교훈 — 이 가게 글의 실측 분석] 아래 교훈을 이번 글에 자연스럽게 반영하라"
+               "(교훈 문장 자체를 글에 옮기지 마라): "
+               + " / ".join(l["lesson"] for l in ls)))
+        return tb + global_note_block()                 # 🌐 전역 감점 교훈(2026-08-01)도 함께
     except Exception:
         return ""
