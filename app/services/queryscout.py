@@ -90,9 +90,24 @@ def candidates(payload: dict, region: str = "", industry: str = "", limit: int =
         c = _clean(t)
         if c and c not in _STOP and (re.search(r"[0-9A-Za-z]", c) or len(c) >= 3) and c != _reg0:
             _seeds.append(c)
+    # ★ 시장 도메인 용어를 씨앗에 합류(2026-08-01) — 상위 글들이 공통으로 쓰는 단일 용어
+    #   ('유리막코팅','성능점검기록부')를 검색광고에 물으면 그 판의 실검색어가 대량으로 나온다.
+    #   (실측: 중고차 판은 2~3어절 교차만으로는 후보가 2개뿐이었다)
+    _mkt_terms: list = []
+    try:
+        from app.services import bloganatomy as _ba1
+        for _sd in _seeds[:2]:
+            _an1 = _ba1.cached(_sd)
+            for cp in ((_an1 or {}).get("common_phrases") or [])[:12]:
+                _p = (cp.get("p") or "").strip()
+                if _p and len(_p.split()) == 1 and len(_p) >= 3:
+                    _mkt_terms.append(_p)
+    except Exception:
+        pass
     try:
         from app.services import searchad as _sa0
-        rel = _sa0.keyword_volumes(_seeds[:5], limit=120) if _seeds else []
+        _seed_all = (_seeds[:3] + _mkt_terms[:2]) or _seeds
+        rel = _sa0.keyword_volumes(_seed_all[:5], limit=120) if _seed_all else []
     except Exception:
         rel = []
     _axis_tokens = {t for t in (_reg0, _ind0, brand.strip()) if t}

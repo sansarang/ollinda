@@ -139,10 +139,10 @@ def _query_phrases(seg: str, text: str) -> list:
     def _push(s: str):
         s = " ".join((s or "").split())
         s = re.sub(r"^[#\-•\d.\)\s]+", "", s).strip(" ?!.·|…\"'“”")
-        if not (4 <= len(s) <= 28):
+        if not (3 <= len(s) <= 28):
             return
         w = s.split()
-        if not (2 <= len(w) <= 6):
+        if not (1 <= len(w) <= 6):                     # 단일 용어도 허용(도메인 명사)
             return
         if re.search(r"(습니다|합니다|했어요|해요|입니다|이에요|드려요|드립니다)$", s):
             return                                     # 완결 서술문 = 원문 조각 → 배제(구절만)
@@ -168,6 +168,9 @@ def _query_phrases(seg: str, text: str) -> list:
         w = _norm_token(w)
         if len(w) >= 2:
             words.append(w)
+    for w in words:                                    # 단일 도메인 용어('성능점검기록부','유리막코팅')
+        if len(w) >= 3 and re.search(r"[가-힣]{3,}", w):
+            _push(w)
     for n in (2, 3):
         for i in range(len(words) - n + 1):
             gram = " ".join(words[i:i + n])
