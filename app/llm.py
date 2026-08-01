@@ -30,6 +30,47 @@ def _dummy(prompt: str) -> str:
             "[이미지배치]\n- 서론: 메인사진\n[키워드]\n샘플,키워드,지역")
 
 
+# 💳 크레딧 소진 상태(2026-08-01 사장님 지시) — 감지되면 즉시 관리자에게 알리고 전부 중지한다.
+#   계속 시도해봐야 매번 같은 400이 나고, 사장님 화면엔 원시 오류만 남는다.
+CREDIT_OUT_TS = 0.0
+_CREDIT_HOLD_SEC = 1800          # 감지 후 30분간 새 작업 차단(그 사이 충전하면 자동 해제)
+CREDIT_MSG = ("AI 사용량(크레딧)이 모두 소진돼 지금은 만들 수 없어요 — "
+              "운영자에게 충전을 요청해 주세요. 충전되면 바로 다시 만들 수 있어요.")
+# 어느 키인지 운영자가 바로 알 수 있게(사장님 지시) — 실측 오류 원문이 제공사를 명시한다.
+CREDIT_PROVIDER = "Anthropic(Claude) API — ANTHROPIC_API_KEY"
+
+
+def _is_credit_error(e) -> bool:
+    s = repr(e).lower()
+    return ("credit balance is too low" in s) or ("credit" in s and "too low" in s)
+
+
+def note_credit_out(e=None) -> None:
+    """크레딧 소진 기록 + 관리자 1회 통보(중복 억제는 watchtower가 담당)."""
+    global CREDIT_OUT_TS
+    import time as _tc
+    first = (_tc.time() - CREDIT_OUT_TS) > _CREDIT_HOLD_SEC
+    CREDIT_OUT_TS = _tc.time()
+    import logging as _lgc
+    _lgc.getLogger("shopcast.llm").error("[llm] 크레딧 소진 — 신규 작업 차단: %s", repr(e)[:200])
+    if first:
+        try:
+            from app.services import watchtower as _wt
+            _wt.send(f"🚨 [올린다] {CREDIT_PROVIDER} 크레딧 소진\n"
+                     "→ 글 생성·영상 대본이 전부 중지됐습니다(헛 시도 방지).\n"
+                     "console.anthropic.com → Plans & Billing 에서 충전해 주세요.\n"
+                     "충전하면 30분 내 자동 재개되며, 즉시 풀려면 /admin/credit-reset 을 호출하세요.\n"
+                     "※ 네이버·ElevenLabs·Gemini 키와는 무관합니다.")
+        except Exception:
+            pass
+
+
+def credit_out() -> bool:
+    """지금 크레딧 소진 상태인가(감지 후 30분). 새 작업 진입점이 이걸 보고 즉시 중지한다."""
+    import time as _tc
+    return CREDIT_OUT_TS > 0 and (_tc.time() - CREDIT_OUT_TS) < _CREDIT_HOLD_SEC
+
+
 def _retryable(e) -> bool:
     """재시도 가치 판정 — 429·5xx·연결오류·타임아웃만 True. 400·401·크레딧부족은 False(헛 재시도 금지)."""
     s = repr(e).lower()
@@ -75,6 +116,9 @@ def call(prompt: str, model: str = MODEL, max_tokens: int = 1200, cache_prefix: 
                 return client.messages.create(model=model, max_tokens=mt, messages=_msgs, **_kw)
             except Exception as e:
                 last = e
+                if _is_credit_error(e):
+                    note_credit_out(e)
+                    raise
                 _rt = _retryable(e)
                 import logging as _lg
                 _lg.getLogger("shopcast.llm").warning("[llm] 콜 실패(try %d, retry=%s): %s",

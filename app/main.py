@@ -866,6 +866,15 @@ def admin_users():
     return JSONResponse({"ok": True, "n": len(out), "users": out})
 
 
+@app.post("/admin/credit-reset")
+def admin_credit_reset():
+    """💳 크레딧 충전 후 즉시 재개(운영 복구용) — 30분 자동 해제를 기다리지 않는다."""
+    from app import llm as _llmr
+    _was = _llmr.credit_out()
+    _llmr.CREDIT_OUT_TS = 0.0
+    return JSONResponse({"ok": True, "was_blocked": _was, "provider": _llmr.CREDIT_PROVIDER})
+
+
 @app.get("/admin/busy")
 def admin_busy():
     """배포 전 통합 점검(배포 규율 확장 2026-07-31) — 재시작에 죽는 진행 작업 전수:
@@ -909,7 +918,10 @@ def admin_busy():
             if _age < 7200:
                 busy.append({"type": "video", "tenant": s.get("tenant"), "asset": aid[:8],
                              "stage": vj.get("stage", "")})
+    from app import llm as _llmb
     return JSONResponse({"ok": True, "busy": busy, "safe_to_deploy": not busy,
+                         "credit_out": _llmb.credit_out(),
+                         "credit_provider": (_llmb.CREDIT_PROVIDER if _llmb.credit_out() else ""),
                          "ts": _d.utcnow().isoformat()})
 
 
@@ -6257,8 +6269,14 @@ def _result_naver_video(pieces, asset_id: str) -> str:
                     "}catch(_){}},5000);})();</script></div>")
         _cs_nv = (((blog.payload.get("channel_status") or {}).get("naver") or {}).get("status") or "") if blog else ""
         if vj.get("status") == "failed" or _cs_nv == "failed":          # 실패 — 조용히 사라지지 않기(버그 실측): 사유+재시도
-            return ("<div class='mt-3'><div class='text-sm text-slate-600 mb-1'>😢 영상을 만들지 못했어요 — 다시 시도할 수 있어요</div>"
-                    + (f"<div class='text-[11px] text-slate-400 mb-2'>{esc((vj.get('error') or '')[:80])}</div>" if vj.get("error") else "")
+            _errraw = (vj.get("error") or "")
+            _credit = ("credit" in _errraw.lower() and "too low" in _errraw.lower())
+            return ("<div class='mt-3'><div class='text-sm text-slate-600 mb-1'>"
+                    + ("💳 AI 사용량(크레딧)이 소진돼 지금은 만들 수 없어요" if _credit
+                       else "😢 영상을 만들지 못했어요 — 다시 시도할 수 있어요") + "</div>"
+                    + (("<div class='text-[11px] text-amber-700 bg-amber-50 rounded-lg px-2 py-1.5 mb-2'>"
+                        "운영자에게 충전을 요청해 주세요. 충전되면 바로 다시 만들 수 있어요.</div>") if _credit
+                       else (f"<div class='text-[11px] text-slate-400 mb-2'>{esc(_errraw[:80])}</div>" if _errraw else ""))
                     + "<button type='button' class='w-full px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-900 "
                     "text-white text-sm font-bold transition' "
                     "onclick=\"vmPick(this,'" + esc(asset_id) + "','naver')\">"
@@ -10789,6 +10807,19 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
                                     error=traceback.format_exc()[-500:])
             except Exception:
                 pass
+    from app import llm as _llmu          # 💳 크레딧 소진이면 생성 자체를 시작하지 않는다(사장님 지시)
+    if _llmu.credit_out():
+        try:
+            db.set_gen_progress(tenant.id, "failed", "AI 사용량 소진",
+                                _llmu.CREDIT_MSG, None, status="failed", error="credit_out")
+        except Exception:
+            pass
+        if auth.current_user(req):
+            from urllib.parse import quote as _qc
+            return RedirectResponse("/me?err=" + _qc(_llmu.CREDIT_MSG), status_code=303)
+        return page("잠시 중지", "<div class='bg-white rounded-xl shadow-sm p-6 text-center'>"
+                    "<div class='text-4xl mb-2'>💳</div>"
+                    f"<p class='text-slate-600 text-sm'>{esc(_llmu.CREDIT_MSG)}</p></div>")
     try:      # ★ 새 생성 시작 즉시 진행률 리셋 — 직전 생성의 낡은 값(84% '영상 대본' 등) 잔상 방지.
         db.set_gen_progress(tenant.id, "start", "준비 중", "사진 정리 중", 0.02, new=True)
     except Exception:
