@@ -409,6 +409,33 @@ def admin_kw_intent(kw: str = "", industry: str = "", biz: str = "seller", note:
                          "intent_ok": _seo.keyword_intent_ok(kw, industry, biz, "sell", note)})
 
 
+@app.get("/admin/searcher-term")
+def admin_searcher_term(industry: str = "", detail: str = ""):
+    """운영 진단 — 업종명 → 손님이 실제로 검색하는 말(seo.searcher_term) 판정 확인.
+    detail=1이면 후보별 검색량·문서수·기회지수까지(축약이 옳은지 눈으로 검증)."""
+    from app import seo as _seo
+    out = {"ok": True, "industry": industry, "term": _seo.searcher_term(industry)}
+    if detail == "1":
+        base = " ".join((industry or "").split())
+        cands = [base] + [base[: -len(t)].strip() for t in _seo._SUPPLIER_TAIL
+                          if base.endswith(t) and len(base) - len(t) >= 2]
+        cands = list(dict.fromkeys([c for c in cands if len(c) >= 2]))
+        from app.services import blogrank as _br
+        from app.services import searchad as _sa
+        vols = _sa.volume_map(cands) if _sa.configured() else {}
+        rows = []
+        for c in cands:
+            v = int(vols.get(c.replace(" ", "")) or 0)
+            try:
+                d = int(_br.doc_count(c) or 0)
+            except Exception:
+                d = 0
+            rows.append({"keyword": c, "volume": v, "docs": d,
+                         "opportunity": round(v / max(d, 1), 6)})
+        out["candidates"] = sorted(rows, key=lambda r: -r["opportunity"])
+    return JSONResponse(out)
+
+
 @app.post("/admin/dwell-test")
 async def admin_dwell_test(request: Request):
     """운영 진단 — 발현률 게이트 단건 실행: body 텍스트를 받아 감사(missing)+보충(fixed) 결과 반환.

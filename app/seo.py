@@ -437,6 +437,73 @@ def region_conflict(kw: str, region: str) -> bool:
     return conflict
 
 
+# 🗣 공급자 쪽 접미어 — 사업자등록증·업종분류에 쓰는 말이지 손님이 검색창에 치는 말이 아니다.
+#   언어 단위 목록일 뿐 업종·가게 하드코딩이 아니다(어느 업종에나 같은 규칙으로 적용).
+#   실측 2026-08-01: '중고차판매' 6,580회 vs '중고차' 271,600회(41배) — 기회지수도 거의 꼴찌.
+_SUPPLIER_TAIL = ("판매", "매매", "시공", "제작", "제조", "가공", "설치", "수리", "정비",
+                  "도매", "소매", "유통", "납품", "대행", "서비스업", "전문점", "전문", "업")
+
+
+def searcher_term(industry: str) -> str:
+    """업종명을 '손님이 실제로 검색하는 말'로 바꾼다(2026-08-01 사장님 지적).
+    방법: 공급자 접미어를 떼어낸 변형들을 만들고 **실측 검색량·기회지수로 승부**를 붙인다.
+    사전에 정답을 박아두지 않는다 — 이긴 쪽이 정답이다(업종 하드코딩 0). 30일 캐시.
+    키 없음·조회 실패 시 원본 유지(기존 동작)."""
+    base = " ".join((industry or "").split())
+    if len(base) < 3:
+        return base
+    cands = [base]
+    for t in _SUPPLIER_TAIL:
+        if base.endswith(t) and len(base) - len(t) >= 2:
+            cands.append(base[: -len(t)].strip())
+    cands = list(dict.fromkeys([c for c in cands if len(c) >= 2]))
+    if len(cands) < 2:
+        return base
+    try:
+        from app import ratelimit as _rl
+        _ck = "searcherterm:" + base
+        _hit = _rl.cache_get(_ck, 30 * 86400)
+        if _hit is not None:
+            return _hit.get("term") or base
+    except Exception:
+        _rl = None
+        _ck = ""
+    best = base
+    try:
+        from app.services import searchad as _sa
+        if not _sa.configured():
+            return base
+        vols = _sa.volume_map(cands) or {}       # ★ 키는 공백 제거형으로 돌아온다
+        from app.services import blogrank as _br
+        scored = []
+        for c in cands:
+            v = int(vols.get(c.replace(" ", "")) or 0)
+            if v <= 0:
+                continue
+            d = 0
+            try:
+                d = int(_br.doc_count(c) or 0)
+            except Exception:
+                pass
+            # 기회지수 = 검색량 / 문서수(공급) — 검색량만 크고 이미 포화된 말은 이기지 못한다
+            scored.append((v / max(d, 1), v, c))
+        if scored:
+            scored.sort(reverse=True)
+            best = scored[0][2]
+            if best != base:
+                import logging as _lgs2
+                _lgs2.getLogger("shopcast.seo").info(
+                    "[손님말] 업종명 %r → 검색어 %r (검색량 %d)", base, best, scored[0][1])
+    except Exception:
+        return base
+    try:
+        if _rl and _ck:
+            _rl.cache_set(_ck, {"term": best})
+    except Exception:
+        pass
+    return best
+
+
 def keyword_intent_ok(kw: str, industry: str, biz: str, content_type: str, note: str = "") -> bool:
     """키워드-소재 의도 정합 검증(제목 개선 ①) — 검색량이 커도 '이 글이 그 검색의 답이 되는' 키워드만.
     실측 결함: '자동차판매순위'(브랜드 판매량 통계 의도)가 중고 매물 글 타깃으로 선정 → 제목 어색 + 이탈 유발.
@@ -464,6 +531,13 @@ def keyword_intent_ok(kw: str, industry: str, biz: str, content_type: str, note:
             f"글 주인: {ind0} 업종의 {_bz}. 이번 글 소재: {_snip or ind0}\n"
             "이 검색자가 '이 가게의 실제 매물·시공·상품·서비스 소개 글'에서 원하는 답을 얻는가?\n"
             "브랜드 판매량 순위·시세 통계·뉴스·연예 등 '자료 조사' 의도라서 가게 글이 답이 못 되면 NO.\n"
+            # ★ 거래 방향 검사(2026-08-01 사장님 지적) — 실측: 중고차 '판매' 가게에
+            #   '중고차팔기'(자기 차를 팔려는 사람)가 확장 키워드로 뽑혔다. 정반대 손님이라
+            #   글이 아무리 좋아도 문의로 이어지지 않는다. 전 업종 공통(사고파는 방향, 맡기고 받는 방향).
+            "★거래 방향: 이 검색자는 가게와 '거래 방향'이 맞는가? 가게가 파는 쪽이면 검색자는 사려는 "
+            "사람이어야 하고, 가게가 사들이는 쪽이면 검색자는 팔려는 사람이어야 한다. 방향이 반대라서 "
+            "이 가게의 손님이 될 수 없으면 NO(예: 파는 가게인데 검색자는 자기 물건을 처분하려는 사람).\n"
+            "동종업자·구직·창업 정보를 찾는 검색이라 손님이 될 수 없어도 NO.\n"
             "구매·방문·시공·비교 검토 의도라 가게 글이 답이 되면 YES. YES 또는 NO 한 단어만.",
             max_tokens=10)
         ok = "NO" not in (v or "").strip().upper()[:8]
@@ -489,6 +563,7 @@ def resolve_target_keyword(industry: str, region: str, note: str, biz: str = "lo
     import logging as _lgk
     _slog = _lgk.getLogger("shopcast.seo")
     prof_name = prof_name or ((industry or "").replace("/", ",").split(",")[0].strip())
+    prof_name = searcher_term(prof_name) or prof_name     # 🗣 업종명 → 손님이 실제로 검색하는 말
     kws = target_keywords(prof_name, region, note, axis=keyword_axis, brand=brand)
     kplan = keyword_plan(prof_name, region, note, axis=keyword_axis, brand=brand)
     kw0 = kplan.get("headline") or (kws[0] if kws else prof_name)
@@ -559,6 +634,19 @@ def resolve_target_keyword(industry: str, region: str, note: str, biz: str = "lo
                 _slog.warning("[resolve-kw] 후보 전부 의도 불일치 → 제네릭 폴백: %r", _gk2)
                 kw0 = _gk2
                 kws = list(dict.fromkeys([_gk2] + kws))[:10]
+            # ★ 확장 키워드 목록도 같은 게이트를 통과해야 한다(2026-08-01 사장님 지적).
+            #   지금까지는 대표 키워드만 검사해, '중고차팔기'(정반대 손님)가 태그·소제목·본문에
+            #   그대로 실렸다. 캐시가 (키워드|업종|글유형) 단위라 같은 업종 가게끼리 재사용된다.
+            _keep = [kw0]
+            for _c in [k for k in kws if k != kw0][:5]:
+                try:
+                    if keyword_intent_ok(_c, industry, _biz, content_type, note):
+                        _keep.append(_c)
+                    else:
+                        _slog.info("[resolve-kw] 확장 키워드 방향 불일치 제외: %r", _c)
+                except Exception:
+                    _keep.append(_c)
+            kws = list(dict.fromkeys(_keep))[:10]
         except Exception:
             pass
     return kw0, kws
