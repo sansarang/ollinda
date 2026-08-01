@@ -37,12 +37,21 @@ def candidates(payload: dict, region: str = "", industry: str = "", limit: int =
     body = (payload.get("body") or "")
     title = (payload.get("title") or "")
     out: list[str] = []
+    # 주제어 집합 — 제목·지역·업종의 어휘. 이 중 하나도 안 겹치는 후보는 '구조 제목'(자주 묻는 질문,
+    #   한눈 요약 등 우리 템플릿 문구)이라 이 가게의 유입 검색어로 볼 수 없다(업종 무관 일반 규칙).
+    _topic = {_clean(t) for t in re.findall(r"[0-9A-Za-z가-힣]{2,}", f"{title} {region} {industry}")}
+    _topic = {t for t in _topic if len(t) >= 2}
 
     def _add(s: str):
         s = " ".join((s or "").split())
         s = re.sub(r"^[#\-•\d.\)\s]+", "", s).strip(" ?!·|")
-        if 4 <= len(s) <= 28 and s not in out:
-            out.append(s)
+        if not (4 <= len(s) <= 28) or s in out:
+            return
+        if _topic:                                       # 주제 무관 구조 제목 배제
+            toks = {_clean(t) for t in re.findall(r"[0-9A-Za-z가-힣]{2,}", s)}
+            if not (toks & _topic):
+                return
+        out.append(s)
 
     for m in re.findall(r"^#{2,3}\s*(.+)$", body, re.M):        # 소제목 = 글이 답하는 질문 단위
         _add(m)
@@ -91,6 +100,7 @@ def scout(tenant_id: str, max_posts: int = 3, per_post: int = 10) -> dict:
         _sa = None
 
     hits, misses, checked, noise = [], [], 0, []
+    seen_kw: set = set()                                 # 글마다 후보가 겹쳐 같은 검색어를 중복 조회하던 것 방지
     for pub in db.list_blog_publishes(tenant_id, limit=max_posts):
         p = None
         try:
@@ -101,6 +111,10 @@ def scout(tenant_id: str, max_posts: int = 3, per_post: int = 10) -> dict:
         cands = candidates(pl, region=getattr(t, "region", "") or "",
                            industry=getattr(t, "industry", "") or "")[:per_post]
         for kw in cands:
+            k_norm = kw.replace(" ", "")
+            if k_norm in seen_kw:
+                continue
+            seen_kw.add(k_norm)
             checked += 1
             try:
                 r = _br.blog_rank(kw, bid)
