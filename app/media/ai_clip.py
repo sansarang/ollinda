@@ -124,9 +124,12 @@ def _generate(img: str, out: str) -> str | None:
         return None
 
 
-def _qc(clip: str, orig_img: str) -> bool:
-    """원본 대조 QC — 새 물체·글자 깨짐·피사체 변형이면 False(폐기).
-    vision 호출 실패·응답 파싱 실패도 False — 검사 없이는 내보내지 않는다(안전 우선)."""
+def _qc(clip: str, orig_img: str) -> "bool | None":
+    """원본 대조 QC — True=통과, False=불량(새 물체·글자 깨짐·피사체 변형), None=검사 불가.
+    ★ '불량'과 '검사 못 함'을 구분한다(2026-08-01 사장님 지적으로 발견).
+      기존엔 둘 다 False로 뭉개져, 비전 API가 잠깐 죽으면(크레딧 소진·타임아웃) 이미 돈을 쓴
+      Veo 클립을 버리고 그 사진에 영구 차단 마커까지 찍었다 — 다시는 AI 무빙을 못 받는다.
+      검사 불가는 이번 회차만 미사용(켄번스 폴백)하고, 마커는 남기지 않아 다음에 재시도된다."""
     try:
         frames = []
         with tempfile.TemporaryDirectory() as td:
@@ -139,12 +142,12 @@ def _qc(clip: str, orig_img: str) -> bool:
                     with open(fp, "rb") as f:
                         frames.append(("image/jpeg", base64.b64encode(f.read()).decode()))
             if len(frames) < 2:
-                return False
+                return None                       # 프레임 추출 실패 = 판정 불가(불량 아님)
             op = os.path.join(td, "orig.jpg")
             subprocess.run(["ffmpeg", "-y", "-i", orig_img, "-vf", "scale=540:-2", "-q:v", "5", op],
                            capture_output=True, timeout=30)
             if not os.path.exists(op):
-                return False
+                return None                       # 원본 축소 실패 = 판정 불가
             with open(op, "rb") as f:
                 orig_b64 = ("image/jpeg", base64.b64encode(f.read()).decode())
         from app import llm
@@ -161,15 +164,15 @@ def _qc(clip: str, orig_img: str) -> bool:
             300, images=[orig_b64] + frames)
         m = re.search(r"\{.*\}", raw or "", re.S)
         if not m:
-            return False
+            return None                           # 응답 파싱 실패 = 판정 불가
         d = json.loads(m.group(0))
         bad = bool(d.get("new_object") or d.get("text_broken") or d.get("subject_changed"))
         if bad:
             log.warning("[aiclip] QC 탈락: %s (%s)", os.path.basename(clip), str(d.get("note"))[:100])
         return not bad
     except Exception:
-        log.exception("[aiclip] QC 실패 — 안전하게 폐기")
-        return False
+        log.warning("[aiclip] QC 검사 불가(비전 호출 실패) — 이번 회차만 미사용, 차단 마커는 남기지 않음")
+        return None
 
 
 class ClipBudget:
@@ -183,9 +186,11 @@ class ClipBudget:
         self.used = 0          # 씬에 실제 투입된 클립 수(캐시 포함)
         self.generated = 0     # 이번 렌더에서 새로 생성(과금)된 수
         self.qc_fail = 0
+        self.qc_skip = 0                           # 검사 불가(비전 호출 실패) — 불량과 구분
 
     def stats(self) -> dict:
-        return {"used": self.used, "generated": self.generated, "qc_fail": self.qc_fail}
+        return {"used": self.used, "generated": self.generated,
+                "qc_fail": self.qc_fail, "qc_skip": self.qc_skip}
 
     def get(self, img: str) -> str | None:
         """img의 AI 클립 경로 또는 None(켄번스 폴백). 캐시 → 생성+QC 순."""
@@ -208,11 +213,19 @@ class ClipBudget:
         if not _generate(img, tmp):
             return None
         self.generated += 1
-        if not _qc(tmp, img):
+        _verdict = _qc(tmp, img)
+        if _verdict is False:                      # 실제 불량 → 폐기 + 영구 차단(재과금 방지)
             self.qc_fail += 1
             try:
                 os.replace(tmp, bad + ".mp4")      # 진단용 보존
-                open(bad, "w").close()             # 재생성 금지 마커(재과금 방지)
+                open(bad, "w").close()             # 재생성 금지 마커
+            except OSError:
+                pass
+            return None
+        if _verdict is None:                       # 검사 불가 → 클립은 보관, 마커 없음(다음에 재검사)
+            self.qc_skip += 1
+            try:
+                os.replace(tmp, cache + ".unverified")
             except OSError:
                 pass
             return None

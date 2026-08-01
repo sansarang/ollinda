@@ -892,6 +892,25 @@ def admin_clear_video_status(asset_id: str):
     return JSONResponse({"ok": True, "channel_status": cs})
 
 
+@app.post("/admin/aiclip-unblock")
+def admin_aiclip_unblock(tenant: str = ""):
+    """🎬 AI 무빙 차단 마커 해제(운영 복구) — 검사 API가 죽었을 때 잘못 찍힌 .bad 마커를 지운다.
+    실제 불량으로 찍힌 것도 함께 풀리므로, 해제 후 다음 생성에서 재검사된다(재과금 1회)."""
+    import glob as _g
+    base = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), tenant or "")
+    if tenant and not db.get_tenant(tenant):
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    n = 0
+    for _p in _g.glob(os.path.join(base, "**", "*.veoclip.bad"), recursive=True):
+        try:
+            os.remove(_p)
+            n += 1
+        except OSError:
+            pass
+    _un = len(_g.glob(os.path.join(base, "**", "*.veoclip.mp4.unverified"), recursive=True))
+    return JSONResponse({"ok": True, "removed_markers": n, "unverified_clips": _un})
+
+
 @app.post("/admin/credit-reset")
 def admin_credit_reset():
     """💳 크레딧 충전 후 즉시 재개(운영 복구용) — 30분 자동 해제를 기다리지 않는다."""

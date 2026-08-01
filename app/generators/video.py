@@ -105,9 +105,30 @@ def _strip_labels(t: str) -> str:
     return t.strip()
 
 
-# 경쟁·가격 저격(정직성·상도의) — 훅/자막 전면 금지 패턴
-_RIVAL_JAB = __import__("re").compile(
-    r"(비싸게|바가지|덤터기|호구 ?잡|딴 데|다른 (업체|가게|집)|타 ?업체|(남들|다들)[^.]{0,12}(비싼|비싸))")
+# 🗣 겁주기·저격 금지 — ★ 생성(프롬프트)과 검사(정규식)가 '같은 목록'을 본다(2026-08-01).
+#   실측 사고: 프롬프트엔 '호구' 금지를 넣었는데 검사는 '호구 잡'만 봐서 "호구 될까 불안하다면"이
+#   그대로 영상에 구워졌다. 규칙이 두 곳에 따로 있으면 반드시 어긋난다.
+#   전 업종 공통(업종 어휘가 아니라 '불안을 파는 화법'을 막는다).
+FEAR_PATTERNS = (
+    r"호구",                                   # 호구 잡/될까/안 잡힙니다 … 형태 불문
+    r"사기\s?당", r"속(지|을까|는다)",
+    r"모르면\s?(손해|당|늦)", r"안\s?보면\s?(손해|후회)",
+    r"당하지\s?않", r"낚이", r"바가지", r"덤터기",
+    r"허위\s?매물\s?(걱정|불안)", r"불안하[다신]",
+)
+RIVAL_PATTERNS = (
+    r"비싸게", r"딴 데", r"다른 (업체|가게|집)", r"타 ?업체", r"(남들|다들)[^.]{0,12}(비싼|비싸)",
+)
+
+
+def fear_ban_line() -> str:
+    """프롬프트에 넣을 금지 문구 — 검사 목록과 같은 뿌리에서 만든다(어긋남 방지)."""
+    return ("겁주기·공포 마케팅 금지: 호구·사기·속는다·모르면 손해·당하지 않으려면·낚이다·"
+            "바가지·덤터기·허위매물 걱정·불안하다 — 이런 말은 소비자 경고 콘텐츠의 화법이다. "
+            "불안을 파는 대신 '우리가 뭘 갖췄는지'를 보여줘라.")
+
+
+_RIVAL_JAB = __import__("re").compile("(" + "|".join(FEAR_PATTERNS + RIVAL_PATTERNS) + ")")
 
 
 # 상호 접미 사전 — 자막 속 '가게명처럼 보이는' 연속 한글어 추출용(업체명 정합 게이트 4-1)
@@ -724,9 +745,7 @@ def _script_from_body(body: str, n: int, kw_nat: str, source: str, tone: str = "
     _voice = ("- 말하는 사람은 '가게 사장'이다. 내 물건·서비스를 손님에게 보여주는 영상이다. "
               "말투는 끝까지 주인의 것(예: 제가 직접 확인했습니다 / 보여드릴게요 / 오시면 열어드립니다). "
               "손님이 쓴 사용기·후기처럼 쓰지 마라 — 우리는 파는 쪽이다.\n"
-              "- 겁주기·공포 마케팅 금지: '모르면 손해·사기 당할까 봐·호구(호구 잡힌다/안 잡힙니다)·"
-              "당하지 않으려면·속지 않으려면·허위매물 걱정' 같은 표현은 "
-              "소비자 경고 콘텐츠의 말투다. 불안을 파는 대신 '우리가 뭘 갖췄는지'를 보여줘라.\n"
+              "- " + fear_ban_line() + "\n"
               "- 손님의 고민을 부를 때만 손님 말을 쓴다(손님은 사는 쪽이다 — '판매 가격'이 아니라 '구매 가격').\n")
     base = (_voice
             + "아래 블로그 본문을 근거로, 세로 영상 자막 대본을 써라. 전체가 하나의 이야기가 되게.\n"
@@ -1636,6 +1655,26 @@ class ShortVideoGenerator(Generator):
                 sent = ([_cut_word(h, 30) for h in heads] + caps)[:6]
             sent = _to_spoken(sent, _fact_src)
             sent = _dedup_lines(sent)                 # 폴백도 서사 정제 — 내용없는 예고('단점부터 말씀드릴게요')·중복 제거
+            # ★ 폴백 발췌도 자막 게이트를 통과해야 한다(2026-08-01 실사고).
+            #   대본 경로에만 게이트가 걸려 있어, 본문에서 그대로 퍼온 "호구 될까 불안하다면"이
+            #   검사 없이 영상에 구워졌다. 본문에는 문장이 많으니 걸린 줄은 버리고 다음 줄을 쓴다.
+            #   전 업종 공통 — 걸러내는 기준은 업종 어휘가 아니라 화법(겁주기·저격)이다.
+            _pool = list(dict.fromkeys(sent + [c for c in caps if c not in sent]))
+            _clean_sent, _dropped_fb = [], []
+            for _ln in _pool:
+                if len(_clean_sent) >= max(4, len(sent)):
+                    break
+                _bad_ln = _subtitle_gate(SceneScript(hook="", sentences=[_ln], outro="",
+                                                     source="body_excerpt", evidence=_fact_src),
+                                         _fact_src, getattr(tenant, "name", "") or "")
+                if _bad_ln:
+                    _dropped_fb.append((_ln[:28], _bad_ln[:40]))
+                else:
+                    _clean_sent.append(_ln)
+            if _dropped_fb:
+                _nlog.warning("[naver-video] 폴백 자막 %d줄 게이트 탈락: %s", len(_dropped_fb), _dropped_fb[:3])
+            if len(_clean_sent) >= 3:                 # 남은 줄이 너무 적으면 원본 유지(영상 불차단)
+                sent = _clean_sent
         # 클로징 다양화 — 고정 템플릿 대신 글 CTA '사실' 기반 선택(본문에 근거 있는 패턴만, 없으면 현행 유지)
         if any(k in body for k in ("성능점검", "서류", "점검기록부")):
             _cta_line = "서류까지 본문에서 확인하세요"          # 매물형 — 본문이 서류 확인을 다룰 때만
@@ -1700,9 +1739,11 @@ class ShortVideoGenerator(Generator):
                     kws, tenant, strat, f"{kw0} 정리")
                 if path2b and os.path.exists(path2b) and (dur2b or 0) > dur:
                     path, note, dur, _cover, opening, sent = path2b, note2b, dur2b, _c2b, opening2, sent2
-        # 15초 하한 가드(3-4, 폴백 발췌 경로): 캡션 확장
-        if path and dur and dur < 15 and not _script_mode and len(caps) > len(sent) - len(heads):
-            _nlog.warning("[naver-video] %s초 < 15 — 캡션 확장 재빌드", dur)
+        # 30초 하한 가드(폴백 발췌 경로) — ★ 기준을 대본 경로와 맞춘다(2026-08-01 실측 교정).
+        #   기존 15초는 폴백만 낮게 잡혀 있어, 21초짜리가 어느 확장에도 안 걸렸다.
+        #   '정보형은 30초+가 체류·D.I.A.+에 유리'라는 같은 근거를 두 경로에 동일 적용(전 업종 공통).
+        if path and dur and dur < 30 and not _script_mode and len(caps) > len(sent) - len(heads):
+            _nlog.warning("[naver-video] %s초 < 30 — 캡션 확장 재빌드(폴백)", dur)
             sent2 = _to_spoken(([_cut_word(h, 30) for h in heads] + caps)[:MAX_SCENES + 2], _fact_src)
             path2, note2, dur2, _cover2 = self._build_scene_video(
                 vid_imgs, SceneScript(hook=opening, sentences=sent2, outro=outro, source="body_excerpt", evidence=body),
@@ -2277,10 +2318,10 @@ class ShortVideoGenerator(Generator):
         os.makedirs(out_dir, exist_ok=True)
         for key, (tw, th) in {"square": (1080, 1080), "feed45": (1080, 1350)}.items():
             dst = os.path.join(out_dir, f"{key}_{uuid.uuid4().hex}.mp4")
-            fc = (f"[0:v]split=2[a][b];"
-                  f"[b]scale={tw}:{th}:force_original_aspect_ratio=increase,crop={tw}:{th},boxblur=22:2[bg];"
-                  f"[a]scale={tw}:{th}:force_original_aspect_ratio=decrease[fg];"
-                  f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v]")
+            # ★ 흐린 배경 대신 어두운 단색 여백(2026-08-01 사장님 지시 — 사진 씬·AI클립과 동일 원칙).
+            fc = (f"[0:v]scale={tw}:{th}:force_original_aspect_ratio=decrease[fg];"
+                  f"color=c=0x0a0d14:s={tw}x{th}[bg];"
+                  f"[bg][fg]overlay=(W-w)/2:(H-h)/2:shortest=1[v]")
             cmd = ["ffmpeg", "-y", "-i", video, "-filter_complex", fc, "-map", "[v]", "-map", "0:a?",
                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-threads", "1", "-pix_fmt", "yuv420p",
                    "-c:a", "aac", "-movflags", "+faststart", dst]   # 최종 규격 파생본은 화질↑(PHASE 12)
@@ -2424,16 +2465,15 @@ class ShortVideoGenerator(Generator):
             im = Image.open(img_path)
             im = ImageOps.exif_transpose(im).convert("RGB")
             im = ImageOps.fit(im, (W, H), method=Image.LANCZOS, centering=(0.5, 0.42))
-            im = im.filter(ImageFilter.GaussianBlur(1))          # 미세 블러 → 텍스트 대비↑(사진은 살림)
-            # 상하 어두운 그라데이션 오버레이(텍스트 가독) — 중앙 사진은 보이게
+            # ★ 사진은 선명하게 둔다(2026-08-01 사장님 지시) — 손님이 보고 싶은 건 실물이다.
+            #   기존: 사진 전체 블러 + 위 67%·아래 47% 농도의 검은 그라데이션 → 차가 뿌옇게 보였다.
+            #   변경: 블러 제거, 어둡게 하는 것은 '글자가 놓이는 띠'로만 한정(전 업종 공통).
+            _band_top, _band_bot = int(H * 0.10), int(H * 0.40)   # 훅 텍스트가 놓이는 구간만
             ov = Image.new("L", (W, H), 0)
             od = ImageDraw.Draw(ov)
-            for y in range(H):
-                if y < H * 0.55:
-                    a = int(170 * (1 - y / (H * 0.55)) ** 1.3)   # 위쪽 어둡게(텍스트 영역)
-                else:
-                    a = int(120 * ((y - H * 0.55) / (H * 0.45)) ** 1.6)
-                od.line([(0, y), (W, y)], fill=a)
+            for y in range(_band_top, _band_bot):
+                _e = min((y - _band_top) / 60.0, 1.0, (_band_bot - y) / 60.0)   # 위아래 60px 페이드
+                od.line([(0, y), (W, y)], fill=int(150 * max(0.0, _e)))
             im.paste(Image.new("RGB", (W, H), (8, 10, 16)), (0, 0), ov)
             d = ImageDraw.Draw(im)
             # 훅 텍스트 — 크게, 화면 상단 1/3(첫 프레임부터 한눈에)
@@ -2592,9 +2632,14 @@ class ShortVideoGenerator(Generator):
                f"d={frames}:s={W}x{H}:fps={FPS}")
         _eq = "eq=contrast=1.06:saturation=1.12:brightness=0.02"
         if _landscape:
-            vf = (f"[0:v]split=2[a][b];"
-                  f"[b]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=22:2[bg];"
-                  f"[a]scale={W}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,"
+            # ★ 흐린 배경 대신 '선명한 사진 + 검은 여백'(2026-08-01 사장님 지시).
+            #   기존 boxblur=22 배경은 화면 대부분을 뿌옇게 만들었다. 가로 사진을 9:16에 꽉 채우려면
+            #   좌우를 크게 잘라내야 해(3:2 기준 폭의 약 37%만 남음) 피사체가 잘릴 위험이 크므로,
+            #   사진은 원래 비율 그대로 선명하게 두고 남는 위아래만 어두운 단색으로 채운다.
+            #   전 업종 공통(사진 비율은 업종과 무관하게 제각각이다).
+            vf = (f"[0:v]scale={W}:-2[fg];"
+                  f"color=c=0x0a0d14:s={W}x{H}:d={total_t:.2f}:r={FPS}[bg];"
+                  f"[bg][fg]overlay=(W-w)/2:(H-h)/2:shortest=1,setsar=1,"
                   f"{_eq},{_zp}" + ("" if tail > 0 else self._fade(dur)) + "[v]")
             cmd = ["ffmpeg", "-y", "-loop", "1", "-t", f"{total_t:.2f}", "-i", img,
                    "-filter_complex", vf, "-map", "[v]", "-t", f"{total_t:.2f}", "-r", str(FPS),
@@ -2628,10 +2673,11 @@ class ShortVideoGenerator(Generator):
                 pass
             _eq = "eq=contrast=1.06:saturation=1.12:brightness=0.02"
             _fade = "" if tail > 0 else self._fade(dur)
-            if cw and ch and cw > ch:                  # 가로 클립 → 블러 패드(커버 크롭 금지 원칙)
-                vf = (f"[0:v]setpts={ratio:.4f}*PTS,split=2[a][b];"
-                      f"[b]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=22:2[bg];"
-                      f"[a]scale={W}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,"
+            if cw and ch and cw > ch:                  # 가로 클립 → 선명한 원본 + 어두운 여백
+                # ★ 사진 씬과 같은 원칙(2026-08-01 사장님 지시): 흐린 배경 대신 단색 여백.
+                vf = (f"[0:v]setpts={ratio:.4f}*PTS,scale={W}:-2[fg];"
+                      f"color=c=0x0a0d14:s={W}x{H}:r={FPS}[bg];"
+                      f"[bg][fg]overlay=(W-w)/2:(H-h)/2:shortest=1,setsar=1,"
                       f"{_eq},fps={FPS}{_fade}[v]")
             else:                                      # 세로 클립 → 커버 스케일
                 vf = (f"[0:v]setpts={ratio:.4f}*PTS,scale={W}:{H}:force_original_aspect_ratio=increase,"
