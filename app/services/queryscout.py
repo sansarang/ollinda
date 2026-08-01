@@ -157,6 +157,15 @@ def scout(tenant_id: str, max_posts: int = 3, per_post: int = 10) -> dict:
     except Exception:
         _sa = None
 
+    def _vols(words: list) -> dict:
+        """검색량 배치 조회 — 5개 단위(API 상한), 물어본 키워드 정확 매칭만."""
+        if not (_sa and words):
+            return {}
+        try:
+            return _sa.volume_map(words[:40])
+        except Exception:
+            return {}
+
     hits, misses, checked, noise = [], [], 0, []
     seen_kw: set = set()                                 # 글마다 후보가 겹쳐 같은 검색어를 중복 조회하던 것 방지
     for pub in db.list_blog_publishes(tenant_id, limit=max_posts):
@@ -166,11 +175,20 @@ def scout(tenant_id: str, max_posts: int = 3, per_post: int = 10) -> dict:
         except Exception:
             pass
         pl = (p.payload if p else None) or {"title": pub.get("post_title") or ""}
-        cands = candidates(pl, region=getattr(t, "region", "") or "",
-                           industry=getattr(t, "industry", "") or "",
-                           biz=getattr(t, "biz_type", "local") or "local",
-                           brand=getattr(t, "brand_name", "") or "",
-                           search_kw=getattr(t, "search_kw", "") or "")[:per_post]
+        # ★ 순서 교정(2026-08-01 실측): 후보를 먼저 자르면 정작 검색량 큰 키워드가 잘려나간다
+        #   ('부산 썬팅' 760회가 신규 용어들에 밀려 탈락 → 실유입 0). 전 후보를 모아 검색량으로
+        #   먼저 거르고, 살아남은 것만 순위 조회한다(무의미 키워드에 순위 API를 안 쓰니 쿼터도 절약).
+        all_cands = candidates(pl, region=getattr(t, "region", "") or "",
+                               industry=getattr(t, "industry", "") or "",
+                               limit=40,
+                               biz=getattr(t, "biz_type", "local") or "local",
+                               brand=getattr(t, "brand_name", "") or "",
+                               search_kw=getattr(t, "search_kw", "") or "")
+        _cv = _vols([c for c in all_cands if c.replace(" ", "") not in seen_kw])
+        scored = [(c, _cv.get(c.replace(" ", ""), 0)) for c in all_cands]
+        noise += [{"kw": c, "rank": None, "volume": v} for c, v in scored if v < MIN_VOLUME][:10]
+        cands = [c for c, v in sorted([s for s in scored if s[1] >= MIN_VOLUME],
+                                      key=lambda x: -x[1])][:per_post]
         for kw in cands:
             k_norm = kw.replace(" ", "")
             if k_norm in seen_kw:
@@ -183,30 +201,17 @@ def scout(tenant_id: str, max_posts: int = 3, per_post: int = 10) -> dict:
                 continue
             rank = r.get("rank")
             if isinstance(rank, int) and rank >= 1:
-                hits.append({"kw": kw, "rank": rank, "url": r.get("url", "")})
+                hits.append({"kw": kw, "rank": rank, "url": r.get("url", ""),
+                             "volume": _cv.get(k_norm, 0)})
             else:
                 misses.append(kw)
 
-    # ★ 검색량 관문(2026-08-01 사장님 지시): 순위가 잡혀도 '사람이 안 치는 문장'은 무의미하다
-    #   (실측: 소제목 문장이 1위로 잡히지만 검색 수요 0). 잡힌 것도 검색량으로 걸러 실유입만 남긴다.
-    def _vols(words: list) -> dict:
-        if not (_sa and words):
-            return {}
-        try:
-            return _sa.volume_map(words[:24])            # 5개씩 배치 조회(정확 매칭)
-        except Exception:
-            return {}
-
-    hv = _vols([h["kw"] for h in hits])
-    real = []
-    for h in hits:
-        vol = hv.get(h["kw"].replace(" ", ""), 0)
-        h["volume"] = vol
-        (real if vol >= MIN_VOLUME else noise).append(h)
-    for h in real:                                       # 실수요 있는 것만 추적 편입(관측 비용 절약)
+    # 후보 단계에서 이미 검색량 관문을 통과했으므로 여기 오는 것은 전부 '실수요 검색어'다.
+    real = hits
+    for h in real:                                       # 추적 편입(성과 관측)
         db.save_rank_snapshot(tenant_id, h["kw"], h["rank"], kind="blog_search")
 
-    # 미노출 후보 중 '수요 있는 것'만 글감 큐로(같은 관문 재사용)
+    # 미노출분은 '수요는 있는데 아직 안 잡히는 것' → 글감 큐(기회)
     queued = 0
     mv = _vols(misses)
     for kw in misses[:20]:
