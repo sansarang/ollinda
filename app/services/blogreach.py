@@ -333,7 +333,9 @@ def blocks_for(tenant_id: str, keyword: str) -> dict:
         d = dict(r)
         d["blocks"] = [x for x in (d.get("blocks") or "").split("|") if x]
         d["blog_blocks"] = [x for x in (d.get("blog_blocks") or "").split("|") if x]
-        d["blog_surface"] = bool(d["blog_blocks"])       # 이 판에 블로그 지면이 있는가
+        # 이 판에 블로그 지면이 있는가 — 블록 귀속이 빗나가도 '내 블로그가 실제로 보였다'면
+        # 지면은 있는 것이다(2026-08-01 실측: 인기글 링크가 리다이렉트라 귀속이 0으로 잡혔다).
+        d["blog_surface"] = bool(d["blog_blocks"]) or bool(d.get("mine"))
         return d
     except Exception:
         return {}
