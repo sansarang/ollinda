@@ -962,7 +962,9 @@ def _set_video_job(asset_id: str, status: str, error: str = "", retried: bool | 
         logging.exception("[ingest] video_job 기록 실패 asset=%s", asset_id)
 
 
-VIDEO_PLATFORMS = ("shorts", "reels", "naver")
+# naver=블로그 본문 첨부용 정보형(30~40초) / clip=네이버 클립 지면용 훅형(15~22초).
+# ★ 둘은 성격도 올리는 자리도 다르다 → 버튼도 따로, 요청도 따로다(2026-08-01 사장님 지시).
+VIDEO_PLATFORMS = ("shorts", "reels", "naver", "clip")
 
 
 _VIDEO_MAX_PHOTOS = int(os.environ.get("SHOPCAST_VIDEO_MAX_PHOTOS", "9"))   # 씬 상한과 동일(초과분 미사용)
@@ -1043,9 +1045,12 @@ def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: di
     #   '없는 것'으로 간주됐다 → 새 ID로 조각이 하나 더 생기고, 실패할 때마다 중복이 쌓였다.
     #   더 나쁜 건 화면·상태 판정이 next()로 아무거나 먼저 잡아 옛 실패 기록을 보여준 것이다.
     _reuse = short or (_shorts_all[0] if _shorts_all else None)
-    _need_naver = "naver" in want and not (short and (short.payload.get("naver_video") or {}).get("path"))
+    _nv_pre = (short.payload.get("naver_video") or {}) if short else {}
+    _need_naver = (("naver" in want and not _nv_pre.get("path"))
+                   or ("clip" in want and not (_nv_pre.get("clip") or {}).get("path")))
     if short is None or _need_naver:
-        asset._want_naver = "naver" in want            # 🎬 영상감독이 네이버 렌더 생략 여부 판단(온디맨드)
+        # 클립은 본편(네이버 영상)에서 잘라내므로 clip만 요청해도 본편 렌더가 필요하다.
+        asset._want_naver = bool({"naver", "clip"} & set(want))
         asset._want_platforms = set(want)              # ★ 요청 플랫폼 전체를 렌더 단계까지 전달(사장님 지적)
         _old_id = _reuse.id if _reuse else ""
         for _dup in _shorts_all:                       # 잉여 중복 조각 정리(대체 대상 1개만 남긴다)

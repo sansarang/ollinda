@@ -6270,12 +6270,23 @@ def _result_naver_video(pieces, asset_id: str) -> str:
         #     기존 조건(=="not_requested")은 channel_status가 비었거나 naver 키가 없는 세트
         #     (품질 루프에 막혀 상태 기록이 안 됐거나, 이 기능 이전에 만들어진 옛 세트)를
         #     통째로 떨어뜨려 버튼이 사라졌다. 전 업종·전 플랜 공통.
-        return ("<div class='mt-3'><div class='text-xs font-bold text-slate-400 mb-1'>네이버용 영상 (블로그 첨부 · 클립 겸용)</div>"
-                    "<div class='text-xs text-slate-500 mb-2'>영상은 필요할 때만 만들어요 — 글은 이미 완성!</div>"
-                    "<button type='button' class='w-full px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-900 "
-                    "text-white text-sm font-bold transition' "
-                    "onclick=\"vmPick(this,'" + esc(asset_id) + "','naver')\">"
-                    "🎬 네이버 영상 만들기</button>" + _VMPICK_JS + "</div>")
+        # 🎬 네이버는 올릴 자리가 두 곳이고 영상 성격도 다르다(2026-08-01 사장님 지시) →
+        #   버튼도 요청도 따로. 블로그 첨부용(정보형 30~40초) / 클립 지면용(훅형 15~22초).
+        _nvc = (((blog.payload.get("naver_video") or {}) if blog else {}).get("clip") or {})
+        _btn = ("w-full px-4 py-2.5 rounded-xl text-white text-sm font-bold transition")
+        return ("<div class='mt-3'><div class='text-xs font-bold text-slate-400 mb-1'>네이버용 영상</div>"
+                "<div class='text-xs text-slate-500 mb-2'>필요한 것만 만들어요 — 글은 이미 완성!</div>"
+                "<button type='button' class='" + _btn + " bg-slate-800 hover:bg-slate-900' "
+                "onclick=\"vmPick(this,'" + esc(asset_id) + "','naver')\">"
+                "🎬 블로그에 넣을 영상 만들기</button>"
+                "<div class='text-[11px] text-slate-400 text-center mt-1'>글 본문에 첨부 · 30~40초 정보형</div>"
+                + ("<div class='mt-2 text-[11px] text-emerald-600 text-center'>✅ 클립 만들어짐</div>"
+                   if _nvc.get("path") else
+                   ("<button type='button' class='" + _btn + " bg-indigo-600 hover:bg-indigo-700 mt-2' "
+                    "onclick=\"vmPick(this,'" + esc(asset_id) + "','clip')\">"
+                    "📱 네이버 클립 만들기</button>"
+                    "<div class='text-[11px] text-slate-400 text-center mt-1'>클립 지면에 업로드 · 15~22초 훅형</div>"))
+                + _VMPICK_JS + "</div>")
     except Exception:
         return ""
 
