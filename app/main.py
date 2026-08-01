@@ -535,6 +535,36 @@ def admin_quality_check_all(request: Request):
     return JSONResponse({"ok": True, "results": out})
 
 
+@app.get("/admin/publish-pairs")
+def admin_publish_pairs(tenant: str = ""):
+    """운영 진단(읽기 전용) — 채점기↔실순위 검증용: 발행 글마다 (제목·URL·매칭·우리점수·타깃kw·최고순위).
+    2026-08-01 사장님 지시 '올린다 글 vs 수동 글' 대조 분석 재료."""
+    if not db.get_tenant(tenant):
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    out = []
+    for pub in db.list_blog_publishes(tenant, limit=50):
+        row = {"title": (pub.get("post_title") or "")[:60], "url": pub.get("published_url"),
+               "at": (pub.get("published_at") or "")[:10], "matched_by": pub.get("matched_by"),
+               "match_score": pub.get("match_score"), "piece_id": (pub.get("piece_id") or "")[:8]}
+        kw = ""
+        try:
+            p = db.get_piece(pub.get("piece_id") or "")
+            if p is not None:
+                pl = p.payload or {}
+                row["our_score"] = (pl.get("ranking_audit") or {}).get("score")
+                row["ours"] = bool(pl.get("gen_source") or pl.get("body"))   # 올린다 생성물 여부
+                kw = (pl.get("target_kw") or (pl.get("target_keywords") or [""])[0] or "")
+        except Exception:
+            pass
+        row["kw"] = kw
+        if kw:
+            ranks = [h["rank"] for h in db.rank_history(tenant, kw, limit=50)
+                     if isinstance(h.get("rank"), int) and h["rank"] >= 1]
+            row["best_rank"] = min(ranks) if ranks else None
+        out.append(row)
+    return JSONResponse({"ok": True, "n": len(out), "pairs": out})
+
+
 @app.get("/admin/kw-region")
 def admin_kw_region(kw: str = "", region: str = ""):
     """운영 진단 — 지역 정합 게이트 단건 판정(2026-08-01): 키워드가 가게 지역과 충돌하는가."""
