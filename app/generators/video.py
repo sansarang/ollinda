@@ -960,39 +960,126 @@ def _lines_for_photos(imgs: list, gen_source: str, cand_lines: list, gate=None) 
     반환 (사진들, 자막들) — 길이 동일, 순서 대응. 묘사가 없으면 ([], [])로 호출부가 기존 경로 유지.
     업종·지명 하드코딩 0(대조 재료는 그 세트의 사진 묘사와 본문뿐)."""
     import re as _r
-    raws = {}
+    # ★ gen_source에는 같은 [사진N]이 여러 번 나온다(실측: 분석 배치가 이어붙어 번호가 겹침).
+    #   나중 것으로 덮어쓰면 '한국 소상공인 마케팅 관점의 분석 결과입니다' 같은 안내문이 자막이 된다.
+    #   → 번호당 '가장 묘사다운 줄'을 고른다: 안내·메타 문장 배제 후 가장 긴 것.
+    _META = _r.compile(r"(분석 결과|분석입니다|관점의|다음과 같|촬영 팁|추천 활용|마케팅|사진 분석)")
+    _cands: dict = {}
     for m in _r.finditer(r"\[사진(\d+)\]\s*([^\n]+)", gen_source or ""):
         i = int(m.group(1)) - 1
-        if 0 <= i < len(imgs):
-            raws[i] = (m.group(2) or "").strip()
-    if not raws:
+        if not (0 <= i < len(imgs)):
+            continue
+        _t = (m.group(2) or "").strip()
+        if _META.search(_t):
+            continue
+        _cands.setdefault(i, []).append(_t)
+    if not _cands:
         return [], []
 
     def _tok(t):
         return {w for w in _r.findall(r"[가-힣A-Za-z0-9]{2,}", t or "")}
 
     def _short(desc):
-        """묘사 → 자막 한 줄(라벨·군더더기 제거 후 어절 경계 절단)."""
-        d = _r.sub(r"^(무엇이 보이는가|보이는 것|피사체|차종|해석|분석)\s*[:：]?\s*", "", desc or "")
-        d = _r.sub(r"\s*\([^)]*\)", "", d).strip(" .·—-")
-        d = _r.sub(r"(입니다|이다|입니다\.|이에요|예요)$", "", d).strip()
-        return _cut_word(d, 26)
+        """묘사 → 자막 한 줄. 실제 vision 출력 형식을 그대로 보고 만든다(2026-08-01 실측):
+        '* 피사체/차종: …' 라벨, '[오버레이]' 단독 줄, 따옴표 인용, 쉼표 나열이 섞여 있다.
+        규칙: ①내부 표기·라벨 제거 ②완결된 조각까지만(어절 경계 + 열린 인용 금지)
+              ③조사·연결어미·관형형으로 끝나면 그 앞까지. 못 만들면 빈 문자열."""
+        d = _r.sub(r"\[[^\]]{1,20}\]", " ", desc or "")            # [오버레이] 등 내부 표기
+        d = _r.sub(r"^\s*[*\-•]+\s*", "", d)                       # 불릿
+        d = _r.sub(r"^\s*[가-힣A-Za-z/·]{2,12}\s*[:：]\s*", "", d)   # '피사체/차종:' 류 라벨
+        d = _r.sub(r"\s*\([^)]*\)", " ", d)                        # 괄호 주석
+        d = _r.sub(r"\s+", " ", d).strip(" .,·—-")
+        d = _r.sub(r"(입니다|이다|이에요|예요|모습입니다|모습으로)$", "", d).strip(" ,·—-")
+        if not _r.search(r"[가-힣]{2,}", d):
+            return ""
+        # ★ 어절을 하나씩 붙이되, '그 자리에서 끝나도 말이 되는' 지점만 기억한다(불변 원칙 ②).
+        #   26자에서 무조건 자르던 것이 '…흰색 SUV', '…회전' 같은 조각을 만든 근본 원인이다.
+        #   끝맺을 수 있는 자리 = 조사·연결어미·관형형·수식어·열린 인용이 아닌 어절.
+        _TAIL_BAD = _r.compile(
+            r"("
+            r"와|과|의|에|을|를|이|가|은|는|도|로|으로|랑|및|고|며|"          # 조사
+            r"는데|은데|지만|면서|라서|어서|아서|으며|하며|거나|든지|려면|다면|으니|니까|"  # 연결어미
+            r"들어간|적용된|열린|놓인|찍힌|각인된|전시된|보이는|켜진|달린|연|"            # 관형형
+            r"흰색|검은색|은색|회색|남색|빨간색|파란색|회전|점등|상단|하단|우측|좌측"      # 수식·위치어
+            r")$")
+        best, acc = "", ""
+        for w in d.split(" "):
+            nxt = (acc + " " + w).strip()
+            # ★ 상한은 자막 규격에서 온다(_cap_lines: 3줄·가중치 30). 26자는 근거 없이 좁아
+            #   '…스티어링', '…성능·상태'처럼 명사 뒤에서 끊겼다(실측).
+            if len(nxt) > 38:
+                break
+            acc = nxt
+            _t = acc.rstrip(" ,·—-")
+            _tail = _t.rsplit(" ", 1)[-1] if " " in _t else _t
+            _closed = (_t.count("'") % 2 == 0 and _t.count('"') % 2 == 0
+                       and _t.count("(") == _t.count(")"))      # 인용·괄호가 열린 채 끝나지 않게
+            _standalone = not (_TAIL_BAD.search(_tail)          # 조사·연결어미·관형형·수식어
+                               or _r.fullmatch(r"[A-Z]{2,}", _tail)   # 영문 약어 단독
+                               or len(_tail) <= 1)              # 한 글자 조각
+            if _closed and _standalone:
+                best = _t
+        d = (best or "").rstrip(" ,·—-")
+        for _ in range(6):                                       # 끝맺음 정리(불변 원칙 ②)
+            _b = d
+            if _r.search(r"(와|과|의|에|을|를|이|가|은|는|도|로|으로|랑|및|고|며)$", d) and " " in d:
+                d = d[:d.rfind(" ")].rstrip(" ,·—-")
+            if _r.search(r"(들어간|적용된|열린|놓인|찍힌|각인된|전시된|보이는|켜진|달린|점등된|"
+                         r"부착된|장착된|표기된|기재된|촬영된|첨부된)$", d) and " " in d:
+                d = d[:d.rfind(" ")].rstrip(" ,·—-")             # 관형형 = 꾸밈 대상이 뒤에 와야 함
+            # ★ 마지막 어절이 '홀로 서지 못하는 조각'이면 잘라낸다(실측: '…흰색 SUV', '…회전').
+            #   판정: 끝 어절이 수식어(색·형용)거나 영문 약어 단독이면 앞 어절까지만 남긴다.
+            _last = d.rsplit(" ", 1)[-1] if " " in d else ""
+            if _last and (_r.fullmatch(r"[A-Z]{2,}", _last)
+                          or _r.search(r"(흰색|검은색|은색|회색|남색|빨간색|파란색|회전|점등)$", _last)):
+                d = d[:d.rfind(" ")].rstrip(" ,·—-")
+            if d.count("'") % 2 or d.count('"') % 2:
+                _q = max(d.rfind("'"), d.rfind('"'))
+                d = (d[:_q] if _q > 0 else d).rstrip(" ,·—-")
+            if d == _b:
+                break
+        # 한글 내용어가 2어절 이상 남아야 자막이다(실측: 인용에서 끊겨 'Encar'만 남는 경우)
+        _kor = _r.findall(r"[가-힣]{2,}", d)
+        return d if (len(d) >= 8 and len(_kor) >= 2) else ""
 
     # 🛒 구매로 이어지는 순서(사장님 불변 원칙 ③) — 손님이 사기로 마음먹는 순서대로 보여준다.
     #   ①전체 모습(뭘 파는지) ②근거 서류·수치(믿을 만한가) ③속·부품 상태(꼼꼼한가) ④나머지.
     #   판정 근거는 그 세트의 vision 묘사뿐이다 — 업종·상품 하드코딩 0.
     #   '서류·수치'는 숫자나 문서형 낱말이 묘사에 있는가로, '전체 모습'은 부분 묘사가 아닌가로 본다.
-    _DOCW = ("서류", "기록부", "증명", "등록증", "점검", "보증", "검인", "명세", "영수")
+    # ★ 같은 사진 번호에 묘사가 수십 줄 쌓인다(실측 21줄 — 분석 배치가 이어붙는다).
+    #   가장 긴 줄은 요소를 잔뜩 나열해 26자에서 끊기기 쉽다 → _short가 실제로 만들어낸
+    #   자막이 가장 긴(정보량 많은) 줄을 고른다. 자막을 못 만드는 줄은 후보에서 제외.
+    raws = {}
+    for _i, _vs in _cands.items():
+        _best_raw, _best_len = "", 0
+        for _v in _vs:
+            _ln = _short(_v)
+            if len(_ln) > _best_len:
+                _best_raw, _best_len = _v, len(_ln)
+        if _best_raw:
+            raws[_i] = _best_raw
+    if not raws:
+        return [], []
+
+    _WHOLE = ("외관", "전면", "후면", "측면", "전경", "전체", "정면", "외부")
+    _DOCW = ("서류", "기록부", "증명", "등록증", "점검", "보증", "검인", "명세", "영수", "성적서")
     _PARTW = ("내부", "부품", "엔진", "실내", "시트", "타이어", "휠", "계기", "콘솔", "핸들",
-              "도어", "트렁크", "배선", "하부", "패널", "필름", "시공", "마감", "표면")
+              "스티어링", "도어", "트렁크", "배선", "하부", "패널", "필름", "시공", "마감", "표면")
 
     def _rank(desc: str) -> int:
-        d = desc or ""
-        if any(w in d for w in _DOCW) or _r.search(r"\d{2,}", d):
-            return 1                                   # 근거(서류·수치)
-        if any(w in d for w in _PARTW):
-            return 2                                   # 상태(속·부품)
-        return 0                                       # 전체 모습(외관·전경)
+        """실측 묘사 기준 3단계. 전체 모습이 먼저 나와야 '뭘 파는지'가 보인다(불변 원칙 ③).
+        ★ 판정 순서가 중요하다 — 외관 묘사에도 수치가 섞여 있어(번호판 등) 수치를 먼저 보면
+          외관이 '근거'로 분류돼 순서가 뭉개진다(실측)."""
+        # ★ 앞부분만 본다(실측: 엔진룸 묘사 끝의 '전면 현대 로고 그릴' 때문에 전체 모습으로 잡혔다).
+        #   vision 묘사는 '주 피사체'를 먼저 쓰고 뒤에 부속 요소를 나열한다.
+        d = (desc or "").split(",")[0]
+        if any(w in d for w in _WHOLE):
+            return 0                                   # 전체 모습
+        if any(w in d for w in _DOCW):
+            return 1                                   # 근거(서류)
+        if any(w in d for w in _PARTW) or _r.search(r"\d{2,}", d):
+            return 2                                   # 상태(속·부품·수치)
+        return 3                                       # 나머지
 
     _ordered = sorted(raws, key=lambda i: (_rank(raws[i]), i))
     out_imgs, out_lines, used = [], [], set()
@@ -1763,7 +1850,8 @@ class ShortVideoGenerator(Generator):
             #   연결어미로 끝나는 줄은 다음 말이 있어야 하는 문장이므로 자막으로 쓰지 않는다.
             #   언어 규칙만 사용(업종 무관).
             _UNFIN = _re.compile(r"(는데|은데|지만|면서|라서|어서|아서|으며|하며|고들|거나|든지|"
-                                 r"려면|다면|으니|니까|는지|은지|ㄹ지|고요|구요|고,|며,)$")
+                                 r"려면|다면|으니|니까|는지|은지|ㄹ지|고요|구요|고,|며,|"
+                                 r"와|과|및|의|에|으로|로)$")
             _fin = [x for x in _clean_sent if not _UNFIN.search(x.rstrip(" .…"))]
             if len(_fin) >= 3:
                 _drop_un = [x for x in _clean_sent if x not in _fin]
