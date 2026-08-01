@@ -1337,6 +1337,19 @@ def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> d
         if re.search(r"[가-힣A-Za-z]{2,},[가-힣A-Za-z]{2,}", title + " " + text[:150]):
             warnings.append("쉼표 나열형 입력이 원문 그대로 노출 — 자연어로 풀어 쓰기('썬팅과 광택')")
             score -= 10
+        # 🗣 읽는 사람 시점(2026-08-01 사장님 지적) — 제목이 '가게가 하는 일'로 쓰이면 손님 입장에서
+        #   주어가 뒤집힌다("중고차판매 가격 걱정?"을 읽는 사람은 사려는 사람이다).
+        #   공급자 접미어는 검색어 정규화에 쓰는 것과 같은 언어 목록을 재사용(업종 하드코딩 0).
+        #   ★ 단, 타깃 키워드 자체에 그 말이 들어 있으면 정상이다 — '간판제작'처럼 손님도 실제로
+        #     검색하는 업종어가 있다(검색량 승부로 이미 검증된 말). 키워드 밖에서 가게 시점 표현이
+        #     새어 들어온 경우만 잡는다. 조어 검사(검수기 등)는 오탐이 커서 프롬프트 지침으로만 다룬다.
+        _tkw0 = " ".join((payload.get("target_keywords") or [""])[:3])
+        _sup_hit = [t for t in _SUPPLIER_TAIL
+                    if len(t) >= 2 and t in title and t not in _tkw0]
+        if _sup_hit:
+            warnings.append(f"제목이 가게 시점 용어({_sup_hit[0]}) — 읽는 사람은 손님이다. "
+                            "손님 행동어(구매·고르기·맡기기)로 바꿔라")
+            score -= 6
         # 1글 1키워드(생성품질 E2E #3): 타깃 외 추적 키워드가 소제목(##)으로 헤딩화되면 감점
         _heads = [ln.lstrip("#").strip() for ln in text.splitlines() if ln.strip().startswith("##")]
         for _ok in (payload.get("target_keywords") or [])[1:6]:
