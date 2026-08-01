@@ -737,7 +737,16 @@ def video_watchdog() -> None:
                 _set_video_job(row["asset_id"], "retrying", retried=True)   # 상한 선기록(폭주 방지)
                 _bump_retry(row["asset_id"])
                 log.info("[video-watchdog] 죽은 영상 잡 재시도 asset=%s t=%s", row["asset_id"], row["tenant_id"])
-                _spawn_video_bundle(tenant, asset, paths, blog.payload.get("brief") or {})
+                # ★ 사용자가 요청했던 플랫폼만 재시도한다(2026-08-01 사장님 지적).
+                #   want를 안 넘겨 기본값(쇼츠·릴스·네이버 전부)으로 돌면서, 누른 적 없는
+                #   인스타 릴스가 워치독에 의해 계속 다시 만들어졌다.
+                _wprev = {ch for ch, info in (blog.payload.get("channel_status") or {}).items()
+                          if ch in VIDEO_PLATFORMS and (info or {}).get("status") != "not_requested"}
+                if not _wprev:
+                    log.info("[video-watchdog] 요청 이력 없음 — 재시도 생략 asset=%s", row["asset_id"])
+                    continue
+                _spawn_video_bundle(tenant, asset, paths, blog.payload.get("brief") or {},
+                                    want=frozenset(_wprev))
             except Exception:
                 log.exception("[video-watchdog] 처리 실패 asset=%s", row.get("asset_id"))
     except Exception:
