@@ -32,14 +32,18 @@ def _clean(tok: str) -> str:
     return _JOSA.sub("", tok) if len(tok) > 2 else tok
 
 
-def candidates(payload: dict, region: str = "", industry: str = "", limit: int = 14) -> list[str]:
-    """발행 글 자체에서 검색어 후보 추출 — 소제목·FAQ 질문·본문 빈출 명사구(언어 구조만, 하드코딩 0)."""
+def candidates(payload: dict, region: str = "", industry: str = "", limit: int = 14,
+               biz: str = "local", brand: str = "", search_kw: str = "") -> list[str]:
+    """발행 글 자체에서 검색어 후보 추출 — 소제목·FAQ 질문·본문 빈출 명사구(언어 구조만, 하드코딩 0).
+    biz: local(동네매장)=지역+업종 축 / seller(온라인셀러)=브랜드·상품 축(지역 토큰 없음) / hybrid=둘 다.
+    축 판단은 seo.canonical_region(전 표면 단일 소스)에 위임 — 여기서 별도 규칙을 만들지 않는다."""
     body = (payload.get("body") or "")
     title = (payload.get("title") or "")
     out: list[str] = []
-    # 주제어 집합 — 제목·지역·업종의 어휘. 이 중 하나도 안 겹치는 후보는 '구조 제목'(자주 묻는 질문,
-    #   한눈 요약 등 우리 템플릿 문구)이라 이 가게의 유입 검색어로 볼 수 없다(업종 무관 일반 규칙).
-    _topic = {_clean(t) for t in re.findall(r"[0-9A-Za-z가-힣]{2,}", f"{title} {region} {industry}")}
+    # 주제어 집합 — 제목·지역·업종·브랜드·상품검색어의 어휘. 이 중 하나도 안 겹치는 후보는
+    #   '구조 제목'(자주 묻는 질문·한눈 요약 등 템플릿 문구)이라 유입 검색어로 볼 수 없다(전 업종 공통).
+    _topic = {_clean(t) for t in re.findall(
+        r"[0-9A-Za-z가-힣]{2,}", f"{title} {region} {industry} {brand} {search_kw}")}
     _topic = {t for t in _topic if len(t) >= 2}
 
     def _add(s: str):
@@ -68,18 +72,21 @@ def candidates(payload: dict, region: str = "", industry: str = "", limit: int =
     # ★ 지역 토큰은 canonical(축약형)으로 — 실측: '부산광역시 썬팅'은 아무도 안 친다(검색량 0).
     #   전 표면이 쓰는 단일 소스(seo.canonical_region)를 그대로 재사용(별도 규칙 만들지 않음).
     reg = ""
-    try:
+    try:                                                 # 셀러면 canonical_region이 ''를 준다(지역 미주입)
         from app import seo as _seo
-        reg = _seo.canonical_region(region or "", "local", industry or "") or _seo._region_wide(region or "")
+        reg = _seo.canonical_region(region or "", biz or "local", industry or "")
     except Exception:
-        reg = (region or "").split()[0]
+        reg = "" if (biz or "local") == "seller" else (region or "").split()[0]
     reg = (reg or "").split()[0] if reg else ""          # '부산 기장' → '부산'(광역 우선, 조합 폭발 방지)
     ind0 = ((industry or "").replace("/", ",").split(",")[0] or "").strip()
-    if reg and ind0:
-        _add(f"{reg} {ind0}")                            # 가장 흔한 검색형(지역+업종)
+    # 축(axis): 매장=지역+업종 / 셀러=브랜드·상품+업종 — 어느 쪽이든 '가게가 가진 값'만 조합(하드코딩 0)
+    axes = [a for a in ([reg] if reg else []) + [brand.strip(), (search_kw or "").split(",")[0].strip()] if a]
+    for a in axes[:2]:
+        if ind0:
+            _add(f"{a} {ind0}")                          # 가장 흔한 검색형(축+업종)
     for t in top[:8]:
-        if reg:
-            _add(f"{reg} {t}")
+        for a in axes[:2]:
+            _add(f"{a} {t}")
         _add(t if len(t) >= 4 else f"{t} {ind0}".strip())
     return out[:limit]
 
@@ -109,7 +116,10 @@ def scout(tenant_id: str, max_posts: int = 3, per_post: int = 10) -> dict:
             pass
         pl = (p.payload if p else None) or {"title": pub.get("post_title") or ""}
         cands = candidates(pl, region=getattr(t, "region", "") or "",
-                           industry=getattr(t, "industry", "") or "")[:per_post]
+                           industry=getattr(t, "industry", "") or "",
+                           biz=getattr(t, "biz_type", "local") or "local",
+                           brand=getattr(t, "brand_name", "") or "",
+                           search_kw=getattr(t, "search_kw", "") or "")[:per_post]
         for kw in cands:
             k_norm = kw.replace(" ", "")
             if k_norm in seen_kw:

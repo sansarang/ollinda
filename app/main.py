@@ -554,7 +554,10 @@ def admin_queryscout(tenant: str = "", posts: int = 3, per: int = 10, debug: str
                 pass
             pl = (p.payload if p else None) or {"title": pub.get("post_title") or ""}
             cands = _qs.candidates(pl, region=getattr(t, "region", "") or "",
-                                   industry=getattr(t, "industry", "") or "")
+                                   industry=getattr(t, "industry", "") or "",
+                                   biz=getattr(t, "biz_type", "local") or "local",
+                                   brand=getattr(t, "brand_name", "") or "",
+                                   search_kw=getattr(t, "search_kw", "") or "")
             vols = {}
             try:
                 vols = _sa.volume_map(cands[:24])
