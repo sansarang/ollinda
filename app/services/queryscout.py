@@ -56,11 +56,22 @@ def candidates(payload: dict, region: str = "", industry: str = "", limit: int =
     for t in toks:
         freq[t] = freq.get(t, 0) + 1
     top = [t for t, n in sorted(freq.items(), key=lambda x: -x[1])[:12] if n >= 3]
-    reg = (region or "").split()[0] if region else ""
+    # ★ 지역 토큰은 canonical(축약형)으로 — 실측: '부산광역시 썬팅'은 아무도 안 친다(검색량 0).
+    #   전 표면이 쓰는 단일 소스(seo.canonical_region)를 그대로 재사용(별도 규칙 만들지 않음).
+    reg = ""
+    try:
+        from app import seo as _seo
+        reg = _seo.canonical_region(region or "", "local", industry or "") or _seo._region_wide(region or "")
+    except Exception:
+        reg = (region or "").split()[0]
+    reg = (reg or "").split()[0] if reg else ""          # '부산 기장' → '부산'(광역 우선, 조합 폭발 방지)
+    ind0 = ((industry or "").replace("/", ",").split(",")[0] or "").strip()
+    if reg and ind0:
+        _add(f"{reg} {ind0}")                            # 가장 흔한 검색형(지역+업종)
     for t in top[:8]:
         if reg:
             _add(f"{reg} {t}")
-        _add(t if len(t) >= 4 else f"{t} {industry}".strip())
+        _add(t if len(t) >= 4 else f"{t} {ind0}".strip())
     return out[:limit]
 
 
