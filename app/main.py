@@ -535,6 +535,18 @@ def admin_quality_check_all(request: Request):
     return JSONResponse({"ok": True, "results": out})
 
 
+@app.get("/admin/blogreach")
+def admin_blogreach(tenant: str = "", sweep: str = ""):
+    """🌐 유입 경로 진단(2026-08-01 사장님 지시 B) — 검색 밖 통로(주제 설정·이웃 피드·발행 리듬·클립).
+    sweep=1이면 전 가게 요약. 진단만 하고 자동 변경은 안 한다(계정 설정은 사람이)."""
+    from app.services import blogreach as _brc
+    if sweep == "1":
+        return JSONResponse({"ok": True, "shops": _brc.sweep()})
+    if not db.get_tenant(tenant):
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    return JSONResponse(_brc.diagnose(tenant))
+
+
 @app.get("/admin/queryscout")
 def admin_queryscout(tenant: str = "", posts: int = 3, per: int = 10, debug: str = ""):
     """🔎 검색어 정찰 진단(①, 자격증명 0) — 발행 글이 어떤 검색어에서 잡히는지 실측.
