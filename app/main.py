@@ -876,7 +876,11 @@ def admin_clear_video_status(asset_id: str):
     blog = next((p for p in ps if p.kind == _CKv.BLOG), None)
     if not blog:
         return JSONResponse({"ok": False, "error": "블로그 피스 없음"}, status_code=404)
-    short = next((p for p in ps if p.kind == _CKv.SHORT and (p.payload or {}).get("video_path")), None)
+    # ★ 쇼츠 파일 유무로 조각을 고르면 안 된다 — 네이버만 만든 세트는 video_path가 없다
+    #   (같은 실수를 성공 판정에서도 했다). 조각은 종류로 고르고, 산출물은 각각 확인한다.
+    _sh_all = [p for p in ps if p.kind == _CKv.SHORT]
+    short = next((p for p in _sh_all if (p.payload or {}).get("video_path")), None) or (
+        _sh_all[0] if _sh_all else None)
     _nv = ((short.payload.get("naver_video") or {}) if short else {})
     cs = dict(blog.payload.get("channel_status") or {})
     for ch, ok in (("shorts", bool(short and short.payload.get("video_path"))),
