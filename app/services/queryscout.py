@@ -69,6 +69,41 @@ def candidates(payload: dict, region: str = "", industry: str = "", limit: int =
     for t in toks:
         freq[t] = freq.get(t, 0) + 1
     top = [t for t, n in sorted(freq.items(), key=lambda x: -x[1])[:12] if n >= 3]
+    # ★ 실검색어 확장(2026-08-01 실측 교훈): 후보를 '지어내면' 아무도 안 치는 조합만 나온다
+    #   ('부산 부산', '계기판 중고차판매'…). 씨앗(축+업종+제목 고유명사)만 우리가 뽑고,
+    #   실제 사람이 치는 검색어는 검색광고 API의 연관 키워드에서 가져온다(전 업종·업태 공통).
+    _seeds: list = []
+    try:
+        from app import seo as _seo0
+        _reg0 = _seo0.canonical_region(region or "", biz or "local", industry or "")
+    except Exception:
+        _reg0 = "" if (biz or "local") == "seller" else (region or "").split()[0]
+    _reg0 = (_reg0 or "").split()[0] if _reg0 else ""
+    _ind0 = ((industry or "").replace("/", ",").split(",")[0] or "").strip()
+    for a in [x for x in (_reg0, brand.strip(), (search_kw or "").split(",")[0].strip()) if x]:
+        if _ind0:
+            _seeds.append(f"{a} {_ind0}")
+    if _ind0:
+        _seeds.append(_ind0)
+    # 제목의 고유명사(모델명·상품명 등) — 업종 무관하게 '숫자·영문 포함' 또는 긴 명사를 씨앗으로
+    for t in re.findall(r"[0-9A-Za-z가-힣]{2,}", title):
+        c = _clean(t)
+        if c and c not in _STOP and (re.search(r"[0-9A-Za-z]", c) or len(c) >= 3) and c != _reg0:
+            _seeds.append(c)
+    try:
+        from app.services import searchad as _sa0
+        rel = _sa0.keyword_volumes(_seeds[:5], limit=120) if _seeds else []
+    except Exception:
+        rel = []
+    _axis_tokens = {t for t in (_reg0, _ind0, brand.strip()) if t}
+    for v in sorted(rel, key=lambda x: -(x.get("total") or 0)):
+        kw, vol = (v.get("keyword") or "").strip(), (v.get("total") or 0)
+        if vol < MIN_VOLUME or not kw:
+            continue
+        # 이 가게와 무관한 연관어 배제 — 축(지역·업종·브랜드) 어휘를 하나는 포함해야 함
+        if _axis_tokens and not any(a and a in kw for a in _axis_tokens):
+            continue
+        _add(kw)
     # ★ 지역 토큰은 canonical(축약형)으로 — 실측: '부산광역시 썬팅'은 아무도 안 친다(검색량 0).
     #   전 표면이 쓰는 단일 소스(seo.canonical_region)를 그대로 재사용(별도 규칙 만들지 않음).
     reg = ""
@@ -85,6 +120,8 @@ def candidates(payload: dict, region: str = "", industry: str = "", limit: int =
         if ind0:
             _add(f"{a} {ind0}")                          # 가장 흔한 검색형(축+업종)
     for t in top[:8]:
+        if t in axes or t == ind0:                       # '부산 부산' 류 중복 조합 방지(실측)
+            continue
         for a in axes[:2]:
             _add(f"{a} {t}")
         _add(t if len(t) >= 4 else f"{t} {ind0}".strip())
