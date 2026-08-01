@@ -4053,6 +4053,9 @@ def _clean_caption_desc(raw: str) -> str:
     if _CAP_LABEL is None:
         _CAP_LABEL = _r.compile(r"^(무엇이 보이는가|보이는 것|해석|분석|촬영 팁|추천 활용|전체)\s*[:：]?\s*")
     s = _r.sub(r"[*_`#]+", "", raw or "").strip()                    # 마크다운 잔재 제거
+    # ★ 내부 표기 제거(2026-08-01 사장님 지적) — vision이 붙이는 '[오버레이]' 같은 대괄호 토큰이
+    #   캡션에 그대로 새어 네이버 이미지 설명에 박혔다. 캡션은 손님과 검색엔진이 읽는 글이다.
+    s = _r.sub(r"\[[^\]]{1,20}\]", " ", s)
     s = _r.sub(r"^[\d)\-•\s.]+", "", s).strip()
     s = _CAP_LABEL.sub("", s).strip()
     s = _r.sub(r"^[:：\-\s]+", "", s).strip()
@@ -4060,6 +4063,8 @@ def _clean_caption_desc(raw: str) -> str:
         return ""                                                     # 프리앰블 문장 — 묘사 아님
     if not _r.search(r"[가-힣]{2,}", s):
         return ""                                                     # 내용어 없는 라인('(5/20).' 류 카운터) — 묘사 아님
+    if _r.fullmatch(r"[\s()\d번째쨰,·\-—]+", s):
+        return ""                                                     # 순서 표기만 남은 잔해('(12번째)') — 묘사 아님
     s = s.rstrip(".")
     if len(s) > 60:                                                   # 어절 경계 절단('…넓.' 류 잘림 방지)
         cut = s[:60]
@@ -4190,11 +4195,16 @@ def _photo_captions(tenant, blog, n: int) -> list[str]:
     kw = seo._kw_shorten(_canonical_keyword(tenant, blog))   # PHASE 1: 낡은 target_keywords 대신 canonical(제목 유래)
     imgs_ = (blog.payload or {}).get("image_paths") or []
     ind0 = ((getattr(tenant, "industry", "") or "").replace("/", ",").split(",")[0] or "").strip()
+    ind0 = seo.searcher_term(ind0) or ind0     # 손님이 쓰는 말로(캡션=이미지 검색 신호)
     _priv = _isc.get_schema(getattr(tenant, "industry", ""),
                             getattr(tenant, "biz_type", "local") or "local").get("privacy_patterns") or []
     _doc_risk = tuple(dict.fromkeys(list(_priv) + list(_CAP_DOC)))
     out, _patched, _fails = [], False, []
     kw_slots = {1, max(2, (n + 1) // 2), n} if n >= 3 else {1}       # 키워드 부착: 첫·중간·끝(도배 방지)
+    # 🏷 상호 표기(2026-08-01 사장님 지적) — 이미지 검색은 캡션·파일명·주변 본문을 함께 읽는다.
+    #   상호가 하나도 없으면 '어느 업체 사진인지' 식별이 안 된다. 단 전 장에 박으면 도배로 읽히므로
+    #   대표(첫) 사진 1장에만 — 본문 상호 표기를 1회로 제한한 것과 같은 원리. 업종 무관 공통.
+    _shop = " ".join((getattr(tenant, "name", "") or "").split())
     for i in range(1, n + 1):
         m = _r.search(rf"\[사진{i}\]\s*([^\n]+)", srcnote)
         raw_line = m.group(1) if m else ""             # 원문(서류·번호판 검사용)
@@ -4217,7 +4227,12 @@ def _photo_captions(tenant, blog, n: int) -> list[str]:
         if _is_doc:
             out.append(f"{ind0} 확인 서류 사진 ({i}번)".strip() if ind0 else f"확인 서류 사진 ({i}번)")
         elif len(desc) >= 4:
-            out.append(f"{desc} — {kw} 현장 사진입니다." if (kw and i in kw_slots) else f"{desc}.")
+            if kw and i == 1 and _shop:
+                out.append(f"{desc} — {kw}, {_shop}에서 직접 촬영했습니다.")
+            elif kw and i in kw_slots:
+                out.append(f"{desc} — {kw} 현장 사진입니다.")
+            else:
+                out.append(f"{desc}.")
         else:                                          # PHASE 2: 분석 실패 → 빈칸(키워드 때움 템플릿 금지 — 오염 원천).
             _fails.append(i)                            # UI가 '직접 적어주세요' 안내. 지어낸 캡션보다 빈칸(정직 게이트).
             out.append("")
@@ -4225,8 +4240,12 @@ def _photo_captions(tenant, blog, n: int) -> list[str]:
     _seen = {}
     for _ix, _c in enumerate(out):
         _key = _r.sub(r"\s", "", _c)
+        if not _key:
+            continue                          # 빈칸은 중복 판정 대상이 아니다(직접 적어주세요 안내)
         if _key in _seen:
-            out[_ix] = _c.rstrip(". ") + f" ({_ix + 1}번째)"
+            # 중복 구분은 필요하지만 '(N번째)'는 사람이 읽는 캡션에 어울리지 않는다(사장님 지적).
+            # 키워드를 덧붙여 자연스럽게 구분 — 이미지 검색에도 도움이 된다.
+            out[_ix] = (f"{_c.rstrip('. ')} — {kw}" if kw else f"{_c.rstrip('. ')} 상세").strip() + "."
         else:
             _seen[_key] = True
     if _fails:
