@@ -111,6 +111,8 @@ def candidates(payload: dict, region: str = "", industry: str = "", limit: int =
     except Exception:
         rel = []
     _axis_tokens = {t for t in (_reg0, _ind0, brand.strip()) if t} | set(_mkt_terms[:6])
+    # 주제어 게이트에도 합류 — 업종명('중고차판매')만 알면 '중고차 시세'가 _add에서 또 탈락한다(실측)
+    _topic.update(_mkt_terms[:6])
     # ★ 3번째 공급원(2026-08-01 사장님 설계): 상위 글 본문에서 뽑힌 '시장 공통 검색 의도 구절'.
     #   검색광고 연관어는 씨앗과 글자가 겹치는 것만 주는 한계가 있어(실측: 주안모터스 후보 2개),
     #   이 판에서 실제로 통하는 표현을 상위 글들의 교차 등장으로 가져온다(캐시만 — 크롤 대기 0).
