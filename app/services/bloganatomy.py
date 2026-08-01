@@ -110,31 +110,44 @@ _Q_MARK = re.compile(r"(어떻게|어디|얼마|무엇|뭐가|왜|언제|추천|
 
 def _query_phrases(seg: str, text: str) -> list:
     """상위 글에서 '검색 의도 구절'만 추출(2026-08-01 사장님 승인) — 원문 저장 금지 원칙 유지:
-    문장을 담지 않고, 소제목·FAQ 질문·의도어 포함 짧은 구절(2~6어절)만 남긴다.
+    문장을 담지 않고, 소제목·질문·의도어 포함 짧은 구절(2~6어절)만 남긴다.
+    ★ 반드시 '평문'에서만 추출한다(실측 2026-08-01: HTML 원본 정규식은 네이버 에디터 구조와 안 맞아
+      매칭 0 + '<div class=se-' 같은 태그 조각이 구절로 잡혔다).
     업종·지명 하드코딩 0 — 의도 표지어(어떻게·가격·비교…)라는 언어 신호만 사용."""
+    import html as _html
     out: list = []
+    # 블록 태그를 줄바꿈으로 바꿔 '줄 구조'를 살린 뒤 태그 제거(소제목·짧은 줄이 살아남는다)
+    t = re.sub(r"<script.*?</script>|<style.*?</style>", " ", seg or "", flags=re.S)
+    t = re.sub(r"(?i)</(p|div|h[1-6]|li|td|tr|blockquote)>|<br[^>]*>", "\n", t)
+    t = _html.unescape(re.sub(r"<[^>]+>", " ", t))
 
     def _push(s: str):
-        s = " ".join(re.sub(r"<[^>]+>", " ", s or "").split())
-        s = re.sub(r"^[#\-•\d.\)\s]+", "", s).strip(" ?!·|·…")
-        if not (4 <= len(s) <= 30):
+        s = " ".join((s or "").split())
+        s = re.sub(r"^[#\-•\d.\)\s]+", "", s).strip(" ?!.·|…\"'“”")
+        if not (4 <= len(s) <= 28):
             return
         w = s.split()
         if not (2 <= len(w) <= 6):
             return
-        if any(t in s for t in _Q_STOP):              # 서술 문장(원문 조각)은 배제 — 구절만
+        if re.search(r"(습니다|합니다|했어요|해요|입니다|이에요|드려요|드립니다)$", s):
+            return                                     # 완결 서술문 = 원문 조각 → 배제(구절만)
+        if any(t0 in s for t0 in _Q_STOP):
+            return
+        if re.search(r"(http|www\.|blog\.naver|se-|css|class=)", s, re.I):
+            return                                     # 마크업·링크 잔해 차단
+        if not re.search(r"[가-힣]{2,}", s):
             return
         if s not in out:
             out.append(s)
 
-    for m in re.findall(r"<h[23][^>]*>(.*?)</h[23]>", seg, re.S)[:12]:      # 소제목
-        _push(m)
-    for m in re.findall(r"se-section-quotation[^>]*>(.*?)</div>", seg, re.S)[:12]:
-        _push(m[:120])
-    for sent in re.split(r"[.!?\n]", text)[:400]:                            # 의도어 포함 짧은 구절
-        s = sent.strip()
-        if 4 <= len(s) <= 30 and _Q_MARK.search(s):
+    for line in t.split("\n")[:800]:
+        s = line.strip()
+        if not s:
+            continue
+        if s.endswith("?") or _Q_MARK.search(s):       # 질문형·의도어 포함 줄
             _push(s)
+        elif 4 <= len(s) <= 20 and len(s.split()) <= 4:
+            _push(s)                                   # 아주 짧은 줄 = 소제목일 확률 높음
     return out[:20]
 
 
