@@ -6987,7 +6987,16 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
             # ★ 클립 업로드 강조(2026-08-01 실측): 통합검색 첫 화면은 플레이스·숏텐츠·'네이버 클립'이
             #   차지하고 블로그 글은 안 보이는 판이 많다(부산 썬팅·썬팅업체 등 3개 키워드 실측 0건).
             #   같은 영상을 클립에 올리는 것이 통합검색 진입의 실질 카드라 안내를 강하게 둔다.
-            "<div class='mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3'>"
+            + ((lambda _c: (
+                f"<div class='mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3'>"
+                f"<div class='text-sm font-bold text-amber-800 mb-1'>🎬 클립 전용 버전({int(_c.get('duration_sec') or 0)}초)이 따로 있어요</div>"
+                "<div class='text-xs text-amber-700 mb-2'>클립은 짧고 첫 화면이 강해야 잘 퍼집니다 — 본문용(긴 버전)과 "
+                "따로 만들어 뒀어요. <b>아래 클립 버전을 올리세요.</b></div>"
+                f"<a href='/dl/{asset_id}/{os.path.basename(_c.get('path',''))}' "
+                f"download='{esc(_c.get('filename') or 'clip.mp4')}' "
+                f"class='{cbtn} bg-amber-600 hover:bg-amber-700 inline-block'>⬇ 클립용 영상 받기</a></div>")
+               )(_nv.get("clip")) if (_nv.get("clip") or {}).get("path") else "")
+            + "<div class='mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3'>"
             "<div class='text-sm font-bold text-amber-800 mb-1'>📌 이 영상, 네이버 클립에도 꼭 올리세요</div>"
             "<div class='text-xs text-amber-700 leading-relaxed'>검색 첫 화면(통합검색)에는 <b>네이버 클립 칸</b>이 "
             "따로 있습니다. 블로그 글만으로는 그 자리에 들어가기 어렵지만, 클립은 올리기만 하면 노출 기회가 생겨요. "

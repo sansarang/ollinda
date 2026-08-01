@@ -1730,7 +1730,47 @@ class ShortVideoGenerator(Generator):
         meta = {"path": final, "title": vtitle, "desc": desc, "filename": fname,
                 "hashtags": hashtags, "quality": _spec,
                 "duration_sec": dur, "opening": opening, "scene_texts": [opening] + sent + [outro]}
+        # 🎬 클립 전용 파생본(2026-08-01 사장님 승인) — 통합검색 '네이버 클립' 블록 진입용.
+        #   실측 배경: 지역+업종 통합검색 첫 화면에 블로그 지면이 0인 판이 많고, 클립 블록은 열려 있다.
+        #   블로그 첨부용(20~45초 정보형)과 클립용(15~25초 훅형)은 성격이 다르다 → 같은 소스에서
+        #   앞부분만 잘라 파생(재생성·LLM·AI 0, ffmpeg 재인코딩만 = 원가 증가 0).
+        try:
+            clip_path, clip_dur = self._clip_cut(final, out_dir, kw_nat)
+            if clip_path:
+                meta["clip"] = {"path": clip_path, "duration_sec": clip_dur,
+                                "filename": (os.path.splitext(fname)[0] + "_클립.mp4"),
+                                "title": vtitle, "desc": desc, "hashtags": hashtags}
+        except Exception:
+            _nlog.exception("[naver-video] 클립 파생 실패(본편은 유지)")
         return final, meta
+
+    def _clip_cut(self, src: str, out_dir: str, kw_nat: str = "") -> tuple:
+        """완성 영상 → 클립용 15~22초 파생본. 소리 없이 보는 지면이라 첫 화면 훅 자막을 크게 얹는다.
+        전 업종 공통(문구는 키워드에서 파생 — 하드코딩 0). 실패 시 (None, 0)."""
+        if not (src and os.path.exists(src) and shutil.which("ffmpeg")):
+            return None, 0
+        _src_dur = _probe_dur(src)
+        if _src_dur < 6:
+            return None, 0
+        target = min(22.0, max(15.0, _src_dur * 0.55))     # 15~22초(클립 알고리즘 안전대)
+        out = os.path.join(out_dir, f"clip_{uuid.uuid4().hex}.mp4")
+        # 첫 1.6초 훅 자막(큰 글씨) — 자막은 이미 본편에 구워져 있으므로 상단에만 얹는다
+        hook = (kw_nat or "").strip()
+        vf = f"scale={W}:{H},setsar=1,fps={FPS}"
+        if hook:
+            _fp = _font_path("Bold")
+            if _fp:
+                _txt = hook.replace("'", "").replace(":", "")[:14]
+                vf += (f",drawtext=fontfile='{_fp}':text='{_txt}':fontcolor=white:fontsize=92:"
+                       f"borderw=8:bordercolor=black@0.85:x=(w-text_w)/2:y=180:"
+                       f"enable='between(t,0,1.6)'")
+        cmd = ["ffmpeg", "-y", "-t", f"{target:.2f}", "-i", src, "-vf", vf,
+               "-t", f"{target:.2f}", "-r", str(FPS), "-pix_fmt", "yuv420p",
+               "-c:v", "libx264", "-preset", "medium", "-crf", "22",
+               "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out]
+        if not (_run_ff(cmd, 180, "clipcut") and os.path.exists(out)):
+            return None, 0
+        return out, round(_probe_dur(out))
 
     def _downscale_for_video(self, imgs):
         """영상용 사진 다운스케일 — 대용량 원본(예: 5712×4284)은 zoompan/scale이 느려
