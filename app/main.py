@@ -892,6 +892,23 @@ def admin_clear_video_status(asset_id: str):
     return JSONResponse({"ok": True, "channel_status": cs})
 
 
+@app.post("/admin/set/{asset_id}/make-video")
+def admin_make_video(asset_id: str, platforms: str = "naver"):
+    """🎬 운영자 영상 요청 — 플랫폼을 지정해 즉시 실행(사용자 버튼과 동일 경로).
+    워치독 자동 재시도를 끈 뒤(사장님 지시) registered 상태가 방치되던 문제의 운영 복구용.
+    platforms=naver / naver,clip / shorts …"""
+    ps = db.get_set_pieces(asset_id)
+    if not ps:
+        return JSONResponse({"ok": False, "error": "세트 없음"}, status_code=404)
+    t = db.get_tenant(ps[0].tenant_id)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    from app.services.ingest import request_video_bundle as _rvb
+    want = {w.strip() for w in (platforms or "").split(",") if w.strip()}
+    ok, msg = _rvb(t, asset_id, want)
+    return JSONResponse({"ok": ok, "error": msg, "want": sorted(want), "tenant": t.name})
+
+
 @app.post("/admin/aiclip-unblock")
 def admin_aiclip_unblock(tenant: str = ""):
     """🎬 AI 무빙 차단 마커 해제(운영 복구) — 검사 API가 죽었을 때 잘못 찍힌 .bad 마커를 지운다.
