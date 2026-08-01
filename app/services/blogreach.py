@@ -162,6 +162,18 @@ def diagnose(tenant_id: str) -> dict:
         rx.append({"level": "mid", "area": "이미지 검색",
                    "msg": "이미지탭에 우리 사진이 안 보입니다 — 사진 많은 업종의 숨은 유입 통로입니다. "
                           "사진 파일명·본문 설명이 검색어와 맞물리면 노출 확률이 올라갑니다."})
+    # 🧱 블록 판정 — 블로그 지면이 없는 판이면 글만으로는 통합검색 진입이 어렵다(클립·플레이스 병행)
+    try:
+        _kws = db.tracked_keywords(tenant_id, 3)
+        _no_surface = [k for k in _kws if (blocks_for(tenant_id, k) or {}).get("blog_surface") is False]
+        if _no_surface:
+            rx.append({"level": "high", "area": "통합검색 지면",
+                       "msg": f"'{_no_surface[0]}' 등 {len(_no_surface)}개 키워드는 통합검색 첫 화면에 "
+                              "블로그 지면 자체가 없습니다(플레이스·클립·숏텐츠가 차지). "
+                              "블로그 글만으로는 노출이 어렵고 — 같은 영상을 네이버 클립에 올리고 "
+                              "플레이스를 채우는 쪽이 실효가 큽니다."})
+    except Exception:
+        pass
     _map = (getattr(t, "map_url", "") or "").strip()
     if (getattr(t, "biz_type", "local") or "local") != "seller" and not _map:
         rx.append({"level": "mid", "area": "플레이스",
@@ -206,6 +218,55 @@ def external_reach(blog_id: str, post_url: str = "", keyword: str = "") -> dict:
         except Exception:
             out["image_rank"] = None
     return out
+
+
+def blocks_ingest(tenant_id: str, rows: list) -> dict:
+    """🧱 스마트블록 정찰 결과 반영(2026-08-01) — 맥 로컬 스캐너(insight/blocks.py)가 POST.
+    '이 키워드의 통합검색에 블로그 지면이 있는가'를 가게 payload에 남겨 작전·진단이 참조한다.
+    실측 배경: 블로그탭 8위여도 통합검색 첫 화면엔 플레이스·숏텐츠·클립만 있는 판이 있다."""
+    t = db.get_tenant(tenant_id)
+    if not t:
+        return {"ok": False, "error": "tenant 없음"}
+    saved = 0
+    try:
+        with db._conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS kw_blocks("
+                      "tenant_id TEXT, keyword TEXT, blocks TEXT, blog_blocks TEXT,"
+                      "mine INTEGER, checked_at TEXT, PRIMARY KEY(tenant_id, keyword))")
+            from datetime import datetime as _d
+            for r in (rows or [])[:40]:
+                kw = (r.get("keyword") or "").strip()
+                if not kw:
+                    continue
+                c.execute("INSERT OR REPLACE INTO kw_blocks VALUES(?,?,?,?,?,?)",
+                          (tenant_id, kw, "|".join(r.get("blocks") or [])[:400],
+                           "|".join(r.get("blog_blocks") or [])[:200],
+                           1 if r.get("my_visible") else 0, _d.utcnow().isoformat()))
+                saved += 1
+    except Exception:
+        _log.exception("[blogreach] 블록 저장 실패")
+        return {"ok": False, "error": "저장 실패"}
+    return {"ok": True, "saved": saved}
+
+
+def blocks_for(tenant_id: str, keyword: str) -> dict:
+    """저장된 블록 판정 조회 — 생성 작전이 '이 판에 블로그 지면이 있는가'를 참조."""
+    try:
+        with db._conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS kw_blocks("
+                      "tenant_id TEXT, keyword TEXT, blocks TEXT, blog_blocks TEXT,"
+                      "mine INTEGER, checked_at TEXT, PRIMARY KEY(tenant_id, keyword))")
+            r = c.execute("SELECT * FROM kw_blocks WHERE tenant_id=? AND keyword=?",
+                          (tenant_id, " ".join((keyword or "").split()))).fetchone()
+        if not r:
+            return {}
+        d = dict(r)
+        d["blocks"] = [x for x in (d.get("blocks") or "").split("|") if x]
+        d["blog_blocks"] = [x for x in (d.get("blog_blocks") or "").split("|") if x]
+        d["blog_surface"] = bool(d["blog_blocks"])       # 이 판에 블로그 지면이 있는가
+        return d
+    except Exception:
+        return {}
 
 
 def sweep(limit: int = 30) -> list:

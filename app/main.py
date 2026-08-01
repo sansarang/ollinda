@@ -535,6 +535,17 @@ def admin_quality_check_all(request: Request):
     return JSONResponse({"ok": True, "results": out})
 
 
+@app.post("/admin/blocks-ingest")
+async def admin_blocks_ingest(request: Request):
+    """🧱 스마트블록 정찰 결과 수신(맥 로컬 insight/blocks.py) — 키워드별 통합검색 블록 구성 저장."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "JSON 필요"}, status_code=400)
+    from app.services import blogreach as _brc
+    return JSONResponse(_brc.blocks_ingest(str(body.get("tenant") or ""), body.get("rows") or []))
+
+
 @app.get("/admin/blogreach")
 def admin_blogreach(tenant: str = "", sweep: str = ""):
     """🌐 유입 경로 진단(2026-08-01 사장님 지시 B) — 검색 밖 통로(주제 설정·이웃 피드·발행 리듬·클립).
@@ -6972,7 +6983,16 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
             f"<a href='{_nvsrc}' download='{esc(_vfn)}' class='{cbtn} bg-emerald-600 hover:bg-emerald-700 inline-block'>⬇ 영상 받기 (본문·클립 겸용 9:16)</a>"
             f"<button onclick=\"nvcp('nvVT',this)\" class='{cbtn} bg-indigo-600 hover:bg-indigo-700'>제목 복사</button>"
             f"<button onclick=\"nvcp('nvVD',this)\" class='{cbtn} bg-indigo-600 hover:bg-indigo-700'>설명 복사</button></div>"
-            f"<div class='text-[11px] text-slate-400 mt-2'>파일명: {esc(_vfn)} · 길이 약 {int(_nv.get('duration_sec') or 0)}초</div>")
+            f"<div class='text-[11px] text-slate-400 mt-2'>파일명: {esc(_vfn)} · 길이 약 {int(_nv.get('duration_sec') or 0)}초</div>"
+            # ★ 클립 업로드 강조(2026-08-01 실측): 통합검색 첫 화면은 플레이스·숏텐츠·'네이버 클립'이
+            #   차지하고 블로그 글은 안 보이는 판이 많다(부산 썬팅·썬팅업체 등 3개 키워드 실측 0건).
+            #   같은 영상을 클립에 올리는 것이 통합검색 진입의 실질 카드라 안내를 강하게 둔다.
+            "<div class='mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3'>"
+            "<div class='text-sm font-bold text-amber-800 mb-1'>📌 이 영상, 네이버 클립에도 꼭 올리세요</div>"
+            "<div class='text-xs text-amber-700 leading-relaxed'>검색 첫 화면(통합검색)에는 <b>네이버 클립 칸</b>이 "
+            "따로 있습니다. 블로그 글만으로는 그 자리에 들어가기 어렵지만, 클립은 올리기만 하면 노출 기회가 생겨요. "
+            "<b>이미 만든 영상 그대로</b> 올리면 되니 추가 비용도 없습니다.<br>"
+            "올리는 법: 네이버 앱 → 하단 <b>+</b> → <b>클립</b> → 위 영상 선택 → 제목·설명 붙여넣기 → 업로드</div></div>")
     else:
         _nv_media_html = (
             "<p class='text-xs text-amber-600 mb-3'>영상 파일이 정리돼 지금은 받을 수 없어요 — 아래 버튼으로 다시 만들면 바로 받을 수 있어요 (1~2분).</p>"
