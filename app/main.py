@@ -563,7 +563,7 @@ def admin_quality_check_all(request: Request):
 
 
 @app.get("/admin/scout-plan")
-def admin_scout_plan(tenant: str = "", limit: int = 30, ttl_days: int = 7):
+def admin_scout_plan(tenant: str = "", limit: int = 30, ttl_days: int = 7, shops_only: str = ""):
     """🗺 지면 정찰 계획(2026-08-01 사장님 승인 ①) — 맥 야간 정찰기가 '오늘 훑을 키워드'를 받아간다.
     tenant 미지정이면 블로그 연결된 전 가게. 새 API 호출 0(이미 있는 키워드 데이터만 조합)."""
     from app.services import blogreach as _brc
@@ -597,6 +597,10 @@ def admin_scout_plan(tenant: str = "", limit: int = 30, ttl_days: int = 7):
             if _n > _by_blog.get(_bid, (0, None))[0]:
                 _by_blog[_bid] = (_n, _t)
         tenants = [v[1] for v in _by_blog.values()]
+    if shops_only == "1":       # 감시기·운영 도구용 — 계획 계산 없이 '살아있는 가게' 목록만
+        return JSONResponse({"ok": True, "shops": [
+            {"tenant_id": t.id, "tenant": t.name,
+             "blog_id": (getattr(t, "blog_id", "") or "")} for t in tenants]})
     for t in tenants:
         try:
             kws = _brc.scout_plan(t.id, limit=limit, ttl_days=ttl_days)
