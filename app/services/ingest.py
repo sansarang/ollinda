@@ -1046,6 +1046,7 @@ def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: di
     _need_naver = "naver" in want and not (short and (short.payload.get("naver_video") or {}).get("path"))
     if short is None or _need_naver:
         asset._want_naver = "naver" in want            # 🎬 영상감독이 네이버 렌더 생략 여부 판단(온디맨드)
+        asset._want_platforms = set(want)              # ★ 요청 플랫폼 전체를 렌더 단계까지 전달(사장님 지적)
         _old_id = _reuse.id if _reuse else ""
         for _dup in _shorts_all:                       # 잉여 중복 조각 정리(대체 대상 1개만 남긴다)
             if _reuse and _dup.id != _reuse.id:

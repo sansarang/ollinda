@@ -1288,6 +1288,10 @@ class ShortVideoGenerator(Generator):
 
     def generate(self, tenant: Tenant, asset: Asset,
                  images: list[str] | None = None) -> ContentPiece:
+        # 🎬 사용자가 고른 플랫폼만 만든다(2026-08-01 사장님 지적 — 네이버만 눌렀는데 쇼츠·릴스가
+        #   같이 만들어졌다). want가 상태 이름표에만 쓰이고 렌더 단계엔 전달되지 않던 결함.
+        _want = set(getattr(asset, "_want_platforms", None) or {"shorts", "reels", "naver"})
+        _need_shorts = bool({"shorts", "reels"} & _want)
         imgs_all = [p for p in (images or [asset.path]) if p and os.path.exists(p)]
         imgs = imgs_all[:8]        # 씬 소스만 상한(씬 6개 + 여유) — payload에는 전체 기록(사진 제한 해제)
         vid_imgs = self._downscale_for_video(imgs)   # 대용량 원본(5712×4284) → zoompan 타임아웃 방지(백그라운드 스레드)
@@ -1447,12 +1451,15 @@ class ShortVideoGenerator(Generator):
                 _orig_v = list(vid_imgs)
                 vid_imgs = _match_photos(list(sent), vid_imgs, _gen_src, "shorts")
                 vid_imgs = _apply_video_grammar(list(sent), vid_imgs, _orig_v, _gen_src, "shorts")
-            video_path, note, dur_sec, cover_path = self._build_scene_video(
-                vid_imgs, script, kws, tenant, strat, title)
+            if not _need_shorts:                           # 네이버만 요청 → 쇼츠 렌더 생략(시간·중복 산출물 방지)
+                video_path, note, dur_sec, cover_path = None, "쇼츠 미요청(건너뜀)", 0, None
+            else:
+                video_path, note, dur_sec, cover_path = self._build_scene_video(
+                    vid_imgs, script, kws, tenant, strat, title)
             _scene_note = note                                # 씬 경로 결과/오류(진단용)
             _scene_ok = bool(video_path)
             # 폴백: 씬 파이프라인 실패 → 기존 슬라이드쇼 + 단일자막 + 오디오(게이트 통과 자막만 도달)
-            if not video_path:
+            if not video_path and _need_shorts:
                 per = _per_image(len(vid_imgs))
                 video_path, note = self._assemble_legacy(vid_imgs, hook, tenant.id, per)
                 video_path, _t, _b, _ = self._add_audio(video_path, narration, tenant.id)
@@ -1469,7 +1476,8 @@ class ShortVideoGenerator(Generator):
                 video_path = _safe
             except Exception:
                 pass
-        variants = self._aspect_variants(video_path, out_dir) if video_path else {}
+        variants = (self._aspect_variants(video_path, out_dir)
+                    if (video_path and "reels" in _want) else {})
         # 네이버용 정보형 영상(추가 산출물) — 실패해도 릴스·글 흐름에 영향 없음(R1·R3)
         # 온디맨드: 사용자가 네이버를 선택 안 했으면 렌더 생략(_want_naver=False, ingest가 지정)
         naver_path, naver_meta = None, {}
