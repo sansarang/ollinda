@@ -33,7 +33,8 @@ def _clean(tok: str) -> str:
 
 
 def candidates(payload: dict, region: str = "", industry: str = "", limit: int = 14,
-               biz: str = "local", brand: str = "", search_kw: str = "") -> list[str]:
+               biz: str = "local", brand: str = "", search_kw: str = "",
+               _diag: dict | None = None) -> list[str]:
     """발행 글 자체에서 검색어 후보 추출 — 소제목·FAQ 질문·본문 빈출 명사구(언어 구조만, 하드코딩 0).
     biz: local(동네매장)=지역+업종 축 / seller(온라인셀러)=브랜드·상품 축(지역 토큰 없음) / hybrid=둘 다.
     축 판단은 seo.canonical_region(전 표면 단일 소스)에 위임 — 여기서 별도 규칙을 만들지 않는다."""
@@ -127,6 +128,10 @@ def candidates(payload: dict, region: str = "", industry: str = "", limit: int =
                 _add(cp.get("p") or "")
     except Exception:
         pass
+    if _diag is not None:                                # 진단용(운영 엔드포인트에서만 사용)
+        _diag.update({"seeds": _seeds[:5], "mkt_terms": _mkt_terms[:8],
+                      "rel_count": len(rel), "axis": sorted(_axis_tokens)[:8],
+                      "rel_sample": [(v.get("keyword"), v.get("total")) for v in rel[:8]]})
     for v in sorted(rel, key=lambda x: -(x.get("total") or 0)):
         kw, vol = (v.get("keyword") or "").strip(), (v.get("total") or 0)
         if vol < MIN_VOLUME or not kw:

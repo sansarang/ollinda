@@ -553,17 +553,18 @@ def admin_queryscout(tenant: str = "", posts: int = 3, per: int = 10, debug: str
             except Exception:
                 pass
             pl = (p.payload if p else None) or {"title": pub.get("post_title") or ""}
+            _dg: dict = {}
             cands = _qs.candidates(pl, region=getattr(t, "region", "") or "",
                                    industry=getattr(t, "industry", "") or "",
                                    biz=getattr(t, "biz_type", "local") or "local",
                                    brand=getattr(t, "brand_name", "") or "",
-                                   search_kw=getattr(t, "search_kw", "") or "")
+                                   search_kw=getattr(t, "search_kw", "") or "", _diag=_dg)
             vols = {}
             try:
                 vols = _sa.volume_map(cands[:24])
             except Exception:
                 pass
-            out.append({"post": (pub.get("post_title") or "")[:40],
+            out.append({"post": (pub.get("post_title") or "")[:40], "diag": _dg,
                         "candidates": [{"kw": c, "volume": vols.get(c.replace(" ", ""), 0)}
                                        for c in cands]})
         return JSONResponse({"ok": True, "region": getattr(t, "region", ""),
