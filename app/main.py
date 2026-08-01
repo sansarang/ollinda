@@ -3260,6 +3260,10 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             _vrow, _ = _video_row(s["asset_id"], ps)
             _nclk = sum(_ccounts.get(p.id[:8], 0) for p in ps)
             _ebadge = _expose_badge(ps)
+            # 진행 중 판정(삭제 잠금용) — 다시쓰기 running 또는 영상 잡 진행 중
+            _bpl = next((p.payload or {} for p in ps if p.kind.value == "blog"), {})
+            s["busy"] = bool(_rewrite_running(_bpl)
+                             or (_bpl.get("video_job") or {}).get("status") in ("registered", "running", "retrying"))
             thumb = ""
             for p in ps:
                 ips = p.payload.get("image_paths") or ([p.payload.get("image_path")] if p.payload.get("image_path") else [])
@@ -3285,8 +3289,14 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 + (f"<div class='mt-1'>{_ebadge}</div>" if _ebadge else "")
                 + _vrow + "</div>"
                 + f"<a href='/me?view={s['asset_id']}' class='px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-[.98] text-white text-xs font-bold rounded-xl transition'>보기</a>"
-                + f"<form method=post action='/me/set/{s['asset_id']}/delete' onsubmit=\"return confirm('이 콘텐츠를 삭제할까요?')\">"
-                + "<button class='px-1.5 py-2 text-slate-300 hover:text-rose-500 text-base transition' title='삭제'>" + _ic("xcircle", "w-4 h-4") + "</button></form></div>")
+                # 🔒 진행 중(다시쓰기·영상)에는 삭제 잠금 — 지웠는데 되살아나는 경험을 없앤다
+                #   (2026-08-01 실사고: 삭제 6분 뒤 끝난 다시쓰기가 글을 되살렸다. 서버 쪽 묘비로
+                #    이미 막히지만, 사장님이 헛수고하지 않도록 버튼 단계에서도 안내한다.)
+                + (("<span class='px-1.5 py-2 text-slate-200 text-base' title='작업이 끝난 뒤 지울 수 있어요'>"
+                    + _ic("xcircle", "w-4 h-4") + "</span>") if s.get("busy") else
+                   (f"<form method=post action='/me/set/{s['asset_id']}/delete' onsubmit=\"return confirm('이 콘텐츠를 삭제할까요?')\">"
+                    + "<button class='px-1.5 py-2 text-slate-300 hover:text-rose-500 text-base transition' title='삭제'>"
+                    + _ic("xcircle", "w-4 h-4") + "</button></form>")) + "</div>")
         hist = ("<div class='grid sm:grid-cols-2 gap-3'>" + "".join(_cards) + "</div>"
                 # 영상 온디맨드 — 요청(선택 플랫폼 전송) + 생성중 카드 폴링(끝나면 새로고침으로 ✓ 반영)
                 "<script>"
@@ -6064,14 +6074,18 @@ def _result_naver_video(pieces, asset_id: str) -> str:
                     "onclick=\"vmPick(this,'" + esc(asset_id) + "','naver')\">"
                     "🎬 네이버 영상 다시 만들기</button>" + _VMPICK_JS + "</div>")
         # 영상 온디맨드 — 네이버 영상은 블로그 카드 안이 자리(별도 채널 카드 없음) → 여기서 바로 생성 버튼
-        if _cs_nv == "not_requested":
-            return ("<div class='mt-3'><div class='text-xs font-bold text-slate-400 mb-1'>네이버용 영상 (블로그 첨부 · 클립 겸용)</div>"
+        #   ★ 판정 기준을 '플래그'가 아니라 '사실'로 바꾼다(2026-08-01 실사고: 어떤 세트는 버튼이
+        #     나오고 어떤 세트는 안 나옴). 위에서 ①영상 있음 ②만드는 중 ③실패를 모두 걸러냈으니,
+        #     여기 온 세트는 '영상이 없고 아무것도 안 돌고 있는' 상태다 — 언제나 만들 수 있어야 한다.
+        #     기존 조건(=="not_requested")은 channel_status가 비었거나 naver 키가 없는 세트
+        #     (품질 루프에 막혀 상태 기록이 안 됐거나, 이 기능 이전에 만들어진 옛 세트)를
+        #     통째로 떨어뜨려 버튼이 사라졌다. 전 업종·전 플랜 공통.
+        return ("<div class='mt-3'><div class='text-xs font-bold text-slate-400 mb-1'>네이버용 영상 (블로그 첨부 · 클립 겸용)</div>"
                     "<div class='text-xs text-slate-500 mb-2'>영상은 필요할 때만 만들어요 — 글은 이미 완성!</div>"
                     "<button type='button' class='w-full px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-900 "
                     "text-white text-sm font-bold transition' "
                     "onclick=\"vmPick(this,'" + esc(asset_id) + "','naver')\">"
                     "🎬 네이버 영상 만들기</button>" + _VMPICK_JS + "</div>")
-        return ""
     except Exception:
         return ""
 
@@ -6447,8 +6461,11 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
             logging.getLogger("shopcast.kit").warning(
                 "[정합] channel_status=done인데 렌더 블록 없음 asset=%s ch=%s", asset_id, _ch)
             continue
-        if not _s:                                         # 상태 기록 이전 구세트 — 하위호환(placeholder 생략)
-            continue
+        if not _s:
+            # ★ 상태 기록이 없어도 '만들기'는 열어둔다(2026-08-01 실사고: 버튼이 세트마다 나왔다
+            #   안 나왔다 함). 상태가 비는 원인은 두 가지 — 이 기능 이전의 옛 세트, 그리고 생성이
+            #   품질 루프에서 막혀 상태를 기록하지 못한 세트다. 어느 쪽이든 영상은 만들 수 있다.
+            _s = "not_requested"
         if _s in ("generating", "registered"):
             _inner = ("<div class='flex items-center gap-2 text-sm text-slate-500'>"
                       "<span class='inline-block w-4 h-4 border-2 border-slate-300 border-t-indigo-500 rounded-full animate-spin'></span>"

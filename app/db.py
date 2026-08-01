@@ -1580,10 +1580,36 @@ def reset_usage(uid: str) -> None:
         c.execute("UPDATE users SET free_used=0, month_used=0 WHERE id=?", (uid,))
 
 
+def _ensure_tombstones(c) -> None:
+    c.execute("CREATE TABLE IF NOT EXISTS deleted_assets("
+              "asset_id TEXT PRIMARY KEY, tenant_id TEXT, deleted_at TEXT)")
+
+
 def delete_set(asset_id: str, tenant_id: str) -> None:
-    """콘텐츠 세트 삭제(본인 가게 것만) — 이력 관리."""
+    """콘텐츠 세트 삭제(본인 가게 것만) — 이력 관리.
+    ★ 묘비(tombstone)를 남긴다(2026-08-01 실사고): 삭제 시점에 다시쓰기·영상 같은 백그라운드
+    스레드가 이미 이 글의 사본을 메모리에 들고 있으면, 몇 분 뒤 그 스레드가 저장하면서
+    지운 글이 되살아난다(save_piece가 INSERT OR REPLACE라 행이 없으면 새로 만든다).
+    실측: 13:41 삭제 → 13:47:33 다시쓰기 완료 → 삭제한 글이 80점으로 부활."""
     with _conn() as c:
+        _ensure_tombstones(c)
+        c.execute("INSERT OR REPLACE INTO deleted_assets VALUES(?,?,?)",
+                  (asset_id, tenant_id, _now()))
         c.execute("DELETE FROM content_pieces WHERE asset_id=? AND tenant_id=?", (asset_id, tenant_id))
+
+
+def is_set_deleted(asset_id: str) -> bool:
+    """이 세트가 삭제된 적이 있는가 — asset_id는 UUID라 재사용되지 않으므로
+    묘비가 있으면 '두 번 다시 쓰면 안 되는 세트'다."""
+    if not asset_id:
+        return False
+    try:
+        with _conn() as c:
+            _ensure_tombstones(c)
+            return c.execute("SELECT 1 FROM deleted_assets WHERE asset_id=?",
+                             (asset_id,)).fetchone() is not None
+    except Exception:
+        return False
 
 
 # ── 랜딩 무료체험(미가입) — IP 기준 횟수 ────────────────
@@ -2237,6 +2263,14 @@ def create_asset(tenant_id: str, type_: AssetType, path: str, note: str = "") ->
 
 # ── ContentPiece ───────────────────────────────────────
 def save_piece(p: ContentPiece) -> ContentPiece:
+    # ★ 삭제된 세트는 절대 되살리지 않는다(2026-08-01 실사고 — delete_set 주석 참고).
+    #   asset_id는 재사용되지 않는 UUID라, 묘비가 있으면 무조건 버리는 게 안전하다.
+    #   호출 지점이 44곳이고 백그라운드 스레드가 12곳이라 개별 대응 대신 여기서 한 번에 막는다.
+    if p.asset_id and is_set_deleted(p.asset_id):
+        import logging as _lgd
+        _lgd.getLogger("shopcast.db").info(
+            "[db] 삭제된 세트에 대한 저장 무시 asset=%s piece=%s", p.asset_id[:8], p.id[:8])
+        return p
     with _conn() as c:
         c.execute(
             "INSERT OR REPLACE INTO content_pieces"

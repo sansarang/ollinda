@@ -201,10 +201,13 @@ def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
     au = pl.get("ranking_audit") or {}
     score = au.get("score")
     rounds = 0
+    # ⏱ 벽시계 상한은 '게이트 진입 시점'부터 잰다(2026-08-01 실측 보정: 라운드에만 걸었더니
+    #   그 앞의 표면 수선 콜이 상한 밖이라 94% 구간이 6분을 넘겼다). 표면 수선도 같은 예산 안에서.
+    _deadline = _time.monotonic() + GATE_BUDGET_SEC
     # 🧹 표면 수선 패스(2026-08-01 사장님 승인 — '한 번에 80점' 2겹): 값비싼 전체 재작성 전에
     #   ①기계 수선(이모지 초과 = regex, 0원) ②표면 감점만 고치는 소형 콜 1회.
     #   전부 업종·가게 무관 언어/구조 원리 — 하드코딩 0. 실패는 조용히(기존 루프 그대로 진행).
-    if isinstance(score, int) and score < POLISH_TARGET:
+    if isinstance(score, int) and score < POLISH_TARGET and _time.monotonic() < _deadline:
         try:
             _body0 = pl.get("body") or ""
             _fixed = _trim_emoji(_body0, keep=1)
@@ -226,10 +229,7 @@ def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
             db.save_piece(blog)
         except Exception as _e:
             pl.setdefault("score_gate_stops", []).append(f"surface: 예외 {repr(_e)[:60]}")
-    # ⏱ 벽시계 상한(2026-08-01 실사고) — LLM 재시도(콜당 최대 210초 × 3회)가 겹치면 이 루프가
-    #   15분 넘게 붙들려 생성 파이프라인 뒤쪽이 통째로 멈춘다. 라운드를 '새로 시작'할 때만 검사한다
-    #   (진행 중인 콜은 중단하지 않는다 — 이미 쓴 비용을 버리지 않기 위해).
-    _deadline = _time.monotonic() + GATE_BUDGET_SEC
+    # 라운드는 '새로 시작'할 때만 상한을 검사한다(진행 중인 콜은 끊지 않는다 — 지불한 비용 보존).
     while isinstance(score, int) and score < PUBLISH_MIN and rounds < max_rounds:
         if _time.monotonic() > _deadline:
             pl.setdefault("score_gate_stops", []).append(
