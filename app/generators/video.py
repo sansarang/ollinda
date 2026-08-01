@@ -1735,6 +1735,8 @@ class ShortVideoGenerator(Generator):
         #   블로그 첨부용(20~45초 정보형)과 클립용(15~25초 훅형)은 성격이 다르다 → 같은 소스에서
         #   앞부분만 잘라 파생(재생성·LLM·AI 0, ffmpeg 재인코딩만 = 원가 증가 0).
         try:
+            if not self._clip_allowed(tenant):
+                raise RuntimeError("plan_no_clip")       # 아래 except가 조용히 흡수(본편 유지)
             clip_path, clip_dur = self._clip_cut(final, out_dir, kw_nat)
             if clip_path:
                 meta["clip"] = {"path": clip_path, "duration_sec": clip_dur,
@@ -1743,6 +1745,19 @@ class ShortVideoGenerator(Generator):
         except Exception:
             _nlog.exception("[naver-video] 클립 파생 실패(본편은 유지)")
         return final, meta
+
+    def _clip_allowed(self, tenant) -> bool:
+        """클립 파생 제공 여부 — ①네이버 영상을 요청한 세트에서만 호출됨(온디맨드) ②플랜 허용 필요.
+        운영자·대행 tenant(연결 사용자 없음)는 허용(내부 운영). 조회 실패 시 보수적으로 미제공."""
+        try:
+            from app import config as _cfg
+            from app import db as _dbp
+            u = _dbp.get_user_by_tenant(getattr(tenant, "id", "") or "")
+            if not u:
+                return True                              # 운영자·대행 tenant
+            return _cfg.plan_limit(u.get("plan") or "free", "clip_video") != 0
+        except Exception:
+            return False
 
     def _clip_cut(self, src: str, out_dir: str, kw_nat: str = "") -> tuple:
         """완성 영상 → 클립용 15~22초 파생본. 소리 없이 보는 지면이라 첫 화면 훅 자막을 크게 얹는다.

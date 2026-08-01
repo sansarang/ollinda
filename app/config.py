@@ -53,12 +53,15 @@ RANK_RATE_PER_HOUR = int(os.environ.get("SHOPCAST_RANK_RPH", "20"))   # 동일 I
 RANK_CACHE_TTL = int(os.environ.get("SHOPCAST_RANK_CACHE_TTL", "3600"))  # 동일 상호+지역 캐시 1시간(네이버 콜 절감)
 
 # ── 신규 기능 플랜 게이팅(경쟁사 추적 / 인쇄물 생성) — 여기서만 조정(-1=무제한) ──
+# clip_video: 네이버 클립 전용 파생본(15~22초) 제공 여부 — 1=제공, 0=미제공(2026-08-01 사장님 방침).
+#   네이버 영상을 '요청한' 사용자에게만 만들어지고(온디맨드), 그중에서도 플랜이 허용해야 한다.
+#   렌더 원가는 0에 가깝지만 통합검색 클립 지면 진입이라는 실효 가치가 커 상위 플랜 차별점으로 둔다.
 PLAN_LIMITS = {
-    "free":   {"competitor_scans": 5,   "print_items": 3,  "competitors_max": 1,  "angle_variants": 2},
-    "basic":  {"competitor_scans": 30,  "print_items": 10, "competitors_max": 2,  "angle_variants": 8},
-    "pro":    {"competitor_scans": 300, "print_items": 50, "competitors_max": 5,  "angle_variants": 60},
-    "self":   {"competitor_scans": 300, "print_items": 50, "competitors_max": 5,  "angle_variants": 60},   # pro 별칭
-    "agency": {"competitor_scans": -1,  "print_items": -1, "competitors_max": -1, "angle_variants": -1},   # 무제한
+    "free":   {"competitor_scans": 5,   "print_items": 3,  "competitors_max": 1,  "angle_variants": 2,  "clip_video": 0},
+    "basic":  {"competitor_scans": 30,  "print_items": 10, "competitors_max": 2,  "angle_variants": 8,  "clip_video": 0},
+    "pro":    {"competitor_scans": 300, "print_items": 50, "competitors_max": 5,  "angle_variants": 60, "clip_video": 1},
+    "self":   {"competitor_scans": 300, "print_items": 50, "competitors_max": 5,  "angle_variants": 60, "clip_video": 1},   # pro 별칭
+    "agency": {"competitor_scans": -1,  "print_items": -1, "competitors_max": -1, "angle_variants": -1, "clip_video": -1},  # 무제한
 }
 
 
