@@ -80,8 +80,8 @@ def _post_metrics(html_txt: str, kw: str) -> "dict | None":
     """본문 HTML → 구조 지표(근사치). 원문 텍스트는 반환하지 않는다(즉시 폐기)."""
     if not html_txt:
         return None
-    m = re.search(r"se-main-container", html_txt)
-    seg = html_txt[m.start():] if m else html_txt
+    m = re.search(r"se-main-container[^>]*>", html_txt)   # 클래스명 뒤(태그 닫힘)부터 — 클래스 문자열이
+    seg = html_txt[m.end():] if m else html_txt          # 본문 텍스트로 새어 'container 안녕하세요'가 잡히던 실측 결함
     _e = re.search(r"area_comment|u_cbox|CommentBox|naverBlog_footer|post_btn", seg)
     if _e:
         seg = seg[:_e.start()]                        # 본문 밖(댓글·버튼·푸터) UI 제외 — 지표 부풀림 방지
@@ -104,6 +104,21 @@ def _post_metrics(html_txt: str, kw: str) -> "dict | None":
 
 _Q_STOP = ("합니다", "습니다", "했어요", "드립니다", "때문", "그리고", "하지만", "저희", "우리",
            "오늘", "이번", "여기", "정도", "경우", "생각")
+# 에디터·템플릿 마크업 잔해(업종 무관 기술 토큰) — 본문 용어로 오인되면 안 됨
+_MARKOUP_HINT = "se-|css|class|style|div|span|container|module|component|editor|blog"
+_MARKUP_TOKENS = {"container", "div", "span", "class", "style", "css", "se", "module",
+                  "component", "editor", "img", "src", "href", "http", "https", "www"}
+_JOSA_TAIL = re.compile(r"(으로써|으로서|에서는|에서도|에게서|이라는|라는|으로|에서|에게|한테|"
+                        r"까지|부터|보다|처럼|만큼|이나|나마|이며|이고|이라|은|는|이|가|을|를|의|"
+                        r"에|와|과|도|만|랑|께|여|아|야)$")
+
+
+def _norm_token(w: str) -> str:
+    """조사·어미 제거 정규화 — 블로그마다 다른 활용형을 같은 용어로 모으기 위함(언어 규칙만)."""
+    if len(w) <= 2 or not re.search(r"[가-힣]", w):
+        return w
+    cut = _JOSA_TAIL.sub("", w)
+    return cut if len(cut) >= 2 else w
 _Q_MARK = re.compile(r"(어떻게|어디|얼마|무엇|뭐가|왜|언제|추천|비교|후기|방법|가격|비용|차이|"
                      r"기준|확인|주의|고르|선택|필요|가능)")
 
@@ -142,8 +157,17 @@ def _query_phrases(seg: str, text: str) -> list:
 
     # ★ 문장이 아니라 '용어'를 뽑는다(2026-08-01 실측 교훈): 같은 문장이 여러 블로그에 똑같이
     #   나오는 일은 없다. 시장 공통 신호는 2~3어절 용어('성능점검기록부','가시광선 투과율')다.
-    words = [w for w in re.findall(r"[0-9A-Za-z가-힣]{2,}", t)
-             if not re.fullmatch(r"\d+", w) and w not in _Q_STOP]
+    #   ★★ 조사·어미를 떼고 정규화한다 — '중고차를 구매'와 '중고차 구매'가 다른 용어로 갈려
+    #      교차 집계가 안 되던 실측 결함(수확 2개) 보정.
+    words = []
+    for w in re.findall(r"[0-9A-Za-z가-힣]{2,}", t):
+        if re.fullmatch(r"\d+", w) or w in _Q_STOP:
+            continue
+        if re.fullmatch(r"[A-Za-z]{2,}", w) and w.lower() in _MARKUP_TOKENS:
+            continue                                   # 마크업 잔해(container·div·class…) 제외
+        w = _norm_token(w)
+        if len(w) >= 2:
+            words.append(w)
     for n in (2, 3):
         for i in range(len(words) - n + 1):
             gram = " ".join(words[i:i + n])
