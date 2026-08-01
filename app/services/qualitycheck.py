@@ -9,7 +9,9 @@
 """
 from __future__ import annotations
 
+import os
 import re
+import time as _time
 
 from app import db
 from app.domain.models import ContentKind
@@ -133,6 +135,10 @@ PUBLISH_MIN = 80    # 발행 게이트 기준선(2026-07-28 사장님 결정: �
 # 종류(상호 미표기)라 수선이 발동조차 안 함 → 효과 0·콜만 증가로 88 복귀.
 # 90점대는 수선이 아니라 '생성 단계'가 책임진다(사실 기반 누락은 처음부터 안 생기게).
 POLISH_TARGET = 88
+# ⏱ 발행 게이트 벽시계 예산(2026-08-01 실사고: 재작성 재시도가 겹쳐 polish에서 15분 정지 →
+#   그 뒤 채널 상태 설정이 실행되지 않아 '영상 만들기' 버튼이 통째로 사라졌다).
+#   라운드 시작 전에만 검사한다 — 진행 중인 콜은 끊지 않는다(이미 지불한 비용 보존).
+GATE_BUDGET_SEC = int(os.environ.get("SHOPCAST_GATE_BUDGET", "300"))
 
 
 _EMOJI_RE = re.compile("[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F900-\U0001F9FF❤️]")
@@ -220,7 +226,15 @@ def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
             db.save_piece(blog)
         except Exception as _e:
             pl.setdefault("score_gate_stops", []).append(f"surface: 예외 {repr(_e)[:60]}")
+    # ⏱ 벽시계 상한(2026-08-01 실사고) — LLM 재시도(콜당 최대 210초 × 3회)가 겹치면 이 루프가
+    #   15분 넘게 붙들려 생성 파이프라인 뒤쪽이 통째로 멈춘다. 라운드를 '새로 시작'할 때만 검사한다
+    #   (진행 중인 콜은 중단하지 않는다 — 이미 쓴 비용을 버리지 않기 위해).
+    _deadline = _time.monotonic() + GATE_BUDGET_SEC
     while isinstance(score, int) and score < PUBLISH_MIN and rounds < max_rounds:
+        if _time.monotonic() > _deadline:
+            pl.setdefault("score_gate_stops", []).append(
+                f"시간상한 {GATE_BUDGET_SEC}s 초과 — 남은 라운드 생략(글은 현 상태로 확정)")
+            break
         rounds += 1
         warns = "; ".join((au.get("warnings") or [])[:6]) or "감점 사유 미상"
         body = pl.get("body") or ""

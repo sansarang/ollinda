@@ -366,6 +366,20 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
                 db.save_piece(blog_piece0)
     except Exception:
         pass
+    # 🎬 채널 상태를 '품질 루프보다 먼저' 확정한다(2026-08-01 실사고).
+    #   실측: score_gate가 재시도 폭풍으로 15분 넘게 붙들리자 그 뒤에 있던 _set_channel_status가
+    #   실행되지 않아 channel_status={} → 사장님 화면에 글은 보이는데 '영상 만들기' 버튼이 없었다.
+    #   채널 상태는 pieces만 있으면 결정되므로 품질 보정을 기다릴 이유가 전혀 없다.
+    #   전 업종 공통(업종·플랜 분기 없음) — 글이 나온 세트는 언제나 영상을 요청할 수 있어야 한다.
+    from app.services.generate import LAST_ERRORS as _LE
+    _cs = {"naver": {"status": "not_requested"}, "shorts": {"status": "not_requested"},
+           "reels": {"status": "not_requested"}}
+    for _k, _ch in KIND_TO_CHANNEL.items():
+        if any(p.kind == _k for p in pieces):
+            _cs[_ch] = {"status": "done"}
+        else:
+            _cs[_ch] = {"status": "failed", "error": _LE.get(str(_k), "생성 실패(로그 참조)")}
+    _set_channel_status(asset.id, _cs)
     # 📏 글올리기 전 자체 검사 AI(2026-07-28 사장님 결정) — 터미널 에이전트 방식: 스스로 검사 →
     #   걸린 항목만 표면 수정 → 재검사. 통과한 글만 사장님 눈에 닿는다(사장님=QA 구조 종식).
     #   끄기: SHOPCAST_SELF_REVIEW=0. 검사 자체는 비용 0(기계 채점), 수정은 걸렸을 때만 LLM 1~3콜.
@@ -441,15 +455,6 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
     # 🎬 영상 온디맨드 — 자동 생성 폐지: 글이 먼저 완성되고, 영상은 사용자가 홈에서 플랫폼(숏폼·릴스·네이버)을
     #   골라 요청할 때 생성(request_video_bundle). 렌더 대기·vision/LLM 경합이 글 완성 시간을 늘리지 않는다.
     #   채널 상태는 not_requested — 워치독은 video_job이 있는 세트만 살피므로 미요청 세트를 부활시키지 않는다.
-    from app.services.generate import LAST_ERRORS as _LE
-    _cs = {"naver": {"status": "not_requested"}, "shorts": {"status": "not_requested"},
-           "reels": {"status": "not_requested"}}
-    for _k, _ch in KIND_TO_CHANNEL.items():
-        if any(p.kind == _k for p in pieces):
-            _cs[_ch] = {"status": "done"}
-        else:
-            _cs[_ch] = {"status": "failed", "error": _LE.get(str(_k), "생성 실패(로그 참조)")}
-    _set_channel_status(asset.id, _cs)
     # 텍스트 완성 — 이 시점까지가 체감 소요. 실측 기록(범위 자동 갱신) + '영상 준비 중'(비동기 렌더).
     try:
         db.record_gen_duration(tenant.id, max(0.0, _tprog.time() - _t_start))

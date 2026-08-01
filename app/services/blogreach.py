@@ -186,10 +186,24 @@ def diagnose(tenant_id: str) -> dict:
             rx.append({"level": "mid", "area": "플레이스",
                        "msg": "네이버 플레이스(지도) 링크가 등록돼 있지 않습니다 — 지도→블로그 유입 경로가 끊깁니다."})
         if place.get("configured") and place.get("registered") is False:
-            rx.append({"level": "high", "area": "플레이스 등록",
-                       "msg": f"'{t.name}'이(가) 네이버 지역검색에 안 잡힙니다 — 통합검색 첫 화면의 "
-                              "플레이스 자리를 통째로 놓치고 있습니다. 네이버 스마트플레이스에 "
-                              "업체 등록(무료)이 최우선입니다."})
+            _clash = place.get("name_clash") or {}
+            if _clash:                                    # 같은 상호의 다른 지역 업체가 먼저 잡히는 경우
+                rx.append({"level": "high", "area": "플레이스 등록",
+                           "msg": f"'{t.name}' 검색에 다른 지역 업체({_clash.get('address') or '?'})가 "
+                                  "먼저 잡힙니다 — 우리 가게가 지역검색에서 밀리거나 아직 안 잡히는 "
+                                  "상태입니다. 스마트플레이스에서 상호·주소·업종을 정확히 채우면 "
+                                  "지역 검색어에서 우리 쪽이 잡힙니다."})
+            else:
+                rx.append({"level": "high", "area": "플레이스 등록",
+                           "msg": f"'{t.name}'이(가) 네이버 지역검색에 안 잡힙니다 — 통합검색 첫 화면의 "
+                                  "플레이스 자리를 통째로 놓치고 있습니다. 네이버 스마트플레이스에 "
+                                  "업체 등록(무료)이 최우선입니다."})
+        elif place.get("registered") is None:             # 지역 일부만 일치 — 단정하지 않고 확인 요청
+            _amb = place.get("ambiguous") or {}
+            rx.append({"level": "mid", "area": "플레이스 확인",
+                       "msg": f"'{t.name}' 지역검색 결과가 등록 지역과 어긋납니다"
+                              f"(잡힌 주소: {_amb.get('address') or '?'}). 같은 상호의 다른 업체이거나 "
+                              "플레이스 주소가 옛 주소일 수 있어 진단을 보류했습니다 — 확인이 필요합니다."})
         elif place.get("registered"):
             if place.get("has_tel") is False:
                 rx.append({"level": "mid", "area": "플레이스 정보",
@@ -261,9 +275,44 @@ def place_audit(tenant) -> dict:
     name = (getattr(tenant, "name", "") or "").strip()
     if not name:
         return out
-    hits = _pl.search(name, 5) or []
-    mine = next((h for h in hits if _pl._name_match(name, h.get("name", ""))), None)
-    out["registered"] = bool(mine)
+    # ★ 상호만으로 찾으면 남의 가게를 우리 가게로 단정한다(2026-08-01 실측: 기장 중고차 업체를
+    #   같은 상호의 남구 광택전문 업체로 진단해 '업종을 고치라'는 틀린 처방을 냈다).
+    #   → 지역을 붙여 검색하고, 잡힌 업체 주소에 우리 지역 토큰이 있는지까지 확인한다.
+    #   전 업종·전 지역 공통 규칙(지명 하드코딩 0 — tenant.region에서 토큰을 뽑아 쓴다).
+    region = " ".join((getattr(tenant, "region", "") or "").split())
+    _rtoks = [w for w in re.split(r"[\s,/]+", region) if len(w) >= 2]
+
+    def _addr_hits(h: dict) -> int:
+        """주소에 우리 지역 토큰이 몇 개 맞는가. '부산'만 맞고 '기장'이 안 맞으면 남의 가게다
+        (실측: 부산 토큰 하나로 남구 동명이 업체가 통과했다). 구·군·시 표기 흔들림은 흡수."""
+        addr = (h.get("address") or "") + " " + (h.get("jibun") or "")
+        return sum(1 for t in _rtoks if t in addr or t.rstrip("시군구") in addr)
+
+    hits, mine, near = [], None, None
+    for q in ([f"{region} {name}", name] if region else [name]):
+        hits = _pl.search(q, 5) or []
+        cand = [h for h in hits if _pl._name_match(name, h.get("name", ""))]
+        if not _rtoks:                                    # 지역 정보가 없으면 판정 보류(기존 동작)
+            mine = cand[0] if cand else None
+        else:
+            scored = sorted(((_addr_hits(h), h) for h in cand), key=lambda x: -x[0])
+            if scored and scored[0][0] == len(_rtoks):    # 지역 토큰 전부 일치 = 우리 가게
+                mine = scored[0][1]
+            elif scored and scored[0][0] >= 1:            # 일부만 일치 = 단정하지 않는다
+                near = scored[0][1]
+        if mine:
+            break
+    if mine:
+        out["registered"] = True
+    elif near is not None:
+        out["registered"] = None                          # 판정 보류(미등록으로 몰지 않는다)
+        out["ambiguous"] = {"name": near.get("name"), "address": near.get("address")}
+    else:
+        out["registered"] = False
+        # 상호는 잡혔는데 지역이 전혀 다르면 '동명이 업체'다 — 미등록과 구분해서 알린다.
+        _other = next((h for h in (hits or []) if _pl._name_match(name, h.get("name", ""))), None)
+        if _other:
+            out["name_clash"] = {"name": _other.get("name"), "address": _other.get("address")}
     if mine:
         out["listed"] = {k: mine.get(k) for k in ("name", "category", "address", "tel")}
         # 정보 정합 — 우리가 아는 값과 다르면 손님이 헷갈리고 신뢰 신호도 약해진다
