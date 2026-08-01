@@ -584,8 +584,11 @@ def admin_scout_plan(tenant: str = "", limit: int = 30, ttl_days: int = 7):
         for _t in db.list_tenants_with_blog():
             if _tenant_is_demo(_t.id):
                 continue
-            try:
-                _n = len(db.list_blog_publishes(_t.id, limit=50) or [])
+            try:      # 활동량 = 발행 + 생성한 콘텐츠 세트.
+                #   ★ '발행 이력'만 보면 안 된다 — 아직 발행 안 한 가게야말로 도와야 할 대상이다
+                #     (실측: 주안모터스가 이 기준에 걸려 통째로 빠졌다). 만든 게 있으면 살아있는 가게다.
+                _n = (len(db.list_blog_publishes(_t.id, limit=50) or []) * 10
+                      + len(db.list_sets(tenant_id=_t.id, limit=20) or []))
             except Exception:
                 _n = 0
             if _n <= 0:
