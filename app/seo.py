@@ -1089,10 +1089,28 @@ def hard_block_hits(text: str) -> list[str]:
     return [w for w in HARD_BLOCK_EXPRESSIONS if w in t]
 
 
+# 날조 탐지에서 제외할 '수사적 나열' 어미 — 실제 주장이 아니라 가정·비유를 열거하는 말.
+#   실측 2026-08-01: "말로 3만이니 5만이니 하는 것보다 계기판 숫자가 정직합니다"에서
+#   3만·5만이 날조로 잡혔다. 이 차의 수치를 주장한 게 아니라 관행을 지적한 문장이다.
+#   언어 규칙일 뿐 업종·가게 하드코딩이 아니다.
+#   ★ '이나/나'는 제외하지 않는다 — "보증금 3만원이나 5만원"처럼 실제 금액 범위를 잇는
+#     '또는'으로 훨씬 자주 쓰인다. 놓치면 진짜 날조를 통과시킨다.
+_RHETORIC_TAIL = re.compile(r"^\s*(이니|이라느니|라느니|이라던|라던|이든지|든지|이든|든)")
+
+
 def _money_nums(s: str) -> set:
-    """텍스트에서 '금액·%·수치+단위'를 정규화 추출(콤마·공백 제거). 날조 탐지용(PHASE 7)."""
-    raw = re.findall(r"(\d[\d,]*)\s*(원|만원|%|퍼센트|만|천원|시간|분)", s or "")
-    return {num.replace(",", "") + unit for num, unit in raw}
+    """텍스트에서 '금액·%·수치+단위'를 정규화 추출(콤마·공백 제거). 날조 탐지용(PHASE 7).
+    ★ 오탐 2종 차단(2026-08-01 실측):
+      ① 단위가 실제로 붙어 있어야 한다 — "연식 2022, 원동기형식"의 '원'을 금액으로 읽어
+        '2022원'을 날조로 잡았다(쉼표·공백 건너뛰기가 원인) → 숫자 바로 뒤만 인정.
+      ② 수사적 나열("3만이니 5만이니")은 주장이 아니다 → 제외."""
+    out = set()
+    for m in re.finditer(r"(\d[\d,]*)(원|만원|%|퍼센트|만|천원|시간|분)", s or ""):
+        tail = (s or "")[m.end():m.end() + 6]
+        if _RHETORIC_TAIL.match(tail):
+            continue
+        out.add(m.group(1).replace(",", "") + m.group(2))
+    return out
 
 
 def keywords_line(kws: list[str]) -> str:
