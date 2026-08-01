@@ -1291,6 +1291,14 @@ class ShortVideoGenerator(Generator):
         # 🎬 사용자가 고른 플랫폼만 만든다(2026-08-01 사장님 지적 — 네이버만 눌렀는데 쇼츠·릴스가
         #   같이 만들어졌다). want가 상태 이름표에만 쓰이고 렌더 단계엔 전달되지 않던 결함.
         _want = set(getattr(asset, "_want_platforms", None) or {"shorts", "reels", "naver"})
+
+        def _stage(msg: str) -> None:      # 진행 단계 보고(없으면 조용히 무시 — 단건 경로 안전)
+            try:
+                cb = getattr(asset, "_stage_cb", None)
+                if cb:
+                    cb(msg)
+            except Exception:
+                pass
         _need_shorts = bool({"shorts", "reels"} & _want)
         imgs_all = [p for p in (images or [asset.path]) if p and os.path.exists(p)]
         imgs = imgs_all[:8]        # 씬 소스만 상한(씬 6개 + 여유) — payload에는 전체 기록(사진 제한 해제)
@@ -1451,6 +1459,7 @@ class ShortVideoGenerator(Generator):
                 _orig_v = list(vid_imgs)
                 vid_imgs = _match_photos(list(sent), vid_imgs, _gen_src, "shorts")
                 vid_imgs = _apply_video_grammar(list(sent), vid_imgs, _orig_v, _gen_src, "shorts")
+            _stage("쇼츠 영상 만드는 중" if _need_shorts else "네이버 영상 준비 중")
             if not _need_shorts:                           # 네이버만 요청 → 쇼츠 렌더 생략(시간·중복 산출물 방지)
                 video_path, note, dur_sec, cover_path = None, "쇼츠 미요청(건너뜀)", 0, None
             else:
@@ -1482,6 +1491,7 @@ class ShortVideoGenerator(Generator):
         # 온디맨드: 사용자가 네이버를 선택 안 했으면 렌더 생략(_want_naver=False, ingest가 지정)
         naver_path, naver_meta = None, {}
         if getattr(asset, "_want_naver", True):
+            _stage("네이버 영상 만드는 중 (대본→음성→사진)")
             try:
                 naver_path, naver_meta = self._naver_video(tenant, asset, vid_imgs, kws, strat, out_dir)
             except Exception:

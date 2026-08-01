@@ -1041,7 +1041,9 @@ def _spawn_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: d
         from app.generators.video import RENDER_SEM   # 동시 렌더 상한(ffmpeg 폭주 방지, PHASE 12)
         with RENDER_SEM:
             try:
-                _set_video_job(asset.id, "running", stage="영상 대본·렌더링 중 (몇 분 걸려요)")
+                _set_video_job(asset.id, "running", stage="영상 대본 쓰는 중")
+                # 📣 진행 단계 보고 통로(2026-08-01 사장님 지적: 눌러도 뭐가 도는지 알 수 없다)
+                asset._stage_cb = (lambda _t: _set_video_job(asset.id, "running", stage=_t))
                 _make_video_bundle(tenant, asset, paths, brief_public, want=want)
             except Exception as e:
                 import logging
@@ -1090,11 +1092,20 @@ def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: di
             if _old_id and p.kind == ContentKind.SHORT and p.channel == Channel.YOUTUBE:
                 p.id = _old_id                         # 재렌더는 기존 피스 대체(중복 방지)
             db.save_piece(p)
+        # ★ 성공 판정은 '요청한 것' 기준이다(2026-08-01 실사고).
+        #   네이버만 요청하면 쇼츠 파일을 안 만드는데, 판정이 여전히 video_path를 요구해
+        #   네이버 영상이 실제로 만들어졌는데도 'failed'로 기록됐다(사장님 화면엔 실패로 표시).
         short = next((p for p in shorts if p.kind == ContentKind.SHORT
-                      and p.channel == Channel.YOUTUBE and p.payload.get("video_path")), None)
-    if not short:
+                      and p.channel == Channel.YOUTUBE), None) or short
+    _nv_out = (short.payload.get("naver_video") or {}) if short else {}
+    _made = {"shorts": bool(short and short.payload.get("video_path")),
+             "reels": bool(short and (short.payload.get("video_variants") or {})),
+             "naver": bool(_nv_out.get("path")),
+             "clip": bool((_nv_out.get("clip") or {}).get("path"))}
+    if not any(_made[ch] for ch in want):              # 요청한 것 중 하나도 못 만들었을 때만 실패
         from app.services.generate import LAST_ERRORS
-        _err = LAST_ERRORS.get("ContentKind.SHORT", "영상 미생성(로그 참조)")
+        _err = (_nv_out.get("_build_note") or LAST_ERRORS.get("ContentKind.SHORT")
+                or "영상 미생성(로그 참조)")
         _set_video_job(asset.id, "failed", error=_err)
         _set_channel_status(asset.id, {ch: {"status": "failed", "error": _err} for ch in want})
         return
@@ -1114,11 +1125,12 @@ def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: di
     except Exception:
         pass
     _cs_done = {}
-    if "shorts" in want:
-        _cs_done["shorts"] = {"status": "done"}
-    if "naver" in want:
-        _cs_done["naver"] = ({"status": "done"} if (short.payload.get("naver_video") or {}).get("path")
-                             else {"status": "failed", "error": "네이버 영상 미생성(로그 참조)"})
+    for _ch in want:                                   # 실제 산출물 기준(요청한 채널만 갱신)
+        if _made.get(_ch):
+            _cs_done[_ch] = {"status": "done"}
+        else:
+            _cs_done[_ch] = {"status": "failed",
+                             "error": (_nv_out.get("_build_note") or "영상 미생성(로그 참조)")[:200]}
     if _cs_done:
         _set_channel_status(asset.id, _cs_done)
     saved = db.get_set_pieces(asset.id)
