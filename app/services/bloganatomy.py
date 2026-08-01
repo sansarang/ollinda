@@ -140,15 +140,22 @@ def _query_phrases(seg: str, text: str) -> list:
         if s not in out:
             out.append(s)
 
-    for line in t.split("\n")[:800]:
+    # ★ 문장이 아니라 '용어'를 뽑는다(2026-08-01 실측 교훈): 같은 문장이 여러 블로그에 똑같이
+    #   나오는 일은 없다. 시장 공통 신호는 2~3어절 용어('성능점검기록부','가시광선 투과율')다.
+    words = [w for w in re.findall(r"[0-9A-Za-z가-힣]{2,}", t)
+             if not re.fullmatch(r"\d+", w) and w not in _Q_STOP]
+    for n in (2, 3):
+        for i in range(len(words) - n + 1):
+            gram = " ".join(words[i:i + n])
+            if not re.search(r"[가-힣]{2,}", gram):
+                continue
+            if 4 <= len(gram) <= 22:
+                _push(gram)
+    for line in t.split("\n")[:800]:                   # 질문형 줄은 그대로도 가치 있음(검색 의도)
         s = line.strip()
-        if not s:
-            continue
-        if s.endswith("?") or _Q_MARK.search(s):       # 질문형·의도어 포함 줄
+        if s.endswith("?") and 4 <= len(s) <= 28:
             _push(s)
-        elif 4 <= len(s) <= 20 and len(s.split()) <= 4:
-            _push(s)                                   # 아주 짧은 줄 = 소제목일 확률 높음
-    return out[:20]
+    return out[:120]                                   # 교차 집계에서 걸러지므로 넉넉히
 
 
 def _blog_vitals(blog_id: str) -> "str | None":
@@ -256,8 +263,9 @@ def anatomize(keyword: str, top_n: int = 5) -> "dict | None":
            # 🔎 시장 공통 검색 의도 구절 — 2개 이상 블로그가 함께 쓴 것만(한 명만 쓰면 개인 취향).
            #    검색어 정찰의 후보 공급원(원문 아님, 짧은 구절 + 등장 블로그 수만 보관).
            "common_phrases": [{"p": p, "blogs": len(b)}
-                              for p, b in sorted(phrase_blogs.items(), key=lambda x: -len(x[1]))
-                              if len(b) >= 2][:15]}
+                              for p, b in sorted(phrase_blogs.items(),
+                                                 key=lambda x: (-len(x[1]), -len(x[0])))
+                              if len(b) >= max(2, min(3, len(rows) // 2))][:25]}
     try:
         with db._conn() as c:
             _ensure(c)
