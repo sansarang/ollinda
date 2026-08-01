@@ -143,9 +143,69 @@ def diagnose(tenant_id: str) -> dict:
         if not _vid:
             rx.append({"level": "mid", "area": "클립",
                        "msg": "만든 세로 영상을 네이버 클립에도 올리면 지면이 하나 더 생깁니다(비용 0)."})
+    # A: 검색 밖 통로 측정(구글 색인·이미지 검색) + 플레이스 연동 점검
+    ext: dict = {}
+    try:
+        _pub = (db.list_blog_publishes(tenant_id, limit=1) or [{}])[0]
+        _kw = (_pub.get("target_kw") or "").strip()
+        if not _kw:
+            _kws = db.tracked_keywords(tenant_id, 1)
+            _kw = _kws[0] if _kws else ""
+        ext = external_reach(bid, (_pub.get("published_url") or ""), _kw)
+    except Exception:
+        pass
+    if ext.get("google_indexed") is False:
+        rx.append({"level": "mid", "area": "구글 색인",
+                   "msg": "발행 글이 구글에 아직 안 잡혔습니다 — 네이버 밖 유입이 0입니다. "
+                          "서치어드바이저 색인 요청 + 시간이 필요합니다."})
+    if ext.get("image_rank") == 0:
+        rx.append({"level": "mid", "area": "이미지 검색",
+                   "msg": "이미지탭에 우리 사진이 안 보입니다 — 사진 많은 업종의 숨은 유입 통로입니다. "
+                          "사진 파일명·본문 설명이 검색어와 맞물리면 노출 확률이 올라갑니다."})
+    _map = (getattr(t, "map_url", "") or "").strip()
+    if (getattr(t, "biz_type", "local") or "local") != "seller" and not _map:
+        rx.append({"level": "mid", "area": "플레이스",
+                   "msg": "네이버 플레이스(지도) 링크가 등록돼 있지 않습니다 — 지도→블로그 유입 경로가 끊깁니다."})
     return {"ok": True, "tenant": t.name, "profile": prof, "theme_fit": fit,
             "posts_per_week": per_week, "last_post_days": last_days,
-            "prescriptions": rx}
+            "external": ext, "prescriptions": rx}
+
+
+def external_reach(blog_id: str, post_url: str = "", keyword: str = "") -> dict:
+    """🔍 검색 밖 유입 통로 측정(A, 2026-08-01) — 공개 API만, 자격증명 0.
+    ①구글 색인 여부(외부 검색 유입의 전제) ②네이버 이미지 검색 노출(사진 많은 글의 숨은 통로).
+    각 항목은 실패 시 None(모름) — 0(없음)과 구분해 정직하게 보고한다."""
+    out: dict = {"blog_id": blog_id}
+    # ① 구글 색인 — 공개 검색 결과 페이지에서 우리 도메인 등장 여부만 확인(크롤 1회, 저속)
+    if post_url:
+        try:
+            q = requests.utils.quote(f"site:{post_url.split('?')[0]}")
+            h = requests.get(f"https://www.google.com/search?q={q}&hl=ko",
+                             headers=_UA, timeout=10).text
+            out["google_indexed"] = ("blog.naver.com" in h and "did not match any documents" not in h
+                                     and "일치하는 문서가 없습니다" not in h)
+        except Exception:
+            out["google_indexed"] = None
+    # ② 네이버 이미지 검색 — 우리 블로그 사진이 이미지탭에 잡히는지(공식 검색 API)
+    if keyword:
+        try:
+            import os as _os
+            r = requests.get("https://openapi.naver.com/v1/search/image",
+                             params={"query": keyword, "display": 50},
+                             headers={"X-Naver-Client-Id": _os.environ.get("NAVER_CLIENT_ID", ""),
+                                      "X-Naver-Client-Secret": _os.environ.get("NAVER_CLIENT_SECRET", "")},
+                             timeout=8)
+            if r.status_code == 200:
+                items = r.json().get("items", [])
+                hit = next((i + 1 for i, it in enumerate(items)
+                            if blog_id and blog_id in (it.get("link", "") + it.get("thumbnail", ""))), 0)
+                out["image_rank"] = hit                  # 0=미노출, N=이미지탭 N번째
+                out["image_checked"] = len(items)
+            else:
+                out["image_rank"] = None
+        except Exception:
+            out["image_rank"] = None
+    return out
 
 
 def sweep(limit: int = 30) -> list:
