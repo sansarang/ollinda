@@ -50,11 +50,12 @@ def candidates(payload: dict, region: str = "", industry: str = "", limit: int =
     def _add(s: str):
         s = " ".join((s or "").split())
         s = re.sub(r"^[#\-•\d.\)\s]+", "", s).strip(" ?!·|")
-        if not (4 <= len(s) <= 28) or s in out:
+        if not (3 <= len(s) <= 28) or s in out:          # 3자 용어도 허용('중고차' 실측 탈락)
             return
-        if _topic:                                       # 주제 무관 구조 제목 배제
-            toks = {_clean(t) for t in re.findall(r"[0-9A-Za-z가-힣]{2,}", s)}
-            if not (toks & _topic):
+        if _topic:
+            # ★ 부분 일치로 판정(2026-08-01 실측): 토큰 완전일치면 '중고차시세'(월 35,120회)가
+            #   주제어 '중고차'와 다르다고 탈락한다 — 한국어 복합어에서 치명적이었다.
+            if not any(a and len(a) >= 2 and (a in s or s in a) for a in _topic):
                 return
         out.append(s)
 
