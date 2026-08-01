@@ -562,6 +562,58 @@ def admin_quality_check_all(request: Request):
     return JSONResponse({"ok": True, "results": out})
 
 
+@app.get("/admin/scout-plan")
+def admin_scout_plan(tenant: str = "", limit: int = 30, ttl_days: int = 7):
+    """🗺 지면 정찰 계획(2026-08-01 사장님 승인 ①) — 맥 야간 정찰기가 '오늘 훑을 키워드'를 받아간다.
+    tenant 미지정이면 블로그 연결된 전 가게. 새 API 호출 0(이미 있는 키워드 데이터만 조합)."""
+    from app.services import blogreach as _brc
+    out = []
+    if tenant:
+        t = db.get_tenant(tenant)
+        if not t:
+            return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+        tenants = [t]
+    else:
+        tenants = db.list_tenants_with_blog()
+    for t in tenants:
+        try:
+            kws = _brc.scout_plan(t.id, limit=limit, ttl_days=ttl_days)
+        except Exception:
+            kws = []
+        if kws:
+            out.append({"tenant_id": t.id, "tenant": t.name,
+                        "blog_id": (getattr(t, "blog_id", "") or ""), "keywords": kws})
+    return JSONResponse({"ok": True, "shops": out,
+                         "total": sum(len(s["keywords"]) for s in out)})
+
+
+@app.get("/admin/blocks-map")
+def admin_blocks_map(tenant: str = ""):
+    """🧱 지면 지도 — 이 가게 키워드별 통합검색 구성·블로그 지면 유무·내 노출(사령탑용)."""
+    if not db.get_tenant(tenant):
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    rows = []
+    try:
+        with db._conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS kw_blocks("
+                      "tenant_id TEXT, keyword TEXT, blocks TEXT, blog_blocks TEXT,"
+                      "mine INTEGER, checked_at TEXT, PRIMARY KEY(tenant_id, keyword))")
+            for r in c.execute("SELECT * FROM kw_blocks WHERE tenant_id=? ORDER BY mine DESC, keyword",
+                               (tenant,)).fetchall():
+                _bb = [x for x in (r["blog_blocks"] or "").split("|") if x]
+                rows.append({"keyword": r["keyword"],
+                             "blocks": [x for x in (r["blocks"] or "").split("|") if x],
+                             "blog_blocks": _bb,
+                             "blog_surface": bool(_bb) or bool(r["mine"]),
+                             "mine": bool(r["mine"]),
+                             "checked_at": (r["checked_at"] or "")[:16]})
+    except Exception:
+        pass
+    return JSONResponse({"ok": True, "n": len(rows),
+                         "surface": sum(1 for r in rows if r["blog_surface"]),
+                         "mine": sum(1 for r in rows if r["mine"]), "rows": rows})
+
+
 @app.post("/admin/blocks-ingest")
 async def admin_blocks_ingest(request: Request):
     """🧱 스마트블록 정찰 결과 수신(맥 로컬 insight/blocks.py) — 키워드별 통합검색 블록 구성 저장."""

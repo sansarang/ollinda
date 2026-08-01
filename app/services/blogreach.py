@@ -379,6 +379,79 @@ def blocks_ingest(tenant_id: str, rows: list) -> dict:
     return {"ok": True, "saved": saved}
 
 
+def scout_plan(tenant_id: str, limit: int = 30, ttl_days: int = 7) -> list:
+    """🗺 지면 정찰 계획(2026-08-01 사장님 승인 ①) — 이 가게에서 '지면을 확인해야 할 키워드' 목록.
+
+    왜: 지면 데이터가 몇 개뿐이라 키워드 선정이 사실상 장님이다. 매일 밤 20~30개씩 훑어
+    '어느 판에 블로그 자리가 있는가' 지도를 만든다. 지도가 있어야 _surface_first가 일한다.
+
+    후보 공급원(전부 이미 있는 데이터 — 새 API 호출 0):
+      ① 순위 추적 중인 키워드(검색어 정찰이 발견한 실유입어 포함)
+      ② 발행한 글들의 타깃 키워드
+      ③ 아직 안 쓴 글감 큐의 키워드(미리 정찰해두면 쓸 때 바로 판단)
+    이미 최근에 훑은 키워드는 제외(ttl_days) — 오래된 것부터 다시 본다.
+    업종·지명 하드코딩 0."""
+    t = db.get_tenant(tenant_id)
+    if not t:
+        return []
+    cands: list = []
+
+    def _add(k):
+        k = " ".join((k or "").split())
+        if k and 2 <= len(k) <= 30 and k not in cands:
+            cands.append(k)
+
+    try:
+        for k in db.tracked_keywords(tenant_id, 40):
+            _add(k)
+    except Exception:
+        pass
+    try:
+        for pub in db.list_blog_publishes(tenant_id, limit=20):
+            _add(pub.get("target_kw") or "")
+            try:
+                p = db.get_piece(pub.get("piece_id") or "")
+                for k in ((p.payload or {}).get("target_keywords") or [])[:4] if p else []:
+                    _add(k)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    try:
+        for q in db.writing_queue_rows(tenant_id, limit=20) or []:
+            _add(q.get("keyword") or "")
+    except Exception:
+        pass
+    if not cands:
+        return []
+    # 최근에 훑은 것은 건너뛰고, 오래된 것·미측정부터 — 매일 조금씩 지도를 넓힌다
+    from datetime import datetime, timedelta
+    fresh = datetime.utcnow() - timedelta(days=max(1, ttl_days))
+    seen: dict = {}
+    try:
+        with db._conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS kw_blocks("
+                      "tenant_id TEXT, keyword TEXT, blocks TEXT, blog_blocks TEXT,"
+                      "mine INTEGER, checked_at TEXT, PRIMARY KEY(tenant_id, keyword))")
+            for r in c.execute("SELECT keyword, checked_at FROM kw_blocks WHERE tenant_id=?",
+                               (tenant_id,)).fetchall():
+                seen[r["keyword"]] = (r["checked_at"] or "")[:19]
+    except Exception:
+        pass
+
+    def _age(k):
+        ts = seen.get(k)
+        if not ts:
+            return (0, "")                     # 미측정이 최우선
+        try:
+            return (0, ts) if datetime.fromisoformat(ts) < fresh else (1, ts)
+        except Exception:
+            return (0, "")
+    todo = [k for k in cands if _age(k)[0] == 0]
+    todo.sort(key=lambda k: _age(k)[1])        # 오래된 것부터
+    return todo[:max(1, limit)]
+
+
 def blocks_for(tenant_id: str, keyword: str) -> dict:
     """저장된 블록 판정 조회 — 생성 작전이 '이 판에 블로그 지면이 있는가'를 참조."""
     try:
