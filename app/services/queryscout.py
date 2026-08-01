@@ -18,6 +18,10 @@ from app import db
 
 _log = logging.getLogger("shopcast.queryscout")
 
+# 실유입 판정 최소 월검색량 — 순위가 잡혀도 이 미만은 '사람이 안 치는 문장'(잡음)으로 본다.
+# 기존 지역 키워드 관문(seo.REGION_MIN_VOLUME=100)과 같은 기준 — 별도 상수 남발 대신 동일 잣대.
+MIN_VOLUME = 100
+
 _STOP = {"그리고", "하지만", "그래서", "합니다", "입니다", "있습니다", "때문에", "우리", "저희",
          "오늘", "이번", "정도", "경우", "생각", "사진", "고객", "사장", "여기", "부분", "가능"}
 _JOSA = re.compile(r"(은|는|이|가|을|를|의|에|에서|으로|로|와|과|도|만|까지|부터|처럼|보다)$")
@@ -75,7 +79,7 @@ def scout(tenant_id: str, max_posts: int = 3, per_post: int = 10) -> dict:
     except Exception:
         _sa = None
 
-    hits, misses, checked = [], [], 0
+    hits, misses, checked, noise = [], [], 0, []
     for pub in db.list_blog_publishes(tenant_id, limit=max_posts):
         p = None
         try:
@@ -93,28 +97,45 @@ def scout(tenant_id: str, max_posts: int = 3, per_post: int = 10) -> dict:
                 continue
             rank = r.get("rank")
             if isinstance(rank, int) and rank >= 1:
-                db.save_rank_snapshot(tenant_id, kw, rank, kind="blog_search")
                 hits.append({"kw": kw, "rank": rank, "url": r.get("url", "")})
             else:
                 misses.append(kw)
-    # 미노출 후보 중 '수요 있는 것'만 글감 큐로(검색량 관문 — 기존 신호 재사용)
-    queued = 0
-    if _sa and misses:
+
+    # ★ 검색량 관문(2026-08-01 사장님 지시): 순위가 잡혀도 '사람이 안 치는 문장'은 무의미하다
+    #   (실측: 소제목 문장이 1위로 잡히지만 검색 수요 0). 잡힌 것도 검색량으로 걸러 실유입만 남긴다.
+    def _vols(words: list) -> dict:
+        if not (_sa and words):
+            return {}
         try:
-            vols = {v["keyword"].replace(" ", ""): v.get("total", 0)
-                    for v in _sa.keyword_volumes(misses[:20], limit=60)}
+            return {v["keyword"].replace(" ", ""): v.get("total", 0)
+                    for v in _sa.keyword_volumes(words[:20], limit=60)}
         except Exception:
-            vols = {}
-        for kw in misses[:20]:
-            vol = vols.get(kw.replace(" ", ""), 0)
-            if vol >= 100 and db.enqueue_writing(
-                    tenant_id, "queryscout", kw, "review",
-                    f"우리 글이 답하는 주제인데 미노출(월 {vol:,}회) — 전용 글로 공략"):
-                queued += 1
-    hits.sort(key=lambda h: h["rank"])
-    _log.info("[queryscout] %s 검사 %d → 잡힘 %d · 큐 %d", tenant_id[:8], checked, len(hits), queued)
-    return {"ok": True, "checked": checked, "hits": hits[:20],
-            "hit_count": len(hits), "queued": queued}
+            return {}
+
+    hv = _vols([h["kw"] for h in hits])
+    real = []
+    for h in hits:
+        vol = hv.get(h["kw"].replace(" ", ""), 0)
+        h["volume"] = vol
+        (real if vol >= MIN_VOLUME else noise).append(h)
+    for h in real:                                       # 실수요 있는 것만 추적 편입(관측 비용 절약)
+        db.save_rank_snapshot(tenant_id, h["kw"], h["rank"], kind="blog_search")
+
+    # 미노출 후보 중 '수요 있는 것'만 글감 큐로(같은 관문 재사용)
+    queued = 0
+    mv = _vols(misses)
+    for kw in misses[:20]:
+        vol = mv.get(kw.replace(" ", ""), 0)
+        if vol >= MIN_VOLUME and db.enqueue_writing(
+                tenant_id, "queryscout", kw, "review",
+                f"우리 글이 답하는 주제인데 미노출(월 {vol:,}회) — 전용 글로 공략"):
+            queued += 1
+    real.sort(key=lambda h: (h["rank"], -h["volume"]))
+    _log.info("[queryscout] %s 검사 %d → 실유입 %d(잡음 %d) · 큐 %d",
+              tenant_id[:8], checked, len(real), len(noise), queued)
+    return {"ok": True, "checked": checked, "hits": real[:20], "hit_count": len(real),
+            "noise_filtered": len(noise), "queued": queued,
+            "noise_sample": [n["kw"] for n in noise[:5]]}
 
 
 def sweep(limit: int = 20) -> None:
