@@ -1612,9 +1612,22 @@ class ShortVideoGenerator(Generator):
                 _hk_kw = _kw_shorten_nolocal(kw_nat, _reg)
             else:
                 _hk_kw = _rh.sub(r"\s*(업체|전문점|전문|추천|가격|후기)\s*$", "", kw_nat).strip()
-            opening = f"{_hk_kw}, 궁금하셨죠?" if _hk_kw else "지금 확인해 보세요"
-            if _hook_gate(opening, kw_nat, _biz, _reg):        # 폴백 훅도 게이트 — 위반이면 업종만
-                opening = f"{(getattr(tenant,'industry','') or '').split(',')[0].strip() or '지금'}, 궁금하셨죠?"
+            # ★ 폴백 훅도 '손님이 실제로 하는 질문'이어야 한다(2026-08-01 사장님 지적).
+            #   실측 사고: '중고차판매, 궁금하셨죠?' — 사업자등록증 업종명을 그대로 박았고,
+            #   손님은 파는 게 아니라 사는 쪽이라 주어가 뒤집혔다.
+            #   업종명은 손님 검색어로 정규화(searcher_term)하고, 손님 행동어로 질문을 만든다.
+            _ind_raw = ((getattr(tenant, "industry", "") or "").split(",")[0]).strip()
+            try:
+                _ind_kw = seo.searcher_term(_ind_raw) or _ind_raw
+            except Exception:
+                _ind_kw = _ind_raw
+            _hk_kw = _hk_kw or _ind_kw
+            # 업종 무관 질문 틀 — '어디서/어떻게' 고를지가 손님의 실제 고민이다.
+            opening = (f"{_hk_kw}, 어디서 고르면 좋을까요?" if _hk_kw else "지금 확인해 보세요")
+            if _hook_gate(opening, kw_nat, _biz, _reg):        # 게이트 위반이면 업종어만으로 재조립
+                opening = (f"{_ind_kw}, 어디서 고르면 좋을까요?" if _ind_kw else "지금 확인해 보세요")
+            if _hook_gate(opening, kw_nat, _biz, _reg):        # 그래도 걸리면 지역·업종 없는 일반형
+                opening = "고르기 전에 이것부터 보세요"
             # 목차 낭독 방지(2026-07-28): 폴백도 소제목(제목형 문장)보다 본문 발췌(사람 말) 우선 —
             # 발췌가 3개 미만일 때만 소제목으로 보충
             if len(caps) >= 3:

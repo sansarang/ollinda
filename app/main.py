@@ -1717,6 +1717,10 @@ def admin_video_status(asset_id: str):
         _rows.append({"piece": _sp.id[:8],
                       "naver_ok": bool(_nv.get("path")),
                       "naver_note": _nv.get("_build_note") or "",
+                      # 실제로 영상에 구워진 자막(진단에서 다른 산출물과 혼동하지 않게)
+                      "naver_opening": _nv.get("opening") or "",
+                      "naver_scenes": (_nv.get("scene_texts") or [])[:10],
+                      "naver_dur": _nv.get("duration_sec"),
                       "shorts_ok": bool(_sp.payload.get("video_path")),
                       "scene_note": (_sp.payload.get("_scene_note") or "")[:200],
                       "assemble_note": (_sp.payload.get("assemble_note") or "")[:200]})
