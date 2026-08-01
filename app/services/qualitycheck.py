@@ -127,6 +127,9 @@ def _revise_text(text: str, problems: list[str], is_blog: bool) -> str:
 
 
 PUBLISH_MIN = 80    # 발행 게이트 기준선(2026-07-28 사장님 결정: 미달 글은 발행 버튼 자체를 봉인)
+# 표면 수선 목표선(2026-08-01 사장님 승인) — 80만 넘으면 손을 떼던 탓에 82점 글이 이모지·문단리듬·
+# 키워드노출 감점을 그대로 안고 나갔다. 88 미만이면 값싼 표면 수선(기계+소형 콜 1회)을 돌려 90선을 노린다.
+POLISH_TARGET = 88
 
 
 _EMOJI_RE = re.compile("[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F900-\U0001F9FF❤️]")
@@ -160,7 +163,9 @@ def _surface_fix(pl: dict, warns: list) -> "str | None":
         "고치는 법: 클리셰 표현은 그 자리에서 자연스러운 말로 교체 / '도입에 끝까지 읽을 이유 없음'은 "
         "첫 문단에 이 글이 답할 것을 예고하는 한 문장 추가(본문에 이미 있는 내용만 예고) / "
         "동어반복 문단은 겹치는 쪽을 압축 / 텍스트 문단 연속은 기존 [사진N] 마커 위치 재배치나 "
-        "소제목 삽입으로 리듬을 끊어라.\n"
+        "소제목 삽입으로 리듬을 끊어라 / '핵심키워드 노출 부족'은 이미 있는 문장 안에서 그 표현을 "
+        "자연스럽게 쓰도록 어휘만 바꿔라(억지 삽입·도배 금지, 조사 없는 동사 직결 금지) / "
+        "'과장·광고성 표현'은 사실 서술로 바꿔라(없는 근거를 만들지 마라).\n"
         "출력: 고친 전체 본문만(머리말·설명 금지).\n\n"
         f"[지적된 표면 문제]\n- " + "\n- ".join(w[:120] for w in warns[:5]) + f"\n\n[본문]\n{body}",
         model=_SN, max_tokens=min(6000, max(2500, int(len(body) * 0.9)))) or "").strip()
@@ -190,14 +195,17 @@ def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
     # 🧹 표면 수선 패스(2026-08-01 사장님 승인 — '한 번에 80점' 2겹): 값비싼 전체 재작성 전에
     #   ①기계 수선(이모지 초과 = regex, 0원) ②표면 감점만 고치는 소형 콜 1회.
     #   전부 업종·가게 무관 언어/구조 원리 — 하드코딩 0. 실패는 조용히(기존 루프 그대로 진행).
-    if isinstance(score, int) and score < PUBLISH_MIN:
+    if isinstance(score, int) and score < POLISH_TARGET:
         try:
             _body0 = pl.get("body") or ""
             _fixed = _trim_emoji(_body0, keep=1)
             if _fixed != _body0:
                 pl["body"] = _fixed
+            # 수선 대상 = '문장·구조만 손보면 되는' 감점(사실·수치 불변). 실측 반복 3종 포함:
+            #   이모지(기계), 문단 연속, 도입 훅, 그리고 82점대에서 흔한 '키워드 노출 부족'·'과장 표현'
             _sw = [w for w in (au.get("warnings") or [])
-                   if any(t in w for t in ("클리셰", "도입", "동어반복", "문단 연속", "연속(시각요소"))]
+                   if any(t in w for t in ("클리셰", "도입", "동어반복", "문단 연속", "연속(시각요소",
+                                           "키워드", "과장", "이모지"))]
             if _sw:
                 _sfx = _surface_fix(pl, _sw)
                 if _sfx:
