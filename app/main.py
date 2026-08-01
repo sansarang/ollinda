@@ -536,11 +536,36 @@ def admin_quality_check_all(request: Request):
 
 
 @app.get("/admin/queryscout")
-def admin_queryscout(tenant: str = "", posts: int = 3, per: int = 10):
-    """🔎 검색어 정찰 진단(①, 자격증명 0) — 발행 글이 어떤 검색어에서 잡히는지 실측."""
+def admin_queryscout(tenant: str = "", posts: int = 3, per: int = 10, debug: str = ""):
+    """🔎 검색어 정찰 진단(①, 자격증명 0) — 발행 글이 어떤 검색어에서 잡히는지 실측.
+    debug=1: 실행 없이 '생성된 후보 + 각 검색량'만 반환(후보 품질 점검용)."""
     from app.services import queryscout as _qs
-    if not db.get_tenant(tenant):
+    t = db.get_tenant(tenant)
+    if not t:
         return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    if debug == "1":
+        from app.services import searchad as _sa
+        out = []
+        for pub in db.list_blog_publishes(tenant, limit=max(1, min(posts, 8))):
+            p = None
+            try:
+                p = db.get_piece(pub.get("piece_id") or "")
+            except Exception:
+                pass
+            pl = (p.payload if p else None) or {"title": pub.get("post_title") or ""}
+            cands = _qs.candidates(pl, region=getattr(t, "region", "") or "",
+                                   industry=getattr(t, "industry", "") or "")
+            vols = {}
+            try:
+                vols = {v["keyword"].replace(" ", ""): v.get("total", 0)
+                        for v in _sa.keyword_volumes(cands[:20], limit=60)}
+            except Exception:
+                pass
+            out.append({"post": (pub.get("post_title") or "")[:40],
+                        "candidates": [{"kw": c, "volume": vols.get(c.replace(" ", ""), 0)}
+                                       for c in cands]})
+        return JSONResponse({"ok": True, "region": getattr(t, "region", ""),
+                             "industry": getattr(t, "industry", ""), "debug": out})
     return JSONResponse(_qs.scout(tenant, max_posts=max(1, min(posts, 8)),
                                   per_post=max(1, min(per, 14))))
 
