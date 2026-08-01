@@ -266,6 +266,28 @@ def _kw_rank_tier(kw: str, models: list, classes: list, wide: str, ind0: str) ->
     return 4
 
 
+def _surface_first(cands: list, tenant_id: str = "") -> list:
+    """🧱 통합검색 지면 신호 반영(2026-08-01 실측) — 블로그 글이 아무리 좋아도 그 키워드의
+    통합검색 첫 화면에 '블로그 지면'이 없으면 노출로 이어지지 않는다(부산 썬팅·썬팅업체 등 실측 0건,
+    반면 '부산 동구 썬팅'은 인기글 블록이 살아 있고 우리 글이 실제 노출 중).
+    정찰 데이터가 있는 키워드만 재정렬 — 데이터 없으면 순서 유지(안전). 하드코딩 0."""
+    if not (cands and tenant_id):
+        return cands
+    try:
+        from app.services import blogreach as _brc
+        scored = []
+        for i, c in enumerate(cands):
+            b = _brc.blocks_for(tenant_id, c) or {}
+            surf = b.get("blog_surface")
+            # 지면 있음=0(앞) / 미상=1(중립) / 지면 없음=2(뒤) — 원 순서는 tie-break로 보존
+            rank = 0 if surf is True else (2 if surf is False else 1)
+            scored.append((rank, i, c))
+        scored.sort()
+        return [c for _, _, c in scored]
+    except Exception:
+        return cands
+
+
 def select_target_keyword(candidates: list, biz_type: str = "local", region: str = "",
                           industry: str = "", tenant_id: str = "", verify_volume: bool = True,
                           primary_model: str = "", allow_inventory_rank: bool = False) -> str:
@@ -276,6 +298,7 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
     cands = list(dict.fromkeys(cands))
     biz = (biz_type or "local")
     ind0 = ((industry or "").replace("/", ",").split(",")[0] or "").strip()
+    cands = _surface_first(cands, tenant_id)             # ★ 통합검색에 블로그 지면이 있는 판을 앞으로
     if biz not in ("seller", "hybrid"):
         return cands[0] if cands else (f"{_kw_shorten(region)} {ind0}".strip() if ind0 else "")
     # 기초지역 배제

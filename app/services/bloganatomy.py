@@ -307,7 +307,7 @@ def anatomize(keyword: str, top_n: int = 5) -> "dict | None":
     return out
 
 
-def battle_plan(keyword: str) -> "tuple[str, dict]":
+def battle_plan(keyword: str, tenant_id: str = "") -> "tuple[str, dict]":
     """🗺 판 유형별 작전 지시서(2026-08-01 사장님 승인) — 4신호(공급·추세·상대전력·해부)를
     글쓰기 작전으로 변환해 프롬프트에 주입. 반환 (프롬프트 블록, 감사용 meta).
     신호가 없으면 빈 문자열(기존 글쓰기 그대로) — 파이프라인을 절대 막지 않는다."""
@@ -367,6 +367,24 @@ def battle_plan(keyword: str) -> "tuple[str, dict]":
                          "드러나는 표현을 도입부에 자연스럽게 써라.")
         else:
             lines.append("[작전 — 보통 판] 기준선 충족 + 이 가게만의 실측·경험 디테일로 차별화하라.")
+        # 🧱 통합검색 지면(2026-08-01 실측): 지면이 없는 판이면 글 품질과 무관하게 노출이 막힌다.
+        #   그 경우 '검색 상단'이 아니라 '이웃 피드·재방문·전환'을 노리는 글로 목적을 바꾼다.
+        if tenant_id:
+            try:
+                from app.services import blogreach as _brc0
+                _b0 = _brc0.blocks_for(tenant_id, kw) or {}
+                if _b0.get("blog_surface") is False:
+                    meta["blog_surface"] = False
+                    lines.append("[지면 경고 — 통합검색에 블로그 자리가 없는 판] 이 키워드의 검색 첫 화면은 "
+                                 "플레이스·클립·쇼핑이 차지한다. 검색 상단 노출은 기대하기 어려우니 "
+                                 "'검색용 나열'이 아니라 **읽고 바로 문의하게 만드는 글**로 써라: 결론을 앞에, "
+                                 "가격·소요시간·연락 방법을 명확히, 마지막에 방문·문의 안내를 분명히.")
+                elif _b0.get("blog_surface") is True:
+                    meta["blog_surface"] = True
+                    lines.append("[지면 확인 — 블로그가 실리는 판] 이 키워드는 통합검색에 블로그 지면이 있다. "
+                                 "검색 의도에 정확히 답하는 구조(질문형 소제목·요약·FAQ)를 확실히 갖춰라.")
+            except Exception:
+                pass
         if rising:
             lines.append("[톤 — 상승 수요] 요즘 찾는 사람이 늘어난 주제다 — 도입부에 시의성(최근 문의 증가·시즌 "
                          "맥락)을 자연스럽게 한 문장 녹여라(과장·날조 금지, 사실 프레임만).")

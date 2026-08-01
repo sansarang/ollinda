@@ -355,7 +355,7 @@ class BlogDraftGenerator(Generator):
             _anat_line = _ba.baseline_line(kw0)
             # 🗺 판 유형별 작전 지시서(2026-08-01) — 4신호를 글쓰기 작전으로(치열한 판=각도 전환,
             #   열린 판=속전속결·최신성, 상승 추세=시의성 톤). 신호 없으면 빈 문자열(기존 그대로).
-            _bp_line, _battle_meta = _ba.battle_plan(kw0)
+            _bp_line, _battle_meta = _ba.battle_plan(kw0, tenant_id=getattr(tenant, 'id', '') or '')
             _anat_line = _anat_line + _bp_line
         except Exception:
             pass
