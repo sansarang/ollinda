@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import re
+import re as _re
 import shutil
 import subprocess
 import uuid
@@ -109,6 +110,12 @@ def _strip_labels(t: str) -> str:
 #   실측 사고: 프롬프트엔 '호구' 금지를 넣었는데 검사는 '호구 잡'만 봐서 "호구 될까 불안하다면"이
 #   그대로 영상에 구워졌다. 규칙이 두 곳에 따로 있으면 반드시 어긋난다.
 #   전 업종 공통(업종 어휘가 아니라 '불안을 파는 화법'을 막는다).
+# 📺 영상에서 '글'을 가리키는 말 금지(2026-08-01 사장님 지적) — 영상만 보는 사람에게는
+#   앞뒤가 끊긴 말이 된다. 마무리 안내(본문에서 확인하세요)는 아웃트로가 따로 담당한다.
+SELFREF_PATTERNS = (
+    r"이 글", r"이 포스팅", r"이 게시글", r"글 하나면", r"본문에서 확인", r"아래 글",
+    r"위에서 말씀", r"앞서 말씀", r"글 끝",
+)
 FEAR_PATTERNS = (
     r"호구",                                   # 호구 잡/될까/안 잡힙니다 … 형태 불문
     r"사기\s?당", r"속(지|을까|는다)",
@@ -129,6 +136,8 @@ def fear_ban_line() -> str:
 
 
 _RIVAL_JAB = __import__("re").compile("(" + "|".join(FEAR_PATTERNS + RIVAL_PATTERNS) + ")")
+# 자기참조는 아웃트로에서는 정상이므로 본문 씬 검사에만 쓴다(별도 정규식).
+_SELFREF = __import__("re").compile("(" + "|".join(SELFREF_PATTERNS) + ")")
 
 
 # 상호 접미 사전 — 자막 속 '가게명처럼 보이는' 연속 한글어 추출용(업체명 정합 게이트 4-1)
@@ -1667,12 +1676,26 @@ class ShortVideoGenerator(Generator):
                 _bad_ln = _subtitle_gate(SceneScript(hook="", sentences=[_ln], outro="",
                                                      source="body_excerpt", evidence=_fact_src),
                                          _fact_src, getattr(tenant, "name", "") or "")
+                if not _bad_ln and _SELFREF.search(_ln):
+                    _bad_ln = "영상에서 '글'을 가리킴"
                 if _bad_ln:
                     _dropped_fb.append((_ln[:28], _bad_ln[:40]))
                 else:
                     _clean_sent.append(_ln)
             if _dropped_fb:
                 _nlog.warning("[naver-video] 폴백 자막 %d줄 게이트 탈락: %s", len(_dropped_fb), _dropped_fb[:3])
+            # ★ 한 말은 끝까지 맺어야 한다(2026-08-01 사장님 불변 원칙).
+            #   실측: '"중고차는 사진이랑 실물이 다르다"고들 하시는데' — 뒷말 없이 끊겼다.
+            #   연결어미로 끝나는 줄은 다음 말이 있어야 하는 문장이므로 자막으로 쓰지 않는다.
+            #   언어 규칙만 사용(업종 무관).
+            _UNFIN = _re.compile(r"(는데|은데|지만|면서|라서|어서|아서|으며|하며|고들|거나|든지|"
+                                 r"려면|다면|으니|니까|는지|은지|ㄹ지|고요|구요|고,|며,)$")
+            _fin = [x for x in _clean_sent if not _UNFIN.search(x.rstrip(" .…"))]
+            if len(_fin) >= 3:
+                _drop_un = [x for x in _clean_sent if x not in _fin]
+                if _drop_un:
+                    _nlog.warning("[naver-video] 미완결 자막 %d줄 제외: %s", len(_drop_un), _drop_un[:2])
+                _clean_sent = _fin
             if len(_clean_sent) >= 3:                 # 남은 줄이 너무 적으면 원본 유지(영상 불차단)
                 sent = _clean_sent
         # 클로징 다양화 — 고정 템플릿 대신 글 CTA '사실' 기반 선택(본문에 근거 있는 패턴만, 없으면 현행 유지)
@@ -2632,20 +2655,17 @@ class ShortVideoGenerator(Generator):
                f"d={frames}:s={W}x{H}:fps={FPS}")
         _eq = "eq=contrast=1.06:saturation=1.12:brightness=0.02"
         if _landscape:
-            # ★ 흐린 배경 대신 '선명한 사진 + 검은 여백'(2026-08-01 사장님 지시).
-            #   기존 boxblur=22 배경은 화면 대부분을 뿌옇게 만들었다. 가로 사진을 9:16에 꽉 채우려면
-            #   좌우를 크게 잘라내야 해(3:2 기준 폭의 약 37%만 남음) 피사체가 잘릴 위험이 크므로,
-            #   사진은 원래 비율 그대로 선명하게 두고 남는 위아래만 어두운 단색으로 채운다.
-            #   전 업종 공통(사진 비율은 업종과 무관하게 제각각이다).
-            vf = (f"[0:v]scale={W}:-2[fg];"
-                  f"color=c=0x0a0d14:s={W}x{H}:d={total_t:.2f}:r={FPS}[bg];"
-                  f"[bg][fg]overlay=(W-w)/2:(H-h)/2:shortest=1,setsar=1,"
-                  f"{_eq},{_zp}" + ("" if tail > 0 else self._fade(dur)) + "[v]")
-            cmd = ["ffmpeg", "-y", "-loop", "1", "-t", f"{total_t:.2f}", "-i", img,
-                   "-filter_complex", vf, "-map", "[v]", "-t", f"{total_t:.2f}", "-r", str(FPS),
-                   "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
-                   "-an", out]
-        else:
+            # ★ 여백 없이 꽉 채운다(2026-08-01 사장님 지적 — 검은 여백이 화면 절반을 먹었다).
+            #   흐린 배경(기존)도, 검은 여백(직전 시도)도 답이 아니었다. 사진을 세로 화면에 채우되
+            #   위아래 여백이 과하지 않도록 '높이 기준 커버 + 중앙 크롭'으로 간다.
+            #   가로 사진의 피사체(차량·시공물·제품)는 중앙에 오는 것이 일반적이라 좌우 크롭이 안전하고,
+            #   흐릿함도 여백도 없다. 전 업종 공통(사진 비율은 업종과 무관하다).
+            vf = (f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,"
+                  f"{_eq},{_zp}" + ("" if tail > 0 else self._fade(dur)))
+            cmd = ["ffmpeg", "-y", "-loop", "1", "-t", f"{total_t:.2f}", "-i", img, "-vf", vf,
+                   "-map", "0:v", "-t", f"{total_t:.2f}", "-r", str(FPS), "-pix_fmt", "yuv420p",
+                   "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", "-an", out]
+        else:                                  # 세로·정사각 사진도 같은 방식(커버 크롭)
             vf = (f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,"
                   f"{_eq},{_zp}" + ("" if tail > 0 else self._fade(dur)))
             cmd = ["ffmpeg", "-y", "-loop", "1", "-t", f"{total_t:.2f}", "-i", img, "-vf", vf,

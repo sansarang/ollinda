@@ -6319,8 +6319,32 @@ def _result_naver_video(pieces, asset_id: str) -> str:
             _player = (f"<div class='mx-auto bg-black rounded-xl overflow-hidden' style='max-width:280px;aspect-ratio:9/16'>"
                        f"<video src='{_dl}' controls preload='none' class='w-full h-full' style='object-fit:contain'></video></div>"
                        if _ok else "")
-            return (f"<div class='mt-3'><div class='text-xs font-bold text-slate-400 mb-1'>네이버용 영상 (본문 첨부·클립 겸용 · 9:16)</div>"
-                    + _player + _action + "</div>")
+            # 📱 클립 버튼은 '본편이 있을 때' 나와야 한다(2026-08-01 사장님 지적).
+            #   클립은 본편에서 잘라내는 파생물인데, 기존엔 본편이 없을 때만 버튼을 그려
+            #   영상이 만들어지는 순간 버튼이 사라졌다(정반대).
+            _clip = nv.get("clip") or {}
+            _cp = _clip.get("path") or ""
+            if _cp and (os.path.exists(_cp) or True):
+                _cdl = f"/dl/{asset_id}/{os.path.basename(_cp)}"
+                _cfn = esc((_slug_v + "_클립.mp4") if _slug_v else "naver-clip.mp4")
+                _clip_block = (
+                    "<div class='mt-3 pt-3 border-t border-slate-100'>"
+                    "<div class='text-xs font-bold text-slate-400 mb-1'>네이버 클립용 (짧은 훅형)</div>"
+                    f"<a href='{_cdl}' download='{_cfn}' class='flex items-center justify-center gap-1 "
+                    "px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition'>"
+                    f"⬇ 클립 받기 (약 {int(_clip.get('duration_sec') or 0)}초)</a></div>")
+            else:
+                _clip_block = (
+                    "<div class='mt-3 pt-3 border-t border-slate-100'>"
+                    "<div class='text-xs font-bold text-slate-400 mb-1'>네이버 클립용 (짧은 훅형)</div>"
+                    "<button type='button' class='w-full px-4 py-2.5 rounded-xl bg-indigo-600 "
+                    "hover:bg-indigo-700 text-white text-sm font-bold transition' "
+                    "onclick=\"vmPick(this,'" + esc(asset_id) + "','clip')\">"
+                    "📱 네이버 클립 만들기</button>"
+                    "<div class='text-[11px] text-slate-400 text-center mt-1'>"
+                    "클립 지면에 업로드 · 이 영상에서 15~22초로 잘라내요</div></div>")
+            return (f"<div class='mt-3'><div class='text-xs font-bold text-slate-400 mb-1'>네이버용 영상 (본문 첨부 · 9:16)</div>"
+                    + _player + _action + _clip_block + _VMPICK_JS + "</div>")
         blog = next((p for p in pieces if p.kind == _CKr.BLOG), None)
         vj = (blog.payload.get("video_job") or {}) if blog else {}
         if vj.get("status") in ("registered", "running", "retrying"):   # 진행 중 — 단계 문구 + 폴링(완성 시 자동 갱신)
