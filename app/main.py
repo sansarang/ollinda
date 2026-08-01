@@ -574,7 +574,26 @@ def admin_scout_plan(tenant: str = "", limit: int = 30, ttl_days: int = 7):
             return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
         tenants = [t]
     else:
-        tenants = db.list_tenants_with_blog()
+        # 🧹 정찰 대상 정리(2026-08-01 사장님 지시) — 첫 실행에서 6개 가게 중 4개가 헛돌았다.
+        #   ① 데모 tenant 제외 ② 발행 이력 없는 빈 계정 제외(측정할 글이 없다)
+        #   ③ 같은 블로그를 보는 tenant는 하나만 — 지면은 '블로그'의 속성이라 3번 훑을 이유가 없다
+        #     (루마 tenant 3개가 같은 블로그를 각각 훑고 있었다). 발행이 많은 쪽을 대표로 삼는다.
+        #   이메일 도메인으로 거르지 않는다 — @ollinda.guest는 카카오·구글 로그인에도 쓰여
+        #   진짜 가입자를 잘라낼 수 있다. 판단 기준은 '실제 활동'이다.
+        _by_blog: dict = {}
+        for _t in db.list_tenants_with_blog():
+            if _tenant_is_demo(_t.id):
+                continue
+            try:
+                _n = len(db.list_blog_publishes(_t.id, limit=50) or [])
+            except Exception:
+                _n = 0
+            if _n <= 0:
+                continue
+            _bid = (getattr(_t, "blog_id", "") or "").strip().lower() or _t.id
+            if _n > _by_blog.get(_bid, (0, None))[0]:
+                _by_blog[_bid] = (_n, _t)
+        tenants = [v[1] for v in _by_blog.values()]
     for t in tenants:
         try:
             kws = _brc.scout_plan(t.id, limit=limit, ttl_days=ttl_days)
