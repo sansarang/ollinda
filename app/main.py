@@ -4225,7 +4225,10 @@ def _photo_captions(tenant, blog, n: int) -> list[str]:
         _is_doc = (any(k in (desc + " " + raw_line) for k in _doc_risk)
                    or bool(_r.search(r"\d{2,3}[가-힣]\s?\d{4}", raw_line + " " + desc)))
         if _is_doc:
-            out.append(f"{ind0} 확인 서류 사진 ({i}번)".strip() if ind0 else f"확인 서류 사진 ({i}번)")
+            # ★ '(N번)' 제거(2026-08-01 사장님 지적) — 사진을 글 흐름에 맞게 재배치하면 이 번호가
+            #   화면의 사진 번호와 어긋나 붙여넣을 때 헷갈린다(실측: 사진3인데 '(13번)').
+            #   중복 구분은 아래 중복 처리에서 키워드로 한다. 손님이 읽는 문장에 내부 번호는 없어야 한다.
+            out.append(f"{ind0} 확인 서류 사진".strip() if ind0 else "확인 서류 사진")
         elif len(desc) >= 4:
             if kw and i == 1 and _shop:
                 out.append(f"{desc} — {kw}, {_shop}에서 직접 촬영했습니다.")

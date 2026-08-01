@@ -662,7 +662,11 @@ def _hook_gate(hook: str, keyword: str, biz_type: str, region: str) -> str:
     h = _r.sub(r"[{}]", "", hook or "").strip()
     kw = (keyword or "").strip()
     if kw and kw.replace(" ", "") in h.replace(" ", ""):     # 키워드 원형 통째 → 차단
-        return f"키워드 원형 삽입('{kw}')"
+        # ★ 사유 문구에 '훅'을 명시한다(2026-08-01 실사고) — 호출부의 강등 경로가
+        #   ("중복","미이행","과장","서식","인용","훅") 부분일치로 소프트 위반을 가려내는데,
+        #   이 문구에 '훅'이 없어 하드 위반으로 분류돼 **영상 전체가 생성 중단**됐다.
+        #   훅은 한 줄일 뿐이다 — 그 줄만 갈아끼우면 되지 영상을 포기할 이유가 없다.
+        return f"훅 키워드 원형 삽입('{kw}')"
     if (biz_type or "local") in ("seller", "hybrid"):
         _regcores = set()
         for tok in _r.findall(r"[가-힣]{2,}", region or ""):
@@ -673,12 +677,12 @@ def _hook_gate(hook: str, keyword: str, biz_type: str, region: str) -> str:
                 _regcores.add(tok)
         for core in _regcores:
             if core in h:                                    # 셀러·병행 훅에 지역명(어간) → 차단
-                return f"셀러·병행 훅 지역명 노출('{core}')"
+                return f"훅 지역명 노출(셀러·병행, '{core}')"
     return ""
 
 
 def _script_from_body(body: str, n: int, kw_nat: str, source: str, tone: str = "info",
-                      biz_type: str = "local", region: str = "") -> list | None:
+                      biz_type: str = "local", region: str = "", title: str = "") -> list | None:
     """본문 전문 → 씬 N개 대본(1콜, Haiku 경로). tone='info'(네이버 정보형)|'reach'(쇼츠·릴스 도달형).
     구조: 핵심(본문 순서 유지) → 단점·정직 고지 → (클로징은 템플릿).
     대본 게이트·사실 게이트 실패 시 사유 피드백 재생성 1회 → 재실패 None(호출부 폴백)."""
@@ -704,8 +708,27 @@ def _script_from_body(body: str, n: int, kw_nat: str, source: str, tone: str = "
            else "매물·상품·가격·상태(차량이면 '9만km 모닝, 830만 원이면 어떤 상태일까요?', 제품이면 '수제 딸기잼, 왜 이틀이면 품절일까요?' 식 — 업종에 맞게). "
                 "단 입력에 명시된 긍정 사실(무사고 등)을 의심·번복하는 훅 금지 — 밝혀진 사실은 확정으로 두고 강점으로 써라") + ".\n"
         + ("" if _allow_region else "- 훅과 모든 자막에 지역명(시·군·구·동 이름)을 넣지 마라 — 전국 손님이 대상이다.\n")
-        + "- 타깃 키워드를 통째로 훅에 넣지 마라(비문·도배). 질문·반전으로 자연스럽게.\n")
-    base = ("아래 블로그 본문을 근거로, 세로 영상 자막 대본을 써라. 전체가 하나의 이야기가 되게.\n"
+        + "- 타깃 키워드를 통째로 훅에 넣지 마라(비문·도배). 질문·반전으로 자연스럽게.\n"
+        # ★ 대상 없는 껍데기 훅 금지(2026-08-01 사장님 지적) — 실측: '부산 기장 중고차 모르면 손해'는
+        #   '무엇을' 모르면 손해인지가 없다. 겁만 주고 알맹이가 없는 문장이다.
+        + "- 훅에는 '무엇에 대한 이야기인지'가 반드시 들어가야 한다. 대상이 빠진 문장 금지"
+          "(나쁜 예: '○○ 모르면 손해', '○○ 이것만 알면 끝' — 무엇을 모르는지·무엇이 이것인지 없다).\n"
+        + "- 본문에 있는 구체적 사실(차종·모델·수치·가격·상태 중 하나 이상)을 훅에 담아라. "
+          "그 사실이 곧 대상이고, 손님이 클릭하는 이유다.\n"
+        + (f"- ★ 이 글의 제목은 '{title}'이다. 훅은 이 제목과 같은 것을 말해야 한다"
+           "(같은 대상·같은 약속). 제목은 무엇을 보여준다고 하는데 훅은 겁만 주는 식의 어긋남 금지. "
+           "제목을 그대로 베끼지는 말고, 영상 첫 줄답게 짧게.\n" if title else ""))
+    # 🗣 화자·청자(2026-08-01 사장님 지적) — 글에는 적용했는데 영상 대본이 빠져 있었다.
+    #   실측 대본: "부산 기장 중고차 모르면 손해 / 사기 당할까 봐 걱정되셨죠?" — 소비자에게 겁을 주는
+    #   정보성 블로거 말투다. 올린다 사용자는 물건을 팔아야 하는 셀러이고, 이 영상은 그 판매 도구다.
+    _voice = ("- 말하는 사람은 '가게 사장'이다. 내 물건·서비스를 손님에게 보여주는 영상이다. "
+              "말투는 끝까지 주인의 것(예: 제가 직접 확인했습니다 / 보여드릴게요 / 오시면 열어드립니다). "
+              "손님이 쓴 사용기·후기처럼 쓰지 마라 — 우리는 파는 쪽이다.\n"
+              "- 겁주기·공포 마케팅 금지: '모르면 손해·사기 당할까 봐·호구·당하지 않으려면' 같은 표현은 "
+              "소비자 경고 콘텐츠의 말투다. 불안을 파는 대신 '우리가 뭘 갖췄는지'를 보여줘라.\n"
+              "- 손님의 고민을 부를 때만 손님 말을 쓴다(손님은 사는 쪽이다 — '판매 가격'이 아니라 '구매 가격').\n")
+    base = (_voice
+            + "아래 블로그 본문을 근거로, 세로 영상 자막 대본을 써라. 전체가 하나의 이야기가 되게.\n"
             f"- 자막 씬 {n}개, 한 줄씩 출력(번호·라벨 없이). 각 씬 12~20자(공백 포함, 절대 24자 초과 금지) — 한 호흡에 읽히게.\n"
             "- 한 문장이 길면 두 씬으로 쪼개되, 반드시 '문장 경계'에서만 쪼개라 — 각 씬은 그 자체로 완결"
             "(종결어미 다/요/죠/까 또는 문장부호로 끝). 문장 중간에서 끊긴 씬 절대 금지. 씬 하나에 두 메시지 금지.\n"
@@ -1556,7 +1579,8 @@ class ShortVideoGenerator(Generator):
         # 실패 시 기존 씬별 발췌+구어화 폴백(영상 흐름 불차단).
         # 30초+ 하한(상위노출 v2 1-4): 정보 씬 8~9개(씬당 ~4초 + 훅·아웃트로 ≈ 30~40초). 허사 아닌 본문 내용으로.
         _n_scenes = min(9, max(7, len(vid_imgs)))
-        _rs = _script_from_body(body, _n_scenes, kw_nat, _fact_src, tone="info", biz_type=_biz, region=_reg)
+        _rs = _script_from_body(body, _n_scenes, kw_nat, _fact_src, tone="info", biz_type=_biz,
+                                region=_reg, title=(pl.get("title") or ""))
         _script_mode = bool(_rs and len(_rs) >= 4)
         if _script_mode:
             opening = _rs[0]                           # 대본이 쓴 훅(검색자 궁금증) — 고정 조립 폐기
@@ -1633,6 +1657,7 @@ class ShortVideoGenerator(Generator):
         if path and dur and dur < 30 and _script_mode and len(sent) < 9:
             _nlog.warning("[naver-video] %s초 < 30 — 대본 씬 확장 재생성", dur)
             _rs2 = _script_from_body(body, min(9, len(sent) + 2), kw_nat, _fact_src, tone="info",
+                                     title=(pl.get("title") or ""),
                                      biz_type=_biz, region=_reg)
             if _rs2 and len(_rs2) > len(sent):
                 opening2 = _rs2[0]; sent2 = _cap_lines([_strip_labels(x) for x in _rs2[1:]])
