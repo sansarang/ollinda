@@ -115,6 +115,13 @@ def _fresh_index_check() -> None:
         lessons.sweep()                     # 🧪 미노출 자동 개선 — 격차 진단→교훈 적재→검증(UI 0개)
     except Exception:
         logging.getLogger("shopcast.lessons").exception("[lessons] 크론 실패")
+    try:  # 🔎 검색어 정찰(2026-08-01) — 발행 글이 실제로 잡히는 검색어 실측(자격증명 0·검색 API만)
+        import datetime as _dtq
+        if _dtq.datetime.utcnow().hour % 6 == 0:         # 6시간마다(쿼터 보호)
+            from app.services import queryscout
+            queryscout.sweep()
+    except Exception:
+        logging.getLogger("shopcast.queryscout").exception("[queryscout] 크론 실패")
     try:  # 🗼 서버 자가진단 — 대시보드가 꺼져 있어도 이상을 텔레그램으로 통보(2026-07-29)
         from app.services import watchtower
         watchtower.check()

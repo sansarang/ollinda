@@ -535,6 +535,16 @@ def admin_quality_check_all(request: Request):
     return JSONResponse({"ok": True, "results": out})
 
 
+@app.get("/admin/queryscout")
+def admin_queryscout(tenant: str = "", posts: int = 3, per: int = 10):
+    """🔎 검색어 정찰 진단(①, 자격증명 0) — 발행 글이 어떤 검색어에서 잡히는지 실측."""
+    from app.services import queryscout as _qs
+    if not db.get_tenant(tenant):
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    return JSONResponse(_qs.scout(tenant, max_posts=max(1, min(posts, 8)),
+                                  per_post=max(1, min(per, 14))))
+
+
 @app.post("/admin/inflow-ingest")
 async def admin_inflow_ingest(request: Request):
     """📊 유입 검색어 수집 반영(2026-08-01 사장님 지시 D) — 맥 로컬 수집기(insight/inflow.py)가 POST.
