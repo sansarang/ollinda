@@ -1390,6 +1390,40 @@ async def admin_gen_test(request: Request, tenant_id: str, photos: list[UploadFi
         return JSONResponse({"ok": False, "traceback": traceback.format_exc()[-1500:]}, status_code=500)
 
 
+@app.post("/admin/gen-pool/{tenant_id}")
+def admin_gen_pool(tenant_id: str):
+    """⏱ 생성 실측용 트리거(2026-08-01) — 그 가게가 이미 쓴 사진 풀을 그대로 재사용해 생성한다.
+    같은 사진·같은 가게로 반복 측정해야 단계별 소요시간 비교가 의미를 갖는다(사진이 다르면
+    분석 시간·본문 길이가 달라져 비교가 무너짐). 백그라운드 실행 — 사용자 경로와 동일."""
+    t = db.get_tenant(tenant_id)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    from app.services.autoqueue import photo_pool
+    paths = photo_pool(t)
+    if not paths:
+        return JSONResponse({"ok": False, "error": "재사용할 사진이 없습니다"}, status_code=409)
+    files = []
+    for _p in paths[:30]:
+        try:
+            with open(_p, "rb") as _f:
+                files.append((_f.read(), os.path.basename(_p)))
+        except Exception:
+            pass
+    if not files:
+        return JSONResponse({"ok": False, "error": "사진 읽기 실패"}, status_code=409)
+
+    import logging as _lgpool
+    import threading as _thpool
+
+    def _bg():
+        try:
+            ingest_upload(t, files, "[실측] 사진 풀 재사용 생성", intake={})
+        except Exception:
+            _lgpool.getLogger("shopcast.ingest").exception("[gen-pool] 실패 tenant=%s", tenant_id)
+    _thpool.Thread(target=_bg, daemon=True).start()
+    return JSONResponse({"ok": True, "photos": len(files), "tenant": t.name})
+
+
 @app.get("/admin/gen-progress/{tenant_id}")
 def admin_gen_progress(request: Request, tenant_id: str):
     """생성 진행/실패 진단 — 해당 tenant의 최신 생성 단계·에러(traceback 포함).
