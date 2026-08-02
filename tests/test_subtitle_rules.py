@@ -167,6 +167,37 @@ def test_camera_meta_is_not_a_subtitle():
     assert any("57,216km" in ln for ln in gl), f"천 단위 쉼표가 깨졌거나 사실이 사라짐: {gl}"
 
 
+def test_cleanup_order_and_modifier_split():
+    """I. 실측 2건(2026-08-02, 재생성 영상에서 확인).
+    ① 쉼표 정리가 괄호 제거보다 먼저 돌아 '다이얼(P/R/N/D 버튼), 듀얼'이
+       '다이얼 , 듀얼'로 남았다 — 정리는 다 걷어낸 뒤에 해야 한다.
+    ② 하드 분할이 수식어에서 끊어 '…오렌지색 고전압'처럼 무엇이 고전압인지 없는 조각이
+       자막으로 구워졌다 — 색·형·식·용·급 뒤에는 이름이 와야 말이 된다."""
+    import re as _re
+    from app.generators.video import _cap_lines, _lines_for_photos
+
+    _, gl = _lines_for_photos(
+        ["p0"], "[사진1] 센터콘솔부, 전자식 기어 다이얼(P/R/N/D 버튼), 듀얼 컵홀더, 주행 57,216km\n",
+        [], gate=lambda _l: "")
+    assert gl, "자막이 안 나옴"
+    assert " ," not in gl[0], f"쉼표 앞 공백이 남음: {gl[0]!r}"
+    assert "57,216km" in gl[0], f"천 단위 쉼표가 깨짐: {gl[0]!r}"
+
+    # ② 이름을 기다리는 말에서 끊지 않는다 — 실측 자막 '…오렌지색 고전압'
+    _, gl2 = _lines_for_photos(
+        ["p0"], "[사진1] 후드 오픈 상태의 엔진룸, 하이브리드 시스템 관련 오렌지색 고전압 케이블과 각종 부품.\n",
+        [], gate=lambda _l: "")
+    assert gl2, "자막이 안 나옴"
+    for ln in gl2 + _cap_lines(gl2):
+        assert not _re.search(r"([가-힣]{2,}(색|형|식|용|급|압)|관련|포함|기반|전용)$", ln), \
+            f"이름을 기다리는 말에서 끊김: {ln!r}"
+    # 정상 문장은 그대로 살아야 한다(과잉 절단 방지)
+    for ok_src, want in (("[사진1] 디지털 계기판 클러스터, 주행거리 57,216km 표시\n", "57,216km"),
+                         ("[사진1] 성능점검기록부 1페이지, 사고 이력 없음 표기\n", "사고 이력 없음")):
+        _, g = _lines_for_photos(["p0"], ok_src, [], gate=lambda _l: "")
+        assert g and want in g[0], f"정상 묘사가 잘림: {g}"
+
+
 def test_fear_list_shared_with_body_scoring():
     """A-구조: 겁주기 목록은 본문 채점기와 같은 뿌리여야 한다.
     두 곳에 따로 두면 어긋난다 — 영상에서 고친 뒤 본문에서 같은 사고가 재발했다."""
