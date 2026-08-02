@@ -352,6 +352,16 @@ def feed(tenant_id: str, limit: int = 3, dry: bool = True) -> dict:
                 "note": f"이번 주 빈자리 글감 상한({WEEKLY_CAP}건)을 이미 채웠습니다"}
 
     mats = _materials(tenant_id)
+    # ★ 재료 게이트(2026-08-02 사장님 결정) — 경험 한 줄이 없으면 큐에 넣지 않는다.
+    #   넣어두면 사장님이 사진 올리실 때 자동으로 그 글감이 쓰이는데, 재료가 부족한 채로
+    #   쓰이면 사진 설명만 있는 낮은 점수 글이 나간다. 자리를 한 번 잘못 먹는 것보다
+    #   늦게 제대로 먹는 게 낫다.
+    if not mats["ready"] and not dry:
+        return {"ok": True, "added": 0, "items": [], "materials": mats,
+                "blocked_by": mats["need"],
+                "questions": questions(tenant_id, limit=limit),
+                "note": f"재료가 부족해 큐에 넣지 않았습니다({', '.join(mats['need'])}). "
+                        "아래 질문에 한 줄씩만 답해 주시면 바로 진행합니다"}
     out, added = [], 0
     for g in rows:
         if added >= min(limit, room):
@@ -369,7 +379,37 @@ def feed(tenant_id: str, limit: int = 3, dry: bool = True) -> dict:
             added += 1 if ok else 0
         out.append(item)
     return {"ok": True, "dry": dry, "added": added, "items": out,
-            "weekly_used": used, "weekly_cap": WEEKLY_CAP, "materials": mats}
+            "weekly_used": used, "weekly_cap": WEEKLY_CAP, "materials": mats,
+            "questions": questions(tenant_id, limit=limit) if not mats["ready"] else []}
+
+
+# 각도별 경험 질문 틀 — 업종·지명 하드코딩 0(키워드와 검색 의도만 들어간다).
+#   왜 질문이 필요한가: 사진은 결과만 보여준다. 왜 그렇게 했는지·무엇이 갈리는지는
+#   사장님만 안다. 그 한 줄이 없으면 사진 설명만 있는 글이 된다(영상 자막에서 겪은 것과 같다).
+_Q_BY_ANGLE = {
+    "price": "'{kw}' 찾는 손님이 많아요. 가격이 갈리는 이유가 뭔가요? 한 줄이면 됩니다",
+    "howto": "'{kw}' 할 때 사장님이 꼭 확인하시는 것 하나만 알려주세요",
+    "review": "'{kw}' 작업하고 나서 손님이 가장 만족하신 점이 뭐였나요? 한 줄이면 됩니다",
+}
+
+
+def questions(tenant_id: str, limit: int = 3) -> list[dict]:
+    """빈자리를 글로 만들려면 사장님께 무엇을 여쭤야 하는가 — 키워드별 한 줄 질문.
+
+    ★ 질문은 '확실' 영역에만 만든다. 미지 영역을 물으면 그건 확인 질문(3단계)이고
+      성격이 다르다 — 여기서는 '하시는 일'의 속을 여쭙는다.
+    """
+    out = []
+    for g in list_gaps(tenant_id, domain="확실", limit=30):
+        if (g.get("score") or 0) <= 0:
+            continue
+        kw = g["keyword"]
+        tmpl = _Q_BY_ANGLE.get(_angle(kw), _Q_BY_ANGLE["review"])
+        out.append({"keyword": kw, "question": tmpl.format(kw=kw),
+                    "why": _why_line(g), "score": g["score"]})
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _why_line(g: dict) -> str:

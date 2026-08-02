@@ -272,6 +272,42 @@ def test_weekly_cap_protects_owner_material():
     assert "WEEKLY_CAP" in src and "days=7" in src, "주간 상한이 실제로 적용되지 않는다"
 
 
+def test_feed_blocked_without_materials():
+    """E5. 재료(경험 한 줄)가 없으면 큐에 넣지 않는다(2026-08-02 사장님 결정).
+    넣어두면 사장님이 사진 올리실 때 자동으로 그 글감이 쓰이는데, 재료가 부족한 채로 쓰이면
+    사진 설명만 있는 낮은 점수 글이 나간다 — 자리를 한 번 잘못 먹는 것보다 늦게 제대로 먹는 게 낫다."""
+    import inspect
+    src = inspect.getsource(gs.feed)
+    i = src.find('mats["ready"]')
+    assert i > 0, "재료 게이트가 없다"
+    seg = src[i:i + 500]
+    assert "not dry" in src[max(0, i - 60):i + 60], "미리보기까지 막으면 무엇이 필요한지 못 본다"
+    assert "questions" in seg, "막기만 하고 무엇을 답해야 하는지 안 알려준다"
+    assert "blocked_by" in seg, "왜 막혔는지 기계가 읽을 수 없다"
+
+
+def test_questions_only_for_certain_domain():
+    """E6. 경험 질문은 '확실' 영역에만 만든다 — 미지 영역을 묻는 것은 성격이 다른
+    확인 질문(3단계)이다. 여기서는 '하시는 일'의 속을 여쭙는다."""
+    import inspect
+    src = inspect.getsource(gs.questions)
+    assert 'domain="확실"' in src, "미지 영역까지 경험을 묻는다"
+    assert "score" in src, "관문 미달 키워드까지 묻는다"
+    # 각도별로 질문이 갈린다(가격 의도에 후기 질문을 하면 답이 안 나온다)
+    assert set(gs._Q_BY_ANGLE) == {"price", "howto", "review"}
+    for tmpl in gs._Q_BY_ANGLE.values():
+        assert "{kw}" in tmpl and "한 줄" in tmpl or "하나만" in tmpl, tmpl
+
+
+def test_experience_page_shows_gap_questions():
+    """E7. 질문은 사장님이 답할 수 있는 곳에 떠야 한다 — 만들어만 두면 아무도 못 본다."""
+    import inspect
+    from app import main as _m
+    src = inspect.getsource(_m.my_experience)
+    assert "gapscout" in src and "questions" in src, "빈자리 질문이 화면에 없다"
+    assert "gapbox" in src, "질문 상자가 조립되지 않는다"
+
+
 def test_feed_reports_what_is_missing():
     """E4. 재료가 없으면 글이 안 된다 — 무엇이 더 필요한지 함께 돌려준다(조용한 실패 금지)."""
     import inspect

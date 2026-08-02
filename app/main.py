@@ -5736,6 +5736,28 @@ def my_experience(request: Request, ok: str = "", err: str = ""):
                  sch, region=t.region or "")][:2]
     except Exception:
         pass
+    # 🕳 빈자리가 기다리는 질문(2026-08-02) — 지금 자리가 비어 있는 검색어에 대해
+    #   사장님만 아는 한 줄을 여쭙는다. 사진은 결과만 보여주고, 왜·무엇이 갈리는지는 사장님만 안다.
+    _gapq = []
+    try:
+        from app.services import gapscout as _gs2
+        _gapq = _gs2.questions(t.id, limit=3)
+    except Exception:
+        pass
+    gapbox = ""
+    if _gapq:
+        _rows = "".join(
+            f"<div class='border border-indigo-100 bg-indigo-50/40 rounded-xl p-3 mb-2'>"
+            f"<div class='text-[11px] font-bold text-indigo-500 mb-1'>🕳 지금 자리가 비어 있어요 — {esc(g['why'])}</div>"
+            f"<div class='text-sm font-bold text-slate-800'>{esc(g['question'])}</div>"
+            f"<button type=button onclick=\"document.getElementById('qf').value={json.dumps(g['question'], ensure_ascii=False)};"
+            f"document.getElementById('af').focus();window.scrollTo({{top:document.getElementById('af').offsetTop-120,behavior:'smooth'}});\" "
+            f"class='mt-2 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg'>이 질문에 답하기</button>"
+            f"</div>" for g in _gapq)
+        gapbox = ("<div class='bg-white rounded-2xl border border-indigo-200 shadow-sm p-5 mb-5'>"
+                  "<div class='font-extrabold text-slate-900 mb-1'>이 한 줄이면 글이 시작됩니다</div>"
+                  "<p class='text-slate-400 text-xs mb-3'>손님이 찾는데 아직 아무도 자리를 안 잡은 검색어예요. "
+                  "사장님 답변 한 줄이 그 자리를 노리는 글의 알맹이가 됩니다.</p>" + _rows + "</div>")
     sec = "bg-white rounded-2xl border border-slate-200 shadow-sm p-5 mb-5"
     status = (f"<div class='bg-emerald-50 text-emerald-700 rounded-xl px-4 py-3 text-sm mb-4'>"
               f"✅ 실경험 답변 {len(exps)}건 등록됨 — 정보성 글(네이버 AI 브리핑용)이 자동으로 시작됩니다.</div>"
@@ -5760,11 +5782,12 @@ def my_experience(request: Request, ok: str = "", err: str = ""):
         + (f"<div class='bg-emerald-50 text-emerald-700 rounded-xl px-4 py-2 text-sm mb-3'>{esc(ok)}</div>" if ok else "")
         + (f"<div class='bg-rose-50 text-rose-600 rounded-xl px-4 py-2 text-sm mb-3'>{esc(err)}</div>" if err else "")
         + status
+        + gapbox                                  # 🕳 빈자리가 기다리는 질문(맨 위 — 지금 할 일)
         + f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>등록된 Q&A</div>{items}</div>"
         + f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>답변 추가</div>"
         "<form method=post action='/me/experience/add' class='space-y-2'>"
-        f"<input name=question maxlength=200 placeholder=\"{ph}\" required class='w-full border border-slate-200 rounded-xl px-3 py-2 text-sm'>"
-        f"<textarea name=answer rows=4 placeholder=\"{ph_a}\" required class='w-full border border-slate-200 rounded-xl px-3 py-2 text-sm'></textarea>"
+        f"<input name=question id=qf maxlength=200 placeholder=\"{ph}\" required class='w-full border border-slate-200 rounded-xl px-3 py-2 text-sm'>"
+        f"<textarea name=answer id=af rows=4 placeholder=\"{ph_a}\" required class='w-full border border-slate-200 rounded-xl px-3 py-2 text-sm'></textarea>"
         "<div class='text-[11px] text-slate-400'>답변은 최소 50자 — 실제로 해주시는 설명을 편하게 적어주세요.</div>"
         "<button class='px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold'>답변 등록</button>"
         "</form></div>")
