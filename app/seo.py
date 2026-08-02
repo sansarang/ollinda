@@ -207,9 +207,17 @@ def is_basic_region_kw(kw: str, region: str, biz_type: str) -> bool:
 REGION_MIN_VOLUME = 100    # 기초지역 지명 표면 허용 최소 월검색량(기장 월20 류 차단 — 키워드 관문과 동일 기준)
 
 
+def _do_abbrev(stem: str) -> str:
+    """도 이름 구어 축약 — '경상남'→'경남', '충청북'→'충북', '전라남'→'전남'.
+    ★ 2026-08-02 실측 결함: 접미사만 떼면 '경상남'처럼 아무도 쓰지 않는 말이 표면에 나간다.
+    언어 규칙만 쓴다(어간 3글자 + 방위자 끝 → 1번째+3번째). 지명 하드코딩 0 —
+    '경기'·'강원'·'제주'는 어간이 2글자라 그대로 통과한다."""
+    return stem[0] + stem[2] if len(stem) == 3 and stem[2] in ("남", "북") else stem
+
+
 def _region_wide(region: str) -> str:
-    """광역 어간 — '부산광역시 기장군' → '부산'."""
-    return next((_re_g.sub(r"(특별시|광역시|특별자치시|특별자치도|자치도|도)$", "", tk)
+    """광역 어간 — '부산광역시 기장군' → '부산', '경상남도 김해시' → '경남'."""
+    return next((_do_abbrev(_re_g.sub(r"(특별시|광역시|특별자치시|특별자치도|자치도|도)$", "", tk))
                  for tk in (region or "").split()
                  if _re_g.search(r"(특별시|광역시|특별자치시|특별자치도|도)$", tk)), "")
 
@@ -338,9 +346,7 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
             classes += [t for t in (_ax.get("tokens") or [])]
     except Exception:
         pass
-    wide = next((_re_g.sub(r"(특별시|광역시|특별자치시|특별자치도|자치도|도)$", "", tk)
-                 for tk in (region or "").split()
-                 if _re_g.search(r"(특별시|광역시|특별자치시|특별자치도|도)$", tk)), "")
+    wide = _region_wide(region)          # 광역 어간 단일 소스(도 축약 포함)
     pm = (primary_model or "").strip()
     if pm:
         # 이번 업로드 매물 모델 = 반드시 타깃(허위·미끼 방지). 검색량 무관 즉시 확정(다른 차종으로 새는 것 원천 차단).

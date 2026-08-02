@@ -44,8 +44,14 @@ def test_human_touch_injected_into_prompts():
     assert "HUMAN_TOUCH" in inspect.getsource(text_claude.BlogDraftGenerator.generate)
     assert "HUMAN_TOUCH" in inspect.getsource(text_claude.CaptionGenerator._prompt)
     assert "HUMAN_TOUCH" in inspect.getsource(x_text)
-    for tok in ("알아보겠습니다", "추천드립니다", "문장 길이", "1인칭"):
-        assert tok in seo.HUMAN_TOUCH
+    # ★ 2026-08-02: 문구가 아니라 '규칙의 실체'를 문다. 옛 판은 "문장 길이"라는 표현을
+    #   그대로 요구해서, 같은 규칙을 더 구체적으로 고쳐 쓴 순간(07-27 acd09a3 '리듬을 일부러
+    #   어긋내라') 빨간불이 났다. 골든이 표현을 물면 개선이 곧 실패가 된다.
+    for tok in ("알아보겠습니다", "추천드립니다", "1인칭"):
+        assert tok in seo.HUMAN_TOUCH, f"금지 클리셰/화자 규칙 누락: {tok}"
+    assert any(t in seo.HUMAN_TOUCH for t in ("리듬", "짧은 문장", "문장 길이")), \
+        "문장 리듬 변주 지시 누락(AI티의 핵심 신호)"
+    assert any(t in seo.HUMAN_TOUCH for t in ("이모지",)), "이모지 상한 지시 누락"
 
 
 def test_experience_placement_directive_only_when_present():
