@@ -220,6 +220,34 @@ def test_photo_pool_prefers_blog_piece(monkeypatch, tmp_path):
     assert len(_aq.photo_pool(_T())) == 17, "X 피스가 먼저 잡혀 사진 풀이 좁아짐"
 
 
+def test_photo_pool_picks_richest_not_merely_newest(monkeypatch, tmp_path):
+    """D3-3. 손상이 스스로 이어지는 것을 끊는다(2026-08-02 후속).
+    사고로 4장짜리 세트가 한 번 만들어지면 그게 최신이 되고, 그걸로 만든 다음 세트도 4장이라
+    사장님이 올린 17장은 영원히 돌아오지 않는다. '재사용'은 사장님 사진을 다시 쓴다는 뜻이지
+    마지막 결과를 물려받는다는 뜻이 아니다."""
+    from app.services import autoqueue as _aq
+    from app.domain.models import ContentKind as _CK
+
+    many = [str(tmp_path / f"m{i}.jpg") for i in range(17)]
+    few = [str(tmp_path / f"f{i}.jpg") for i in range(4)]
+    for p in many + few:
+        open(p, "wb").close()
+
+    def _mk(paths):
+        o = type("P", (), {})()
+        o.kind, o.tenant_id, o.payload = _CK.BLOG, "T", {"image_paths": paths}
+        return o
+
+    sets = {"NEW4": [_mk(few)], "OLD17": [_mk(many)]}      # 최신이 4장짜리
+    monkeypatch.setattr(_aq.db, "list_sets",
+                        lambda **k: [{"asset_id": "NEW4"}, {"asset_id": "OLD17"}])
+    monkeypatch.setattr(_aq.db, "get_set_pieces", lambda a: sets[a])
+
+    class _T:
+        id = "T"
+    assert len(_aq.photo_pool(_T())) == 17, "최신 4장짜리를 물려받아 손상이 이어짐"
+
+
 # ── E. 게이트 시간 상한 ───────────────────────────────────────────
 def test_quality_gate_has_deadline():
     """E. 품질 루프에 시간 상한이 없으면 영상 버튼이 영원히 안 나온다(채널 상태 고착 실사고).

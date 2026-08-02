@@ -370,6 +370,11 @@ def photo_pool(t) -> list:
     """재사용 가능한 최근 사진 세트 — 로컬 소실 시 R2 미러에서 복원(설계상 원본은 R2 영구).
     로컬 캐시만 비었을 뿐 사진은 R2에 있으므로 '사진 없음' 오판 금지(regen-naver와 동일 복원 경로)."""
     from app.domain.models import ContentKind as _CK
+    # ★ '가장 최근'이 아니라 '최근 중 가장 많은' 세트를 고른다(2026-08-02 실사고 후속).
+    #   사고로 4장짜리 세트가 한 번 만들어지면 그게 최신이 되고, 그걸로 만든 다음 세트도 4장이라
+    #   손상이 스스로 이어진다. 사장님이 올린 사진은 17장인데 결과는 영원히 4장이 된다.
+    #   재사용의 뜻은 '사장님이 올린 사진을 다시 쓴다'이지 '마지막 결과를 물려받는다'가 아니다.
+    _best: list = []
     for s in db.list_sets(tenant_id=t.id, limit=10):
         ps = db.get_set_pieces(s["asset_id"])
         # ★ 블로그 피스 우선(2026-08-02 실사고 계열) — 조각 순서는 저장 순서라 뒤섞인다.
@@ -378,22 +383,30 @@ def photo_pool(t) -> list:
         ps = sorted(ps, key=lambda p: 0 if p.kind == _CK.BLOG else 1)
         for p in ps:
             raw = [x for x in (p.payload.get("image_paths") or []) if x]
+            if not raw:
+                continue                                # 사진을 안 가진 조각은 건너뛴다
             paths = [x for x in raw if os.path.exists(x)]
             # ★ 부분 소실도 복원한다(2026-08-02 실사고). 옛 조건은 '전부 사라졌을 때만'이라,
             #   17장 중 4장만 로컬에 남은 상태(R2엔 17장 그대로)에서 복원을 건너뛰고 4장을
             #   그대로 반환했다 — 사장님 사진이 조용히 4장으로 줄어든 원인이 이것이다.
             #   배포마다 컨테이너가 새로 뜨므로 로컬은 언제든 부분 소실이 정상 상태다.
-            if raw and len(paths) < len(raw):
-                try:
-                    from app.services.ingest import _restore_media
-                    _rest = _restore_media(p.tenant_id, raw)
-                    if len(_rest) > len(paths):         # 복원이 늘렸을 때만 채택(실패 시 기존 유지)
-                        paths = _rest
-                except Exception:
-                    pass
-            if paths:
-                return paths
-    return []
+            #   ※ 복원은 후보로 뽑힌 뒤에 한다 — 세트마다 R2를 긁으면 느려진다.
+            _cand = raw if len(raw) > len(paths) else paths     # R2 원본 기준(로컬 소실 무관)
+            if len(_cand) > len(_best):
+                _best, _best_tid = _cand, p.tenant_id
+            break                                       # 사진을 가진 첫 조각(블로그 우선)이면 충분
+    if not _best:
+        return []
+    have = [x for x in _best if os.path.exists(x)]
+    if len(have) < len(_best):
+        try:
+            from app.services.ingest import _restore_media
+            _rest = _restore_media(_best_tid, _best)
+            if len(_rest) > len(have):                  # 복원이 늘렸을 때만 채택(실패 시 기존 유지)
+                have = _rest
+        except Exception:
+            pass
+    return have
 
 
 def _schedule_date(t) -> str:
