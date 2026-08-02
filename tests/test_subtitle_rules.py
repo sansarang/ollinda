@@ -272,6 +272,26 @@ def test_selling_lines_wired_into_naver_path():
     assert "desc_map=_desc_of" in src, "원본 묘사를 재료로 넘기지 않음"
 
 
+def test_outro_is_self_contained_and_industry_neutral():
+    """K. 마무리 줄도 자기참조 금지다(2026-08-02 사장님 지적).
+    '서류까지 본문에서 확인하세요'가 아웃트로에 박혀 있었고, 그 영상이 네이버 클립 지면으로도
+    나간다 — 거기엔 '본문'이 없다. 게이트를 안 타는 경로였다.
+    함께: '중고'가 업종 문자열로 박혀 있었다(업종 중립 위반)."""
+    import inspect
+    from app.generators import video as _v
+    src = inspect.getsource(_v.ShortVideoGenerator._naver_video)
+    i = src.find("_cta_line =")
+    assert i > 0, "마무리 줄 생성부를 못 찾음"
+    seg = src[i - 400:src.find("outro = f", i) + 200]
+    for bad in ("본문에서 확인", "자세한 내용은 본문", "본문에"):
+        assert bad not in seg, f"마무리가 글을 가리킨다: {bad}"
+    assert "_SELFREF.search(_cta_line)" in seg, "규칙이 바뀌어도 막을 안전장치가 없음"
+    # 업종 문자열이 판정에 쓰이면 안 된다 — 근거는 본문이 무엇을 다루는지에서 온다
+    assert 'tenant.industry' not in seg, "업종명으로 분기함(업종 중립 위반)"
+    for kw in ("중고", "썬팅", "카페", "미용"):
+        assert f'"{kw}"' not in seg, f"업종어 하드코딩: {kw}"
+
+
 def test_fear_list_shared_with_body_scoring():
     """A-구조: 겁주기 목록은 본문 채점기와 같은 뿌리여야 한다.
     두 곳에 따로 두면 어긋난다 — 영상에서 고친 뒤 본문에서 같은 사고가 재발했다."""
