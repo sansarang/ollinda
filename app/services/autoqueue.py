@@ -509,7 +509,11 @@ def consume(t, files: list | None = None, plan: str = "free", only_id: int = 0) 
                     p.payload["geo_gate"] = ggate
                     if not ggate["passed"]:
                         _cf.append(("geo", _geo.regen_instruction(ggate["fails"])))
-                mg = seo.mobile_spec_gate(p.payload.get("body") or "", _ctype)   # 3) 자수 + 4) 모바일 규격
+                # ★ 이 모듈은 seo를 전역 import하지 않는다(다른 곳은 전부 지역 import).
+                #   여기만 전역인 줄 알고 써서 NameError로 큐 생성이 통째로 죽었다(2026-08-02 실측).
+                #   실패가 조용해서 오래 안 보였다 — 큐 행은 pending으로 되돌아갈 뿐이었다.
+                from app import seo as _seo_g
+                mg = _seo_g.mobile_spec_gate(p.payload.get("body") or "", _ctype)   # 3) 자수 + 4) 모바일 규격
                 p.payload["spec_gate"] = mg
                 if not mg["passed"]:
                     if mg["below"]:

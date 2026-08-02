@@ -5970,6 +5970,7 @@ def admin_kit_verify(tid: str = "", asset_id: str = "", inject: str = "", regen:
         return JSONResponse({"ok": False, "error": "사진 없음(세트 사진 소실 가능)"}, status_code=409)
     note = "[자동 글감] 매물 실사진 세트"
     try:
+        from app import vision                       # 이 모듈은 vision을 전역으로 들이지 않는다
         analysis = vision.analyze_all(paths, t.industry)
         if analysis:
             note += f"\n[사진 분석] {analysis[:2500]}"
@@ -6268,6 +6269,7 @@ def admin_geo_gen(tid: str = "", industry: str = "", biz: str = "local", region:
     note = f"[자동 글감·트랙B] {topic}"
     if paths:
         try:
+            from app import vision                   # 이 모듈은 vision을 전역으로 들이지 않는다
             analysis = vision.analyze_all(paths, t.industry)
             if analysis:
                 note += f"\n[사진 분석] {analysis[:1200]}"
@@ -9228,6 +9230,7 @@ def _regen_piece_common(asset_id: str, kind_val: str, channel_val: str = "", dry
         or "[자동 글감] 매물 실사진 세트"
     if "[사진" not in note:
         try:
+            from app import vision                   # 이 모듈은 vision을 전역으로 들이지 않는다
             _an = vision.analyze_all(paths, t.industry)
             if _an:
                 note += f"\n[사진 분석] {_an[:2500]}"
