@@ -1,0 +1,104 @@
+"""
+영상 자막 규칙 박제(2026-08-01 수정분 부채 청산).
+
+발행 산출물에 직결되는 계열이라 최우선으로 못 박는다. 각 테스트는 '수정 전 상태로
+되돌리면 실패한다'를 기준으로 만들었다.
+
+박제 대상(커밋 33c5c2d, 43c1016, 4368dcb, cb1b98e, 03cfdbe):
+  A. 겁주기 목록이 생성·검사 단일 소스인가
+  B. 훅 게이트 위반이 '영상 전체 중단'이 아니라 '훅만 교체'로 강등되는가
+  C. 미완결·자기참조 자막이 걸러지는가
+  D. 화면-자막 일치: 사진마다 그 사진에 대한 말이 붙는가
+  E. 자막 조각이 완결되는가(라벨·짝없는 인용·조사 종결 없음)
+"""
+from __future__ import annotations
+
+import re
+
+from app.generators.video import (FEAR_PATTERNS, SceneScript, _hook_gate,
+                                  _lines_for_photos, _SELFREF, _subtitle_gate)
+
+SRC = ("2022년식 투싼 하이브리드 N라인, 실주행 57,216km, 무사고, 가격 2990만원. "
+       "성능점검기록부 확인. 엔진룸 직접 검수. 부산 기장 주안모터스.")
+
+
+def test_fear_phrases_blocked_in_subtitles():
+    """A. 겁주기 표현은 자막 게이트가 잡는다.
+    실측: '호구 될까 불안하다면'이 검사 정규식('호구 잡'만 봄)을 빠져나가 영상에 구워졌다."""
+    for line in ("호구 될까 불안하다면, 여기부터 보세요", "호구 안 잡힙니다",
+                 "사기 당할까 봐 걱정되셨죠?", "모르면 손해"):
+        bad = _subtitle_gate(SceneScript(hook=line, sentences=["오시면 보여드립니다"], outro="",
+                                         source="x", evidence=SRC), SRC, "주안모터스")
+        assert bad, f"겁주기 표현이 통과함: {line}"
+
+
+def test_normal_subtitles_pass():
+    """A-역: 사실 서술은 통과해야 한다(과잉 차단 방지)."""
+    for line in ("성능점검기록부부터 보여드릴게요", "2022년식 무사고, 2990만원입니다",
+                 "엔진룸까지 직접 검수했습니다"):
+        bad = _subtitle_gate(SceneScript(hook=line, sentences=["오시면 보여드립니다"], outro="",
+                                         source="x", evidence=SRC), SRC, "주안모터스")
+        assert not bad, f"정상 문장이 차단됨: {line} ({bad})"
+
+
+def test_hook_violation_is_soft_not_fatal():
+    """B. 훅 게이트 위반은 '훅만 교체'로 강등돼야 한다.
+    실측 사고: 사유 문구에 '훅'이 없어 하드 위반으로 분류돼 영상 전체 생성이 중단됐다.
+    호출부는 사유 문구 부분일치로 소프트/하드를 가른다 — 그래서 문구에 '훅'이 있어야 한다."""
+    bad = _hook_gate("부산 기장 중고차 모르면 손해", "부산 기장 중고차", "local", "부산 기장")
+    assert bad, "훅 게이트가 키워드 원형 삽입을 못 잡음"
+    soft_keys = ("중복", "미이행", "과장", "서식", "인용", "훅")
+    assert any(k in bad for k in soft_keys), f"강등 경로로 못 들어감(영상 전체 중단): {bad}"
+
+
+def test_selfref_subtitles_rejected():
+    """C. 영상에서 '글'을 가리키는 자막은 쓰지 않는다(영상만 보는 사람에겐 앞뒤가 끊긴 말)."""
+    assert _SELFREF.search("부산 중고차, 고민 끝. 이 글이면 충분")
+    assert _SELFREF.search("서류까지 본문에서 확인하세요")
+    assert not _SELFREF.search("성능점검기록부 2페이지, 직인과 실차 사진까지")
+
+
+def test_photo_first_alignment():
+    """D. 화면-자막 일치 — 사진을 먼저 놓고 그 사진에 대한 말을 고른다.
+    실측 사고: 지시어 없는 자막에 '남은 사진 아무거나'가 배정돼 차 후면 사진에
+    '고민 끝. 이 글이면 충분'이 붙었다."""
+    imgs = [f"p{i}" for i in range(4)]
+    src = ("[사진1] 흰색 차량의 전면 외관, 라디에이터 그릴\n"
+           "[사진2] 성능점검기록부 서류, 사고 이력 없음 표기\n"
+           "[사진3] 보닛을 연 엔진룸 내부, 고전압 배선\n"
+           "[사진4] 디지털 계기판 화면, 주행거리 57,216km\n")
+    cands = ["부산 중고차, 고민 끝. 이 글이면 충분",            # 자기참조 → 탈락해야
+             "성능점검기록부에 사고 이력 없음으로 표기돼 있습니다",
+             "계기판 주행거리 57,216km 그대로입니다"]
+
+    def gate(ln):
+        return "자기참조" if _SELFREF.search(ln) else ""
+    gi, gl = _lines_for_photos(imgs, src, cands, gate=gate)
+    assert len(gl) >= 3, f"자막이 너무 적게 생성됨: {gl}"
+    assert not any("이 글" in x for x in gl), f"자기참조 자막이 사진에 붙음: {gl}"
+    # 서류 사진에는 서류 이야기가 붙어야 한다(사진↔자막 일치)
+    pair = dict(zip(gi, gl))
+    assert "기록부" in pair.get("p1", ""), f"서류 사진에 다른 말이 붙음: {pair.get('p1')}"
+
+
+def test_subtitle_fragments_are_complete():
+    """E. 자막 조각은 완결돼야 한다 — 라벨·짝없는 인용·조사 종결 금지.
+    실측: '* 피사체/문자: 공식', '…기록부 서식 문서와', "MICHELIN' 브랜드명과 '235/55 R"."""
+    imgs = [f"p{i}" for i in range(3)]
+    src = ("[사진1] * 피사체/문자: 공식 '자동차성능·상태점검기록부' (1페이지)\n"
+           "[사진2] 'MICHELIN' 브랜드명과 '235/55 R 19' 규격 문자가 각인된 타이어\n"
+           "[사진3] [오버레이]\n")
+    gi, gl = _lines_for_photos(imgs, src, [], gate=lambda _l: "")
+    for ln in gl:
+        assert "피사체" not in ln, f"내부 라벨 노출: {ln}"
+        assert "[오버레이]" not in ln, f"내부 표기 노출: {ln}"
+        assert ln.count("'") % 2 == 0, f"짝 없는 인용으로 끝남: {ln}"
+        assert not re.search(r"(와|과|의|에|으로|로|및)$", ln), f"조사로 끝남: {ln}"
+        assert len(ln) >= 8, f"의미 없는 조각: {ln}"
+
+
+def test_fear_list_shared_with_body_scoring():
+    """A-구조: 겁주기 목록은 본문 채점기와 같은 뿌리여야 한다.
+    두 곳에 따로 두면 어긋난다 — 영상에서 고친 뒤 본문에서 같은 사고가 재발했다."""
+    from app import seo
+    assert tuple(seo._fear_patterns()) == tuple(FEAR_PATTERNS)
