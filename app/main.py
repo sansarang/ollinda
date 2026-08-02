@@ -597,6 +597,14 @@ def admin_gap_scan(tenant_id: str = "", limit: int = 40, comp: int = 1):
     return JSONResponse(r)
 
 
+@app.post("/admin/gap-answer")
+def admin_gap_answer(tenant_id: str = "", token: str = "", verdict: str = "", axis: str = ""):
+    """사장님 확인 응답 기록 — '해요'(yes) / '안 해요'(no).
+    yes는 분류만 올린다(글은 실사진·실경험이 있어야 쓴다). no는 영구 제외이자 되돌릴 수 있다."""
+    from app.services import gapscout as _gs
+    return JSONResponse(_gs.answer(tenant_id, token, verdict, axis))
+
+
 @app.get("/admin/gap-list")
 def admin_gap_list(tenant_id: str = "", domain: str = "", limit: int = 30):
     """저장된 빈자리 판정 결과 조회(재조회 없이 표만 다시 본다)."""

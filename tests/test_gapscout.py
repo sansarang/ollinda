@@ -175,6 +175,50 @@ def test_block_names_are_not_used_as_evidence():
         assert name not in code, f"블록 이름을 판정에 씀: {name}"
 
 
+# ── D. 확인 응답(영역 프로필) ────────────────────────────────────
+def test_yes_promotes_but_does_not_authorize_writing():
+    """D1. '해요'는 분류만 올린다. 답변만으로 글을 쓰면 그게 날조다 —
+    실사진·실경험이 있어야 글이 나간다(앵커·경험 게이트는 그대로)."""
+    tid = "T_DOM_" + uuid.uuid4().hex[:8]
+    try:
+        assert gs.classify("부산 유리막코팅", {"tokens": set(), "sources": {}},
+                           [{"axis": "시공", "tokens": ["유리막코팅"]}], set())[0] == "미지"
+        assert gs.answer(tid, "유리막코팅", "yes", axis="시공")["ok"] is True
+        dom = gs.owner_domain(tid)
+        assert "유리막코팅" in dom["tokens"], "확인 응답이 영역에 합류하지 않음"
+        assert dom["sources"]["유리막코팅"] == "사장님 확인", dom["sources"]
+        # 승격은 분류까지다 — 글감·생성 경로를 건드리지 않는다
+        import inspect
+        assert "writing_queue" not in inspect.getsource(gs.answer)
+    finally:
+        with db._conn() as c:
+            c.execute("DELETE FROM tenant_domain WHERE tenant_id=?", (tid,))
+
+
+def test_no_is_permanent_but_reversible():
+    """D2. '안 해요'는 영구 제외다 — 같은 걸 또 물으면 잔소리다.
+    단 되돌릴 수 있어야 한다: 나중에 그 일을 시작하실 수 있다."""
+    tid = "T_DOM_" + uuid.uuid4().hex[:8]
+    try:
+        gs.answer(tid, "유리막코팅", "no")
+        assert "유리막코팅" in gs.excluded_tokens(tid)
+        assert gs.classify("부산 유리막코팅", {"tokens": set(), "sources": {}}, [],
+                           gs.excluded_tokens(tid))[0] == "제외"
+        gs.answer(tid, "유리막코팅", "yes")                 # 나중에 시작하셨다
+        assert "유리막코팅" not in gs.excluded_tokens(tid), "되돌릴 수 없다"
+        assert "유리막코팅" in gs.owner_domain(tid)["tokens"]
+    finally:
+        with db._conn() as c:
+            c.execute("DELETE FROM tenant_domain WHERE tenant_id=?", (tid,))
+
+
+def test_answer_rejects_garbage():
+    """D3. 판정에 쓰이는 기록이다 — 빈 값·모르는 판정을 조용히 삼키지 않는다."""
+    tid = "T_DOM_" + uuid.uuid4().hex[:8]
+    assert gs.answer(tid, "", "yes")["ok"] is False
+    assert gs.answer(tid, "유리막코팅", "maybe")["ok"] is False
+
+
 # ── C. 1단계는 읽기 전용이다 ─────────────────────────────────────
 def test_stage1_is_read_only():
     """C. 1단계는 판정만 한다. 분류가 맞는지 사람이 먼저 보고 판단해야 하기 때문이다 —

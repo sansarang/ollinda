@@ -114,6 +114,8 @@ def owner_domain(tenant_id: str) -> dict:
             _add({v for v in (ctx.get("model"), ctx.get("car_class")) if v}, "재고 맥락")
     except Exception:
         pass
+    for tok, where in confirmed_tokens(tenant_id).items():   # 사장님이 '해요'라고 답하신 것
+        _add({tok}, where)
     return {"tokens": toks, "sources": src}
 
 
@@ -285,6 +287,42 @@ def _ensure_domain(c) -> None:
     c.execute("CREATE TABLE IF NOT EXISTS tenant_domain("
               "tenant_id TEXT, token TEXT, axis TEXT, verdict TEXT, source TEXT, "
               "created_at TEXT, PRIMARY KEY(tenant_id, token))")
+
+
+def answer(tenant_id: str, token: str, verdict: str, axis: str = "", source: str = "사장님 확인") -> dict:
+    """사장님 확인 응답을 영역 프로필에 기록(2026-08-02).
+
+    'yes'  — 실제로 하시는 일 → 다음 판정부터 실데이터와 같은 자격으로 본다.
+    'no'   — 안 하시는 일 → 영구 제외. 같은 걸 또 물으면 잔소리이자 신뢰 손실이다.
+    되돌릴 수 있어야 한다 — 나중에 그 일을 시작하실 수 있다(같은 함수로 덮어쓴다).
+
+    ★ 'yes'가 곧 글감이 되지는 않는다. 분류만 올라간다 — 실사진·실경험이 있어야 글을 쓴다
+      (앵커·경험 게이트 그대로). 답변만으로 글을 쓰면 그게 날조다.
+    """
+    token = " ".join((token or "").split())
+    if not token or verdict not in ("yes", "no"):
+        return {"ok": False, "error": "token과 verdict(yes/no)가 필요합니다"}
+    try:
+        with db._conn() as c:
+            _ensure_domain(c)
+            c.execute("INSERT OR REPLACE INTO tenant_domain VALUES(?,?,?,?,?,?)",
+                      (tenant_id, token, axis, verdict, source, datetime.utcnow().isoformat()))
+    except Exception:
+        _log.exception("[gapscout] 확인 응답 저장 실패 t=%s tok=%s", tenant_id, token)
+        return {"ok": False, "error": "저장 실패"}
+    return {"ok": True, "token": token, "verdict": verdict}
+
+
+def confirmed_tokens(tenant_id: str) -> dict:
+    """사장님이 '해요'라고 확인하신 것 — 실데이터와 같은 자격으로 영역에 합류한다."""
+    try:
+        with db._conn() as c:
+            _ensure_domain(c)
+            rows = c.execute("SELECT token FROM tenant_domain WHERE tenant_id=? AND verdict='yes'",
+                             (tenant_id,)).fetchall()
+        return {r["token"]: "사장님 확인" for r in rows}
+    except Exception:
+        return {}
 
 
 def excluded_tokens(tenant_id: str) -> set:
