@@ -241,6 +241,25 @@ def test_selling_lines_fall_back_on_llm_failure(monkeypatch):
     assert _v._selling_lines(["a", "b"], drafts, "사실", "가게", "키워드") == drafts
 
 
+def test_selling_report_surfaces_why(monkeypatch):
+    """J5. 왜 그 줄이 묘사로 남았는지는 로그에만 두면 화면에서 읽을 수 없다(조용한 실패 금지).
+    실측: 7씬 중 2씬이 묘사로 남았는데 이유를 확인할 방법이 없었다."""
+    import inspect
+    from app.generators import video as _v
+    from app import llm as _llm
+    monkeypatch.setattr(_llm, "call_task", lambda *a, **k: "1. 호구 잡히기 전에 보세요\n")
+    rep = {}
+    _v._selling_lines(["a", "b"], ["묘사1", "묘사2"], "사실", "가게", "kw",
+                      gate=lambda l: "겁주기" if "호구" in l else "", report=rep)
+    assert rep.get("swapped") == 0 and rep.get("kept") == 2
+    assert any("반려" in w for w in rep.get("why") or []), rep
+    assert any("문장 없음" in w for w in rep.get("why") or []), rep
+    # 진단으로 읽을 수 있어야 한다
+    assert '"selling": _sell_rep' in inspect.getsource(_v.ShortVideoGenerator._naver_video)
+    from app import main as _m
+    assert "naver_selling" in inspect.getsource(_m)
+
+
 def test_selling_lines_wired_into_naver_path():
     """J4. 실제 경로에 붙어 있는가 — 사진 순서를 고정한 '뒤'에 말만 바꾼다(일치 유지)."""
     import inspect

@@ -971,7 +971,7 @@ _re_sell = re.compile(r"^\s*(\d{1,2})\s*[.)]\s*(.+)$")
 
 
 def _selling_lines(descs: list, drafts: list, facts: str, shop: str, kw: str,
-                   gate=None) -> list:
+                   gate=None, report: dict = None) -> list:
     """사진별 '파는 말' 한 줄씩(1콜, 2026-08-02 사장님 승인).
 
     왜: 지금까지 자막 재료가 vision 묘사였다 — '파노라마 선루프', '오렌지색 고전압'.
@@ -983,7 +983,9 @@ def _selling_lines(descs: list, drafts: list, facts: str, shop: str, kw: str,
     할 말'을 쓰게 한다. 근거는 본문 사실과 그 사진 묘사뿐 — 없는 정보는 만들지 않는다.
     한 줄이라도 게이트에 걸리면 그 줄만 원래 묘사로 되돌린다(전체를 버리지 않는다).
 
-    반환: drafts와 같은 길이의 리스트(실패 시 drafts 그대로 — 조용한 실패 없음, 사유는 로그).
+    반환: drafts와 같은 길이의 리스트(실패 시 drafts 그대로).
+    report를 주면 {swapped, kept, why:[...]}를 채운다 — 왜 그 줄이 묘사로 남았는지는
+    로그에만 두면 화면에서 읽을 수 없다(조용한 실패 금지).
     """
     import logging as _lg
     log = _lg.getLogger("shopcast.video")
@@ -1013,6 +1015,9 @@ def _selling_lines(descs: list, drafts: list, facts: str, shop: str, kw: str,
         raw = _llm.call_task("spoken", prompt, max_tokens=700)
     except Exception as e:
         log.warning("[selling] 호출 실패 — 묘사 자막 유지: %r", repr(e)[:120])
+        if report is not None:
+            report.update({"swapped": 0, "kept": len(drafts),
+                           "why": [f"호출 실패: {repr(e)[:60]}"]})
         return drafts
     got = {}
     for ln in (raw or "").splitlines():
@@ -1023,7 +1028,7 @@ def _selling_lines(descs: list, drafts: list, facts: str, shop: str, kw: str,
         txt = m.group(2).strip().strip('"“”')
         if 0 <= idx < n and txt:
             got[idx] = txt
-    out, kept, swapped = [], 0, 0
+    out, kept, swapped, why = [], 0, 0, []
     for i, d in enumerate(drafts):
         t = got.get(i, "")
         bad = ""
@@ -1039,7 +1044,12 @@ def _selling_lines(descs: list, drafts: list, facts: str, shop: str, kw: str,
             kept += 1
             if t and bad:
                 log.warning("[selling] %d번 반려(%s): %s", i + 1, bad, t[:40])
+                why.append(f"{i + 1}번 반려({bad}): {t[:34]}")
+            elif not t:
+                why.append(f"{i + 1}번 문장 없음 — 묘사 유지")
     log.warning("[selling] %d/%d줄 판매 문장으로 교체(묘사 유지 %d)", swapped, n, kept)
+    if report is not None:
+        report.update({"swapped": swapped, "kept": kept, "why": why[:6]})
     return out
 
 
@@ -1899,7 +1909,8 @@ class ShortVideoGenerator(Generator):
         # 대본 단위 생성(구조 전환) — 대본 첫 줄이 훅(고정 템플릿 폐기), 훅 게이트(키워드 원형·지역) 경유.
         # 실패 시 기존 씬별 발췌+구어화 폴백(영상 흐름 불차단).
         # 30초+ 하한(상위노출 v2 1-4): 정보 씬 8~9개(씬당 ~4초 + 훅·아웃트로 ≈ 30~40초). 허사 아닌 본문 내용으로.
-        _photo_locked = False                      # 사진↔자막 짝이 확정되면 뒤의 재매칭을 건너뛴다
+        _photo_locked = False                     # 사진↔자막 짝이 확정되면 뒤의 재매칭을 건너뛴다
+        _sell_rep: dict = {}                      # 판매 문장 교체 결과(진단 — 조용한 실패 금지)
         _n_scenes = min(9, max(7, len(vid_imgs)))
         _rs = _script_from_body(body, _n_scenes, kw_nat, _fact_src, tone="info", biz_type=_biz,
                                 region=_reg, title=(pl.get("title") or ""))
@@ -1995,7 +2006,8 @@ class ShortVideoGenerator(Generator):
                 #   실패하거나 게이트에 걸린 줄은 원래 묘사로 남는다(전체를 버리지 않는다).
                 _descs = [_desc_of.get(_ix, "") for _ix in _pairs_i[:9]]   # 사진별 원본 묘사
                 _pairs_l = _selling_lines(_descs, _pairs_l[:9], _fact_src,
-                                          getattr(tenant, "name", "") or "", kw_nat, gate=_fb_gate)
+                                          getattr(tenant, "name", "") or "", kw_nat,
+                                          gate=_fb_gate, report=_sell_rep)
                 # ★ 분할이 일어나도 짝을 유지한다(2026-08-02 실측: 사진 9장인데 자막 12줄이 되어
                 #   뒤 3씬이 사진 없이 남았다). imgs를 함께 넘겨 조각마다 원본 사진을 물린다.
                 sent, vid_imgs = _cap_lines(_pairs_l[:9], imgs=_pairs_i[:9])
@@ -2167,7 +2179,8 @@ class ShortVideoGenerator(Generator):
                 #   봐야만 확인할 수 있다 — 불변 원칙이라면 검증 가능해야 한다.
                 "scene_pairs": [{"img": os.path.basename(vid_imgs[_i]) if _i < len(vid_imgs) else "",
                                  "line": _s} for _i, _s in enumerate(sent)],
-                "photo_locked": bool(_photo_locked)}
+                "photo_locked": bool(_photo_locked),
+                "selling": _sell_rep}          # 몇 줄을 파는 말로 바꿨는지·왜 못 바꿨는지
         # 🎬 클립 전용 파생본(2026-08-01 사장님 승인) — 통합검색 '네이버 클립' 블록 진입용.
         #   실측 배경: 지역+업종 통합검색 첫 화면에 블로그 지면이 0인 판이 많고, 클립 블록은 열려 있다.
         #   블로그 첨부용(20~45초 정보형)과 클립용(15~25초 훅형)은 성격이 다르다 → 같은 소스에서

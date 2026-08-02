@@ -1848,6 +1848,7 @@ def admin_video_status(asset_id: str):
                       # 화면-자막 짝(2026-08-02) — 일치 검증을 눈이 아니라 기록으로 한다
                       "naver_pairs": (_nv.get("scene_pairs") or [])[:12],
                       "naver_photo_locked": _nv.get("photo_locked"),
+                      "naver_selling": _nv.get("selling") or {},   # 판매 문장 교체 결과·반려 사유
                       "naver_dur": _nv.get("duration_sec"),
                       "shorts_ok": bool(_sp.payload.get("video_path")),
                       "scene_note": (_sp.payload.get("_scene_note") or "")[:200],
