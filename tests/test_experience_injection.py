@@ -71,6 +71,30 @@ def test_track_a_injects_experience():
     assert "note += _expn" in src, "주입 결과를 노트에 붙이지 않는다"
 
 
+def test_injection_is_at_the_single_funnel():
+    """E. 사장님 지적: "경험을 글 쓸 때마다 적을 순 없잖아".
+    맞다 — 한 번 적어두면 시스템이 꺼내 쓴다. 그러려면 모든 생성 경로가 지나는 곳에 있어야 한다.
+    실측 사고: 큐 경로에만 붙였더니 사장님이 실제로 쓰는 업로드 경로에서 경험이 안 실렸다
+    (소나타 DN8 글 — 소재는 살았는데 경험 주입 False)."""
+    import inspect
+    from app.services import generate as _g
+    src = inspect.getsource(_g.generate_for)
+    assert "experience_note" in src, "단일 관문에 실경험 주입이 없다"
+    assert "[사장님 실제 답변" in src, "중복 주입 방지 검사가 없다"
+    i, j = src.find("experience_note"), src.find("_generate_sequential")
+    assert 0 < i < j, "주입이 생성 실행보다 뒤에 있으면 프롬프트에 안 들어간다"
+
+
+def test_injection_never_blocks_generation():
+    """E2. 주입이 실패해도 글은 나와야 한다 — 부가 기능이 본 기능을 막으면 안 된다."""
+    import inspect
+    from app.services import generate as _g
+    src = inspect.getsource(_g.generate_for)
+    i = src.find("experience_note")
+    seg = src[i:i + 700]
+    assert "except Exception" in seg, "주입 실패가 생성을 막는다"
+
+
 def test_missing_experience_is_logged_not_silent():
     """D. 관련 답변이 없으면 그 사실이 로그에 남아야 한다 — 왜 일반론 글이 나왔는지
     나중에 알 수 있어야 한다(조용한 실패 금지)."""

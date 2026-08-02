@@ -48,6 +48,25 @@ def generate_for(tenant: Tenant, asset: Asset, kinds: list[ContentKind],
                 asset.target_kw = _kw0
         except Exception:
             pass
+    # 🗣 사장님 실경험 자동 주입(2026-08-02 사장님 지적) — 단일 관문에서 한 번만.
+    #   "경험을 글 쓸 때마다 적을 순 없잖아" — 맞다. 한 번 적어두면 시스템이 알아서 꺼내 쓴다.
+    #   ★ 여기 두는 이유: 업로드·큐·재생성이 전부 이 함수를 지난다. 큐 경로에만 붙였더니
+    #     사장님이 실제로 쓰는 업로드 경로에서는 경험이 안 실렸다(실측: 소나타 DN8 글).
+    #   중복 방지: 이미 붙어 있으면 다시 붙이지 않는다.
+    try:
+        _note = getattr(asset, "note", "") or ""
+        if "[사장님 실제 답변" not in _note:
+            from app.services.autoqueue import experience_note as _expn_fn
+            _kw_for_exp = (getattr(asset, "target_kw", "") or "").strip()
+            _blk = _expn_fn(tenant.id, _kw_for_exp) if _kw_for_exp else ""
+            if _blk:
+                asset.note = _note + _blk
+                import logging as _lge
+                _lge.getLogger("shopcast.generate").info(
+                    "[generate] 실경험 자동 주입 t=%s kw=%r", tenant.id, _kw_for_exp)
+    except Exception:
+        pass                                          # 주입 실패가 생성을 막지 않는다
+
     # ★ 병렬화 재활성(2026-08-01) — 원래 껐던 이유는 '타임아웃 없는 LLM 호출이 블록'이었고,
     #   그 조건이 해소됐다: llm.call이 출력 예산에 비례한 클라이언트 타임아웃 + 재시도 상한 3을
     #   갖고, 빈 응답도 예외로 올린다(무한 대기 경로 없음). 실측 근거: 본문 68.6초 → 캡션 21.1초
