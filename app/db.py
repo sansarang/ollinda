@@ -1929,9 +1929,10 @@ def claim_writing(tenant_id: str, only_id: int = 0) -> Optional[dict]:
     try:
         with _conn() as c:
             if only_id:
+                # 지목 클레임은 skipped도 다시 잡는다 — 실패 원인을 고친 뒤 재시도해야 하기 때문(진단 경로).
                 r = c.execute(
-                    "UPDATE writing_queue SET status='generating' WHERE id=? AND tenant_id=? "
-                    "AND status='pending' RETURNING *", (only_id, tenant_id)).fetchone()
+                    "UPDATE writing_queue SET status='generating', attempts=0 WHERE id=? AND tenant_id=? "
+                    "AND status IN ('pending','skipped') RETURNING *", (only_id, tenant_id)).fetchone()
             else:
                 r = c.execute(
                     "UPDATE writing_queue SET status='generating' WHERE id=("
@@ -1967,8 +1968,10 @@ def rollback_writing(qid: int, max_attempts: int = 2, why: str = "") -> None:
                       "status=CASE WHEN attempts+1 >= ? THEN 'skipped' ELSE 'pending' END WHERE id=?",
                       (max_attempts, qid))
             if why:
-                c.execute("UPDATE writing_queue SET reason=substr(COALESCE(reason,'') || ' | 실패: ' || ?, 1, 900) "
-                          "WHERE id=?", (why[:200], qid))
+                # ★ 사유가 뒤에 붙으면 잘린다(실측: 'NameError("nam'에서 끊겼다).
+                #   원래 reason을 줄이고 실패 사유를 온전히 남긴다 — 진단이 목적이다.
+                c.execute("UPDATE writing_queue SET reason=substr(COALESCE(reason,''),1,400) "
+                          "|| ' | 실패: ' || ? WHERE id=?", (why[:300], qid))
     except Exception:
         pass
 
