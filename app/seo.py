@@ -214,6 +214,17 @@ def _region_wide(region: str) -> str:
                  if _re_g.search(r"(특별시|광역시|특별자치시|특별자치도|도)$", tk)), "")
 
 
+def _dedup_tokens(s: str) -> str:
+    """같은 지역 토큰이 반복되면 하나로(2026-08-02 실사고: 타깃 키워드에 '부산 부산').
+    광역과 기초지역이 같은 값일 때 'wide + basic'이 그대로 이어붙던 경로를 막는다.
+    언어 규칙만 — 지명 하드코딩 0."""
+    out = []
+    for w in (s or "").split():
+        if w and w not in out:
+            out.append(w)
+    return " ".join(out)
+
+
 def canonical_region(region: str, biz_type: str = "local", industry: str = "",
                      allow_region_hook=None, verify_volume: bool = True) -> str:
     """★ 세트 지역 토큰 단일 소스(canonical) — 지역이 등장하는 전 표면(제목·훅·태그·해시태그·영상)이 참조.
@@ -228,7 +239,7 @@ def canonical_region(region: str, biz_type: str = "local", industry: str = "",
     wide = _region_wide(region)
     cores = basic_region_cores(region)
     if not cores:
-        return wide or _kw_shorten(region)               # 기초지역 없음 → 광역
+        return _dedup_tokens(wide or _kw_shorten(region))   # 기초지역 없음 → 광역
     basic = cores[0]
     ind0 = ((industry or "").replace("/", ",").split(",")[0] or "").strip()
     if verify_volume and ind0:
@@ -238,11 +249,11 @@ def canonical_region(region: str, biz_type: str = "local", industry: str = "",
                 vv = {(_v.get("keyword") or "").replace(" ", ""): (_v.get("total") or 0)
                       for _v in _sa.keyword_volumes([f"{basic} {ind0}", f"{wide} {ind0}"], limit=10)}
                 if vv.get((basic + ind0).replace(" ", ""), 0) >= REGION_MIN_VOLUME:
-                    return f"{wide} {basic}".strip() if wide else basic   # 기초지역 검색량 통과 → 허용
-                return wide or basic                     # 미달 → 광역(기장 배제)
+                    return _dedup_tokens(f"{wide} {basic}".strip() if wide else basic)
+                return _dedup_tokens(wide or basic)      # 미달 → 광역(기장 배제)
         except Exception:
             pass
-    return wide or basic                                 # 무키/미검증 → 광역(안전)
+    return _dedup_tokens(wide or basic)                  # 무키/미검증 → 광역(안전)
 
 
 def _kw_rank_tier(kw: str, models: list, classes: list, wide: str, ind0: str) -> int:
@@ -1055,6 +1066,18 @@ AI_CLICHES = [
     "어떠셨나요", "포스팅을 마",
 ]
 
+# 🗣 겁주기·공포 마케팅 — ★ 영상 자막과 '같은 목록'을 쓴다(2026-08-02 실사고).
+#   프롬프트(HUMAN_TOUCH)에는 '호구 낚시 훅' 금지가 있었는데 채점기가 그 목록을 안 봐서
+#   본문에 "호구 잡힐까 불안한 분들"이 그대로 들어간 채 88점으로 통과했다.
+#   생성 규칙과 검사 규칙이 두 곳에 따로 있으면 반드시 어긋난다(영상에서 겪은 것과 같은 사고).
+def _fear_patterns():
+    """단일 소스 — app.generators.video.FEAR_PATTERNS. 순환참조 회피 위해 지연 import."""
+    try:
+        from app.generators.video import FEAR_PATTERNS as _FP
+        return _FP
+    except Exception:
+        return (r"호구", r"사기\s?당", r"모르면\s?(손해|당)", r"허위\s?매물\s?(걱정|불안)")
+
 # 휴먼터치 지시 — blog/insta/X 공통 주입(A1). '사람이 쓴 것 같은' 리듬·구어가 차별화.
 HUMAN_TOUCH = (
     "[휴먼터치 — AI 티 빼기(어기면 저품질·독자 이탈)]\n"
@@ -1281,6 +1304,16 @@ def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> d
     if cliches:
         warnings.append(f"AI 클리셰 {cliches[:3]} → AI티(사람 냄새 없는 글)")
         score -= min(15, 5 * len(cliches))
+    # 겁주기·공포 마케팅 — 영상 자막과 같은 목록으로 검사(2026-08-02 실사고: 본문 '호구'가
+    # 88점으로 통과했다). 손님 불안을 파는 화법은 E-E-A-T·정직 원칙에 정면으로 어긋난다.
+    _fear_hit = []
+    for _fp in _fear_patterns():
+        _m = re.search(_fp, text)
+        if _m and _m.group(0) not in _fear_hit:
+            _fear_hit.append(_m.group(0))
+    if _fear_hit:
+        warnings.append(f"겁주기 표현 {_fear_hit[:3]} → 불안 마케팅(사실 서술로 교체)")
+        score -= min(15, 6 * len(_fear_hit))
     paras = [p for p in text.split("\n\n") if len(p.strip()) >= 40 and not p.strip().startswith(("#", "|", "["))]
     if len(paras) >= 4:
         lens = [len(p) for p in paras]
