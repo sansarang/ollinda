@@ -139,6 +139,34 @@ def test_photo_cap_matches_scene_cap():
     assert "len(paths) > _VIDEO_MAX_PHOTOS" in src, "상한이 실제로 적용되지 않음"
 
 
+def test_photo_cap_is_told_to_the_user_not_applied_silently():
+    """D2. 상한은 서버가 이미 걸고 있었는데(제작시간 때문에 9장) 화면은 17장을 고르게 두고
+    '17장으로 영상 만들기'라고 적었다(2026-08-02 사장님 지적).
+    지키지 않을 약속을 화면에 쓰는 것도, 조용히 잘라내는 것도 정직 게이트 위반이다."""
+    from app import main as _m
+    from app.services import ingest as _ing
+
+    # ① 화면이 상한을 알 수 있어야 한다 — 서버 단일 소스에서 내려준다
+    ep = inspect.getsource(_m.me_video_photos)
+    assert "max_photos" in ep, "화면에 상한을 알려주지 않음"
+    assert "_VIDEO_MAX_PHOTOS" in ep, "상한을 UI가 따로 정의(단일 소스 이탈 — 값이 갈라진다)"
+
+    # ② 모달이 상한을 지키고, 이유를 말한다
+    js = _m._VMPICK_JS
+    assert "d.max_photos" in js, "모달이 상한을 읽지 않음"
+    assert "n_sel()>=CAP" in js, "상한을 넘겨 고를 수 있음(약속을 못 지킨다)"
+    assert "최대 '+CAP+'장" in js, "상한을 사용자에게 알리지 않음"
+    assert "(i<CAP)" in js, "기본 선택이 상한을 넘음"
+    assert "names.length<=CAP" in js, "'전부'로 보내 서버가 조용히 자르는 경로가 남음"
+
+    # ③ 서버가 자를 때는 사유를 남긴다
+    src = inspect.getsource(_ing)
+    i = src.find("paths = paths[:_VIDEO_MAX_PHOTOS]")
+    assert i > 0, "상한 적용부를 못 찾음"
+    seg = src[i:i + 600]
+    assert "note=" in seg, "조용히 자른다(사유가 payload에 안 남는다)"
+
+
 # ── E. 게이트 시간 상한 ───────────────────────────────────────────
 def test_quality_gate_has_deadline():
     """E. 품질 루프에 시간 상한이 없으면 영상 버튼이 영원히 안 나온다(채널 상태 고착 실사고).

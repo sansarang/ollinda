@@ -1793,7 +1793,15 @@ def me_video_photos(request: Request, asset_id: str = ""):
     ips = (blog.payload.get("image_paths") if blog else None) or []
     photos = [{"name": os.path.basename(p), "url": f"/dl/{asset_id}/{os.path.basename(p)}"}
               for p in ips]
+    # 🎬 영상 사진 상한을 화면에 알린다(2026-08-02 사장님 지적) — 상한은 서버가 이미 걸고
+    #   있었는데(제작시간 때문에 9장) 화면은 17장을 고르게 두고 '17장으로 영상 만들기'라고 적었다.
+    #   지키지 않을 약속을 화면에 쓰는 건 정직 게이트 위반이다. 상한은 파이프라인 단일 소스에서 읽는다.
+    try:
+        from app.services.ingest import _VIDEO_MAX_PHOTOS as _cap
+    except Exception:
+        _cap = 9
     return JSONResponse({"ok": True, "photos": photos,
+                         "max_photos": int(_cap),
                          "video_photos": (blog.payload.get("video_photos") or []) if blog else [],
                          "hero": os.path.basename((blog.payload.get("hero_photo") or "")) if blog else ""})
 
@@ -6613,9 +6621,10 @@ _VMPICK_JS = ("<script>if(!window.vmMake){"
               "try{d=await (await fetch('/me/video/photos?asset_id='+encodeURIComponent(a))).json();}catch(e){}"
               "if(!d||!d.ok||!(d.photos||[]).length){window.vmMake(b,a,p,'','');return;}"
               "var hero=d.hero||'';"
-              "var inc={};d.photos.forEach(function(ph){inc[ph.name]=true;});"   # 기본: 전부 포함
+              "var CAP=d.max_photos||9;"                                       # 영상 사진 상한(서버 단일 소스)
+              "var inc={};d.photos.forEach(function(ph,i){inc[ph.name]=(i<CAP);});"  # 기본: 상한까지만
               "if((d.video_photos||[]).length){d.photos.forEach(function(ph){inc[ph.name]=false;});"
-              "d.video_photos.forEach(function(n){inc[n]=true;});}"              # 이전 선택 복원
+              "d.video_photos.slice(0,CAP).forEach(function(n){inc[n]=true;});}"     # 이전 선택 복원(상한 내)
               "var ov=document.createElement('div');"
               "ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';"
               "var box=document.createElement('div');"
@@ -6629,7 +6638,8 @@ _VMPICK_JS = ("<script>if(!window.vmMake){"
               "+(IN?'<button data-star=\"'+ph.name+'\" style=\"position:absolute;bottom:6px;left:6px;width:26px;height:26px;border-radius:999px;border:0;cursor:pointer;background:'+(H?'#f59e0b':'rgba(15,23,42,.45)')+';color:#fff;font-size:13px\">\\u2605</button>':'')"
               "+'</div>';});"
               "box.innerHTML='<div style=\"font-weight:800;font-size:16px;color:#0f172a;margin-bottom:4px\">영상에 쓸 사진 고르기</div>'"
-              "+'<div style=\"font-size:12px;color:#94a3b8;margin-bottom:12px\">사진을 누르면 <b>넣고/빼고</b>, \\u2605를 누르면 <b>첫 장면 대표</b>가 돼요. 그대로 두면 AI가 알아서 골라요.</div>'"
+              "+'<div style=\"font-size:12px;color:#94a3b8;margin-bottom:12px\">사진을 누르면 <b>넣고/빼고</b>, \\u2605를 누르면 <b>첫 장면 대표</b>가 돼요. </div>'"
+              "+'<div style=\"font-size:12px;color:#4f46e5;background:#eef2ff;border-radius:8px;padding:7px 10px;margin-bottom:12px\">영상에는 <b>최대 '+CAP+'장</b>까지 써요 — 더 넣으면 제작이 오래 걸려요.'+(d.photos.length>CAP?(' 올린 '+d.photos.length+'장 중 '+CAP+'장을 골라주세요.'):'')+'</div>'"
               "+'<div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px\">'+g+'</div>'"
               "+'<button id=\"vmGo\" style=\"width:100%;padding:13px;border-radius:12px;background:#4f46e5;color:#fff;font-weight:800;border:0;font-size:14px;cursor:pointer\">'+n_sel()+'장으로 영상 만들기'+(hero&&inc[hero]?' (\\u2605 대표 지정됨)':'')+'</button>'"
               "+'<button id=\"vmX\" style=\"width:100%;padding:10px;background:none;border:0;color:#94a3b8;font-size:12px;margin-top:4px;cursor:pointer\">취소</button>';"
@@ -6637,11 +6647,12 @@ _VMPICK_JS = ("<script>if(!window.vmMake){"
               "if(ev.target&&ev.target.getAttribute&&ev.target.getAttribute('data-star'))return;"
               "var n=el.getAttribute('data-n');"
               "if(inc[n]&&n_sel()<=1){alert('사진 1장은 있어야 영상을 만들 수 있어요');return;}"
+              "if(!inc[n]&&n_sel()>=CAP){alert('영상에는 최대 '+CAP+'장까지 쓸 수 있어요. 다른 사진을 먼저 빼주세요.');return;}"
               "inc[n]=!inc[n];if(!inc[n]&&hero===n)hero='';render();};});"
               "box.querySelectorAll('[data-star]').forEach(function(el){el.onclick=function(ev){"
               "ev.stopPropagation();var n=el.getAttribute('data-star');hero=(hero===n)?'':n;render();};});"
               "box.querySelector('#vmGo').onclick=function(){var names=d.photos.filter(function(ph){return inc[ph.name];}).map(function(ph){return ph.name;});"
-              "var all=(names.length===d.photos.length);ov.remove();"
+              "var all=(names.length===d.photos.length&&names.length<=CAP);ov.remove();"
               "window.vmMake(b,a,p,hero||'auto',all?'all':names.join(','));};"
               "box.querySelector('#vmX').onclick=function(){ov.remove();};}"
               "render();ov.appendChild(box);"

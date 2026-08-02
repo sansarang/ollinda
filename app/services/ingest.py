@@ -954,7 +954,7 @@ def _regen_text_piece(tenant: Tenant, asset, kind: ContentKind, ref) -> bool:
 
 
 def _set_video_job(asset_id: str, status: str, error: str = "", retried: bool | None = None,
-                   stage: str = "") -> None:
+                   stage: str = "", note: str = "") -> None:
     """영상 잡 상태를 블로그 피스 payload.video_job에 기록(영상 증발 재발 방지).
     registered→running→done/failed(+사유). stage=진행 단계 문구(온디맨드 진행률 표시).
     실패·미실행이 조용히 사라지는 구조 금지."""
@@ -965,6 +965,8 @@ def _set_video_job(asset_id: str, status: str, error: str = "", retried: bool | 
             return
         vj = dict(blog.payload.get("video_job") or {})
         vj.update({"status": status, "ts": datetime.utcnow().isoformat()})
+        if note:                      # 사용자에게 보일 안내(사유). 빈 값은 기존 안내를 지우지 않는다.
+            vj["note"] = note
         if stage or status in ("done", "failed"):
             vj["stage"] = stage
         if error:
@@ -1021,12 +1023,18 @@ def request_video_bundle(tenant: Tenant, asset_id: str, want: set[str]) -> tuple
     # 🎬 영상용 사진 상한(2026-08-01 사장님 지시) — 네이버 영상 씬은 어차피 최대 9개다
     #   (_n_scenes = min(9, max(7, len))). 17장을 넘겨도 9장만 쓰이고 나머지는 버려지는데,
     #   렌더 전 다운스케일은 전부에 걸려 시간만 태운다. 대표 사진은 위에서 맨 앞으로 정렬돼 보존된다.
+    _capped = 0
     if len(paths) > _VIDEO_MAX_PHOTOS:
         import logging as _lgvp
         _lgvp.getLogger("shopcast.video").info(
             "[video] 사진 %d장 → 상한 %d장으로 제한(초과분은 어차피 미사용)", len(paths), _VIDEO_MAX_PHOTOS)
+        _capped = len(paths) - _VIDEO_MAX_PHOTOS
         paths = paths[:_VIDEO_MAX_PHOTOS]
-    _set_video_job(asset_id, "registered")
+    # 상한이 걸렸으면 잡에 사유를 남긴다(2026-08-02 사장님 지적) — 화면은 17장을 고르게 두고
+    #   서버가 조용히 9장으로 잘랐다. 조용한 실패 금지: 잘랐으면 잘랐다고 말한다.
+    _set_video_job(asset_id, "registered",
+                   note=(f"사진 {_capped}장은 쓰지 않았어요 — 영상은 최대 {_VIDEO_MAX_PHOTOS}장까지 씁니다"
+                         if _capped else ""))
     _set_channel_status(asset_id, {ch: {"status": "generating"} for ch in want})
     _spawn_video_bundle(tenant, asset, paths, blog.payload.get("brief") or {}, want=frozenset(want))
     return True, ""
