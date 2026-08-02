@@ -147,6 +147,34 @@ def test_region_shortform_used_not_official_longform():
         assert got == want, f"{full} → {got!r} (기대 {want!r})"
 
 
+# ── F. 도입 훅 예고 판정 ─────────────────────────────────────────
+def _intro_warns(intro: str):
+    body = intro + "\n\n## 소제목\n본문 내용입니다. 성능점검기록부를 보여드립니다.\n"
+    au = _audit(body)
+    return [w for w in (au.get("warnings") or []) if "끝까지 읽을 이유" in w]
+
+
+def test_intro_preview_recognized_not_only_by_wordlist():
+    """F. 오탐 수정(2026-08-02): 옛 판정은 특정 낱말('알려'·'아래에서')만 인정해서
+    예고의 교과서적 형태를 못 읽고 -6점을 먹였다. 실측 문장으로 검증한다."""
+    real = ("이 흰색 SUV가 매장에 들어온 날, 저는 판매 사진보다 보닛을 먼저 열었습니다. "
+            "이 글에서는 외관 흠집 상태, 엔진룸 내부, 그리고 가격이 매물마다 다른 이유까지 "
+            "순서대로 확인하실 수 있습니다.")
+    assert not _intro_warns(real), "실제 예고 문장을 못 읽음(오탐)"
+    for ok in ("이 글에서 서류 보는 법까지 정리해 드릴게요.",
+               "아래에서 엔진룸 상태를 하나씩 짚어 드립니다.",
+               "가격이 갈리는 이유를 차례대로 비교해 봅니다.",
+               "마지막에 성능점검기록부 보는 법까지 알려드릴게요."):
+        assert not _intro_warns(ok), f"예고를 못 읽음: {ok}"
+
+
+def test_intro_without_preview_still_penalized():
+    """F-역: 예고가 정말 없으면 여전히 잡아야 한다(오탐 수정이 검사를 죽이면 안 된다)."""
+    for bad in ("안녕하세요. 오늘 날씨가 참 좋네요. 매장에 새 차가 들어왔습니다.",
+                "저희 가게는 부산 기장에 있습니다. 오래 영업했습니다."):
+        assert _intro_warns(bad), f"예고 없는 도입이 통과함: {bad}"
+
+
 # ── D. 지역 정합 ──────────────────────────────────────────────────
 def test_region_conflict_fails_open(monkeypatch):
     """D. 지역 정합 게이트는 판정 불가일 때 막지 않는다(조용한 실패 금지의 반대편 —
