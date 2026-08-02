@@ -219,6 +219,50 @@ def test_answer_rejects_garbage():
     assert gs.answer(tid, "유리막코팅", "maybe")["ok"] is False
 
 
+# ── F. 정찰 → 생성 연결 ──────────────────────────────────────────
+def test_gap_keyword_promoted_only_when_material_supports_it(monkeypatch):
+    """F1. 사고: 소나타 DN8 신차 종합시공 소재를 올렸는데 타깃이 '부산 동구 썬팅업체'로 잡혔다.
+    같은 날 정찰이 '신차 썬팅'을 빈자리로 찾아뒀는데 소재가 딱 맞는데도 안 쓰였다 —
+    정찰과 생성이 이어져 있지 않았다.
+
+    ★ 지어내지 않는다: 소재(note)가 뒷받침할 때만 앞으로 낸다.
+      소재 없는 키워드를 밀어 넣으면 사진에 없는 걸 쓰게 된다(날조 유도)."""
+    from app import seo
+    monkeypatch.setattr(gs, "list_gaps", lambda t, domain="", limit=30: [
+        {"keyword": "신차 썬팅", "score": 4.07, "domain": "확실"},
+        {"keyword": "썬팅 가격", "score": 5.62, "domain": "확실"}])
+    cands = ["부산 동구 썬팅업체", "부산 썬팅"]
+    note = "소나타 DN8 신차. 루마 버텍스900 썬팅, 신차검수, 유리막코팅, 생활보호PPF"
+
+    out = seo._gap_first(cands, "T", note)
+    assert out[0] == "신차 썬팅", f"소재가 뒷받침하는 빈자리가 앞으로 안 옴: {out}"
+    # '썬팅 가격'은 소재에 '가격'이 없다 — 겹침 1개라 올리지 않는다
+    assert "썬팅 가격" not in out[:1], f"근거 없는 키워드가 승격됨: {out}"
+    # 기존 후보는 사라지지 않는다(뒤로 밀릴 뿐)
+    assert set(cands) <= set(out), "기존 후보가 사라짐"
+
+
+def test_unrelated_material_promotes_nothing(monkeypatch):
+    """F2. 소재가 무관하면 아무것도 올리지 않는다 — 빈자리가 있다고 아무 글에나 붙이면 안 된다."""
+    from app import seo
+    monkeypatch.setattr(gs, "list_gaps", lambda t, domain="", limit=30: [
+        {"keyword": "신차 썬팅", "score": 4.07, "domain": "확실"}])
+    cands = ["부산 동구 썬팅업체"]
+    assert seo._gap_first(cands, "T", "제주 감귤 배송 신선") == cands
+    assert seo._gap_first(cands, "", "소나타 신차 썬팅") == cands      # tenant 없으면 손대지 않는다
+    assert seo._gap_first(cands, "T", "") == cands                   # 소재 없으면 판단 불가
+
+
+def test_gap_first_runs_inside_the_single_gateway():
+    """F3. 키워드 결정은 단일 관문을 지나야 한다 — 관문 밖에서 키워드를 바꾸면 규칙이 갈라진다."""
+    import inspect
+    from app import seo
+    src = inspect.getsource(seo.select_target_keyword)
+    assert "_gap_first(cands, tenant_id, note)" in src, "관문에 빈자리 반영이 없다"
+    i, j = src.find("_surface_first"), src.find("_gap_first")
+    assert 0 < i < j, "지면 신호보다 먼저 적용되면 자리 없는 판을 밀 수 있다"
+
+
 # ── C. 판정과 적재는 분리돼 있다 ─────────────────────────────────
 def test_judging_never_writes():
     """C1. 판정(scan/classify)은 절대 글감을 만들지 않는다. 적재는 feed() 하나뿐이다 —

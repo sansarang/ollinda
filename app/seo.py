@@ -285,6 +285,42 @@ def _kw_rank_tier(kw: str, models: list, classes: list, wide: str, ind0: str) ->
     return 4
 
 
+def _gap_first(cands: list, tenant_id: str = "", note: str = "") -> list:
+    """🕳 빈자리 키워드를 후보 앞으로(2026-08-02 사장님 지적).
+
+    사고: 소나타 DN8 신차 종합시공 소재를 올렸는데 타깃이 '부산 동구 썬팅업체'로 잡혔다.
+    같은 날 정찰이 '신차 썬팅'을 빈자리(자리 있음·우리 글 없음·검색량 통과)로 찾아뒀는데
+    소재가 딱 맞는데도 안 쓰였다 — 정찰과 생성이 이어져 있지 않았다.
+
+    ★ 지어내지 않는다. 두 조건을 모두 만족할 때만 앞으로 낸다:
+      ① 판정이 '확실'이고 점수 > 0 (자리 있음 · 검색량 통과 · 사장님 영역)
+      ② 이 소재(note)가 그 키워드를 실제로 뒷받침한다(의미 낱말 2개 이상 겹침)
+    소재가 없는 키워드를 밀어 넣으면 사진에 없는 걸 쓰게 된다 — 날조 유도다.
+    """
+    if not (cands and tenant_id and note):
+        return cands
+    try:
+        from app.services import gapscout as _gs
+        gaps = [g for g in _gs.list_gaps(tenant_id, domain="확실", limit=20)
+                if (g.get("score") or 0) > 0]
+    except Exception:
+        return cands
+    if not gaps:
+        return cands
+    _nt = {w for w in re.findall(r"[가-힣A-Za-z0-9]{2,}", note or "")}
+    hits = []
+    for g in gaps:
+        kt = {w for w in re.findall(r"[가-힣A-Za-z0-9]{2,}", g["keyword"])}
+        if len(kt & _nt) >= 2:                     # 소재가 뒷받침하는 것만
+            hits.append((g["score"], g["keyword"]))
+    if not hits:
+        return cands
+    hits.sort(reverse=True)
+    front = [k for _s, k in hits]
+    rest = [c for c in cands if c not in front]
+    return front + rest
+
+
 def _surface_first(cands: list, tenant_id: str = "") -> list:
     """🧱 통합검색 지면 신호 반영(2026-08-01 실측) — 블로그 글이 아무리 좋아도 그 키워드의
     통합검색 첫 화면에 '블로그 지면'이 없으면 노출로 이어지지 않는다(부산 썬팅·썬팅업체 등 실측 0건,
@@ -309,7 +345,8 @@ def _surface_first(cands: list, tenant_id: str = "") -> list:
 
 def select_target_keyword(candidates: list, biz_type: str = "local", region: str = "",
                           industry: str = "", tenant_id: str = "", verify_volume: bool = True,
-                          primary_model: str = "", allow_inventory_rank: bool = False) -> str:
+                          primary_model: str = "", allow_inventory_rank: bool = False,
+                          note: str = "") -> str:
     """★ 타깃 키워드 최종 선택 단일 관문(오토큐·직접생성 공통).
     ① 기초지역(구·군) 하드 배제(셀러·병행) ② 매물 속성 서열 정렬 ③ 검색량 검증(월 100회+, 실패 시 스킵).
     후보 전부 탈락하면 광역+업종 폴백. 매장(local)은 지역 규칙 미적용(원 후보 유지)."""
@@ -318,6 +355,7 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
     biz = (biz_type or "local")
     ind0 = ((industry or "").replace("/", ",").split(",")[0] or "").strip()
     cands = _surface_first(cands, tenant_id)             # ★ 통합검색에 블로그 지면이 있는 판을 앞으로
+    cands = _gap_first(cands, tenant_id, note)           # ★ 소재가 뒷받침하는 빈자리를 그보다 앞으로
     if biz not in ("seller", "hybrid"):
         return cands[0] if cands else (f"{_kw_shorten(region)} {ind0}".strip() if ind0 else "")
     # 기초지역 배제
@@ -635,7 +673,8 @@ def resolve_target_keyword(industry: str, region: str, note: str, biz: str = "lo
             _slog.warning("[resolve-kw] 앵커 부재 → 제네릭 확정: %r", _gk)
         else:
             _gk = select_target_keyword([kw0] + list(kws), _biz, region or "", prof_name,
-                                        tenant_id=tenant_id, primary_model=_pm, verify_volume=verify_volume)
+                                        tenant_id=tenant_id, primary_model=_pm,
+                                        verify_volume=verify_volume, note=note)
         if _gk:
             kw0 = _gk
             kws = list(dict.fromkeys([_gk] + [k for k in kws
