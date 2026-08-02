@@ -597,6 +597,22 @@ def admin_gap_scan(tenant_id: str = "", limit: int = 40, comp: int = 1):
     return JSONResponse(r)
 
 
+@app.post("/admin/exp-add")
+async def admin_exp_add(request: Request):
+    """운영 지원 — 사장님이 대화로 주신 실경험 답변을 대신 등록(2026-08-02).
+    화면 입력과 같은 저장 경로·같은 검증(길이)을 탄다. 내용은 사장님 말 그대로 넣는다."""
+    body = await request.json()
+    tid = (body.get("tenant_id") or "").strip()
+    if not db.get_tenant(tid):
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    saved, failed = [], []
+    for it in (body.get("items") or []):
+        q, a = (it.get("question") or "").strip(), (it.get("answer") or "").strip()
+        (saved if db.save_owner_experience(tid, q, a) else failed).append(q[:40])
+    return JSONResponse({"ok": True, "saved": saved, "failed": failed,
+                         "total": len(db.list_owner_experience(tid, limit=50))})
+
+
 @app.post("/admin/gap-feed")
 def admin_gap_feed(tenant_id: str = "", limit: int = 3, dry: int = 1):
     """확실 영역의 빈자리를 글감 큐에 편입(2단계). dry=1이면 무엇이 들어갈지만 보여준다."""
