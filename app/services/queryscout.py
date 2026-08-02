@@ -112,9 +112,29 @@ def candidates(payload: dict, region: str = "", industry: str = "", limit: int =
         rel = _sa0.keyword_volumes(_seed_all[:5], limit=120) if _seed_all else []
     except Exception:
         rel = []
-    _axis_tokens = {t for t in (_reg0, _ind0, brand.strip()) if t} | set(_mkt_terms[:6])
+    # ★ 업종명 어간(2026-08-02 실측 결함): 축 필터가 업종명 '원형'만 요구하면 손님이 실제로 치는
+    #   축약형이 전부 탈락한다 — '중고차판매' 가게에서 '중고차 시세'(월 35,120회)도, '중고차'
+    #   (월 271,600회)도 축 어휘를 안 가졌다고 버려졌다. 시장 용어(_mkt_terms)를 축에 넣는 수정이
+    #   있었지만 그건 상위 글 분석 캐시가 더워야 동작한다 — 캐시가 비면(신규 가게 첫 회차) 같은
+    #   사고가 그대로 난다. 그래서 API 없이 되는 언어 규칙으로 어간을 만들어 축에 함께 넣는다.
+    #   공급자 접미어 목록은 seo가 검색어 정규화에 쓰는 것과 같은 단일 소스(업종 하드코딩 0).
+    _ind_stems = {_ind0} if _ind0 else set()
+    try:
+        from app import seo as _seo1
+        _cur = _ind0
+        while _cur:
+            _nxt = next((_cur[: -len(t)].strip() for t in _seo1._SUPPLIER_TAIL
+                         if _cur.endswith(t) and len(_cur) - len(t) >= 2), "")
+            if not _nxt or _nxt in _ind_stems:
+                break
+            _ind_stems.add(_nxt)
+            _cur = _nxt
+    except Exception:
+        pass
+    _axis_tokens = {t for t in ({_reg0, brand.strip()} | _ind_stems) if t} | set(_mkt_terms[:6])
     # 주제어 게이트에도 합류 — 업종명('중고차판매')만 알면 '중고차 시세'가 _add에서 또 탈락한다(실측)
     _topic.update(_mkt_terms[:6])
+    _topic.update(_ind_stems)
     # ★ 3번째 공급원(2026-08-01 사장님 설계): 상위 글 본문에서 뽑힌 '시장 공통 검색 의도 구절'.
     #   검색광고 연관어는 씨앗과 글자가 겹치는 것만 주는 한계가 있어(실측: 주안모터스 후보 2개),
     #   이 판에서 실제로 통하는 표현을 상위 글들의 교차 등장으로 가져온다(캐시만 — 크롤 대기 0).
@@ -157,7 +177,9 @@ def candidates(payload: dict, region: str = "", industry: str = "", limit: int =
         if ind0:
             _add(f"{a} {ind0}")                          # 가장 흔한 검색형(축+업종)
     for t in top[:8]:
-        if t in axes or t == ind0:                       # '부산 부산' 류 중복 조합 방지(실측)
+        # '부산 부산' 류 중복 조합 방지(실측). ★ 2026-08-02: 완전일치만 보면 '중고차 중고차판매'
+        #   처럼 한쪽이 다른 쪽에 통째로 들어가는 조합이 새어 나간다(같은 말을 두 번 하는 검색어).
+        if any(t == a or (len(t) >= 2 and (t in a or a in t)) for a in axes + ([ind0] if ind0 else [])):
             continue
         for a in axes[:2]:
             _add(f"{a} {t}")
