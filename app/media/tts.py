@@ -19,7 +19,10 @@ LAST_ERR = ""   # 진단용 — 마지막 TTS 실패 원인
 
 
 def configured() -> bool:
-    return bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("ELEVENLABS_API_KEY"))
+    # ★ strip 필수 — 공백만 든 값도 truthy라 '설정됨'으로 읽히고, 실제 호출에서 400이 난다
+    #   (2026-07-30 실사고: 키 앞 공백 한 칸 → 조용히 폴백으로 떨어져 목소리가 바뀌었다).
+    return bool((os.environ.get("GEMINI_API_KEY") or "").strip()
+                or (os.environ.get("ELEVENLABS_API_KEY") or "").strip())
 
 
 def synthesize(text: str, out_dir: str) -> str | None:
