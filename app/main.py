@@ -576,6 +576,36 @@ def admin_quality_check_all(request: Request):
     return JSONResponse({"ok": True, "results": out})
 
 
+@app.get("/admin/gap-scan")
+def admin_gap_scan(tenant_id: str = "", limit: int = 40, comp: int = 1):
+    """🕳 빈자리 판정 진단(2026-08-02, 1단계 읽기 전용) — 글감·화면 변화 0.
+
+    '자리는 열려 있는데 우리가 아직 없는 검색어'를 점수순으로, 각 키워드가 사장님 영역인지
+    (확실/인접/미지/제외) 근거와 함께 보여준다. 분류가 맞는지 사람이 먼저 판단하기 위한 표다.
+    comp=0이면 경쟁 조회(문서 수·상위 글 나이)를 건너뛴다(호출 절약).
+    """
+    if not tenant_id:
+        return JSONResponse({"ok": False, "error": "tenant_id 필요"}, status_code=400)
+    from app.services import gapscout as _gs
+    r = _gs.scan(tenant_id, limit=limit, with_competition=bool(comp))
+    if r.get("gaps"):
+        by = {}
+        for g in r["gaps"]:
+            by[g["domain"]] = by.get(g["domain"], 0) + 1
+        r["by_domain"] = by
+        r["proposable"] = [g for g in r["gaps"] if g["domain"] in ("확실", "인접") and g["score"] > 0]
+    return JSONResponse(r)
+
+
+@app.get("/admin/gap-list")
+def admin_gap_list(tenant_id: str = "", domain: str = "", limit: int = 30):
+    """저장된 빈자리 판정 결과 조회(재조회 없이 표만 다시 본다)."""
+    if not tenant_id:
+        return JSONResponse({"ok": False, "error": "tenant_id 필요"}, status_code=400)
+    from app.services import gapscout as _gs
+    return JSONResponse({"ok": True, "gaps": _gs.list_gaps(tenant_id, domain, limit)})
+
+
 @app.get("/admin/scout-plan")
 def admin_scout_plan(tenant: str = "", limit: int = 30, ttl_days: int = 7, shops_only: str = ""):
     """🗺 지면 정찰 계획(2026-08-01 사장님 승인 ①) — 맥 야간 정찰기가 '오늘 훑을 키워드'를 받아간다.
