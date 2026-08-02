@@ -92,10 +92,16 @@ def summary(tenant_id: str) -> dict:
         out["measured_at"] = rows[0]["checked_at"]
 
     # ① 통합검색 — 우리 글이 실린 검색어 / 자리는 있는데 아직인 검색어 / 자리가 없는 검색어
+    # ★ 블록명은 표시하지 않는다(2026-08-02 실사고). 링크→블록 귀속을 'DOM 문서순서상 앞선
+    #   마지막 제목'으로 추정하는데, 실측에서 우리 글이 없는 블록명('네이버 클립')까지 섞여
+    #   표시됐다 — 만든 적 없는 숏텐츠에 '보이는 중'이라고 허위 표시. 귀속 검증 전까지
+    #   블록 단위 주장을 금지하고 '첫 화면'까지만 말한다(정밀해 보이는 미확인 < 두루뭉술한 사실).
+    #   raw(kw_blocks)에는 블록 추정을 계속 기록한다 — 복원 대비 데이터 축적.
     shown, waiting, no_room = [], [], []
     for r in rows:
         if r["mine"]:
-            shown.append({"keyword": r["keyword"], "where": ", ".join(r["blog_blocks"][:2]) or "첫 화면"})
+            shown.append({"keyword": r["keyword"], "where": "첫 화면",
+                          "blocks_guess": r["blog_blocks"][:3]})   # 표시 안 함(진단·복원용)
         elif r["blog_blocks"]:
             waiting.append(r["keyword"])
         else:

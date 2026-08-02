@@ -3291,8 +3291,9 @@ def _exposure_card(t) -> str:
     else:
         _b = []
         for x in se.get("shown", []):
+            # 블록명 미표시 — 귀속 검증 전까지 '첫 화면'까지만(허위 양성 방지, 2026-08-02).
             _b.append(f"<b class='text-emerald-700'>‘{esc(x['keyword'])}’</b> "
-                      f"<span class='text-slate-500'>{esc(x['where'])}에 보이는 중</span>")
+                      f"<span class='text-slate-500'>첫 화면에 보이는 중</span>")
         for k in se.get("waiting", [])[:3]:
             _b.append(f"‘{esc(k)}’ <span class='text-amber-600'>자리는 있는데 아직</span>")
         for k in se.get("no_room", [])[:2]:
@@ -3316,7 +3317,8 @@ def _exposure_card(t) -> str:
     br = _s.get("briefing") or {}
     if br.get("state") == "shown":
         _line("🤖", "AI 브리핑", "‘" + "’, ‘".join(esc(k) for k in br.get("items", [])) +
-              "’ <b class='text-emerald-700'>에서 인용됐어요</b>")
+              "’ <b class='text-emerald-700'>브리핑 지면에서 확인됐어요</b>"
+              " <span class='text-slate-400'>(블록 정확도 검증 중)</span>")
     elif br.get("state") == "waiting":
         _line("🤖", "AI 브리핑", "‘" + "’, ‘".join(esc(k) for k in br.get("items", [])) +
               "’ <span class='text-amber-600'>브리핑 자리는 있는데 아직</span>")
