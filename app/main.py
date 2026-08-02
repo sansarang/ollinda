@@ -10099,7 +10099,10 @@ def admin_queue_audit(tid: str = ""):
         return JSONResponse({"error": "tid 필요"}, status_code=400)
     rows = db.writing_queue_rows(tid, limit=100)
     out = [{"id": r.get("id"), "source": r.get("source_type"), "keyword": r.get("target_keyword"),
-            "status": r.get("status"), "created_at": r.get("created_at"), "reason": (r.get("reason") or "")[:80]}
+            "status": r.get("status"), "created_at": r.get("created_at"), "attempts": r.get("attempts"),
+            # ★ 80자에서 자르면 실패 사유가 안 보인다(실측: 'NameError("nam'에서 끊겼다).
+            #   진단 엔드포인트가 진단을 못 하게 만드는 절단 — 사유는 온전히 보여준다.
+            "reason": (r.get("reason") or "")[:600]}
            for r in rows]
     # 발행 확인된 글의 타깃 키워드
     pubs = []
