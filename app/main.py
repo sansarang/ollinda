@@ -1721,14 +1721,27 @@ def admin_gowatch_consume(request: Request):
 
 
 @app.post("/admin/gen-test/{tenant_id}")
-async def admin_gen_test(request: Request, tenant_id: str, photos: list[UploadFile] = File(...)):
-    """생성 다운 진단 — ingest_upload를 동기 실행해 예외를 즉시 반환(bg 스레드 삼킴 우회). 실물 재현."""
+async def admin_gen_test(request: Request, tenant_id: str, photos: list[UploadFile] = File(...),
+                         note: str = Form(""), bg: int = Form(0)):
+    """생성 다운 진단 — ingest_upload를 동기 실행해 예외를 즉시 반환(bg 스레드 삼킴 우회). 실물 재현.
+    note: 사장님이 주신 실제 소재 메모(없으면 진단 표시). bg=1이면 백그라운드(사진이 많을 때)."""
     t = db.get_tenant(tenant_id)
     if not t:
         return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
     files = await _read_image_uploads(photos)
+    _note = (note or "").strip() or "[진단 테스트]"
+    if bg:
+        import threading as _tgt
+
+        def _run():
+            try:
+                ingest_upload(t, files, _note, intake={})
+            except Exception:
+                logging.getLogger("shopcast.ingest").exception("[gen-test] 실패 t=%s", tenant_id)
+        _tgt.Thread(target=_run, daemon=True).start()
+        return JSONResponse({"ok": True, "bg": True, "photos": len(files), "tenant": t.name})
     try:
-        made = ingest_upload(t, files, "[진단 테스트]", intake={})
+        made = ingest_upload(t, files, _note, intake={})
         from app.services.generate import LAST_ERRORS as _LEd
         return JSONResponse({"ok": True, "pieces": [p.kind.value for p in made], "n": len(made),
                              "errors": dict(_LEd)})
