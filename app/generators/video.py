@@ -1055,8 +1055,15 @@ def _selling_lines(descs: list, drafts: list, facts: str, shop: str, kw: str,
     return out
 
 
+def _photo_stem(p: str) -> str:
+    """사진 파일의 신원 — 영상용 다운스케일본('xxxx_vid.jpg')과 원본('xxxx.png')을 같은 것으로 본다."""
+    import os as _o
+    b = _o.path.splitext(_o.path.basename(p or ""))[0]
+    return b[:-4] if b.endswith("_vid") else b
+
+
 def _lines_for_photos(imgs: list, gen_source: str, cand_lines: list, gate=None,
-                      desc_map: dict = None) -> tuple:
+                      desc_map: dict = None, order_ref: list = None) -> tuple:
     """📺 화면-자막 일치 보장(2026-08-01 사장님 불변 원칙 ①) — 방향을 뒤집는다.
 
     기존: 자막을 먼저 만들고 사진을 맞춘다 → 지시어 없는 자막은 '남은 사진 아무거나'가 배정돼
@@ -1066,6 +1073,13 @@ def _lines_for_photos(imgs: list, gen_source: str, cand_lines: list, gate=None,
 
     gate(line) → 사유 문자열(통과 시 빈 값). 걸린 후보는 건너뛰고 다음 후보를 본다.
     desc_map을 주면 {사진경로: 원본 묘사}로 채워준다(자막을 '파는 말'로 다시 쓸 때 재료로 쓴다).
+
+    ★ order_ref = 분석 당시의 원본 사진 순서(blog.payload.image_paths). 반드시 넘겨야 한다.
+      [사진N] 번호는 '분석 당시 순서' 기준인데, 영상에 들어가는 목록은 그 뒤로 세 번 바뀐다:
+      ①사용자가 고른 사진만 남기는 필터 ②대표 사진 맨 앞 이동 ③9장 상한.
+      그런데 여기서는 imgs[i] ↔ [사진 i+1]로 '자리'를 믿고 있었다 — 실측(2026-08-02,
+      사장님이 받은 영상): 자막 '선루프 열고 그릴까지'에 후면 사진, '뒤에서 투싼 엠블럼'에
+      센터콘솔 사진이 붙었다. 자리가 아니라 파일 신원으로 묘사를 찾는다.
     반환 (사진들, 자막들) — 길이 동일, 순서 대응. 묘사가 없으면 ([], [])로 호출부가 기존 경로 유지.
     업종·지명 하드코딩 0(대조 재료는 그 세트의 사진 묘사와 본문뿐)."""
     import re as _r
@@ -1074,9 +1088,12 @@ def _lines_for_photos(imgs: list, gen_source: str, cand_lines: list, gate=None,
     #   → 번호당 '가장 묘사다운 줄'을 고른다: 안내·메타 문장 배제 후 가장 긴 것.
     _META = _r.compile(r"(분석 결과|분석입니다|관점의|다음과 같|촬영 팁|추천 활용|마케팅|사진 분석)")
     _cands: dict = {}
+    # ★ 번호 상한은 '분석 당시 장수'다(2026-08-02). 영상에 들어간 장수로 자르면,
+    #   9장 상한·사용자 선택 때문에 뒤 번호 묘사가 통째로 사라진다(그 사진이 영상에 있어도).
+    _n_ref = len(order_ref) if order_ref else len(imgs)
     for m in _r.finditer(r"\[사진(\d+)\]\s*([^\n]+)", gen_source or ""):
         i = int(m.group(1)) - 1
-        if not (0 <= i < len(imgs)):
+        if not (0 <= i < _n_ref):
             continue
         _t = (m.group(2) or "").strip()
         if _META.search(_t):
@@ -1187,6 +1204,21 @@ def _lines_for_photos(imgs: list, gen_source: str, cand_lines: list, gate=None,
     if not raws:
         return [], []
 
+    # 🔗 분석 순서([사진N]) → 실제 영상에 들어간 사진. 자리가 아니라 파일 신원으로 잇는다.
+    #   order_ref가 없으면 옛 동작(자리 기준)이지만, 호출부는 반드시 넘긴다.
+    if order_ref:
+        _stem2img = {_photo_stem(p): p for p in imgs}
+        _idx_img = {}
+        for _n, _op in enumerate(order_ref):
+            _hit = _stem2img.get(_photo_stem(_op))
+            if _hit:
+                _idx_img[_n] = _hit
+    else:
+        _idx_img = {i: p for i, p in enumerate(imgs)}
+    raws = {i: d for i, d in raws.items() if i in _idx_img}   # 영상에 안 들어간 사진의 묘사는 버린다
+    if not raws:
+        return [], []
+
     _WHOLE = ("외관", "전면", "후면", "측면", "전경", "전체", "정면", "외부")
     _DOCW = ("서류", "기록부", "증명", "등록증", "점검", "보증", "검인", "명세", "영수", "성적서")
     _PARTW = ("내부", "부품", "엔진", "실내", "시트", "타이어", "휠", "계기", "콘솔", "핸들",
@@ -1229,10 +1261,10 @@ def _lines_for_photos(imgs: list, gen_source: str, cand_lines: list, gate=None,
             if _d and len(_d) >= 6 and not (gate and gate(_d)):
                 line = _d
         if line:
-            out_imgs.append(imgs[i])
+            out_imgs.append(_idx_img[i])
             out_lines.append(line)
             if desc_map is not None:               # 자막을 '파는 말'로 다시 쓸 때 쓰는 원본 묘사
-                desc_map[imgs[i]] = desc
+                desc_map[_idx_img[i]] = desc
     return out_imgs, out_lines
 
 
@@ -2003,7 +2035,8 @@ class ShortVideoGenerator(Generator):
             _desc_of: dict = {}
             _pairs_i, _pairs_l = _lines_for_photos(vid_imgs, pl.get("gen_source") or "",
                                                    list(sent) + list(caps), gate=_fb_gate,
-                                                   desc_map=_desc_of)
+                                                   desc_map=_desc_of,
+                                                   order_ref=pl.get("image_paths") or [])
             if len(_pairs_l) >= 3:
                 _nlog.warning("[naver-video] 화면-자막 일치 재구성: %d씬(사진 기준)", len(_pairs_l))
                 # 🗣 사진별 '파는 말'로 바꾼다(2026-08-02 사장님 승인). 사진 순서는 이미 고정됐으므로

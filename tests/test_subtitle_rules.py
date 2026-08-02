@@ -292,6 +292,42 @@ def test_outro_is_self_contained_and_industry_neutral():
         assert f'"{kw}"' not in seg, f"업종어 하드코딩: {kw}"
 
 
+def test_description_maps_by_file_identity_not_position():
+    """L. 사장님이 받은 영상에서 확인된 실사고(2026-08-02) — 자막 '선루프 열고 그릴까지'에
+    후면 사진이, '뒤에서 투싼 엠블럼'에 센터콘솔 사진이 붙었다.
+
+    원인: [사진N] 번호는 '분석 당시 순서' 기준인데, 영상에 들어가는 목록은 그 뒤로 세 번 바뀐다
+    (①사용자가 고른 사진만 남기는 필터 ②대표 사진 맨 앞 이동 ③9장 상한).
+    그런데 imgs[i] ↔ [사진 i+1]로 '자리'를 믿고 있었다.
+    → 자리가 아니라 파일 신원(basename)으로 잇는다."""
+    from app.generators.video import _lines_for_photos, _photo_stem
+
+    assert _photo_stem("/t/abc_vid.jpg") == "abc" == _photo_stem("/o/abc.png"), \
+        "다운스케일본과 원본을 같은 사진으로 못 본다"
+
+    orig = [f"/o/{c}.png" for c in "abcdefghi"]           # 분석 당시 9장
+    vid = ["/t/e_vid.jpg", "/t/a_vid.jpg", "/t/b_vid.jpg", "/t/c_vid.jpg"]   # 대표(e)가 맨 앞
+    src = ("[사진1] 흰색 차량 전면 외관, 그릴\n"
+           "[사진2] 차량 후면, 엠블럼 확인\n"
+           "[사진3] 후드 오픈 엔진룸 내부\n"
+           "[사진5] 센터콘솔부, 전자식 기어 다이얼 버튼 배치\n")
+    gi, gl = _lines_for_photos(vid, src, [], gate=lambda _l: "", order_ref=orig)
+    pair = dict(zip(gi, gl))
+    assert "전면" in pair.get("/t/a_vid.jpg", ""), f"1번 묘사가 다른 사진에 붙음: {pair}"
+    assert "후면" in pair.get("/t/b_vid.jpg", ""), f"2번 묘사가 다른 사진에 붙음: {pair}"
+    assert "엔진룸" in pair.get("/t/c_vid.jpg", ""), f"3번 묘사가 다른 사진에 붙음: {pair}"
+    # 번호가 영상 장수를 넘어도, 그 사진이 영상에 있으면 묘사를 써야 한다
+    assert "센터콘솔" in pair.get("/t/e_vid.jpg", ""), f"뒤 번호 묘사가 사라짐: {pair}"
+
+
+def test_naver_path_passes_original_photo_order():
+    """L2. 실제 경로가 원본 순서를 넘기지 않으면 위 보장이 무의미하다."""
+    import inspect
+    from app.generators import video as _v
+    src = inspect.getsource(_v.ShortVideoGenerator._naver_video)
+    assert 'order_ref=pl.get("image_paths")' in src, "분석 당시 사진 순서를 안 넘김"
+
+
 def test_fear_list_shared_with_body_scoring():
     """A-구조: 겁주기 목록은 본문 채점기와 같은 뿌리여야 한다.
     두 곳에 따로 두면 어긋난다 — 영상에서 고친 뒤 본문에서 같은 사고가 재발했다."""
