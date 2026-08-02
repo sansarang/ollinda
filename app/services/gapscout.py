@@ -8,7 +8,8 @@
 왜 판정만 먼저인가: 분류가 틀린 채로 글감 큐에 들어가면 쓸 수 없는 글감이 쌓인다.
 
 두 관문을 모두 통과해야 '제안 자격'이 있다:
-  ① 빈자리 — 검색 실측(지면이 있는가 · 우리가 없는가 · 사람이 찾는가 · 경쟁이 약한가)
+  ① 빈자리 — 검색 실측(첫 화면에 블로그 글이 실리는가 · 우리는 없는가 · 사람이 찾는가 ·
+              경쟁이 약한가). 블록 '이름'은 쓰지 않는다 — 귀속이 미검증이다(실사고 2026-08-02).
   ② 사장님 영역 — 실데이터(실제로 다루시는 것인가)
 실사진·실경험 없는 주제를 시키는 것은 날조 유도다. 그래서 ②가 없으면 제안하지 않는다.
 
@@ -200,7 +201,11 @@ def scan(tenant_id: str, limit: int = 40, with_competition: bool = True) -> dict
         return {"ok": True, "gaps": [], "skipped": 0,
                 "note": f"유효한 지면 지도가 없습니다(최근 {MAP_TTL_DAYS}일). "
                         "야간 정찰이 돌아야 판정할 수 있습니다"}
-    # 빈자리 후보 = 블로그 지면이 뜨는데 우리가 없는 키워드
+    # 빈자리 후보 = 그 검색어 첫 화면에 '블로그 글이 실리는데' 우리 글은 없는 키워드.
+    #   ★ blog_blocks 필드는 '블로그 링크가 2개 이상 실린 블록의 이름' 목록이다.
+    #     블록 이름 자체는 귀속이 미검증이라 근거로 쓰지 않는다(2026-08-02 오전 실사고 —
+    #     '숏텐츠·클립에 노출 중'이라고 표시했는데 실제로는 타사만 있었다).
+    #     우리가 쓰는 신호는 이름이 아니라 '비어 있지 않다' 하나뿐이다 = 블로그 글이 실린다.
     cands = [r for r in rows if (r.get("blog_blocks") or "").strip() and not r.get("mine")]
     skipped_mine = sum(1 for r in rows if r.get("mine"))
     if not cands:
@@ -235,7 +240,8 @@ def scan(tenant_id: str, limit: int = 40, with_competition: bool = True) -> dict
                     "doc_count": dc, "top_age_days": age,
                     "score": _score(vol, True, dc, age),
                     "domain": domain, "domain_why": why,
-                    "blocks": (r.get("blog_blocks") or "")[:120],
+                    # 블록 이름은 내보내지 않는다 — 미검증 귀속을 근거처럼 보이게 하면 안 된다.
+                    "surface_note": "첫 화면에 블로그 글이 실림",
                     "checked_at": r.get("checked_at") or ""})
     out.sort(key=lambda x: -x["score"])
     _save(tenant_id, out)

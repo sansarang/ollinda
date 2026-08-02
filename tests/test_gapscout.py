@@ -157,6 +157,24 @@ def test_scan_says_why_when_it_cannot_judge():
             c.execute("DELETE FROM tenants WHERE id=?", (tid,))
 
 
+def test_block_names_are_not_used_as_evidence():
+    """B8. 블록 이름은 근거로 쓰지 않는다(2026-08-02 오전 실사고).
+    '숏텐츠·클립에 노출 중'이라고 표시했는데 실제로는 타사만 있었다 — 귀속이 미검증이다.
+    실측 데이터에서도 blog_blocks에 '플레이스 MY'·'네이버 클립'이 들어 있다.
+    우리가 쓰는 신호는 이름이 아니라 '비어 있지 않다' 하나뿐이다."""
+    import inspect
+    src = inspect.getsource(gs.scan)
+    assert '"blocks"' not in src, "블록 이름을 결과에 실어 보낸다"
+    assert "surface_note" in src, "지면 신호를 사람 말로 설명하지 않는다"
+    # 주석·독스트링에 사건을 적는 것은 좋다(사고 계보). 금지는 '판정에 쓰는 것'이다.
+    code = "\n".join(ln.split("#", 1)[0] for ln in inspect.getsource(gs).splitlines()
+                     if not ln.strip().startswith("#"))
+    import re as _re
+    code = _re.sub(r'"""[\s\S]*?"""', "", code)          # 독스트링 제거
+    for name in ("숏텐츠", "네이버 클립", "플레이스 MY", "인기글"):
+        assert name not in code, f"블록 이름을 판정에 씀: {name}"
+
+
 # ── C. 1단계는 읽기 전용이다 ─────────────────────────────────────
 def test_stage1_is_read_only():
     """C. 1단계는 판정만 한다. 분류가 맞는지 사람이 먼저 보고 판단해야 하기 때문이다 —
