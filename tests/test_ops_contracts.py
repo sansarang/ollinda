@@ -167,6 +167,59 @@ def test_photo_cap_is_told_to_the_user_not_applied_silently():
     assert "note=" in seg, "조용히 자른다(사유가 payload에 안 남는다)"
 
 
+# ── D3. 사진 풀 복원 ─────────────────────────────────────────────
+def test_photo_pool_restores_partial_loss(monkeypatch, tmp_path):
+    """D3. 실사고(2026-08-02): 주안모터스 사진이 17장 → 4장으로 줄었다.
+    R2에는 17장 그대로 있었는데(on_disk 4 / in_r2 17) 복원 조건이 '전부 사라졌을 때만'이라
+    부분 소실을 건너뛰고 남은 4장을 반환했다. 배포마다 컨테이너가 새로 뜨므로
+    로컬 부분 소실은 예외가 아니라 정상 상태다."""
+    from app.services import autoqueue as _aq
+    import app.services.ingest as _ing
+
+    raw = [str(tmp_path / f"p{i}.jpg") for i in range(17)]
+    for p in raw[:4]:                                  # 로컬엔 4장만 남은 상태를 만든다
+        open(p, "wb").close()
+
+    class _P:
+        kind = __import__("app.domain.models", fromlist=["ContentKind"]).ContentKind.BLOG
+        tenant_id = "T"
+        payload = {"image_paths": raw}
+
+    monkeypatch.setattr(_aq.db, "list_sets", lambda **k: [{"asset_id": "A"}])
+    monkeypatch.setattr(_aq.db, "get_set_pieces", lambda a: [_P()])
+    monkeypatch.setattr(_ing, "_restore_media", lambda tid, ps: list(ps))   # R2에 전부 있다
+
+    class _T:
+        id = "T"
+    out = _aq.photo_pool(_T())
+    assert len(out) == 17, f"부분 소실을 복원하지 않음 — {len(out)}장만 반환"
+
+
+def test_photo_pool_prefers_blog_piece(monkeypatch, tmp_path):
+    """D3-2. 조각 순서는 저장 순서라 뒤섞인다. X 피스는 발행용으로 사진을 4장만 들고 있어
+    그게 먼저 잡히면 풀이 4장으로 좁아진다(결과 화면·ZIP에서 이미 같은 사고가 났다)."""
+    from app.services import autoqueue as _aq
+    from app.domain.models import ContentKind as _CK
+
+    many = [str(tmp_path / f"b{i}.jpg") for i in range(17)]
+    few = many[:4]
+    for p in many:
+        open(p, "wb").close()
+
+    def _mk(kind, paths):
+        o = type("P", (), {})()
+        o.kind, o.tenant_id, o.payload = kind, "T", {"image_paths": paths}
+        return o
+
+    monkeypatch.setattr(_aq.db, "list_sets", lambda **k: [{"asset_id": "A"}])
+    monkeypatch.setattr(_aq.db, "get_set_pieces",
+                        lambda a: [_mk(_CK.X_POST, few), _mk(_CK.BLOG, many)])   # X가 먼저
+
+    class _T:
+        id = "T"
+    assert len(_aq.photo_pool(_T())) == 17, "X 피스가 먼저 잡혀 사진 풀이 좁아짐"
+
+
 # ── E. 게이트 시간 상한 ───────────────────────────────────────────
 def test_quality_gate_has_deadline():
     """E. 품질 루프에 시간 상한이 없으면 영상 버튼이 영원히 안 나온다(채널 상태 고착 실사고).

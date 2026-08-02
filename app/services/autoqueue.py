@@ -369,17 +369,28 @@ def _existing_kw_set(t) -> set:
 def photo_pool(t) -> list:
     """재사용 가능한 최근 사진 세트 — 로컬 소실 시 R2 미러에서 복원(설계상 원본은 R2 영구).
     로컬 캐시만 비었을 뿐 사진은 R2에 있으므로 '사진 없음' 오판 금지(regen-naver와 동일 복원 경로)."""
+    from app.domain.models import ContentKind as _CK
     for s in db.list_sets(tenant_id=t.id, limit=10):
         ps = db.get_set_pieces(s["asset_id"])
+        # ★ 블로그 피스 우선(2026-08-02 실사고 계열) — 조각 순서는 저장 순서라 뒤섞인다.
+        #   X 피스는 발행용으로 사진을 4장까지만 들고 있어, 그게 먼저 잡히면 사진 풀이 4장으로
+        #   좁아진다(결과 화면·ZIP에서 이미 같은 사고가 났고 거기선 이미 이 순서를 쓴다).
+        ps = sorted(ps, key=lambda p: 0 if p.kind == _CK.BLOG else 1)
         for p in ps:
-            raw = p.payload.get("image_paths") or []
-            paths = [x for x in raw if x and os.path.exists(x)]
-            if not paths and raw:                       # 로컬 소실 → R2 복원 시도(원본은 R2에 있음)
+            raw = [x for x in (p.payload.get("image_paths") or []) if x]
+            paths = [x for x in raw if os.path.exists(x)]
+            # ★ 부분 소실도 복원한다(2026-08-02 실사고). 옛 조건은 '전부 사라졌을 때만'이라,
+            #   17장 중 4장만 로컬에 남은 상태(R2엔 17장 그대로)에서 복원을 건너뛰고 4장을
+            #   그대로 반환했다 — 사장님 사진이 조용히 4장으로 줄어든 원인이 이것이다.
+            #   배포마다 컨테이너가 새로 뜨므로 로컬은 언제든 부분 소실이 정상 상태다.
+            if raw and len(paths) < len(raw):
                 try:
                     from app.services.ingest import _restore_media
-                    paths = _restore_media(p.tenant_id, raw)
+                    _rest = _restore_media(p.tenant_id, raw)
+                    if len(_rest) > len(paths):         # 복원이 늘렸을 때만 채택(실패 시 기존 유지)
+                        paths = _rest
                 except Exception:
-                    paths = []
+                    pass
             if paths:
                 return paths
     return []
