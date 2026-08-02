@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import datetime, timedelta
 
 from app import db
@@ -100,6 +101,45 @@ def _seller_longtail_candidates(t) -> list:
         if k and k not in seen:
             seen.add(k); uniq.append(k)
     return uniq
+
+
+def relevant_experience(tenant_id: str, keyword: str, limit: int = 2) -> list[dict]:
+    """이 키워드와 관련된 사장님 실경험 답변만 고른다(2026-08-02 실사고).
+
+    사고: '썬팅 가격' 글을 뽑았는데 사장님이 주신 '루마 정품·버텍스700·열성형' 같은
+    구체 근거가 하나도 안 들어갔다. owner_experience가 트랙 B에서만 쓰이고 트랙 A는
+    아예 안 읽었기 때문이다. 경험이 있어야 큐에 넣는다고 막아놓고 정작 글에는 안 쓴 셈이다.
+
+    관련 판정은 낱말 겹침으로만 한다(업종·지명 하드코딩 0). 겹치는 게 없으면 넣지 않는다 —
+    엉뚱한 경험을 넣으면 글이 딴 데로 샌다.
+    """
+    kt = {w for w in re.findall(r"[가-힣A-Za-z0-9]{2,}", keyword or "")}
+    if not kt:
+        return []
+    out = []
+    for e in db.list_owner_experience(tenant_id, limit=20) or []:
+        txt = f"{e.get('question','')} {e.get('answer','')}"
+        et = {w for w in re.findall(r"[가-힣A-Za-z0-9]{2,}", txt)}
+        hit = kt & et
+        if hit:
+            out.append({"q": e.get("question", ""), "a": e.get("answer", ""),
+                        "hit": sorted(hit, key=len, reverse=True)[:3],
+                        "score": len(hit)})
+    out.sort(key=lambda x: -x["score"])
+    return out[:limit]
+
+
+def experience_note(tenant_id: str, keyword: str) -> str:
+    """생성 프롬프트에 넣을 '사장님 실제 답변' 블록. 없으면 빈 문자열."""
+    exps = relevant_experience(tenant_id, keyword)
+    if not exps:
+        return ""
+    body = "\n".join(f"- (Q) {e['q']}\n  (A) {e['a']}" for e in exps)
+    return ("\n[사장님 실제 답변 — 이 글의 핵심 근거]\n" + body +
+            "\n※ 이 답변은 사장님이 직접 하신 말이다. 여기 담긴 구체적인 제품명·등급·공정 이름·"
+            "판단 기준을 본문에 그대로 살려라 — 일반론('정품 필름도 라인업이 나뉩니다')으로 "
+            "바꾸면 어느 가게나 쓸 수 있는 글이 되어 이기지 못한다. "
+            "단, 답변에 없는 수치·보증 조건·가격은 지어내지 마라.")
 
 
 def _reason(text: str, **meta) -> str:
@@ -470,6 +510,14 @@ def consume(t, files: list | None = None, plan: str = "free", only_id: int = 0) 
                          "사진 설명을 담아라. 같은 의도를 더 정확히 충족하는 글이 이긴다(비방 금지).")
             note += ("\n[배치 생성 — 유사문서 금지] 기존 글들과 도입·구성·소제목·사례를 완전히 다르게. "
                      "이 글은 오직 이 키워드 하나의 검색 의도에만 답한다.")
+            # 🗣 사장님 실제 답변 주입(2026-08-02) — 트랙 A도 읽는다.
+            #   받아놓고 안 쓰면 경험 게이트가 형식만 남는다.
+            _expn = experience_note(t.id, kw)
+            if _expn:
+                note += _expn
+                _log.info("[autoqueue] 실경험 주입 t=%s kw=%r", t.id, kw)
+            else:
+                _log.info("[autoqueue] 실경험 없음(관련 답변 0) t=%s kw=%r", t.id, kw)
             analysis = vision.analyze_all(paths, t.industry) if paths else ""
             if analysis:
                 note += f"\n[사진 분석] {analysis[:1500]}"
