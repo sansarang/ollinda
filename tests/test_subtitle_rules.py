@@ -97,6 +97,37 @@ def test_subtitle_fragments_are_complete():
         assert len(ln) >= 8, f"의미 없는 조각: {ln}"
 
 
+def test_scene_expansion_adopts_its_photos_too():
+    """F. 화면-자막 일치는 사장님이 '절대 불변'이라 하신 원칙이다.
+    실측 결함(2026-08-02): 30초 하한 확장이 성공하면 자막만 sent2로 바꾸고 사진 목록(vid_imgs)은
+    옛것을 그대로 뒀다. 그러면 뒤따르는 화질 재빌드가 '새 자막 + 옛 사진'으로 다시 굽는다 —
+    어긋난 영상이 그대로 발행된다. 확장이 이겼으면 그 확장이 쓰던 사진도 함께 채택해야 한다."""
+    import inspect
+    from app.generators import video as _v
+    src = inspect.getsource(_v.ShortVideoGenerator._naver_video)
+    i = src.find("opening2, sent2")
+    assert i > 0, "씬 확장 채택부를 못 찾음"
+    seg = src[i:i + 400]
+    assert "vid_imgs = _vi2" in seg, "자막만 바꾸고 사진은 옛것을 유지함(화면-자막 어긋남)"
+    # 재빌드가 참조하는 변수와 같은 이름이어야 의미가 있다
+    assert "vid_imgs, SceneScript(hook=opening, sentences=sent" in src, \
+        "재빌드 경로가 바뀌었다 — 이 계약을 다시 확인하라"
+
+
+def test_scene_pairs_are_recorded_for_verification():
+    """F2. 불변 원칙이면 검증 가능해야 한다. 자막만 남기면 '일치했는가'를 영상을 눈으로
+    봐야만 알 수 있다 — 사진 basename과 자막의 짝을 기록으로 남긴다."""
+    import inspect
+    from app.generators import video as _v
+    src = inspect.getsource(_v.ShortVideoGenerator._naver_video)
+    assert '"scene_pairs"' in src, "화면-자막 짝을 기록하지 않음"
+    i = src.find('"scene_pairs"')
+    seg = src[i:i + 300]
+    assert "vid_imgs" in seg and "enumerate(sent)" in seg, "짝이 실제 렌더 입력에서 나오지 않음"
+    from app import main as _m
+    assert "naver_pairs" in inspect.getsource(_m), "진단에서 짝을 읽을 수 없음"
+
+
 def test_fear_list_shared_with_body_scoring():
     """A-구조: 겁주기 목록은 본문 채점기와 같은 뿌리여야 한다.
     두 곳에 따로 두면 어긋난다 — 영상에서 고친 뒤 본문에서 같은 사고가 재발했다."""

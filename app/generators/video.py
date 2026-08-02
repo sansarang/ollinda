@@ -1941,6 +1941,10 @@ class ShortVideoGenerator(Generator):
                     kws, tenant, strat, f"{kw0} 정리")
                 if path2b and os.path.exists(path2b) and (dur2b or 0) > dur:
                     path, note, dur, _cover, opening, sent = path2b, note2b, dur2b, _c2b, opening2, sent2
+                    # ★ 사진 목록도 함께 채택한다(2026-08-02 실측 결함). 자막만 sent2로 바꾸고
+                    #   vid_imgs를 옛 목록으로 두면, 뒤의 화질 재빌드가 '새 자막 + 옛 사진'으로
+                    #   다시 굽는다 — 화면과 자막이 어긋난 채 발행된다(사장님 불변 원칙 위반).
+                    vid_imgs = _vi2
         # 30초 하한 가드(폴백 발췌 경로) — ★ 기준을 대본 경로와 맞춘다(2026-08-01 실측 교정).
         #   기존 15초는 폴백만 낮게 잡혀 있어, 21초짜리가 어느 확장에도 안 걸렸다.
         #   '정보형은 30초+가 체류·D.I.A.+에 유리'라는 같은 근거를 두 경로에 동일 적용(전 업종 공통).
@@ -2029,7 +2033,12 @@ class ShortVideoGenerator(Generator):
         desc = desc + "\n" + " ".join(hashtags)       # 설명 복사에 포함(클립 업로드용)
         meta = {"path": final, "title": vtitle, "desc": desc, "filename": fname,
                 "hashtags": hashtags, "quality": _spec,
-                "duration_sec": dur, "opening": opening, "scene_texts": [opening] + sent + [outro]}
+                "duration_sec": dur, "opening": opening, "scene_texts": [opening] + sent + [outro],
+                # 🎬 화면-자막 짝을 기록한다(2026-08-02). 자막만 남기면 '일치했는가'를 영상을 눈으로
+                #   봐야만 확인할 수 있다 — 불변 원칙이라면 검증 가능해야 한다.
+                "scene_pairs": [{"img": os.path.basename(vid_imgs[_i]) if _i < len(vid_imgs) else "",
+                                 "line": _s} for _i, _s in enumerate(sent)],
+                "photo_locked": bool(_photo_locked)}
         # 🎬 클립 전용 파생본(2026-08-01 사장님 승인) — 통합검색 '네이버 클립' 블록 진입용.
         #   실측 배경: 지역+업종 통합검색 첫 화면에 블로그 지면이 0인 판이 많고, 클립 블록은 열려 있다.
         #   블로그 첨부용(20~45초 정보형)과 클립용(15~25초 훅형)은 성격이 다르다 → 같은 소스에서

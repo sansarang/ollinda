@@ -1845,6 +1845,9 @@ def admin_video_status(asset_id: str):
                       # 실제로 영상에 구워진 자막(진단에서 다른 산출물과 혼동하지 않게)
                       "naver_opening": _nv.get("opening") or "",
                       "naver_scenes": (_nv.get("scene_texts") or [])[:10],
+                      # 화면-자막 짝(2026-08-02) — 일치 검증을 눈이 아니라 기록으로 한다
+                      "naver_pairs": (_nv.get("scene_pairs") or [])[:12],
+                      "naver_photo_locked": _nv.get("photo_locked"),
                       "naver_dur": _nv.get("duration_sec"),
                       "shorts_ok": bool(_sp.payload.get("video_path")),
                       "scene_note": (_sp.payload.get("_scene_note") or "")[:200],
