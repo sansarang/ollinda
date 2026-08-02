@@ -613,6 +613,31 @@ def admin_scout_plan(tenant: str = "", limit: int = 30, ttl_days: int = 7, shops
                          "total": sum(len(s["keywords"]) for s in out)})
 
 
+@app.post("/admin/rank-kw-normalize")
+def admin_rank_kw_normalize(dry: str = "1"):
+    """🔤 순위 이력 키워드 표기 통일(1회 이관) — 공식 지명을 구어형으로.
+    이력이 끊기지 않게 '행을 지우지 않고 keyword 값만 바꾼다'(PK가 자동증가 id라 병존 안전).
+    dry=1이면 바꿀 목록만 반환(기본). 실제 반영은 dry=0."""
+    from app import seo as _seo
+    changes, applied = [], 0
+    try:
+        with db._conn() as c:
+            rows = c.execute("SELECT DISTINCT tenant_id, keyword FROM rank_snapshots").fetchall()
+            for r in rows:
+                _old = r["keyword"] or ""
+                _new = " ".join((_seo._kw_shorten(_old)).split())
+                if _new and _new != _old:
+                    changes.append({"tenant": (r["tenant_id"] or "")[:8], "from": _old, "to": _new})
+                    if dry == "0":
+                        c.execute("UPDATE rank_snapshots SET keyword=? WHERE tenant_id=? AND keyword=?",
+                                  (_new, r["tenant_id"], _old))
+                        applied += 1
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": repr(e)[:120]}, status_code=500)
+    return JSONResponse({"ok": True, "dry_run": dry != "0", "n": len(changes),
+                         "applied": applied, "changes": changes[:30]})
+
+
 @app.get("/admin/exposure")
 def admin_exposure(tenant: str = ""):
     """운영 진단 — 노출 현황 요약(사장 화면에 그릴 데이터 그대로)."""

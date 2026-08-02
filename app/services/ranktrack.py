@@ -20,16 +20,27 @@ _ANGLE_LABEL = {"review": "후기형", "howto": "방법·과정형", "price": "�
 
 
 def tenant_keywords(t, limit: int | None = None) -> list[str]:
-    """추적 키워드 — 스냅샷 이력 + 최근 생성물 target_keywords(중복 제거)."""
+    """추적 키워드 — 발행이 곧 편입(2026-08-02 사장님 지시).
+    ★ 수동 등록 0: 스냅샷 이력 + 생성물 target_keywords + 발행 글의 canonical 키워드를 모두 모은다.
+      '키워드 하나만 넣어 오판'을 구조적으로 막는다(한 검색어만 보고 미노출로 단정한 실사고).
+    ★ 표기는 구어형으로 통일한다(표시·추적 층에서만) — '부산광역시 동구 썬팅' 같은 공식 지명은
+      검색량이 0이고 화면에서도 어색하다. 키워드 결정·검색량 관문 로직은 건드리지 않는다."""
+    from app import seo as _seo
     limit = limit or config.RANK_TRACK_KEYWORDS
-    kws = list(db.tracked_keywords(t.id, limit=limit))
-    if len(kws) < limit:
-        for s in db.list_sets(tenant_id=t.id, limit=20):
-            for p in db.get_set_pieces(s["asset_id"]):
-                for k in (p.payload.get("target_keywords") or []):
-                    if k and k not in kws:
-                        kws.append(k)
-    return kws[:limit]
+    raw: list = list(db.tracked_keywords(t.id, limit=limit * 3))
+    for s in db.list_sets(tenant_id=t.id, limit=20):          # 생성물의 타깃 키워드
+        for p in db.get_set_pieces(s["asset_id"]):
+            raw += [k for k in (p.payload.get("target_keywords") or []) if k]
+    try:                                                      # 발행 글의 canonical 키워드
+        raw += [(pub.get("target_kw") or "") for pub in db.list_blog_publishes(t.id, limit=20)]
+    except Exception:
+        pass
+    out: list = []
+    for k in raw:
+        k = " ".join((_seo._kw_shorten(k or "")).split())      # 공식 지명 → 구어형(표시·추적 층)
+        if k and 2 <= len(k) <= 30 and k not in out:
+            out.append(k)
+    return out[:limit]
 
 
 def track_tenant(t) -> int:
