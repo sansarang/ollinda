@@ -28,6 +28,58 @@ def review_request_texts(tenant) -> list[dict]:
     ]
 
 
+def description_draft(tenant) -> str:
+    """📝 스마트플레이스 '상세설명' 초안(2026-08-02 사장님 지시) — 복붙용.
+    플레이스 순위는 글이 아니라 등록정보 완성도가 정한다. 상세설명에 검색어가 자연스럽게
+    들어가야 지역검색에서 잡힌다.
+    재료는 가게 프로필 실값과 실측 검색어뿐 — 없는 정보는 쓰지 않는다(정직 게이트 동일).
+    업종·지명 하드코딩 0(전 업종 공통 뼈대에 그 가게 값만 채운다)."""
+    from app import seo as _seo
+    name = (getattr(tenant, "name", "") or "").strip()
+    ind_raw = ((getattr(tenant, "industry", "") or "").replace("/", ",").split(",")[0] or "").strip()
+    ind = _seo.searcher_term(ind_raw) or ind_raw          # 손님이 실제로 검색하는 말
+    reg = _seo.canonical_region(getattr(tenant, "region", "") or "",
+                                getattr(tenant, "biz_type", "local") or "local", ind_raw)
+    addr = (getattr(tenant, "address", "") or "").strip()
+    tel = (getattr(tenant, "phone", "") or "").strip()
+    kws = []
+    try:                                                  # 실측 추적 키워드(검색어 자연 포함용)
+        kws = [k for k in db.tracked_keywords(tenant.id, 6) if k][:3]
+    except Exception:
+        pass
+    head = " ".join(x for x in (reg, ind) if x).strip()
+    lines = []
+    if head and name:
+        lines.append(f"{head} {name}입니다.")
+    elif name:
+        lines.append(f"{name}입니다.")
+    if kws:
+        lines.append("‘" + "’, ‘".join(kws) + "’ 찾으시는 분들이 많이 오십니다.")
+    lines.append("")
+    # 뼈대는 업종 중립이어야 한다 — '작업 전 상태' 같은 시공업 표현은 매물 판매에 안 맞는다.
+    # 어느 업종에나 통하는 약속만 쓴다(상태 공개·가격 안내·기록 남기기).
+    lines.append("[약속드립니다]")
+    lines.append("· 실제 상태를 있는 그대로 먼저 보여드립니다.")
+    lines.append("· 가격과 포함 내용을 미리 알려드립니다.")
+    lines.append("· 확인하신 내용은 사진·기록으로 남겨 드립니다.")
+    lines.append("")
+    if addr or tel:
+        lines.append("[찾아오시는 길]")
+        if addr:
+            lines.append(f"· {addr}")
+        if tel:
+            lines.append(f"· 전화 {tel} (방문 전 연락 주시면 대기 없이 도와드립니다)")
+    return "\n".join(lines).strip()
+
+
+PLACE_STEPS = (
+    ("등록 확인", "네이버 스마트플레이스에 우리 가게가 등록돼 있는지 확인하세요. 없으면 무료 등록부터."),
+    ("상세설명 붙여넣기", "아래 초안을 복사해 스마트플레이스 → 정보 수정 → 상세설명에 붙여넣으세요."),
+    ("새소식 시작", "새 매물·시공 소식을 올리세요. 새소식 활동도 플레이스 순위에 들어갑니다."),
+    ("리뷰 응답", "받은 리뷰에 답글을 다세요. 응답률도 지수에 들어갑니다."),
+)
+
+
 def place_checklist(tenant) -> list[dict]:
     """플레이스 정보 완성도 — 올린다가 아는 정보(tenant) 기반 점검 + 직접 확인 항목.
     [{key, label, done(True|False|None=직접확인), why, how}]"""
