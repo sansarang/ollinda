@@ -613,6 +613,15 @@ def admin_scout_plan(tenant: str = "", limit: int = 30, ttl_days: int = 7, shops
                          "total": sum(len(s["keywords"]) for s in out)})
 
 
+@app.get("/admin/exposure")
+def admin_exposure(tenant: str = ""):
+    """운영 진단 — 노출 현황 요약(사장 화면에 그릴 데이터 그대로)."""
+    from app.services import exposure as _ex
+    if not db.get_tenant(tenant):
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    return JSONResponse({"ok": True, **_ex.summary(tenant)})
+
+
 @app.get("/admin/blocks-map")
 def admin_blocks_map(tenant: str = ""):
     """🧱 지면 지도 — 이 가게 키워드별 통합검색 구성·블로그 지면 유무·내 노출(사령탑용)."""
