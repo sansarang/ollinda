@@ -1038,7 +1038,8 @@ def _selling_lines(descs: list, drafts: list, facts: str, shop: str, kw: str,
             if len(t) > 40:
                 bad = bad or "길이 초과"
         if t and not bad:
-            out.append(t)
+            from app.seo import natural_kr_number as _nkn
+            out.append(_nkn(t))
             swapped += 1
         else:
             out.append(d)                      # 그 줄만 되돌린다 — 전체를 버리지 않는다
@@ -1109,6 +1110,8 @@ def _lines_for_photos(imgs: list, gen_source: str, cand_lines: list, gate=None,
         #   숫자 사이 쉼표는 천 단위 구분자라 건드리지 않는다('57,216km').
         d = _r.sub(r"(?<!\d)\s*[,，]\s*(?!\d)", ", ", d).strip(" ,")
         d = _r.sub(r"(입니다|이다|이에요|예요|모습입니다|모습으로)$", "", d).strip(" ,·—-")
+        from app.seo import natural_kr_number as _nkn0
+        d = _nkn0(d)                               # '5.7만km' 류 비한국어 표기 교정(표면 단일 규칙)
         if not _r.search(r"[가-힣]{2,}", d):
             return ""
         # ★ 어절을 하나씩 붙이되, '그 자리에서 끝나도 말이 되는' 지점만 기억한다(불변 원칙 ②).
@@ -2185,6 +2188,8 @@ class ShortVideoGenerator(Generator):
                 hashtags.append(f"#{t_}")
         hashtags = hashtags[:5]
         desc = desc + "\n" + " ".join(hashtags)       # 설명 복사에 포함(클립 업로드용)
+        from app.seo import natural_kr_number as _nkn2
+        vtitle, desc = _nkn2(vtitle), _nkn2(desc)   # 영상 제목·설명도 같은 표기 규칙
         meta = {"path": final, "title": vtitle, "desc": desc, "filename": fname,
                 "hashtags": hashtags, "quality": _spec,
                 "duration_sec": dur, "opening": opening, "scene_texts": [opening] + sent + [outro],

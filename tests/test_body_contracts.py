@@ -194,6 +194,43 @@ def test_emoji_rule_is_single_source():
     assert not seo._EMOJI_RE.findall("가격 — 시세 → 비교 ① ② ③")
 
 
+# ── H. 한국어 수 표기 ────────────────────────────────────────────
+def test_decimal_man_notation_converted():
+    """H. '5.7만km'는 한국어가 아니다(2026-08-02 사장님 지적).
+    중국어·일본어식 표기이고 손님이 검색창에 치지도, 읽고 자연스럽지도 않다.
+    실측: 제목 '부산 기장 중고차 5.7만km 흰색 SUV 가격·이력 공개'.
+    프롬프트로 부탁하는 대신 기계로 고친다 — 부탁은 확률이고 이건 규칙이다."""
+    n = seo.natural_kr_number
+    assert n("중고차 5.7만km 공개") == "중고차 5만 7천km 공개"
+    assert n("가격 2.5억") == "가격 2억 5천만"
+    assert n("주행 5.0만km") == "주행 5만km"
+    assert n("정가 1.2만원부터") == "정가 1만 2천원부터"
+    # 건드리면 안 되는 것 — 천 단위 구분자, 일반 소수
+    assert n("실주행 57,216km") == "실주행 57,216km"
+    assert n("소수 3.14는 그대로") == "소수 3.14는 그대로"
+    assert n("") == ""
+
+
+def test_decimal_man_notation_is_scored():
+    """H2. 기계 교정이 닿지 않는 경로가 생기면 눈에 보여야 한다(조용한 실패 금지)."""
+    au = _audit("## 소제목\n실주행 5.7만km입니다. 무사고 차량이에요.",
+                title="부산 기장 중고차 공개")
+    assert [w for w in (au.get("warnings") or []) if "한국어에 없는 수 표기" in w], au.get("warnings")
+    ok = _audit("## 소제목\n실주행 57,216km입니다. 무사고 차량이에요.",
+                title="부산 기장 중고차 공개")
+    assert not [w for w in (ok.get("warnings") or []) if "한국어에 없는 수 표기" in w]
+
+
+def test_surfaces_apply_the_number_rule():
+    """H3. 표기 규칙은 제목·본문·자막·영상 메타 전부에 걸린다 — 한 군데만 고치면 다른 데로 샌다."""
+    import inspect
+    from app.generators import text_claude as _tc, video as _v
+    tsrc = inspect.getsource(_tc)
+    assert "natural_kr_number(title)" in tsrc and "natural_kr_number(body)" in tsrc
+    vsrc = inspect.getsource(_v)
+    assert vsrc.count("natural_kr_number") >= 3, "영상 경로 일부가 규칙을 안 탄다"
+
+
 # ── D. 지역 정합 ──────────────────────────────────────────────────
 def test_region_conflict_fails_open(monkeypatch):
     """D. 지역 정합 게이트는 판정 불가일 때 막지 않는다(조용한 실패 금지의 반대편 —

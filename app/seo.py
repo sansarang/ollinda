@@ -1141,6 +1141,25 @@ def hard_block_hits(text: str) -> list[str]:
 _RHETORIC_TAIL = re.compile(r"^(이니(?!까)|이라느니|라느니|이라던|라던|이든지|이든)")
 
 
+_KR_DEC_UNIT = re.compile(r"(?<![\d.])(\d{1,4})\.(\d)(\d*)\s*(만|억)")
+
+
+def natural_kr_number(text: str) -> str:
+    """'5.7만km' → '5만 7천km' — 한국어에 없는 소수점+만/억 표기를 자연 표기로(2026-08-02 사장님 지적).
+
+    왜: 한국어는 만·억을 소수로 쪼개 말하지 않는다. '5.7만'은 중국어·일본어식 표기이고,
+    손님이 검색창에 치지도, 읽고 자연스럽지도 않다. 실측: 제목 '5.7만km 흰색 SUV'.
+    프롬프트로 부탁하는 대신 기계로 고친다 — 부탁은 확률이고 이건 규칙이다.
+    언어 규칙만(업종·지명 무관). 소수점 뒤 둘째 자리부터는 버린다(천 단위까지가 자연스럽다).
+    """
+    def _r(m):
+        a, b, _rest, unit = m.group(1), m.group(2), m.group(3), m.group(4)
+        if b == "0":
+            return f"{a}{unit}"
+        return f"{a}만 {b}천" if unit == "만" else f"{a}억 {b}천만"
+    return _KR_DEC_UNIT.sub(_r, text or "")
+
+
 def _money_nums(s: str) -> set:
     """텍스트에서 '금액·%·수치+단위'를 정규화 추출(콤마·공백 제거). 날조 탐지용(PHASE 7).
     ★ 오탐 2종 차단(2026-08-01 실측):
@@ -1402,6 +1421,12 @@ def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> d
         if _intro and not re.search(_PREVIEW, _intro):
             warnings.append("도입에 '끝까지 읽을 이유' 예고 없음 → 초반 이탈 위험(v2 도입 훅 3요소)")
             score -= 6
+        # 🔢 비한국어 수 표기(2026-08-02) — 기계 교정이 있지만, 새는 경로가 생기면 눈에 보여야 한다
+        _dec = _KR_DEC_UNIT.findall(title + " " + text)
+        if _dec:
+            _sample = f"{_dec[0][0]}.{_dec[0][1]}{_dec[0][3]}"
+            warnings.append(f"한국어에 없는 수 표기('{_sample}') → '5만 7천' 식으로")
+            score -= 5
         # 입력 원문 노출(생성품질 E2E #2): '썬팅,광택' 같은 쉼표 나열형이 제목/첫문단에 그대로 박히면 감점
         if re.search(r"[가-힣A-Za-z]{2,},[가-힣A-Za-z]{2,}", title + " " + text[:150]):
             warnings.append("쉼표 나열형 입력이 원문 그대로 노출 — 자연어로 풀어 쓰기('썬팅과 광택')")

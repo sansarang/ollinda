@@ -554,10 +554,11 @@ class BlogDraftGenerator(Generator):
         return ContentPiece(
             id=str(uuid.uuid4()), tenant_id=tenant.id, asset_id=asset.id,
             channel=Channel.NAVER_BLOG, kind=self.kind,
-            payload={"title": title,
-                     "title_options": title_cands,
+            payload={"title": seo.natural_kr_number(title),
+                     "title_options": [seo.natural_kr_number(t) for t in (title_cands or [])],
                      "meta_description": d.get("메타설명", ""),
-                     "body": body, "photo_markers": markers,
+                     # 🔢 '5.7만km' 류 비한국어 표기 교정(2026-08-02 사장님 지적) — 표면 단일 규칙
+                     "body": seo.natural_kr_number(body), "photo_markers": markers,
                      "recommended_image_placement": d.get("이미지배치", ""),
                      "tags": tags, "seo_keywords": tags, "target_keywords": kws,
                      "keyword_density": kdens,
