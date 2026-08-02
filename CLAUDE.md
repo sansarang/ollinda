@@ -90,6 +90,7 @@ payload에 남겨 진단으로 읽히게 한다.
 - 구조 변경 시 → `@docs/architecture.md` (단일 관문·워커 계약·저장 계약)
 - 같은 실수 반복 방지 → `@docs/lessons.md` (사건 계보: 원인과 교훈)
 - 조사 절차 → `@docs/research-protocol.md`
+- 수정을 박제할 때 → `@docs/golden-debt.md` (부채 표·박제 기준·미박제 사유)
 - 현행 전체 구조(as-is) → `@ARCHITECTURE.md` (2026-07-11 기준 — 배포처·테스트 항목은 낡음)
 
 ---
