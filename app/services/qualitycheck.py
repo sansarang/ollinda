@@ -141,7 +141,7 @@ POLISH_TARGET = 88
 GATE_BUDGET_SEC = int(os.environ.get("SHOPCAST_GATE_BUDGET", "300"))
 
 
-_EMOJI_RE = re.compile("[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F900-\U0001F9FF❤️]")
+from app.seo import _EMOJI_RE          # ★ 판정 단일 소스 — 채점기와 같은 목록으로 지운다
 
 
 def _trim_emoji(body: str, keep: int = 1) -> str:
