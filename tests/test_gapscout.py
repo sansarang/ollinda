@@ -219,11 +219,61 @@ def test_answer_rejects_garbage():
     assert gs.answer(tid, "유리막코팅", "maybe")["ok"] is False
 
 
-# ── C. 1단계는 읽기 전용이다 ─────────────────────────────────────
-def test_stage1_is_read_only():
-    """C. 1단계는 판정만 한다. 분류가 맞는지 사람이 먼저 보고 판단해야 하기 때문이다 —
-    틀린 분류가 큐에 들어가면 쓸 수 없는 글감이 쌓인다."""
+# ── C. 판정과 적재는 분리돼 있다 ─────────────────────────────────
+def test_judging_never_writes():
+    """C1. 판정(scan/classify)은 절대 글감을 만들지 않는다. 적재는 feed() 하나뿐이다 —
+    판정이 곧 적재면 틀린 분류가 그대로 큐에 쌓인다."""
+    import inspect
+    for fn in (gs.scan, gs.classify, gs.owner_domain, gs._score):
+        src = inspect.getsource(fn)
+        for forbidden in ("enqueue", "writing_queue", "save_piece", "generate"):
+            assert forbidden not in src, f"{fn.__name__}이 글감/생성을 건드린다: {forbidden}"
+
+
+def test_feed_is_dry_by_default():
+    """C2. 기본은 미리보기다. 무엇이 들어갈지 먼저 보여주고 승인된 실행만 실제로 넣는다."""
+    import inspect
+    sig = inspect.signature(gs.feed)
+    assert sig.parameters["dry"].default is True, "기본이 실행이면 사고가 조용히 난다"
+
+
+def test_never_generates_by_itself():
+    """C3. 자동 발행 금지 — 큐에 넣는 것까지다. 생성·발행은 사장님이 누른다."""
     import inspect
     src = inspect.getsource(gs)
-    for forbidden in ("enqueue", "writing_queue", "refill", "save_piece", "generate"):
-        assert forbidden not in src, f"1단계가 글감/생성을 건드린다: {forbidden}"
+    # 발행 '조회'(list_blog_publishes)는 판정 재료다 — 금지는 발행 '실행'이다
+    for forbidden in ("generate_for", "consume(", "services import publish", "publish.publish"):
+        assert forbidden not in src, f"스스로 생성·발행한다: {forbidden}"
+
+
+# ── E. 적재 계약 ─────────────────────────────────────────────────
+def test_queue_source_sorts_after_all_existing():
+    """E1. 트랙 A 매물 글 우선순위 불변 — 큐는 source_type 알파벳순으로 소비된다.
+    빈자리는 '추정'이고 실유입·경쟁격차는 '실측'이다. 실측이 먼저 쓰여야 한다."""
+    existing = ["P1", "P2", "P3", "P4", "R1", "inflow"]
+    assert sorted(existing + [gs.QUEUE_SOURCE])[-1] == gs.QUEUE_SOURCE, \
+        f"빈자리 글감({gs.QUEUE_SOURCE})이 기존 소재보다 먼저 소비된다"
+
+
+def test_only_certain_domain_is_fed():
+    """E2. '확실'만 큐에 넣는다 — 인접은 편승(3단계), 미지는 확인 질문이다.
+    근거 없는 주제를 큐에 넣으면 사장님이 겪지도 않은 일을 쓰게 된다."""
+    import inspect
+    src = inspect.getsource(gs.feed)
+    assert 'domain="확실"' in src, "확실 외 분류가 큐에 들어갈 수 있다"
+    assert "score" in src and "> 0" in src, "0점(관문 미달) 키워드가 큐에 들어간다"
+
+
+def test_weekly_cap_protects_owner_material():
+    """E3. 주 N건 상한 — 빈자리 글감이 큐를 삼키면 사장님의 실제 소재가 밀린다."""
+    assert 1 <= gs.WEEKLY_CAP <= 3, f"상한이 비현실적이다({gs.WEEKLY_CAP})"
+    import inspect
+    src = inspect.getsource(gs.feed)
+    assert "WEEKLY_CAP" in src and "days=7" in src, "주간 상한이 실제로 적용되지 않는다"
+
+
+def test_feed_reports_what_is_missing():
+    """E4. 재료가 없으면 글이 안 된다 — 무엇이 더 필요한지 함께 돌려준다(조용한 실패 금지)."""
+    import inspect
+    src = inspect.getsource(gs.feed)
+    assert "materials" in src and "need" in src, "필요 재료를 알려주지 않는다"

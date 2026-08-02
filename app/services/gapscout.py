@@ -289,6 +289,110 @@ def _ensure_domain(c) -> None:
               "created_at TEXT, PRIMARY KEY(tenant_id, token))")
 
 
+# 글감 큐 적재(2단계). source_type은 정렬상 기존 전 소스(P1~P4·R1·inflow) 뒤에 온다 —
+#   빈자리는 '추정'이고 실유입·경쟁격차는 '실측'이다. 실측이 먼저 쓰인다.
+QUEUE_SOURCE = "vacant"
+WEEKLY_CAP = 2            # 주 N건 상한 — 빈자리가 큐를 삼키면 사장님의 실제 소재가 밀린다
+
+
+def _materials(tenant_id: str) -> dict:
+    """이 글을 쓰려면 무엇이 더 필요한가 — 사장님께 그대로 보여줄 말로 만든다."""
+    photos, exp = 0, 0
+    try:
+        from app.services.autoqueue import photo_pool
+        photos = len(photo_pool(db.get_tenant(tenant_id)) or [])
+    except Exception:
+        pass
+    try:
+        exp = len(db.list_owner_experience(tenant_id, limit=5) or [])
+    except Exception:
+        pass
+    need = []
+    if photos < 3:
+        need.append("사진")
+    if not exp:
+        need.append("경험 한 줄")
+    return {"photos": photos, "experience": exp,
+            "need": need, "ready": not need}
+
+
+def feed(tenant_id: str, limit: int = 3, dry: bool = True) -> dict:
+    """확실 영역의 빈자리를 글감 큐에 편입(2단계).
+
+    ★ '확실'만 넣는다. 인접은 편승(3단계), 미지는 확인 질문 — 여기서는 다루지 않는다.
+    ★ 주 N건 상한 — 빈자리 글감이 큐를 삼키면 사장님의 실제 소재(매물·시공)가 밀린다.
+    ★ dry=True가 기본이다. 무엇이 들어갈지 먼저 보여주고, 승인된 실행만 실제로 넣는다.
+    """
+    rows = [g for g in list_gaps(tenant_id, domain="확실", limit=50) if (g.get("score") or 0) > 0]
+    if not rows:
+        return {"ok": True, "added": 0, "items": [],
+                "note": "점수가 0보다 큰 '확실' 빈자리가 없습니다(검색량 관문·지면 조건 확인)"}
+    # 이미 큐에 있거나 이미 발행한 키워드는 뺀다(중복 글 방지 — 유사문서는 저품질이다)
+    have = set()
+    try:
+        for q in db.writing_queue_rows(tenant_id, limit=60) or []:
+            have.add(" ".join((q.get("target_keyword") or "").split()))
+        for p in db.list_blog_publishes(tenant_id, limit=40):
+            have.add(" ".join((p.get("target_kw") or "").split()))
+    except Exception:
+        pass
+    used = 0
+    try:                                              # 주간 상한 — 최근 7일 적재분
+        from datetime import timedelta as _td
+        since = (datetime.utcnow() - _td(days=7)).isoformat()
+        with db._conn() as c:
+            r = c.execute("SELECT COUNT(*) FROM writing_queue WHERE tenant_id=? AND source_type=? "
+                          "AND created_at>=?", (tenant_id, QUEUE_SOURCE, since)).fetchone()
+        used = int(r[0]) if r else 0
+    except Exception:
+        pass
+    room = max(0, WEEKLY_CAP - used)
+    if room <= 0:
+        return {"ok": True, "added": 0, "items": [],
+                "note": f"이번 주 빈자리 글감 상한({WEEKLY_CAP}건)을 이미 채웠습니다"}
+
+    mats = _materials(tenant_id)
+    out, added = [], 0
+    for g in rows:
+        if added >= min(limit, room):
+            break
+        kw = g["keyword"]
+        if kw in have:
+            continue
+        why = _why_line(g)
+        item = {"keyword": kw, "why": why, "track": "A(매물·시공)",
+                "angle": _angle(kw), "need": mats["need"], "score": g["score"]}
+        if not dry:
+            ok = db.enqueue_writing(tenant_id, QUEUE_SOURCE, kw, item["angle"],
+                                    f"빈자리 선점 — {why}", content_type="sell")
+            item["enqueued"] = bool(ok)
+            added += 1 if ok else 0
+        out.append(item)
+    return {"ok": True, "dry": dry, "added": added, "items": out,
+            "weekly_used": used, "weekly_cap": WEEKLY_CAP, "materials": mats}
+
+
+def _why_line(g: dict) -> str:
+    """왜 기회인지 한 줄 — 사장님이 읽고 판단하실 말로. 숫자는 실측값만."""
+    bits = [f"검색 {g.get('volume', 0):,}회"]
+    age = g.get("top_age_days")
+    if isinstance(age, int) and age > 0:
+        bits.append(f"상위 글 {age}일 전")
+    bits.append("첫 화면에 블로그 자리 있음")
+    bits.append("우리 글 없음")
+    return " · ".join(bits)
+
+
+def _angle(keyword: str) -> str:
+    """검색 의도에 맞는 글 각도 — 기존 판정기를 재사용한다(새 규칙 만들지 않음)."""
+    try:
+        from app.services import smartblock as _sb
+        a = _sb.angle_for(keyword)
+        return a if a in ("review", "howto", "price") else "review"
+    except Exception:
+        return "review"
+
+
 def answer(tenant_id: str, token: str, verdict: str, axis: str = "", source: str = "사장님 확인") -> dict:
     """사장님 확인 응답을 영역 프로필에 기록(2026-08-02).
 
