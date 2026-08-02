@@ -263,6 +263,21 @@ def test_gap_first_runs_inside_the_single_gateway():
     assert 0 < i < j, "지면 신호보다 먼저 적용되면 자리 없는 판을 밀 수 있다"
 
 
+def test_gap_applied_where_the_decision_actually_ends():
+    """F4. 실측(2026-08-02): 후보 재정렬은 '신차 썬팅'을 1위로 올렸는데 최종 키워드는
+    '부산 동구 썬팅,광택'이었다. select_target_keyword 안에서만 적용해서, '앵커 부재 →
+    제네릭 확정' 같은 다른 분기로 빠지면 통째로 무시됐다.
+    결정이 끝나는 자리에서 한 번 더 봐야 한다 — 한 군데만 고치면 다른 길로 샌다."""
+    import inspect
+    from app import seo
+    src = inspect.getsource(seo.resolve_target_keyword)
+    assert "_gap_first([kw0] + list(kws), tenant_id, note)" in src, "최종 결정부에 반영이 없다"
+    assert "빈자리 승격" in src, "승격 사실이 로그에 안 남는다"
+    # 반환 직전이어야 한다 — 뒤에 다른 결정이 오면 또 덮인다
+    i, j = src.find("_gap_first([kw0]"), src.rfind("return kw0, kws")
+    assert 0 < i < j, "반영 뒤에 또 다른 결정이 온다"
+
+
 # ── C. 판정과 적재는 분리돼 있다 ─────────────────────────────────
 def test_judging_never_writes():
     """C1. 판정(scan/classify)은 절대 글감을 만들지 않는다. 적재는 feed() 하나뿐이다 —

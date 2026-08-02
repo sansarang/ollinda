@@ -712,6 +712,19 @@ def resolve_target_keyword(industry: str, region: str, note: str, biz: str = "lo
             kws = list(dict.fromkeys(_keep + _rest))[:10]
         except Exception:
             pass
+    # 🕳 빈자리 최종 반영(2026-08-02 실측) — 앞의 select_target_keyword 안에서만 적용했더니
+    #   '앵커 부재 → 제네릭 확정' 같은 다른 분기로 빠질 때 통째로 무시됐다.
+    #   실측: 소나타 DN8 소재에서 후보 재정렬은 '신차 썬팅'을 1위로 올렸는데
+    #   최종 kw0는 '부산 동구 썬팅,광택'이었다. 결정이 끝나는 자리에서 한 번 더 본다.
+    #   조건은 그대로다 — 판정 '확실' + 점수>0 + 소재가 뒷받침(낱말 2개 이상). 지어내지 않는다.
+    try:
+        _gf = _gap_first([kw0] + list(kws), tenant_id, note)
+        if _gf and _gf[0] != kw0:
+            _slog.warning("[resolve-kw] 빈자리 승격: %r → %r", kw0, _gf[0])
+            kw0 = _gf[0]
+            kws = list(dict.fromkeys([kw0] + [k for k in kws if k != kw0]))[:10]
+    except Exception:
+        pass
     return kw0, kws
 
 
