@@ -1955,13 +1955,20 @@ def mark_writing(qid: int, status: str, piece_id: str = "", reason_append: str =
         pass
 
 
-def rollback_writing(qid: int, max_attempts: int = 2) -> None:
-    """생성 실패 롤백 — attempts+1, 상한 도달 시 skipped(재시도 폭주 금지)."""
+def rollback_writing(qid: int, max_attempts: int = 2, why: str = "") -> None:
+    """생성 실패 롤백 — attempts+1, 상한 도달 시 skipped(재시도 폭주 금지).
+
+    ★ why를 남긴다(2026-08-02 실사고): 실패하면 status만 pending으로 되돌아가고 사유가
+      어디에도 안 남았다. 화면에도 진단에도 안 보여서 왜 글이 안 나오는지 알 수 없었다.
+      조용한 실패 금지 — 실패는 진단으로 읽혀야 한다."""
     try:
         with _conn() as c:
             c.execute("UPDATE writing_queue SET attempts=attempts+1, "
                       "status=CASE WHEN attempts+1 >= ? THEN 'skipped' ELSE 'pending' END WHERE id=?",
                       (max_attempts, qid))
+            if why:
+                c.execute("UPDATE writing_queue SET reason=substr(COALESCE(reason,'') || ' | 실패: ' || ?, 1, 900) "
+                          "WHERE id=?", (why[:200], qid))
     except Exception:
         pass
 

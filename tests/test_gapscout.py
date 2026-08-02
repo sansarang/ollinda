@@ -319,6 +319,17 @@ def test_targeted_claim_does_not_change_normal_order():
     assert inspect.signature(_aq.consume).parameters["only_id"].default == 0
 
 
+def test_generation_failure_leaves_a_reason():
+    """E9. 생성이 실패하면 status만 pending으로 되돌아가고 사유가 어디에도 안 남았다(실사고).
+    화면에도 진단에도 안 보여서 왜 글이 안 나오는지 알 수 없다 — 조용한 실패 금지."""
+    import inspect
+    src = inspect.getsource(db.rollback_writing)
+    assert "why" in src and "실패:" in src, "실패 사유를 큐 행에 남기지 않는다"
+    from app.services import autoqueue as _aq
+    csrc = inspect.getsource(_aq.consume)
+    assert "why=repr(_e)" in csrc, "예외 내용을 버린다"
+
+
 def test_feed_reports_what_is_missing():
     """E4. 재료가 없으면 글이 안 된다 — 무엇이 더 필요한지 함께 돌려준다(조용한 실패 금지)."""
     import inspect

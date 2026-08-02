@@ -552,10 +552,10 @@ def consume(t, files: list | None = None, plan: str = "free", only_id: int = 0) 
             return {"ok": True, "made": 1, "keyword": kw, "source": q["source_type"],
                     "piece_id": p.id, "asset_id": asset.id, "gate": gate["score"],
                     "scheduled_date": p.payload["scheduled_date"]}
-        except Exception:
+        except Exception as _e:
             _log.exception("[autoqueue] 생성 실패 t=%s kw=%r", t.id, kw)
-            db.rollback_writing(q["id"])
-            return {"ok": False, "error": "generate_failed"}
+            db.rollback_writing(q["id"], why=repr(_e)[:200])
+            return {"ok": False, "error": "generate_failed", "why": repr(_e)[:300]}
     return {"ok": False, "empty": True}
 
 
