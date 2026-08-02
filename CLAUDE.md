@@ -64,7 +64,8 @@ payload에 남겨 진단으로 읽히게 한다.
 ## 5. 아키텍처 경계
 
 - 백그라운드는 `threading.Thread(daemon=True)` — 큐·재개 없음. **배포는 진행 중 작업을
-  죽인다**: `/admin/busy` 확인, 사용자가 작업 중이면 배포하지 않는다.
+  죽인다**: push는 `scripts/safe-push.sh`로만 한다(busy 자동 확인·fail-closed).
+  맨손 `git push` 금지 — 같은 사고를 3회 냈고 3회 다 규율로는 못 막았다.
 - 죽은 잡은 스스로 말하지 못한다 — 시간 기준 자동 해제를 반드시 둔다.
 - 스레드는 옛 스냅샷을 들고 있다 — 끝날 때 행 전체를 덮어쓰지 말고 바꾼 키만 병합한다.
 - `db.save_piece`는 INSERT OR REPLACE다. 삭제는 묘비로 막되, 묘비는 **실제로 지웠을

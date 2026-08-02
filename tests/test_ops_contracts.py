@@ -91,6 +91,29 @@ def test_deploy_gate_skips_demo_tenant():
     assert "_tenant_is_demo" in src[max(0, i - 900):i], "데모 예외가 빠짐"
 
 
+def test_safe_push_gate_exists_and_fails_closed():
+    """B4. 같은 사고를 세 번 냈다(07-24, 07-30, 08-02) — 세 번 다 '확인하겠다'는 규율은
+    있었고 세 번 다 확인하지 않았다. 규율이 세 번 실패했으면 장치가 필요하다.
+    ★ fail-closed: busy 확인 자체가 실패하면 push하지 않는다(모르는 상태 = 위험한 상태)."""
+    import pathlib
+    sh = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "safe-push.sh"
+    assert sh.exists(), "배포 전 게이트 스크립트가 없음"
+    assert os.access(sh, os.X_OK), "실행 권한이 없음(장치가 아니라 문서가 된다)"
+    body = sh.read_text()
+    assert "/admin/busy" in body, "busy를 확인하지 않음"
+    assert "curl -sf" in body and "exit 3" in body, "확인 실패 시 그대로 push하는 구조"
+    assert "SHOPCAST_FORCE_PUSH" in body, "사장님 승인 시 통과할 경로가 없다(장치가 일을 막는다)"
+    assert "git push" in body
+
+
+def test_busy_payload_has_fields_the_gate_reads():
+    """B5. 게이트가 읽는 필드가 사라지면 게이트는 조용히 '항상 통과'가 된다."""
+    from app import main as _m
+    src = inspect.getsource(_m)
+    for f in ('"busy": busy', '"ghosts": ghosts', '"safe_to_deploy"'):
+        assert f in src, f"busy 응답에서 {f} 누락 — 게이트가 눈이 먼다"
+
+
 # ── C. 영상 성공 판정 ─────────────────────────────────────────────
 def test_video_success_judged_per_requested_platform():
     """C. 네이버 영상이 실제로 만들어졌는데 '실패'로 기록되던 버그 —
