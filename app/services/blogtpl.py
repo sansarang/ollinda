@@ -38,8 +38,12 @@ def sequence_directive(biz_type: str) -> str:
 def fixed_info_block(tenant) -> str:
     """매장 고정정보 블록(글 마무리 자동 삽입) — PHASE 1 매장정보 재사용.
     지도는 텍스트 URL 대신 MAP_MARKER(발행 시 장소 컴포넌트로 교체 안내)."""
+    # ★ 이모지 0개(2026-08-02 사장님 지적) — 채점 상한은 블로그 본문 1개인데 이 템플릿이
+    #   혼자 2개(📍·⭐)를 넣어, 어떤 글도 이 감점을 피할 수 없었다. 실측: 루마 글 3편 연속 감점.
+    #   템플릿이 사장님 예산을 잡아먹으면 안 된다 — 꾸밈은 0으로 두고 1개는 본문 몫으로 남긴다.
+    #   기능(구분·안내)은 글머리 텍스트로 그대로 산다.
     name = getattr(tenant, "name", "") or ""
-    lines = ["📍 찾아오는 길 · 이용 안내"]
+    lines = ["찾아오는 길 · 이용 안내"]
     if (getattr(tenant, "address", "") or "").strip():
         lines.append(f"주소: {tenant.address.strip()}")
     if (getattr(tenant, "phone", "") or "").strip():
@@ -52,7 +56,7 @@ def fixed_info_block(tenant) -> str:
     lines.append(MAP_MARKER)
     lines.append("")
     if name:
-        lines.append(f"네이버에서 '{name}' 검색 → 플레이스에서 저장·리뷰·예약·전화 ⭐")
+        lines.append(f"네이버에서 '{name}' 검색 → 플레이스에서 저장·리뷰·예약·전화")
     return "\n".join(lines)
 
 
@@ -62,10 +66,10 @@ def seller_buy_block(tenant) -> str:
         from app.strategies import buy_block
         b = buy_block(tenant)
         if b:
-            return "🛒 구매 안내\n" + b
+            return "구매 안내\n" + b          # 이모지 0(위와 같은 이유 — 채점 예산은 본문 몫)
     except Exception:
         pass
-    parts = ["🛒 구매 안내"]
+    parts = ["구매 안내"]                      # 이모지 0(셀러 블록도 같은 규칙)
     if (getattr(tenant, "buy_url", "") or "").strip():
         parts.append(f"구매 링크: {tenant.buy_url.strip()}")
     if (getattr(tenant, "search_kw", "") or "").strip():

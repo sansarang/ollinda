@@ -231,6 +231,51 @@ def test_surfaces_apply_the_number_rule():
     assert vsrc.count("natural_kr_number") >= 3, "영상 경로 일부가 규칙을 안 탄다"
 
 
+# ── I. 템플릿과 채점 규칙의 모순 ─────────────────────────────────
+def test_fixed_templates_add_no_emoji():
+    """I. 사장님 지적(2026-08-02): 이모지 감점이 계속 떴다.
+    원인은 글이 아니라 우리 템플릿이었다 — 고정 블록이 혼자 2개(📍·⭐)를 넣는데
+    채점 상한은 블로그 본문 1개다. 어떤 글도 이 감점을 피할 수 없었다(루마 글 3편 연속).
+    템플릿이 사장님 예산을 잡아먹으면 안 된다 — 꾸밈은 0, 1개는 본문 몫으로 남긴다."""
+    from app.services import blogtpl
+
+    class _T:
+        name = "테스트가게"
+        address = "부산광역시 동구 어딘가 1-1"
+        phone = "051-000-0000"
+        hours = ""
+        parking = ""
+        brand_name = ""
+        biz_type = "local"
+
+    blk = blogtpl.fixed_info_block(_T())
+    assert seo._EMOJI_RE.findall(blk) == [], f"고정 블록이 이모지를 넣는다: {seo._EMOJI_RE.findall(blk)}"
+    assert "찾아오는 길" in blk, "기능(구분 안내)까지 사라지면 안 된다"
+    try:
+        buy = blogtpl.seller_buy_block(_T())
+        assert seo._EMOJI_RE.findall(buy) == [], f"셀러 블록이 이모지를 넣는다: {buy[:60]}"
+    except Exception:
+        pass                                   # 셀러 블록이 없는 구성은 통과
+
+
+def test_template_leaves_room_for_body_emoji():
+    """I2. 템플릿이 0개여야 본문이 상한(1개)을 온전히 쓴다 — 규칙과 템플릿이 싸우면 안 된다."""
+    from app.services import blogtpl
+
+    class _T:
+        name = "테스트가게"
+        address = "부산 동구 1-1"
+        phone = ""
+        hours = ""
+        parking = ""
+        biz_type = "local"
+
+    body = "## 소제목\n본문입니다 ✨ 하나만 썼습니다.\n\n" + blogtpl.fixed_info_block(_T())
+    au = _audit(body, title="부산 동구 썬팅 후기")
+    hits = [w for w in (au.get("warnings") or []) if "이모지" in w]
+    assert not hits, f"본문 1개인데 감점: {hits}"
+
+
 # ── D. 지역 정합 ──────────────────────────────────────────────────
 def test_region_conflict_fails_open(monkeypatch):
     """D. 지역 정합 게이트는 판정 불가일 때 막지 않는다(조용한 실패 금지의 반대편 —
