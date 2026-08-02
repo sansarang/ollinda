@@ -198,6 +198,61 @@ def test_cleanup_order_and_modifier_split():
         assert g and want in g[0], f"정상 묘사가 잘림: {g}"
 
 
+def test_selling_lines_replace_descriptions(monkeypatch):
+    """J. 자막은 '사진 설명'이 아니라 '파는 말'이어야 한다(2026-08-02 사장님 승인).
+    실측 자막: '파노라마 선루프', '블랙 그릴과 라디에이터 그릴 하이라이트, 스포크형' —
+    정확하지만 손님을 사게 만드는 말이 아니다. 사진 순서는 이미 고정돼 있으니
+    화면-자막 일치는 그대로 두고 말만 바꾼다."""
+    from app.generators import video as _v
+    from app import llm as _llm
+
+    drafts = ["파노라마 선루프", "후드 오픈 상태의 엔진룸", "실내 프론트 시트"]
+    descs = ["파노라마 선루프, 블랙", "후드 오픈 엔진룸", "실내 프론트 시트"]
+    monkeypatch.setattr(_llm, "call_task", lambda *a, **k: (
+        "1. 선루프까지 열어서 보여드립니다\n"
+        "2. 보닛 열어 엔진룸부터 확인하세요\n"
+        "3. 시트 상태는 앉아보시면 압니다\n"))
+    out = _v._selling_lines(descs, drafts, "무사고, 57,216km", "주안모터스", "부산 기장 중고차",
+                            gate=lambda _l: "")
+    assert out == ["선루프까지 열어서 보여드립니다", "보닛 열어 엔진룸부터 확인하세요",
+                   "시트 상태는 앉아보시면 압니다"], out
+
+
+def test_selling_lines_keep_draft_when_gate_fails(monkeypatch):
+    """J2. 걸린 줄만 되돌린다 — 한 줄 때문에 전체를 버리면 영상이 통째로 나빠진다."""
+    from app.generators import video as _v
+    from app import llm as _llm
+    drafts = ["파노라마 선루프", "엔진룸"]
+    monkeypatch.setattr(_llm, "call_task", lambda *a, **k: (
+        "1. 호구 잡히기 전에 보세요\n2. 보닛 열어 직접 확인하세요\n"))
+    out = _v._selling_lines(["a", "b"], drafts, "사실", "가게", "키워드",
+                            gate=lambda l: "겁주기" if "호구" in l else "")
+    assert out[0] == "파노라마 선루프", "게이트에 걸린 줄이 그대로 나감"
+    assert out[1] == "보닛 열어 직접 확인하세요", "멀쩡한 줄까지 버림"
+
+
+def test_selling_lines_fall_back_on_llm_failure(monkeypatch):
+    """J3. 호출이 실패하면 묘사 자막을 유지한다 — 영상이 사라지면 안 된다."""
+    from app.generators import video as _v
+    from app import llm as _llm
+    monkeypatch.setattr(_llm, "call_task",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
+    drafts = ["파노라마 선루프", "엔진룸"]
+    assert _v._selling_lines(["a", "b"], drafts, "사실", "가게", "키워드") == drafts
+
+
+def test_selling_lines_wired_into_naver_path():
+    """J4. 실제 경로에 붙어 있는가 — 사진 순서를 고정한 '뒤'에 말만 바꾼다(일치 유지)."""
+    import inspect
+    from app.generators import video as _v
+    src = inspect.getsource(_v.ShortVideoGenerator._naver_video)
+    i, j = src.find("_lines_for_photos("), src.find("_selling_lines(")
+    assert i > 0 and j > i, "일치 고정보다 먼저 말을 바꾸면 짝이 깨진다"
+    k = src.find("_cap_lines(_pairs_l[:9]")
+    assert k > j, "판매 문장 교체가 캡 뒤에 오면 길이 계약이 깨진다"
+    assert "desc_map=_desc_of" in src, "원본 묘사를 재료로 넘기지 않음"
+
+
 def test_fear_list_shared_with_body_scoring():
     """A-구조: 겁주기 목록은 본문 채점기와 같은 뿌리여야 한다.
     두 곳에 따로 두면 어긋난다 — 영상에서 고친 뒤 본문에서 같은 사고가 재발했다."""

@@ -967,7 +967,84 @@ def _apply_video_grammar(lines: list, imgs: list, orig_imgs: list, gen_source: s
         return imgs
 
 
-def _lines_for_photos(imgs: list, gen_source: str, cand_lines: list, gate=None) -> tuple:
+_re_sell = re.compile(r"^\s*(\d{1,2})\s*[.)]\s*(.+)$")
+
+
+def _selling_lines(descs: list, drafts: list, facts: str, shop: str, kw: str,
+                   gate=None) -> list:
+    """사진별 '파는 말' 한 줄씩(1콜, 2026-08-02 사장님 승인).
+
+    왜: 지금까지 자막 재료가 vision 묘사였다 — '파노라마 선루프', '오렌지색 고전압'.
+    정확하지만 손님을 사게 만드는 말이 아니다. 묘사를 아무리 다듬어도 묘사다.
+    화자는 가게(파는 쪽)여야 한다는 원칙, '30초 보고 구매 의사가 생겨야 한다'는 기준을
+    정제만으로는 만족할 수 없다.
+
+    어떻게: 사진 순서를 먼저 고정하고(=화면-자막 일치는 구조로 보장), 사진마다 '이 사진에 대해
+    할 말'을 쓰게 한다. 근거는 본문 사실과 그 사진 묘사뿐 — 없는 정보는 만들지 않는다.
+    한 줄이라도 게이트에 걸리면 그 줄만 원래 묘사로 되돌린다(전체를 버리지 않는다).
+
+    반환: drafts와 같은 길이의 리스트(실패 시 drafts 그대로 — 조용한 실패 없음, 사유는 로그).
+    """
+    import logging as _lg
+    log = _lg.getLogger("shopcast.video")
+    if not drafts:
+        return drafts
+    n = len(drafts)
+    from app import llm as _llm
+    _scenes = "\n".join(
+        f"{i + 1}. [사진] {(descs[i] if i < len(descs) else '')[:120]}"
+        f"\n   (지금 자막: {drafts[i][:60]})" for i in range(n))
+    prompt = (
+        f"너는 '{shop}' 사장 본인이다. 아래 사진 {n}장 각각에 대해, 손님에게 직접 하는 말을 "
+        "한 줄씩 써라. 영상 자막으로 쓴다.\n\n"
+        "[반드시 지킬 것]\n"
+        "1. 사진 번호 순서 그대로, 정확히 " + str(n) + "줄. 각 줄은 그 사진에 대한 말이어야 한다.\n"
+        "2. 완결된 한 문장. 끊긴 조각·명사 나열 금지('블랙 그릴과 라디에이터 하이라이트, 스포크형' 같은 카탈로그 나열 금지).\n"
+        "3. 한 줄 34자 이내(공백 포함). 넘으면 짧게 다시 써라.\n"
+        "4. 파는 사람의 말로. 손님이 '이건 봐야겠다'고 느끼게. 촬영 각도·배경·조명 이야기 금지.\n"
+        "5. 아래 [사실]과 사진 묘사에 있는 것만 써라. 없는 수치·가격·이력은 절대 지어내지 마라.\n"
+        "6. 겁주기('호구', '사기당', '모르면 손해') 금지. 과장·보장('최고', '완벽', '무조건') 금지.\n"
+        "7. 글을 가리키는 말('이 글', '본문에서') 금지 — 영상만 보는 사람에게는 앞뒤가 끊긴다.\n"
+        "8. 어미를 씬마다 바꿔라('~입니다' 연속 금지).\n"
+        f"9. 참고 키워드: {kw} (통째로 넣지 말 것)\n\n"
+        f"[사실]\n{(facts or '')[:2500]}\n\n[사진]\n{_scenes}\n\n"
+        f"출력: {n}줄, 각 줄 '번호. 문장' 형식. 설명·머리말 없이 줄만.")
+    try:
+        raw = _llm.call_task("spoken", prompt, max_tokens=700)
+    except Exception as e:
+        log.warning("[selling] 호출 실패 — 묘사 자막 유지: %r", repr(e)[:120])
+        return drafts
+    got = {}
+    for ln in (raw or "").splitlines():
+        m = _re_sell.match(ln.strip())
+        if not m:
+            continue
+        idx = int(m.group(1)) - 1
+        txt = m.group(2).strip().strip('"“”')
+        if 0 <= idx < n and txt:
+            got[idx] = txt
+    out, kept, swapped = [], 0, 0
+    for i, d in enumerate(drafts):
+        t = got.get(i, "")
+        bad = ""
+        if t:
+            bad = (gate(t) if gate else "") or ""
+            if len(t) > 40:
+                bad = bad or "길이 초과"
+        if t and not bad:
+            out.append(t)
+            swapped += 1
+        else:
+            out.append(d)                      # 그 줄만 되돌린다 — 전체를 버리지 않는다
+            kept += 1
+            if t and bad:
+                log.warning("[selling] %d번 반려(%s): %s", i + 1, bad, t[:40])
+    log.warning("[selling] %d/%d줄 판매 문장으로 교체(묘사 유지 %d)", swapped, n, kept)
+    return out
+
+
+def _lines_for_photos(imgs: list, gen_source: str, cand_lines: list, gate=None,
+                      desc_map: dict = None) -> tuple:
     """📺 화면-자막 일치 보장(2026-08-01 사장님 불변 원칙 ①) — 방향을 뒤집는다.
 
     기존: 자막을 먼저 만들고 사진을 맞춘다 → 지시어 없는 자막은 '남은 사진 아무거나'가 배정돼
@@ -976,6 +1053,7 @@ def _lines_for_photos(imgs: list, gen_source: str, cand_lines: list, gate=None) 
           없으면 묘사 자체를 짧게 다듬어 쓴다 — 어느 쪽이든 자막은 그 사진에 대한 말이 된다.
 
     gate(line) → 사유 문자열(통과 시 빈 값). 걸린 후보는 건너뛰고 다음 후보를 본다.
+    desc_map을 주면 {사진경로: 원본 묘사}로 채워준다(자막을 '파는 말'로 다시 쓸 때 재료로 쓴다).
     반환 (사진들, 자막들) — 길이 동일, 순서 대응. 묘사가 없으면 ([], [])로 호출부가 기존 경로 유지.
     업종·지명 하드코딩 0(대조 재료는 그 세트의 사진 묘사와 본문뿐)."""
     import re as _r
@@ -1139,6 +1217,8 @@ def _lines_for_photos(imgs: list, gen_source: str, cand_lines: list, gate=None) 
         if line:
             out_imgs.append(imgs[i])
             out_lines.append(line)
+            if desc_map is not None:               # 자막을 '파는 말'로 다시 쓸 때 쓰는 원본 묘사
+                desc_map[imgs[i]] = desc
     return out_imgs, out_lines
 
 
@@ -1904,10 +1984,18 @@ class ShortVideoGenerator(Generator):
                 return _subtitle_gate(SceneScript(hook="", sentences=[_ln], outro="",
                                                   source="body_excerpt", evidence=_fact_src),
                                       _fact_src, getattr(tenant, "name", "") or "") or ""
+            _desc_of: dict = {}
             _pairs_i, _pairs_l = _lines_for_photos(vid_imgs, pl.get("gen_source") or "",
-                                                   list(sent) + list(caps), gate=_fb_gate)
+                                                   list(sent) + list(caps), gate=_fb_gate,
+                                                   desc_map=_desc_of)
             if len(_pairs_l) >= 3:
                 _nlog.warning("[naver-video] 화면-자막 일치 재구성: %d씬(사진 기준)", len(_pairs_l))
+                # 🗣 사진별 '파는 말'로 바꾼다(2026-08-02 사장님 승인). 사진 순서는 이미 고정됐으므로
+                #   화면-자막 일치는 구조로 보장되고, 여기서는 '묘사 → 가게가 손님에게 하는 말'만 바꾼다.
+                #   실패하거나 게이트에 걸린 줄은 원래 묘사로 남는다(전체를 버리지 않는다).
+                _descs = [_desc_of.get(_ix, "") for _ix in _pairs_i[:9]]   # 사진별 원본 묘사
+                _pairs_l = _selling_lines(_descs, _pairs_l[:9], _fact_src,
+                                          getattr(tenant, "name", "") or "", kw_nat, gate=_fb_gate)
                 # ★ 분할이 일어나도 짝을 유지한다(2026-08-02 실측: 사진 9장인데 자막 12줄이 되어
                 #   뒤 3씬이 사진 없이 남았다). imgs를 함께 넘겨 조각마다 원본 사진을 물린다.
                 sent, vid_imgs = _cap_lines(_pairs_l[:9], imgs=_pairs_i[:9])
