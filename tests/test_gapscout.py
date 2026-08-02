@@ -308,6 +308,17 @@ def test_experience_page_shows_gap_questions():
     assert "gapbox" in src, "질문 상자가 조립되지 않는다"
 
 
+def test_targeted_claim_does_not_change_normal_order():
+    """E8. 특정 글감 지목(only_id)은 진단 경로 전용이다.
+    평소 소비는 순서를 따라야 한다 — 지목이 기본이 되면 우선순위 규칙이 무의미해진다."""
+    import inspect
+    src = inspect.getsource(db.claim_writing)
+    assert "only_id: int = 0" in src, "지목이 기본값이면 순서가 무너진다"
+    assert "ORDER BY source_type ASC, created_at ASC" in src, "순서 규칙이 사라짐"
+    from app.services import autoqueue as _aq
+    assert inspect.signature(_aq.consume).parameters["only_id"].default == 0
+
+
 def test_feed_reports_what_is_missing():
     """E4. 재료가 없으면 글이 안 된다 — 무엇이 더 필요한지 함께 돌려준다(조용한 실패 금지)."""
     import inspect

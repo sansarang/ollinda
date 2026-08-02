@@ -597,6 +597,26 @@ def admin_gap_scan(tenant_id: str = "", limit: int = 40, comp: int = 1):
     return JSONResponse(r)
 
 
+@app.post("/admin/queue-gen")
+def admin_queue_gen(tid: str = "", qid: int = 0):
+    """운영 진단 — 큐의 특정 글감(qid)으로 글을 뽑는다. 백그라운드 실행.
+    평소 소비 순서(P1→…)는 그대로다. 지목은 여기서만 한다(검증·실측용)."""
+    t = db.get_tenant(tid)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    from app.services import autoqueue as _aq
+    import threading as _th
+
+    def _bg():
+        try:
+            r = _aq.consume(t, plan="pro", only_id=qid)
+            logging.getLogger("shopcast.autoqueue").warning("[queue-gen] %s", r)
+        except Exception:
+            logging.getLogger("shopcast.autoqueue").exception("[queue-gen] 실패 qid=%s", qid)
+    _th.Thread(target=_bg, daemon=True).start()
+    return JSONResponse({"ok": True, "tenant": t.name, "qid": qid})
+
+
 @app.post("/admin/exp-add")
 async def admin_exp_add(request: Request):
     """운영 지원 — 사장님이 대화로 주신 실경험 답변을 대신 등록(2026-08-02).

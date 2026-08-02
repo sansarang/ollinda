@@ -1920,16 +1920,24 @@ def info_track_count_since(tenant_id: str, days: int = 7) -> int:
         return 0
 
 
-def claim_writing(tenant_id: str) -> Optional[dict]:
+def claim_writing(tenant_id: str, only_id: int = 0) -> Optional[dict]:
     """pending 1건을 P1→P2→P3→P4 순으로 원자적 클레임(status→generating).
-    UPDATE ... RETURNING(SQLite 3.35+) — 동시 요청에도 이중 소비 없음."""
+    UPDATE ... RETURNING(SQLite 3.35+) — 동시 요청에도 이중 소비 없음.
+
+    only_id를 주면 그 행만 클레임한다(운영 진단 — 특정 글감을 지목해 뽑아볼 때).
+    ★ 순서 규칙은 그대로다. 지목은 진단 경로에서만 쓰고, 평소 소비는 순서를 따른다."""
     try:
         with _conn() as c:
-            r = c.execute(
-                "UPDATE writing_queue SET status='generating' WHERE id=("
-                "  SELECT id FROM writing_queue WHERE tenant_id=? AND status='pending' "
-                "  ORDER BY source_type ASC, created_at ASC LIMIT 1) RETURNING *",
-                (tenant_id,)).fetchone()
+            if only_id:
+                r = c.execute(
+                    "UPDATE writing_queue SET status='generating' WHERE id=? AND tenant_id=? "
+                    "AND status='pending' RETURNING *", (only_id, tenant_id)).fetchone()
+            else:
+                r = c.execute(
+                    "UPDATE writing_queue SET status='generating' WHERE id=("
+                    "  SELECT id FROM writing_queue WHERE tenant_id=? AND status='pending' "
+                    "  ORDER BY source_type ASC, created_at ASC LIMIT 1) RETURNING *",
+                    (tenant_id,)).fetchone()
         return dict(r) if r else None
     except Exception:
         return None
