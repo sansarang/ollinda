@@ -65,6 +65,23 @@ def test_deploy_gate_ignores_ghost_jobs():
     assert "600" in rw or "10" in rw, "다시쓰기 유령 필터가 없음"
 
 
+def test_deploy_gate_ignores_stale_generation():
+    """B3. 생성 잡에는 유령 필터가 아예 없었다 — 2026-08-02 실측: 60%에서 991초 무갱신인데
+    status는 running으로 남아 safe_to_deploy가 영원히 false였다.
+    다시쓰기(10분)·영상(2시간)에는 있던 장치가 생성에만 빠져 있던 구멍."""
+    from app import main as _m
+    assert _m.GEN_STALE_SEC > 688, "기준이 실측 정상 소요 최대치보다 짧다(정상 생성을 죽인다)"
+    src = inspect.getsource(_m)
+    i = src.find('"type": "gen"')
+    assert i > 0
+    seg = src[max(0, i - 700):i + 700]
+    assert "GEN_STALE_SEC" in seg, "생성 잡 유령 필터가 없음(배포 영구 차단 재발)"
+    # 값이 없거나 깨진 시각은 '죽은 것'으로 본다 — 판정 불가로 배포가 막히면 안 된다
+    assert _m._job_age("") > 1e8
+    assert _m._job_age("깨진값") > 1e8
+    assert _m._job_age(__import__("datetime").datetime.utcnow().isoformat()) < 5
+
+
 def test_deploy_gate_skips_demo_tenant():
     """B2. 랜딩 데모는 티저가 진행률을 안 닫아 유령행이 남는다 — 배포를 막으면 안 된다."""
     from app import main as _m

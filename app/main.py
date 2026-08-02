@@ -456,6 +456,20 @@ async def admin_dwell_test(request: Request):
                          "body": fixed_body})
 
 
+GEN_STALE_SEC = int(os.environ.get("SHOPCAST_GEN_STALE", "900"))
+#   생성 잡 유령 판정 기준 — 실측 정상 소요 최대치(688초)의 약 1.3배. 단계마다 진행률을
+#   찍으므로 이만큼 무갱신이면 스레드가 죽은 것이다(2026-08-02 실사고).
+
+
+def _job_age(ts: str) -> float:
+    """기록 시각 이후 경과 초. 값이 없거나 깨졌으면 무한대(=죽은 것으로 본다)."""
+    from datetime import datetime as _d2
+    try:
+        return (_d2.utcnow() - _d2.fromisoformat(ts or "")).total_seconds()
+    except Exception:
+        return 1e9
+
+
 def _tenant_is_demo(tid: str) -> bool:
     """tenants.is_demo 직접 조회 — Tenant 모델에 is_demo 필드가 없어 getattr은 항상 0(실측 버그 2026-07-31)."""
     try:
@@ -901,6 +915,25 @@ def admin_users():
     return JSONResponse({"ok": True, "n": len(out), "users": out})
 
 
+@app.post("/admin/clear-gen-progress/{tenant_id}")
+def admin_clear_gen_progress(tenant_id: str):
+    """🧹 죽은 생성 잡 정리(운영 복구, 2026-08-02) — 스레드가 죽었는데 status가 running으로
+    남아 화면엔 '생성 중', 배포 게이트는 영구 차단되던 문제.
+    ★ 살아 있는 잡은 절대 건드리지 않는다 — 마지막 갱신 후 GEN_STALE_SEC 미만이면 거부한다."""
+    pr = db.get_gen_progress(tenant_id) or {}
+    if not pr:
+        return JSONResponse({"ok": False, "error": "진행 기록 없음"}, status_code=404)
+    age = _job_age(pr.get("updated_at"))
+    if pr.get("status") == "running" and age < GEN_STALE_SEC:
+        return JSONResponse({"ok": False, "error": f"아직 살아 있는 잡(마지막 갱신 {round(age)}초 전, "
+                                                   f"기준 {GEN_STALE_SEC}초) — 정리 거부"},
+                            status_code=409)
+    db.set_gen_progress(tenant_id, pr.get("stage") or "", status="failed",
+                        error=f"중단됨(마지막 갱신 {round(age)}초 전 — 운영자 정리)")
+    return JSONResponse({"ok": True, "tenant_id": tenant_id, "idle_sec": round(age),
+                         "was_stage": pr.get("stage")})
+
+
 @app.post("/admin/set/{asset_id}/clear-video-status")
 def admin_clear_video_status(asset_id: str):
     """🧹 낡은 영상 상태 정리(운영 복구) — 죽은 잡·지난 실패 기록이 화면에 '만드는 중'으로 남는 문제.
@@ -978,7 +1011,7 @@ def admin_busy():
     ①생성 진행률 running ②다시쓰기 running(10분 내) ③영상 잡 registered/running.
     busy=[]일 때만 배포. (실사고: 배포가 다시쓰기 스레드를 죽여 상태 고착+비용 낭비)"""
     from datetime import datetime as _d
-    busy = []
+    busy, ghosts = [], []
     seen_t = set()
     for s in db.list_sets(limit=40):
         tid, aid = s.get("tenant_id"), s.get("asset_id")
@@ -988,7 +1021,19 @@ def admin_busy():
                 continue                               # 랜딩 데모 tenant — 티저가 진행률을 안 닫아 유령행 남음(실측)
             pr = db.get_gen_progress(tid) or {}
             if pr.get("status") == "running":
-                busy.append({"type": "gen", "tenant": s.get("tenant"), "stage": pr.get("stage")})
+                # 유령 생성 잡 필터(2026-08-02 실측: 60%에서 991초 무갱신 — 스레드가 죽었는데
+                #   status는 running으로 남아 배포가 영구히 막혔다). 다시쓰기·영상 잡에는 이미
+                #   있던 장치가 생성에만 빠져 있었다. 기준은 '마지막 갱신 후 경과' — 단계마다
+                #   갱신을 찍으므로, 한 단계가 통째로 멈춘 것을 잡는다.
+                _stale = _job_age(pr.get("updated_at")) > GEN_STALE_SEC
+                busy.append({"type": "gen", "tenant": s.get("tenant"), "stage": pr.get("stage"),
+                             "idle_sec": round(_job_age(pr.get("updated_at"))),
+                             "stale": _stale})
+                if _stale:
+                    busy.pop()                       # 표시는 아래 ghosts로, 배포는 막지 않는다
+                    ghosts.append({"type": "gen", "tenant": s.get("tenant"),
+                                   "stage": pr.get("stage"),
+                                   "idle_sec": round(_job_age(pr.get("updated_at")))})
         if not aid:
             continue
         try:
@@ -1017,6 +1062,7 @@ def admin_busy():
                              "stage": vj.get("stage", "")})
     from app import llm as _llmb
     return JSONResponse({"ok": True, "busy": busy, "safe_to_deploy": not busy,
+                         "ghosts": ghosts,          # 죽은 것으로 판정 — 배포는 막지 않되 눈에는 보인다
                          "credit_out": _llmb.credit_out(),
                          "credit_provider": (_llmb.CREDIT_PROVIDER if _llmb.credit_out() else ""),
                          "ts": _d.utcnow().isoformat()})
