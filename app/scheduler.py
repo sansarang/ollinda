@@ -9,6 +9,12 @@ import logging
 import os
 
 _scheduler = None
+LAST_RUN: dict = {}          # 잡 id → 마지막 실행 시각(ISO) — 배선이 실제로 도는지 실증용
+
+
+def _mark(job_id: str) -> None:
+    from datetime import datetime
+    LAST_RUN[job_id] = datetime.utcnow().isoformat(timespec="seconds")
 
 
 def start() -> None:
@@ -50,6 +56,16 @@ def start() -> None:
                     id="fresh_index", replace_existing=True)   # 발행 후 24h 집중 색인 체크(2-3)
         sch.add_job(_rss_autosync, "cron", hour="*/2", minute=20,
                     id="rss_autosync", replace_existing=True)
+        # 🕳 빈자리 판정 갱신(2026-08-03) — 야간 정찰이 지면 지도를 채운 '뒤'에 돈다(새벽 4시 스캔 → 6시 판정).
+        #   판정만 한다. 글감 편입·카드 노출은 사장님 화면에서 사장님 판단으로.
+        sch.add_job(_gap_scan_all, "cron", hour=6, minute=10,
+                    id="gap_scan_daily", replace_existing=True)
+        # 🧹 디스크 정리(2026-08-03) — 원본은 R2에 영구 보존되고 로컬은 캐시다. 새벽에 오래된 미디어 정리.
+        sch.add_job(_disk_prune, "cron", hour=4, minute=40,
+                    id="disk_prune_daily", replace_existing=True)
+        # 📡 주 1회 자율 정찰 보고(CLAUDE.md 자율 리서치 원칙) — 노출 실측 변화 + 제안을 운영자에게.
+        sch.add_job(_autoscout_report, "cron", day_of_week="mon", hour=8, minute=30,
+                    id="autoscout_weekly", replace_existing=True)
         sch.start()
         # 배포/재시작 직후 1회 소급 동기화(완전 자동 A) — 버튼 없이 등록 블로그 새 글을 즉시 추적
         import threading as _th
@@ -181,8 +197,74 @@ def _rank_track() -> None:
         logging.exception("[scheduler] 슬롯 자동 채움 실패")
 
 
+def _gap_scan_all() -> None:
+    """🕳 전 가게 빈자리 판정 갱신 — 지면 지도가 채워진 뒤 판정만 한다(글감 편입 없음).
+    판정이 최신이어야 사장님이 사진 올릴 때 그 자리를 노릴 수 있다(seo._gap_first)."""
+    _mark("gap_scan_daily")
+    try:
+        from app import db
+        from app.services import gapscout
+        n = 0
+        for t in db.list_tenants() or []:
+            try:
+                r = gapscout.scan(t.id if hasattr(t, "id") else t.get("id"), limit=30)
+                n += len(r.get("gaps") or [])
+            except Exception:
+                continue
+        logging.info("[scheduler] 빈자리 판정 갱신 — 총 %d건", n)
+    except Exception:
+        logging.exception("[scheduler] 빈자리 판정 실패")
+
+
+def _disk_prune() -> None:
+    """🧹 오래된 미디어 정리 — 원본은 R2에 있고 로컬은 캐시다(설계). 실패는 로그로 남긴다."""
+    _mark("disk_prune_daily")
+    try:
+        from app import db, main as _m
+        freed = 0
+        for t in db.list_tenants() or []:
+            tid = t.id if hasattr(t, "id") else t.get("id")
+            try:
+                freed += _m._prune_old_media(tid, keep_recent=4)
+            except Exception:
+                continue
+        logging.info("[scheduler] 디스크 정리 — %d개 제거", freed)
+    except Exception:
+        logging.exception("[scheduler] 디스크 정리 실패")
+
+
+def _autoscout_report() -> None:
+    """📡 주 1회 자율 정찰 보고(CLAUDE.md 자율 리서치 원칙).
+    노출 실측 변화 + 빈자리 상위 + 열린 확인 카드를 운영자 공지로 남긴다.
+    ★ 보고일 뿐 아무것도 자동 실행하지 않는다."""
+    _mark("autoscout_weekly")
+    try:
+        from app import db
+        from app.services import exposure, gapscout
+        lines = []
+        for t in db.list_tenants() or []:
+            tid = t.id if hasattr(t, "id") else t.get("id")
+            nm = getattr(t, "name", "") or (t.get("name") if isinstance(t, dict) else "")
+            try:
+                ex = exposure.summary(tid) or {}
+                gaps = [g for g in gapscout.list_gaps(tid, domain="확실", limit=5)
+                        if (g.get("score") or 0) > 0]
+            except Exception:
+                continue
+            if not (ex or gaps):
+                continue
+            top = ", ".join(f"{g['keyword']}({g['volume']}회)" for g in gaps[:3]) or "없음"
+            lines.append(f"{nm} — 빈자리 상위: {top}")
+        if lines:
+            db.add_notice("", "autoscout", "주간 자율 정찰\n" + "\n".join(lines[:20]))
+        logging.info("[scheduler] 자율 정찰 보고 — %d개 가게", len(lines))
+    except Exception:
+        logging.exception("[scheduler] 자율 정찰 보고 실패")
+
+
 def _publish_reminder() -> None:
     """발행 공백 리마인더(상위노출 PHASE 2)."""
+    _mark("publish_reminder")
     try:
         from app.services import pubcal
         pubcal.remind_stale_tenants()
@@ -192,6 +274,7 @@ def _publish_reminder() -> None:
 
 def _weekly_blog_report() -> None:
     """주간 성과 리포트 — 블로그 연결 가게 전체(블로그등록 PHASE 4)."""
+    _mark("weekly_blog_report")
     try:
         from app.services import weekly_report
         weekly_report.send_all()
@@ -201,6 +284,7 @@ def _weekly_blog_report() -> None:
 
 def _daily_scan() -> None:
     """active 경쟁사 전체 자동 스캔(자동 benefit — 사용자 수동 한도와 무관)."""
+    _mark("competitor_daily")
     from app import db
     from app.services import competitor
     try:

@@ -652,6 +652,30 @@ def admin_gap_answer(tenant_id: str = "", token: str = "", verdict: str = "", ax
     return JSONResponse(_gs.answer(tenant_id, token, verdict, axis))
 
 
+@app.get("/admin/wiring")
+def admin_wiring():
+    """🔌 자율 운행 배선 실증(2026-08-03) — 무엇이 스케줄로 실제 도는가.
+    [주기 / 마지막 실행 / 다음 예정]을 그대로 보여준다. '돌 것이다'가 아니라 '돌고 있다'를 본다."""
+    from app import scheduler as _sc
+    out, running = [], bool(getattr(_sc, "_scheduler", None))
+    try:
+        for j in (_sc._scheduler.get_jobs() if running else []):
+            out.append({"id": j.id, "trigger": str(j.trigger),
+                        "next_run": (j.next_run_time.isoformat() if j.next_run_time else None),
+                        "last_run_utc": _sc.LAST_RUN.get(j.id)})
+    except Exception:
+        pass
+    try:
+        from app.services import gowatch_client as _gw
+        gowatch = _gw.configured()
+    except Exception:
+        gowatch = None
+    return JSONResponse({"ok": True, "scheduler_running": running, "jobs": out,
+                         "gowatch_configured": gowatch,
+                         "local_cron": ["nightly.py 04:00(지면 정찰)", "trackpub.py */30분(발행 추적)"],
+                         "note": "local_cron은 맥북에서 돈다 — 노트북이 꺼지면 지면 지도가 낡는다"})
+
+
 @app.get("/admin/kw-decide")
 def admin_kw_decide(tenant_id: str = "", note: str = ""):
     """운영 진단 — 이 소재로 키워드가 어떻게 정해지는지 단계별로 보여준다(2026-08-02).
