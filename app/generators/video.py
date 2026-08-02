@@ -573,21 +573,29 @@ def _script_gate(lines: list) -> str:
     return ""
 
 
-def _cap_lines(sentences: list, max_lines: int = 3, budget: float = 9.0) -> list:
+def _cap_lines(sentences: list, max_lines: int = 3, budget: float = 9.0, imgs: list = None):
     """씬당 3줄 초과 강제 분할(코드 강제) — 긴 문장을 절 경계로 나눠 각 조각이 3줄 이내가 되게.
-    분할 조각은 같은 사진을 쓰게 되므로(순서 보존) 사진 정합 유지. 강조 마킹 {} 균형 보존."""
+    강조 마킹 {} 균형 보존.
+
+    ★ imgs를 주면 (자막, 사진) 쌍을 함께 돌려준다(2026-08-02 실측 결함).
+      '분할 조각은 같은 사진을 쓴다'고 주석에 적혀 있었지만 실제로는 아무도 사진을 늘려주지
+      않았다 — 호출부가 imgs[:len(sent)]로 자르는 구조라, 9장으로 12줄이 나오면 뒤 3줄은
+      사진 없이 남았다(실측: 주안모터스 네이버 영상 12씬 vs 사진 9장).
+      화면-자막 일치는 사장님이 '절대 불변'이라 하신 원칙이다 — 분할이 그걸 깨면 안 된다."""
     import re as _r
     cap = max_lines * budget                          # 3줄 ≈ 가중치 30
     def _w(s):
         s = s.replace("{", "").replace("}", "")
         return sum(1.0 if ("가" <= c <= "힣" or "一" <= c <= "鿿") else 0.55 for c in s)
-    out = []
-    for s in sentences:
+    out, src = [], []                       # src[i] = 이 조각이 나온 원본 문장 번호
+    for _si, s in enumerate(sentences):
         s = (s or "").strip()
         if not s:
             continue
+        _n0 = len(out)
         if _w(s) <= cap:
             out.append(s)
+            src += [_si] * (len(out) - _n0)
             continue
         # 절 경계 분할(쉼표·강한 연결어미) 후 cap 이하로 재그룹
         parts = _r.split(r"(?<=[,，、])\s+|(?<=지만)\s+|(?<=는데)\s+|(?<=으며)\s+|(?<=니까)\s+|(?<=어서)\s+|(?<=해서)\s+|(?<=면서)\s+", s)
@@ -615,20 +623,25 @@ def _cap_lines(sentences: list, max_lines: int = 3, budget: float = 9.0) -> list
                 rest = " ".join(ws[len(acc.split(" ")):]).strip()
             if rest:
                 out.append(rest.strip(" ,"))
+        src += [_si] * (len(out) - _n0)          # 이 문장이 만든 조각 전부에 같은 사진을 물린다
     # 고립 말미 조각(예: '시운전해 보시고') 병합 — 앞 줄과 합쳐 어중간한 조각 방지(3줄 소폭 초과 허용)
-    merged = []
-    for s in out:
+    merged, msrc = [], []
+    for _k, s in enumerate(out):
         if merged and _w(s) < 8 and _w(merged[-1]) + _w(s) <= cap + 8:
             merged[-1] = (merged[-1].rstrip(" ,") + " " + s).strip()
         else:
             merged.append(s)
+            msrc.append(src[_k] if _k < len(src) else (msrc[-1] if msrc else 0))
     # 중괄호 균형 복구(분할로 한쪽만 남으면 제거)
     fixed = []
     for s in merged:
         if s.count("{") != s.count("}"):
             s = s.replace("{", "").replace("}", "")
         fixed.append(s)
-    return fixed
+    if imgs is None:
+        return fixed
+    _im = [imgs[i] if i < len(imgs) else (imgs[-1] if imgs else "") for i in msrc]
+    return fixed, _im
 
 
 def _seam_dedup(hook: str, sent: list, outro: str) -> list:
@@ -985,6 +998,15 @@ def _lines_for_photos(imgs: list, gen_source: str, cand_lines: list, gate=None) 
         규칙: ①내부 표기·라벨 제거 ②완결된 조각까지만(어절 경계 + 열린 인용 금지)
               ③조사·연결어미·관형형으로 끝나면 그 앞까지. 못 만들면 빈 문자열."""
         d = _r.sub(r"\[[^\]]{1,20}\]", " ", desc or "")            # [오버레이] 등 내부 표기
+        # ★ 촬영 메타 제거(2026-08-02 실측 결함) — '45도 앵글, 스튜디오 배경', '클로즈업 샷'은
+        #   사진을 설명하는 말이지 손님에게 파는 말이 아니다. 손님은 각도·배경을 사지 않는다.
+        #   화자는 가게(파는 쪽)여야 한다는 원칙에도 어긋난다. 언어 규칙만 — 업종 무관.
+        d = _r.sub(r"[^,，]*\b\d{1,3}\s?도\s?앵글[^,，]*", " ", d)
+        d = _r.sub(r"[^,，]*(앵글|구도|배경|샷|프레이밍|클로즈업|촬영|조명|화각|정면 ?컷|측면 ?컷)[^,，]*",
+                   " ", d)
+        d = _r.sub(r"^\s*[,，]+|[,，]\s*(?=[,，])", " ", d)          # 지우고 남은 쉼표 정리
+        # 숫자 사이 쉼표는 천 단위 구분자다 — 건드리면 '57,216km'가 '57, 216km'가 된다
+        d = _r.sub(r"(?<!\d)\s*[,，]\s*(?!\d)", ", ", d).strip(" ,")
         d = _r.sub(r"^\s*[*\-•]+\s*", "", d)                       # 불릿
         d = _r.sub(r"^\s*[가-힣A-Za-z/·]{2,12}\s*[:：]\s*", "", d)   # '피사체/차종:' 류 라벨
         d = _r.sub(r"\s*\([^)]*\)", " ", d)                        # 괄호 주석
@@ -1874,8 +1896,9 @@ class ShortVideoGenerator(Generator):
                                                    list(sent) + list(caps), gate=_fb_gate)
             if len(_pairs_l) >= 3:
                 _nlog.warning("[naver-video] 화면-자막 일치 재구성: %d씬(사진 기준)", len(_pairs_l))
-                sent = _cap_lines(_pairs_l[:9])
-                vid_imgs = _pairs_i[:len(sent)]
+                # ★ 분할이 일어나도 짝을 유지한다(2026-08-02 실측: 사진 9장인데 자막 12줄이 되어
+                #   뒤 3씬이 사진 없이 남았다). imgs를 함께 넘겨 조각마다 원본 사진을 물린다.
+                sent, vid_imgs = _cap_lines(_pairs_l[:9], imgs=_pairs_i[:9])
                 _photo_locked = True
         # 클로징 다양화 — 고정 템플릿 대신 글 CTA '사실' 기반 선택(본문에 근거 있는 패턴만, 없으면 현행 유지)
         if any(k in body for k in ("성능점검", "서류", "점검기록부")):
@@ -1885,7 +1908,13 @@ class ShortVideoGenerator(Generator):
         else:
             _cta_line = "자세한 내용은 본문에"                  # 공통형(현행)
         outro = f"{tenant.name} · {region_short}\n{_cta_line}"
-        sent = _cap_lines([_strip_labels(s) for s in sent])   # 서식 세척 + 3줄 초과 강제 분할(캡 후 최종 sent로 1회만 매칭)
+        # 서식 세척 + 3줄 초과 강제 분할(캡 후 최종 sent로 1회만 매칭).
+        #   ★ 사진이 잠긴 경로(_photo_locked)에서는 여기서도 짝을 유지해야 한다 — 안 그러면
+        #     위에서 맞춰둔 1:1이 이 한 줄에서 다시 깨진다.
+        if _photo_locked:
+            sent, vid_imgs = _cap_lines([_strip_labels(s) for s in sent], imgs=vid_imgs)
+        else:
+            sent = _cap_lines([_strip_labels(s) for s in sent])
         _gen_src2 = pl.get("gen_source") or ""
         if _gen_src2 and sent and not _photo_locked:
             _drops = []

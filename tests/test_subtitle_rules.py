@@ -128,6 +128,45 @@ def test_scene_pairs_are_recorded_for_verification():
     assert "naver_pairs" in inspect.getsource(_m), "진단에서 짝을 읽을 수 없음"
 
 
+def test_split_lines_keep_their_photo():
+    """G. 분할이 짝을 깨면 안 된다(2026-08-02 실측: 사진 9장인데 자막 12줄 → 뒤 3씬 사진 없음).
+    _cap_lines 주석은 '분할 조각은 같은 사진을 쓴다'고 적혀 있었지만, 사진을 늘려주는 코드가
+    어디에도 없었다. 주석이 약속하고 코드가 안 지킨 계약."""
+    from app.generators.video import _cap_lines
+    long_ = ("아주 긴 문장인데 쉼표로 나뉘고, 또 이어지며 계속되고, "
+             "더 길어져서 세 줄을 훌쩍 넘기게 만드는 문장입니다")
+    lines, imgs = _cap_lines(["짧은 줄", long_], imgs=["A.jpg", "B.jpg"])
+    assert len(lines) == len(imgs), f"자막 {len(lines)}줄 vs 사진 {len(imgs)}장"
+    assert all(i for i in imgs), f"사진 없는 씬이 있음: {imgs}"
+    assert imgs[0] == "A.jpg"
+    assert set(imgs[1:]) == {"B.jpg"}, f"분할 조각이 원본 사진을 안 물음: {imgs}"
+
+
+def test_naver_path_keeps_pairing_through_recap():
+    """G2. 네이버 경로는 캡을 두 번 탄다 — 두 번 다 짝을 유지해야 한다."""
+    import inspect
+    from app.generators import video as _v
+    src = inspect.getsource(_v.ShortVideoGenerator._naver_video)
+    assert "_cap_lines(_pairs_l[:9], imgs=_pairs_i[:9])" in src, "1차 캡에서 짝이 끊김"
+    assert "_cap_lines([_strip_labels(s) for s in sent], imgs=vid_imgs)" in src, "2차 캡에서 짝이 끊김"
+
+
+def test_camera_meta_is_not_a_subtitle():
+    """H. 자막은 사진을 설명하는 말이 아니라 파는 말이어야 한다(2026-08-02 실측).
+    실제로 구워진 자막: '흰색 투싼 전면 45도 앵글, 스튜디오 배경' — 손님은 각도·배경을 사지 않는다.
+    화자는 가게(파는 쪽)여야 한다는 원칙에도 어긋난다."""
+    from app.generators.video import _lines_for_photos
+    src = ("[사진1] 흰색 투싼 전면 45도 앵글, 스튜디오 배경\n"
+           "[사진2] 디지털 계기판 클러스터, 주행거리 57,216km 표시\n"
+           "[사진3] 후드 오픈 상태의 엔진룸, 클로즈업 샷\n")
+    gi, gl = _lines_for_photos(["p0", "p1", "p2"], src, [], gate=lambda _l: "")
+    for ln in gl:
+        for bad in ("앵글", "배경", "구도", "샷", "클로즈업", "조명", "화각"):
+            assert bad not in ln, f"촬영 메타가 자막에 남음: {ln}"
+    # 실제 정보(주행거리)는 살아야 한다 — 메타 제거가 사실까지 지우면 안 된다
+    assert any("57,216km" in ln for ln in gl), f"천 단위 쉼표가 깨졌거나 사실이 사라짐: {gl}"
+
+
 def test_fear_list_shared_with_body_scoring():
     """A-구조: 겁주기 목록은 본문 채점기와 같은 뿌리여야 한다.
     두 곳에 따로 두면 어긋난다 — 영상에서 고친 뒤 본문에서 같은 사고가 재발했다."""
