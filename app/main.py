@@ -652,6 +652,32 @@ def admin_gap_answer(tenant_id: str = "", token: str = "", verdict: str = "", ax
     return JSONResponse(_gs.answer(tenant_id, token, verdict, axis))
 
 
+@app.get("/admin/kw-decide")
+def admin_kw_decide(tenant_id: str = "", note: str = ""):
+    """운영 진단 — 이 소재로 키워드가 어떻게 정해지는지 단계별로 보여준다(2026-08-02).
+    빈자리 승격이 안 걸릴 때 어디서 끊겼는지 추측하지 않고 보기 위한 것."""
+    t = db.get_tenant(tenant_id)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    from app import seo as _s
+    from app.services import gapscout as _gs
+    from app.strategies import resolve_strategy as _rs
+    cands = _s.target_keywords(t.industry, t.region or "", note,
+                               axis=_rs(t).keyword_axis, brand=t.brand_name or "") or []
+    gaps = [g for g in _gs.list_gaps(tenant_id, domain="확실", limit=20) if (g.get("score") or 0) > 0]
+    after_gap = _s._gap_first(list(cands), tenant_id, note)
+    kw0, kws = _s.resolve_target_keyword(
+        industry=t.industry or "", region=t.region or "", note=note,
+        biz=(getattr(t, "biz_type", "local") or "local"), content_type="sell",
+        brand=t.brand_name or "", keyword_axis=_rs(t).keyword_axis,
+        tenant_id=tenant_id, prof_name=t.industry or "", verify_volume=False)
+    return JSONResponse({"ok": True, "candidates": cands[:8],
+                         "gaps_certain": [g["keyword"] for g in gaps],
+                         "after_gap_first": after_gap[:8],
+                         "gap_changed_order": after_gap[:1] != cands[:1],
+                         "final_kw0": kw0, "final_kws": (kws or [])[:5]})
+
+
 @app.get("/admin/gap-list")
 def admin_gap_list(tenant_id: str = "", domain: str = "", limit: int = 30):
     """저장된 빈자리 판정 결과 조회(재조회 없이 표만 다시 본다)."""
