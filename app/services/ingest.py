@@ -106,6 +106,24 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
             _lgr.getLogger("shopcast.ingest").error(
                 "[ingest] ⚠️ R2 미러 실패 %d/%d — 로컬 캐시 만료 시 소실 위험: %s",
                 len(_miss), len(paths), [os.path.basename(m) for m in _miss][:5])
+    # 🖼 파생본 즉시 생성(2026-08-03) — 화면은 원본을 열지 않는다.
+    #   ★ 가게마다 손으로 데우는 건 지금뿐이다. 가입자가 늘면 업로드 경로가 유일한 보장선이다.
+    #   실패해도 업로드는 진행한다(파생 실패 ≠ 업로드 실패) — 단 사유는 남긴다(조용한 실패 금지).
+    try:
+        from app.services import derived as _dv
+        _fail = []
+        for _p in paths:
+            _fn = os.path.basename(_p)
+            if not (_dv.make_thumb(tenant.id, _fn) and _dv.make_web(tenant.id, _fn)):
+                _fail.append(_fn)
+        if _fail:
+            import logging as _lgd
+            _lgd.getLogger("shopcast.ingest").error(
+                "[ingest] 파생본 생성 실패 %d/%d — 그 사진은 화면에서 원본을 로드한다: %s",
+                len(_fail), len(paths), _fail[:5])
+    except Exception:
+        import logging as _lgd2
+        _lgd2.getLogger("shopcast.ingest").exception("[ingest] 파생본 단계 실패(업로드는 계속)")
     # 대표 Asset(첫 장)에 메모 기록 — 나머지 장은 images로 전달
     asset = db.create_asset(tenant.id, AssetType.IMAGE, paths[0], note)
     # 🎯 진단→생성 연결(상위노출 PHASE 1): 타겟 키워드·앵글을 asset에 실어 생성기로 전달

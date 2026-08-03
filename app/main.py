@@ -745,6 +745,7 @@ def admin_thumb_audit(tid: str = "", warm: int = 0, limit: int = 500):
     if not db.get_tenant(tid):
         return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
     rows, hit, miss, made, failed = [], 0, 0, 0, 0
+    web_hit, web_need = 0, 0
     for s0 in db.list_sets(tenant_id=tid, limit=limit):
         aid = s0.get("asset_id") or ""
         imgs = []
@@ -754,19 +755,35 @@ def admin_thumb_audit(tid: str = "", warm: int = 0, limit: int = 500):
                     imgs.append(x)
         if not imgs:
             continue
-        fn = os.path.basename(imgs[0])                 # 화면이 실제로 요청하는 그 한 장
+        # 목록은 첫 장의 썸네일을, 상세('보기')는 전 장의 웹용을 요청한다 — 둘 다 본다.
+        fn = os.path.basename(imgs[0])
         ok = _dv.has_thumb(tid, fn)
         if not ok and warm:
             ok = _dv.make_thumb(tid, fn)
             made += 1 if ok else 0
             failed += 0 if ok else 1
+        _wn = [os.path.basename(x) for x in imgs]
+        _whit = sum(1 for f in _wn if _dv.has_web(tid, f))
+        if warm and _whit < len(_wn):
+            for f in _wn:
+                if not _dv.has_web(tid, f):
+                    if _dv.make_web(tid, f):
+                        made += 1
+                    else:
+                        failed += 1
+            _whit = sum(1 for f in _wn if _dv.has_web(tid, f))
         hit += 1 if ok else 0
         miss += 0 if ok else 1
-        rows.append({"asset": aid[:8], "file": fn, "thumb": ok})
+        web_hit += _whit
+        web_need += len(_wn)
+        rows.append({"asset": aid[:8], "file": fn, "thumb": ok,
+                     "web": f"{_whit}/{len(_wn)}"})
     return JSONResponse({"ok": True, "tid": tid, "sets": len(rows),
                          "thumb_hit": hit, "thumb_miss": miss,
+                         "web_hit": web_hit, "web_need": web_need,
                          "made": made, "failed": failed,
-                         "coverage": f"{(100*hit/len(rows)):.0f}%" if rows else "-",
+                         "list_coverage": f"{(100*hit/len(rows)):.0f}%" if rows else "-",
+                         "detail_coverage": f"{(100*web_hit/web_need):.0f}%" if web_need else "-",
                          "detail": rows[:12]})
 
 
@@ -7083,7 +7100,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
             if m:
                 i = int(m.group(1)) - 1
                 if 0 <= i < len(imgs) and imgs[i]:
-                    out.append(f"<img src='/dl/{asset_id}/{os.path.basename(imgs[i])}' class='my-3 rounded-xl w-full border border-slate-100'>")
+                    out.append(f"<img src='/web/{asset_id}/{os.path.basename(imgs[i])}' loading='lazy' class='my-3 rounded-xl w-full border border-slate-100'>")
             else:
                 for ln in (seg or "").split("\n"):
                     s = ln.strip()
@@ -7420,7 +7437,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
     all_btn = (f"<a href='/kit/{asset_id}/pack-all' class='block text-center {_BTN} py-4 rounded-2xl mb-5 font-extrabold'>"
                "5채널 전체 한 번에 받기 "
                "<span class='opacity-80 font-medium text-sm'>· 글+사진+영상 (채널별 폴더)</span></a>")
-    thumbs = "".join(f"<img src='/dl/{asset_id}/{os.path.basename(im)}' class='h-24 w-24 object-cover rounded-lg border border-slate-100'>"
+    thumbs = "".join(f"<img src='/web/{asset_id}/{os.path.basename(im)}' loading='lazy' class='h-24 w-24 object-cover rounded-lg border border-slate-100'>"
                      for im in imgs if im)
     photos_strip = (("<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-4 mb-4'>"
                      "<div class='font-bold text-sm mb-2'>📷 내가 올린 사진</div>"
@@ -7865,7 +7882,8 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
     _nv_playable = bool(_nv.get("path") and _media_exists(_nv["path"]))
     _fn_base = _seo_photo_name(tenant, blog)               # 이미지 SEO(5-1): 지역-업종-피사체
     photo_cells = "".join(
-        f"<div class='relative'><img src='/dl/{asset_id}/{os.path.basename(im)}' class='w-full aspect-square object-cover rounded-xl border border-slate-200'>"
+        # 화면은 웹용 파생본만(2026-08-03) — 원본은 아래 '저장'·ZIP에서만 내려간다
+        f"<div class='relative'><img src='/web/{asset_id}/{os.path.basename(im)}' loading='lazy' class='w-full aspect-square object-cover rounded-xl border border-slate-200'>"
         f"<div class='absolute top-2 left-2 w-7 h-7 rounded-full bg-black/75 text-white text-sm font-bold flex items-center justify-center'>{i+1}</div>"
         f"<a href='/dl/{asset_id}/{os.path.basename(im)}' download='{_fn_base}-{i+1:02d}.jpg' class='absolute bottom-2 right-2 bg-white/95 text-slate-700 text-xs font-bold px-2 py-1 rounded-lg shadow hover:bg-white'>⬇ 저장</a></div>"
         for i, im in enumerate(photos))
@@ -8140,6 +8158,23 @@ def kit_regen_naver(request: Request, asset_id: str):
     msg = ("ok=네이버 영상을 만드는 중이에요 — 1~2분 뒤 이 페이지에 자동으로 나타나요"
            if ok else "err=영상 다시 만들기에 실패했어요 — 잠시 후 다시 시도해 주세요")
     return RedirectResponse(f"/kit/{asset_id}/naver?{msg}", status_code=303)
+
+
+@app.get("/web/{asset_id}/{fname}")
+def web_media(request: Request, asset_id: str, fname: str):
+    """🖼 상세 화면용 파생본(2026-08-03) — '보기'가 원본 20장(약 93MB)을 로드하던 것을 끊는다.
+    원본은 다운로드·ZIP에서만 쓴다. 경로·생성은 services/derived.py 단일 함수."""
+    import re
+    u = auth.current_user(request)
+    pieces = _owned_pieces(u, asset_id) if u else None
+    if not pieces or not re.fullmatch(r"[A-Za-z0-9._-]+", fname):
+        return HTMLResponse(status_code=404)
+    from app.services import derived as _dv
+    tid = pieces[0].tenant_id
+    if not _dv.make_web(tid, fname):
+        return RedirectResponse(f"/dl/{asset_id}/{fname}", status_code=302)   # 실패 시 원본
+    return FileResponse(_dv.web_path(tid, fname), media_type="image/jpeg",
+                        headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/thumb/{asset_id}/{fname}")

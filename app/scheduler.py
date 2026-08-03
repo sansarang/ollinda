@@ -63,6 +63,10 @@ def start() -> None:
         # 🧹 디스크 정리(2026-08-03) — 원본은 R2에 영구 보존되고 로컬은 캐시다. 새벽에 오래된 미디어 정리.
         sch.add_job(_disk_prune, "cron", hour=4, minute=40,
                     id="disk_prune_daily", replace_existing=True)
+        # 🖼 파생본 데우기(2026-08-03) — 전 가게 자동. 가입자가 늘어도 손이 안 가야 한다.
+        #   업로드 경로가 1차 보장선이고, 이건 그물(이관·복원·과거분 누락을 메운다).
+        sch.add_job(_derive_warm, "cron", hour=5, minute=10,
+                    id="derive_warm_daily", replace_existing=True)
         # 📡 주 1회 자율 정찰 보고(CLAUDE.md 자율 리서치 원칙) — 노출 실측 변화 + 제안을 운영자에게.
         sch.add_job(_autoscout_report, "cron", day_of_week="mon", hour=8, minute=30,
                     id="autoscout_weekly", replace_existing=True)
@@ -214,6 +218,35 @@ def _gap_scan_all() -> None:
         logging.info("[scheduler] 빈자리 판정 갱신 — 총 %d건", n)
     except Exception:
         logging.exception("[scheduler] 빈자리 판정 실패")
+
+
+def _derive_warm() -> None:
+    """🖼 전 가게 파생본 데우기 — 누락분만 만든다(있으면 건너뛴다).
+    화면이 요청하는 그 경로 기준으로 채운다(services/derived.py 단일 함수)."""
+    _mark("derive_warm_daily")
+    try:
+        import os as _os
+        from app import db
+        from app.services import derived as _dv
+        made = fail = 0
+        for t in db.list_tenants() or []:
+            tid = t.id if hasattr(t, "id") else t.get("id")
+            for s0 in db.list_sets(tenant_id=tid, limit=200):
+                imgs = []
+                for p0 in db.get_set_pieces(s0.get("asset_id") or ""):
+                    for x in ((p0.payload or {}).get("image_paths") or []):
+                        if x and x not in imgs:
+                            imgs.append(x)
+                for x in imgs:
+                    fn = _os.path.basename(x)
+                    if _dv.has_thumb(tid, fn) and _dv.has_web(tid, fn):
+                        continue
+                    ok = _dv.make_thumb(tid, fn) and _dv.make_web(tid, fn)
+                    made += 1 if ok else 0
+                    fail += 0 if ok else 1
+        logging.info("[scheduler] 파생본 데우기 — 생성 %d 실패 %d", made, fail)
+    except Exception:
+        logging.exception("[scheduler] 파생본 데우기 실패")
 
 
 def _disk_prune() -> None:

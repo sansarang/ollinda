@@ -35,7 +35,7 @@ def test_thumb_route_caches_and_shrinks():
     assert "Cache-Control" in src, "브라우저 캐시를 안 준다"
     assert dv.THUMB_PX <= 480, f"썸네일이 너무 크다({dv.THUMB_PX}px)"
     dsrc = inspect.getsource(dv)
-    assert "thumbnail((THUMB_PX, THUMB_PX))" in dsrc, "축소하지 않는다"
+    assert "THUMB_PX, 72" in dsrc, "썸네일 규격으로 축소하지 않는다"
     assert "THUMB_DIR" in dsrc, "파생본 폴더 규칙이 없다"
     # 원본이 없어도 목록이 죽지 않아야 한다(폴백)
     assert "status_code=404" in src or "RedirectResponse" in src
@@ -47,12 +47,43 @@ def test_thumb_generation_restores_from_r2():
     그 세트만 계속 원본을 직접 로드해 느렸다. 없으면 복원하고 만든다."""
     import inspect
     from app.services import derived as dv
-    src = inspect.getsource(dv.make_thumb)
-    assert "_restore_media" in src, "R2 복원 없이 '원본 없음'으로 끝낸다"
-    i, j = src.find("_restore_media"), src.find("Image.open")
-    assert 0 < i < j, "복원이 생성보다 뒤에 있다"
-    # 복원도 실패하면 조용히 채우지 않고 False(침묵 폴백 금지)
-    assert "return False" in src
+    # 복원은 파생본 공통 준비 단계(_ensure_original)로 모았다 — 썸네일·웹용 둘 다 탄다
+    esrc = inspect.getsource(dv._ensure_original)
+    assert "_restore_media" in esrc, "R2 복원 없이 '원본 없음'으로 끝낸다"
+    rsrc = inspect.getsource(dv._resize)
+    i, j = rsrc.find("_ensure_original"), rsrc.find("Image.open")
+    assert 0 <= i < j, "복원이 생성보다 뒤에 있다"
+    assert "return False" in rsrc, "실패를 조용히 채운다"
+
+
+def test_detail_view_uses_web_derivative():
+    """B4. '보기'(상세)가 원본을 로드하면 실패한다 — 20장이면 약 93MB다(2026-08-03 체감 반려).
+    화면은 파생본만, 원본은 저장·ZIP에서만."""
+    from app.services import derived as dv
+    src = inspect.getsource(m)
+    assert "src='/dl/" not in src, "화면 어딘가가 아직 원본을 직접 로드한다"
+    assert "/web/{asset_id}/" in src, "상세가 웹용 파생본을 안 쓴다"
+    assert dv.WEB_PX <= 1600, f"웹용이 너무 크다({dv.WEB_PX}px)"
+    assert dv.web_path("T", "a.jpg").endswith(f"T/{dv.WEB_DIR}/a.jpg")
+
+
+def test_new_tenants_get_derivatives_automatically():
+    """B5. 가게마다 손으로 데우는 건 지금뿐이다 — 가입자가 늘면 자동 경로가 유일한 보장선이다.
+    ① 업로드 시점 생성(1차) ② 야간 전 가게 데우기(그물)."""
+    import inspect
+    from app.services import ingest as ing
+    src = inspect.getsource(ing.ingest_upload)
+    assert "make_thumb" in src and "make_web" in src, "업로드가 파생본을 안 만든다"
+    i, j = src.find("make_thumb"), src.find("create_asset")
+    assert 0 < i < j, "파생본 생성이 세트 생성보다 뒤에 있다"
+    assert "파생본 생성 실패" in src, "실패를 조용히 넘긴다"
+
+    from app import scheduler as sc
+    ssrc = inspect.getsource(sc.start)
+    assert 'id="derive_warm_daily"' in ssrc, "야간 데우기가 스케줄에 없다"
+    wsrc = inspect.getsource(sc._derive_warm)
+    assert "list_tenants()" in wsrc, "일부 가게만 돈다(신규 가입자 누락)"
+    assert "has_thumb" in wsrc and "has_web" in wsrc, "이미 있는 것도 다시 만든다"
 
 
 def test_thumb_path_rule_lives_in_one_place():
