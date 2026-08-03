@@ -9549,6 +9549,8 @@ def admin_tenant_photos(tid: str = "", check_r2: str = "1"):
                     pass
         _title = (blog.payload or {}).get("selected_title") or (blog.payload or {}).get("title") or ""
         rows.append({"asset_id": aid, "photos": len(imgs), "on_disk": on_disk, "in_r2": in_r2,
+                     # 성능 실측용 표본 1장(2026-08-03) — 원본 vs 썸네일 크기를 재려면 파일명이 필요하다
+                     "sample": os.path.basename(imgs[0]) if imgs else "",
                      "title": _title[:40]})
     rows.sort(key=lambda r: -r["photos"])
     return JSONResponse({"ok": True, "tid": tid, "sets": rows})
