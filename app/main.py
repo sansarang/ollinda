@@ -756,7 +756,15 @@ def admin_caption_preview(asset_id: str = "", regen: int = 0):
     _dg = []
     caps = _photo_captions(t, blog, n, _diag=_dg)
     _src = (blog.payload or {}).get("gen_source") or ""
-    return JSONResponse({"ok": True, "n": n,
+    # 사장님 화면·네이버에 올라가는 모습 그대로 — 본문 흐름에 사진 자리와 캡션을 끼운다
+    _body, _order, _c2 = _content_photo_layout(t, blog)
+    _seq = [(_c2 or caps)[i] if i < len(_c2 or caps) else "" for i in _order]
+    import re as _rb
+    _merged = _rb.sub(r"\[사진(\d+)\]",
+                      lambda m: (lambda k: f"\n  🖼 [사진{k + 1}]\n  💬 " +
+                                 ((_seq[k] if 0 <= k < len(_seq) else "") or "(캡션 없음)"))(
+                          int(m.group(1)) - 1), _body)
+    return JSONResponse({"ok": True, "n": n, "merged": _merged,
                          "descs": [{"i": i, "d": _pd.best_line(_src, i)} for i in range(1, n + 1)],
                          "anchors": seo.input_anchors(_src),
                          "rejects": _dg,
