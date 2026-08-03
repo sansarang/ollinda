@@ -78,3 +78,163 @@ def desc_map(gen_source: str, count: int) -> dict:
         if b:
             out[i] = b
     return out
+
+
+# ── 캡션 규격(2026-08-03 사장님 지시) ────────────────────────────
+#   원리 하나: **아는 건 실값으로 말하고, 모르는 건 말하지 않는다.**
+#   "ST1로 추정"은 둘 다 위반이었다 — 아는 것(세트 차종)을 안 쓰고, 모르는 것(추측)을 썼다.
+CAPTION_MAX = 60
+
+# 불확실 표현 — vision의 망설임이 손님 눈에 날것으로 나가면 안 된다(언어 규칙, 업종어 0)
+_GUESS_PAREN = re.compile(r"\(([^)]*?(추정|보이는|보이며|또는|인 ?듯|가능성|계열)[^)]*)\)")
+_GUESS_TAIL = re.compile(r"[가-힣A-Za-z0-9·\s]{1,14}(으)?로 ?추정(되[는던]|됨)?")
+_GUESS_OR = re.compile(r"\s*(또는|혹은)\s*[^,.]{1,20}")
+_GUESS_WORD = re.compile(r"(추정|로 보이는|인 ?듯|가능성|것으로 보임)")
+# 촬영 환경·소품 — 손님이 사는 것과 무관하다(시계 시각 사고와 같은 계열)
+_SCENE = re.compile(r"(배경|바닥|조명|반사|콘크리트|쇼룸|매장 ?내부|창밖|도로|건물|"
+                    r"손목시계|스마트워치|시계 ?착용|착용한 손|픽셀화|모자이크)")
+_LIST_NO = re.compile(r"^\s*\d{1,2}\s*[).]\s*")
+_PROP_PHRASE = re.compile(r"(손목시계|스마트워치|시계)\s*(\([^)]*\))?[^,]{0,16}?"
+                          r"(착용한|찬|착용)\s*(손이|손|사람이|사람)?")
+
+
+def to_caption(desc: str, anchors=(), shop: str = "") -> str:
+    """묘사 → 캡션. 1문장·핵심만·추측 0.
+
+    anchors: 세트 실값(차종·등급명 등, seo.input_anchors 유래). 실값이 있으면 추측 명칭 대신 쓴다.
+    반환이 빈 문자열이면 캡션을 만들지 못한 것이다 — 채우지 않는다(침묵 폴백 금지).
+    """
+    s = _LIST_NO.sub("", " ".join((desc or "").split()))
+    if not s:
+        return ""
+    had_guess_subject = bool(_GUESS_PAREN.search(s) or _GUESS_TAIL.search(s))
+    s = _GUESS_PAREN.sub(" ", s)                 # (현대 ST1로 추정) 통째 제거
+    s = _GUESS_TAIL.sub(" ", s)                  # '…로 추정' 제거
+    s = _GUESS_OR.sub(" ", s)                    # '또는 왁스' 같은 대안 나열 제거
+    # 촬영 소품 상투구 — vision이 거의 모든 사진에 붙이는 말이라 절 제거로는 안 걸린다.
+    #   '손목시계(카키색)를 착용한 손이' → '손이'. 소품 어휘일 뿐 업종 어휘가 아니다.
+    # 절 맨 앞이면 '손이'로 바꾸고(주어 유지), 중간이면 통째로 지운다(치환 잔재 방지)
+    def _prop(m):
+        return "손이" if m.start() == 0 or s[max(0, m.start() - 2):m.start()].strip() in ("", ",") else ""
+    s = _PROP_PHRASE.sub(_prop, s)
+    s = re.sub(r"손\s*\(\s*손이\s*\)", "손", s)
+    s = re.sub(r"(손에|손으로|손이)\s+[가-힣]{1,6}색?\s*(손이)", r"\1", s)
+    s = re.sub(r"손이\s*(손이|사람이|손으로)", "손이", s)
+    s = re.sub(r"\s{2,}", " ", s)
+    # 절 단위로 배경·소품 제거(첫 절은 피사체라 보존)
+    parts = [p.strip() for p in re.split(r"[,，]", s) if p.strip()]
+    kept = [p for p in parts if not _SCENE.search(p)] or parts[:1]
+    s = ", ".join(kept)
+    s = re.split(r"(?<=[.!?])\s+", s)[0]         # 1문장
+    s = _GUESS_WORD.sub(" ", s)
+    s = re.sub(r"\s{2,}", " ", s)
+    s = re.sub(r"\s+(의|을|를|로|으로|에|이|가)(\s|$)", r"\1\2", s)   # 괄호 제거로 뜬 조사만
+    s = re.sub(r"\(\s*\)", " ", s)
+    s = re.sub(r"\s{2,}", " ", s).strip(" ,·—-.")
+    if not s or len(s) < 6:
+        return ""
+    # 아는 건 실값으로 — vision이 피사체를 추측했다면 그 자리를 세트 실값이 대신한다
+    a = next((x for x in (anchors or []) if x and x not in s), "")
+    if a and had_guess_subject:
+        # 추측으로 부르던 자리에 실값을 앞세운다. 일반 명칭을 지우려면 업종 어휘 목록이
+        #   필요한데(차량·밴·세단…) 그건 업종 중립 위반이다 — 지우지 않고 실값을 앞에 둔다.
+        s = f"{a} {s}".strip()
+    if len(s) > CAPTION_MAX:                     # 절 경계에서 자른다(어중간한 절단 금지)
+        cut = s[:CAPTION_MAX]
+        j = max(cut.rfind(","), cut.rfind(" "))
+        s = (cut[:j] if j > 12 else cut).strip(" ,·—-")
+    return _finish(s)
+
+
+# 홀로 서지 못하는 꼬리 — 조사·연결어미·관형형으로 끝나면 그 어절까지 되감는다.
+#   (영상 자막에서 쓰던 규칙과 같은 언어 규칙 — 캡션에도 같은 기준을 적용한다)
+_TAIL_BAD = re.compile(r"(와|과|의|에|을|를|이|가|은|는|도|로|으로|랑|및|고|며|"
+                       r"면서|하며|으며|에서|까지|부터|처럼|보다|"
+                       r"[가-힣]{2,}(색|형|식|용|급|압)|관련|포함|기반|전용)$")
+
+
+def _finish(s: str) -> str:
+    """캡션이 그 자리에서 끝나도 말이 되게. 못 만들면 빈 문자열."""
+    t = (s or "").strip(" ,·—-.")
+    for _ in range(4):
+        if not t or " " not in t:
+            break
+        if not _TAIL_BAD.search(t.rsplit(" ", 1)[-1].rstrip(")")):
+            break
+        t = t.rsplit(" ", 1)[0].strip(" ,·—-")
+    if t.count("(") != t.count(")"):
+        t = re.sub(r"\([^)]*$", "", t).strip(" ,·—-")
+    return t if len(t) >= 8 else ""
+
+
+def caption_ok(text: str) -> str:
+    """캡션 게이트 — 통과면 빈 문자열, 아니면 사유. 게이트 없는 표면은 만들지 않는다(조항)."""
+    t = " ".join((text or "").split())
+    if not t:
+        return "빈 캡션"
+    if _GUESS_WORD.search(t) or _GUESS_TAIL.search(t):
+        return "추측 표현"
+    if _LIST_NO.match(t):
+        return "분석 넘버링"
+    if _SCENE.search(t):
+        return "촬영 환경·소품 서술"
+    if len(t) > CAPTION_MAX + 12:
+        return f"너무 김({len(t)}자)"
+    return ""
+
+
+def write_captions(descs: list, anchors=(), shop: str = "", kw: str = "") -> list:
+    """사진 묘사 → 캡션 N개를 한 번에 쓴다(1콜, 2026-08-03 사장님 승인 B안).
+
+    왜 깎지 않고 다시 쓰는가: 긴 관찰문에서 소품·추측·배경을 도려내면 문장 뼈대가 부서진다
+    ('군용 스타일 시계를 착용한 손이' → '군용 스타일'). 캡션은 깎아 만드는 게 아니라 쓰는 것이다.
+
+    원리(사장님 구술): **아는 건 실값으로 말하고, 모르는 건 말하지 않는다.**
+    반환은 descs와 같은 길이. 게이트를 통과 못 한 줄은 규격 깎기로, 그것도 안 되면 빈칸.
+    """
+    import logging
+    n = len(descs or [])
+    if not n:
+        return []
+    _fallback = [to_caption(d, anchors) for d in descs]
+    src = "\n".join(f"{i + 1}. {(d or '')[:160]}" for i, d in enumerate(descs))
+    known = ", ".join([x for x in (anchors or []) if x] + ([shop] if shop else [])) or "(없음)"
+    prompt = (
+        f"사진 {n}장의 관찰 기록을 보고, 각 사진에 붙일 **캡션**을 한 줄씩 써라.\n\n"
+        "[규격]\n"
+        f"1. 정확히 {n}줄. '번호. 캡션' 형식. 순서는 사진 번호 그대로.\n"
+        "2. 한 문장, 40~60자. 끝나도 말이 되는 완결 문장.\n"
+        "3. 담을 것: [무엇을] + [어디에] + [무슨 작업/상태]. 그것만.\n"
+        "4. 빼야 할 것: 배경·바닥·조명·반사·소품(손목시계 등)·촬영 각도. 손님과 무관하다.\n"
+        "5. 추측 금지: '추정·로 보이는·또는 ~인 듯·가능성' 같은 말을 쓰지 마라. "
+        "확실치 않은 세부(도구명·차종)는 상위어로 써라('시공 도구로', '차량 표면을').\n"
+        f"6. 아는 것은 실값으로: 이 세트의 실제 값은 [{known}]다. "
+        "관찰 기록이 대상을 추측해 부른 자리에는 이 실값을 써라. 실값에 없는 이름은 지어내지 마라.\n"
+        "7. 관찰 기록에 없는 내용을 만들지 마라. 판별 안 되는 사진은 확실한 부분만 쓴다.\n"
+        "8. 번호 매기기('1)')·제목·머리말 금지. 줄만 출력.\n\n"
+        f"[관찰 기록]\n{src}")
+    try:
+        from app import llm as _llm
+        raw = _llm.call_task("spoken", prompt, max_tokens=900)
+    except Exception as e:
+        logging.getLogger("shopcast.caption").warning("[caption] 일괄 작성 실패 — 규격 깎기로: %r",
+                                                      repr(e)[:100])
+        return _fallback
+    got = {}
+    for ln in (raw or "").splitlines():
+        m = re.match(r"^\s*(\d{1,2})\s*[.)]\s*(.+)$", ln.strip())
+        if m:
+            i = int(m.group(1)) - 1
+            if 0 <= i < n:
+                got[i] = m.group(2).strip().strip('"“”')
+    out, kept = [], 0
+    for i in range(n):
+        c = " ".join((got.get(i) or "").split())
+        if c and not caption_ok(c):
+            out.append(c)
+            continue
+        kept += 1
+        out.append(_fallback[i] if _fallback[i] and not caption_ok(_fallback[i]) else "")
+    logging.getLogger("shopcast.caption").info(
+        "[caption] 일괄 작성 %d/%d (규격 미달·폴백 %d)", n - kept, n, kept)
+    return out

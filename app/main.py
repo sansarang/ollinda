@@ -4837,39 +4837,37 @@ def _photo_captions(tenant, blog, n: int) -> list[str]:
     #   헤더('사진 분석 (썬팅 업종 관점)')·라벨('피사체/제품')·마크다운 잔해('**')인 경우가 있다.
     #   실측: 20장 중 8장이 그 헤더를 캡션으로 내보냈다. 영상 자막엔 있던 방어가 여기엔 없었다.
     from app.services import photodesc as _pdsc
+    # 🖊 캡션은 깎아 만들지 않고 '쓴다'(2026-08-03 사장님 승인 B안) — 세트당 1콜, payload에 캐시.
+    #   매 렌더마다 부르면 비용·지연이 난다. 사진 수가 그대로면 저장된 것을 그대로 쓴다.
+    _anchors = []
+    try:
+        _anchors = seo.input_anchors((blog.payload or {}).get("gen_source") or "")
+    except Exception:
+        pass
+    _cache = (blog.payload or {}).get("photo_captions") or {}
+    if isinstance(_cache, dict) and _cache.get("n") == n and len(_cache.get("caps") or []) == n:
+        _written = list(_cache["caps"])
+    else:
+        _descs = [_pdsc.best_line(srcnote, i) for i in range(1, n + 1)]
+        _written = _pdsc.write_captions(_descs, _anchors, _shop, kw)
+        try:
+            blog.payload["photo_captions"] = {"n": n, "caps": _written}
+            db.save_piece(blog)
+        except Exception:
+            pass
     for i in range(1, n + 1):
-        raw_line = _pdsc.best_line(srcnote, i)         # 후보 전체에서 '가장 묘사다운' 줄
-        desc = raw_line
-        if not desc:                                   # 묘사가 없으면 해당 사진 1장만 재분석 1회
-            try:
-                from app import vision as _vz
-                p_ = imgs_[i - 1] if i - 1 < len(imgs_) else ""
-                one = (_vz.analyze(p_, ind0) or "").strip() if (p_ and os.path.exists(p_)) else ""
-                # ★ 첫 줄이 아니라 '묘사인 줄' 중 가장 긴 것(첫 줄도 헤더일 수 있다 — 같은 사고)
-                _cands = [_pdsc.clean(l) for l in one.splitlines() if _pdsc.is_description(l)]
-                _d2 = max(_cands, key=len) if _cands else ""
-                if _d2:
-                    desc, raw_line, _patched = _d2, _d2, True
-                    srcnote += f"\n[사진{i}] {_d2}"
-            except Exception:
-                pass
+        raw_line = _pdsc.best_line(srcnote, i)         # 서류·번호판 검사용 원문
+        desc = _written[i - 1] if i - 1 < len(_written) else ""
         # 서류·개인정보 사진 — 민감정보 서술 금지 + 사진별 고유(인덱스). desc 비어도 원문 서류어로 판정.
         _is_doc = (any(k in (desc + " " + raw_line) for k in _doc_risk)
                    or bool(_r.search(r"\d{2,3}[가-힣]\s?\d{4}", raw_line + " " + desc)))
         if _is_doc:
-            # ★ '(N번)' 제거(2026-08-01 사장님 지적) — 사진을 글 흐름에 맞게 재배치하면 이 번호가
-            #   화면의 사진 번호와 어긋나 붙여넣을 때 헷갈린다(실측: 사진3인데 '(13번)').
-            #   중복 구분은 아래 중복 처리에서 키워드로 한다. 손님이 읽는 문장에 내부 번호는 없어야 한다.
             out.append(f"{ind0} 확인 서류 사진".strip() if ind0 else "확인 서류 사진")
-        elif len(desc) >= 4:
-            if kw and i == 1 and _shop:
-                out.append(f"{desc} — {kw}, {_shop}에서 직접 촬영했습니다.")
-            elif kw and i in kw_slots:
-                out.append(f"{desc} — {kw} 현장 사진입니다.")
-            else:
-                out.append(f"{desc}.")
-        else:                                          # PHASE 2: 분석 실패 → 빈칸(키워드 때움 템플릿 금지 — 오염 원천).
-            _fails.append(i)                            # UI가 '직접 적어주세요' 안내. 지어낸 캡션보다 빈칸(정직 게이트).
+        elif desc and not _pdsc.caption_ok(desc):
+            # 상호는 대표(첫) 사진 1장에만 — 전 장에 박으면 도배로 읽힌다
+            out.append(f"{desc} — {_shop}" if (i == 1 and _shop) else desc)
+        else:                                          # 침묵 폴백 금지 — 빈칸 + 안내
+            _fails.append(i)
             out.append("")
     # 중복 금지 — 동일 문구는 사진 번호 접미로 결정적 구분(빈 재생성 대신 확정 구분)
     _seen = {}

@@ -84,6 +84,59 @@ def test_duplicate_captions_resolved_by_real_alternates():
         "중복을 키워드로 채운다(침묵 폴백)"
 
 
+# ── 2차 교정(2026-08-03): 추측 노출 금지 + 간결화 + canonical 주입 ──
+def test_guess_expressions_are_gated():
+    """H. vision의 망설임이 손님 눈에 날것으로 나가면 안 된다 —
+    '현대 ST1로 추정', '기아 PV류로 보이는', '스크래퍼 또는 시공 도구'."""
+    for bad in ("현대 ST1로 추정되는 측면 모습", "기아 PV류로 보이는 박스형 전기밴",
+                "빨간색 도구인 듯한 물체", "코팅제일 가능성이 있는 액체"):
+        assert pd.caption_ok(bad), f"추측 표현이 통과: {bad}"
+
+
+def test_scene_props_are_gated():
+    """H2. 배경·바닥·조명·소품(손목시계)은 손님이 사는 것과 무관하다."""
+    for bad in ("손목시계를 착용한 손이 유리를 시공", "바닥은 무광 콘크리트이며 조명이 반사됨"):
+        assert pd.caption_ok(bad), f"촬영 환경이 통과: {bad}"
+
+
+def test_caption_length_and_numbering():
+    """H3. 캡션은 1문장·간결. 분석 넘버링('1)')은 캡션이 아니다."""
+    assert pd.caption_ok("1) 자동차 도장면을 손으로 만지며 작업하는 모습") == "분석 넘버링"
+    assert pd.caption_ok("가" * 200), "길이 상한이 없다"
+    assert pd.caption_ok("기아 PV5 앞유리 썬팅 시공 장면") == "", "정상 캡션을 막는다"
+
+
+def test_captions_are_written_not_carved():
+    """H4. 캡션은 깎아 만들지 않고 쓴다(사장님 승인 B안).
+    긴 관찰문에서 소품·추측을 도려내면 문장 뼈대가 부서진다
+    ('군용 스타일 시계를 착용한 손이' → '군용 스타일')."""
+    src = inspect.getsource(pd.write_captions)
+    assert "call_task" in src, "LLM으로 쓰지 않는다"
+    assert "40~60자" in src and "추측 금지" in src and "실값" in src, "규격 지시가 없다"
+    assert "caption_ok(c)" in src, "쓴 결과를 게이트에 안 태운다"
+    from app import main as m
+    msrc = inspect.getsource(m._photo_captions)
+    assert "write_captions" in msrc, "캡션 경로가 새 방식을 안 쓴다"
+    assert "photo_captions" in msrc and '"n": n' in msrc, "매 렌더마다 LLM을 부른다(캐시 없음)"
+
+
+def test_canonical_values_injected():
+    """H5. 아는 건 실값으로 — 세트 실값(차종·등급)을 캡션 입력에 준다.
+    'ST1로 추정'은 둘 다 위반이었다: 아는 걸 안 쓰고, 모르는 걸 썼다."""
+    from app import main as m
+    msrc = inspect.getsource(m._photo_captions)
+    assert "input_anchors" in msrc, "세트 실값을 캡션에 주입하지 않는다"
+    i, j = msrc.find("input_anchors"), msrc.find("write_captions")
+    assert 0 < i < j, "실값이 작성보다 뒤에 온다"
+
+
+def test_no_industry_vocab_in_caption_rules():
+    """H6. 규격·게이트는 전 업종 공통 — 차량 어휘를 코드에 박지 않는다."""
+    src = inspect.getsource(pd)
+    for w in ("차량", "밴", "전기차", "세단", "SUV", "트럭", "썬팅", "시공"):
+        assert f'"{w}"' not in src and f"'{w}'" not in src, f"업종 어휘 하드코딩: {w}"
+
+
 def test_constitution_has_silent_fallback_ban():
     """G. 조항이 헌법에 있어야 다음 세션이 안다."""
     import pathlib
