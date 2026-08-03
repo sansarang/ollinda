@@ -46,13 +46,16 @@ def _sentences(body: str) -> list[str]:
     return out
 
 
-def from_published(tenant_id: str, limit_posts: int = 20) -> list[dict]:
-    """① 과거 글에서 사장님이 이미 하신 말을 캔다."""
+def from_published(tenant_id: str, limit_posts: int = 20, _diag: dict = None) -> list[dict]:
+    """① 과거 글에서 사장님이 이미 하신 말을 캔다.
+    _diag를 주면 왜 0건인지(발행 행 수·본문 확보 수·문장 수) 남긴다 — 조용한 0 금지."""
     out, seen = [], set()
     try:
         rows = db.list_blog_publishes(tenant_id, limit=limit_posts) or []
     except Exception:
         return []
+    if _diag is not None:
+        _diag.update({"publishes": len(rows), "bodies": 0, "sentences": 0})
     for r in rows:
         pid = r.get("piece_id") or ""
         try:
@@ -61,7 +64,11 @@ def from_published(tenant_id: str, limit_posts: int = 20) -> list[dict]:
             p = None
         body = ((p.payload or {}).get("body") if p else "") or ""
         kw = (r.get("target_kw") or "").strip()
-        for s in _sentences(body):
+        _ss = _sentences(body)
+        if _diag is not None:
+            _diag["bodies"] += 1 if body else 0
+            _diag["sentences"] += len(_ss)
+        for s in _ss:
             if not _EXP_SIGN.search(s) or _GENERIC.search(s):
                 continue
             key = re.sub(r"\W+", "", s)[:40]
@@ -72,9 +79,19 @@ def from_published(tenant_id: str, limit_posts: int = 20) -> list[dict]:
     return out
 
 
+# 우리 시스템이 프롬프트에 쓰는 말 — 사진 묘사가 아니다(업종어가 아니라 내부 어휘라 목록이 맞다).
+_SYSWORD = {"사진", "키워드", "셀링포인트", "사장님", "추측", "미확인", "분석", "대상", "메뉴명",
+            "본문", "제목", "장면", "부분", "상태", "모습", "표시", "확인", "작업"}
+_JOSA_TAIL = re.compile(r"(을|를|이|가|은|는|의|에|에서|으로|로|와|과|도|만|까지|부터|처럼|보다)$")
+
+
 def from_vision(tenant_id: str, limit_sets: int = 12, min_repeat: int = 2) -> list[dict]:
     """② 사진 묘사에서 반복되는 것 = 이 가게가 실제로 하는 일.
-    한 번 나온 건 우연일 수 있다 — 여러 세트에서 반복될 때만 인정한다."""
+    한 번 나온 건 우연일 수 있다 — 여러 세트에서 반복될 때만 인정한다.
+
+    ★ 실측 교정(2026-08-03): gen_source에는 사진 묘사 말고 프롬프트 지시문도 섞여 있다.
+      전체를 훑었더니 '키워드·셀링포인트·사장님·추측이다' 같은 우리 시스템 어휘를 캤다.
+      → [사진N] 뒤의 묘사 줄만 읽고, 조사 붙은 어절과 내부 어휘는 뺀다."""
     freq: dict = {}
     try:
         sets = db.list_sets(tenant_id=tenant_id, limit=limit_sets) or []
@@ -86,13 +103,14 @@ def from_vision(tenant_id: str, limit_sets: int = 12, min_repeat: int = 2) -> li
             src = (p.payload or {}).get("gen_source") or ""
             if not src:
                 continue
-            for w in re.findall(r"[가-힣A-Za-z0-9]{3,}", src):
-                if len(w) >= 3:
-                    seen_here.add(w)
+            for m in re.finditer(r"\[사진\d+\]\s*([^\n]+)", src):     # 묘사 줄만
+                for w in re.findall(r"[가-힣A-Za-z0-9]{3,}", m.group(1)):
+                    w = _JOSA_TAIL.sub("", w)
+                    if len(w) >= 3 and w not in _SYSWORD:
+                        seen_here.add(w)
             break
         for w in seen_here:
             freq[w] = freq.get(w, 0) + 1
-    # 반복 상위만 — 이 가게 사진에 거듭 등장하는 말
     hot = [w for w, n in sorted(freq.items(), key=lambda x: -x[1]) if n >= min_repeat]
     return [{"kind": "fact", "text": w, "source": "사진 반복 판독", "topic": ""} for w in hot[:40]]
 
@@ -114,9 +132,9 @@ def from_reviews(tenant_id: str, limit: int = 20) -> list[dict]:
     return out
 
 
-def harvest(tenant_id: str) -> dict:
+def harvest(tenant_id: str, _diag: dict = None) -> dict:
     """전 수확처 통합. 반환 {owner:[], fact:[], review:[], covered:set-like list}."""
-    owner = from_published(tenant_id)
+    owner = from_published(tenant_id, _diag=_diag)
     fact = from_vision(tenant_id)
     review = from_reviews(tenant_id)
     covered = set()

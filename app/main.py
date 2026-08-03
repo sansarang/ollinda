@@ -659,8 +659,9 @@ def admin_harvest(tenant_id: str = "", topic: str = ""):
     if not db.get_tenant(tenant_id):
         return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
     from app.services import gapscout as _gs, harvest as _hv
-    h = _hv.harvest(tenant_id)
-    out = {"ok": True, "counts": h["counts"],
+    _dg: dict = {}
+    h = _hv.harvest(tenant_id, _diag=_dg)
+    out = {"ok": True, "counts": h["counts"], "why": _dg,
            "owner": [i["text"][:120] for i in h["owner"][:12]],
            "fact": [i["text"] for i in h["fact"][:15]],
            "review": [i["text"][:100] for i in h["review"][:5]]}
