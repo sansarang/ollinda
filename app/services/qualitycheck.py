@@ -201,6 +201,21 @@ def _save_gate_fields(blog, pl: dict) -> None:
         db.save_piece(blog)                    # 병합 실패 시에도 결과는 남긴다(기존 동작)
 
 
+# 본문 산문의 사진 번호 지칭 — 마커([사진N])는 제외하고 문장 안의 것만 잡는다.
+_PROSE_PHOTO_REF = re.compile(r"(?<!\[)사진\s*(\d+)(?!\])")
+
+
+def prose_photo_refs(body: str) -> list:
+    """본문 문장이 사진을 번호로 부르는 곳 — 있으면 결함이다.
+
+    ★ 2026-08-04 실물 사고: 본문 "사진13은 짙은 회색 도어 패널을…"의 자리에 다른 사진이 있었다(3건).
+      우리는 LLM의 마커 배치를 신뢰하지 않고 어절 겹침으로 다시 옮긴다(text_claude 실측 41%).
+      마커를 옮기는 이상 산문에 박힌 번호는 반드시 어긋난다 — 이건 확률이 아니라 구조다.
+      사진 설명은 캡션의 일이고 본문은 주제를 쓴다.
+    """
+    return [m.group(0) for m in _PROSE_PHOTO_REF.finditer(body or "")]
+
+
 def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
     """📮 발행 게이트 — ranking_audit<80이면 감점 사유를 피드백으로 자동 재작성(최대 2회,
     사실·마커·구조 보존). 그래도 미달이면 payload.publish_blocked_score 봉인 플래그(발행 버튼 숨김).
@@ -223,7 +238,16 @@ def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
     # 🧹 표면 수선 패스(2026-08-01 사장님 승인 — '한 번에 80점' 2겹): 값비싼 전체 재작성 전에
     #   ①기계 수선(이모지 초과 = regex, 0원) ②표면 감점만 고치는 소형 콜 1회.
     #   전부 업종·가게 무관 언어/구조 원리 — 하드코딩 0. 실패는 조용히(기존 루프 그대로 진행).
-    if isinstance(score, int) and score < POLISH_TARGET and _time.monotonic() < _deadline:
+    # 📷 본문 문장의 사진 번호 지칭 — 점수와 무관하게 결함이다(2026-08-04 실물 3건).
+    #   마커를 옮기는 구조에서 산문 번호는 반드시 어긋난다. 점수가 높아도 고쳐야 한다.
+    _pref = prose_photo_refs(pl.get("body") or "")
+    if _pref:
+        au.setdefault("warnings", []).append(
+            f"사진 지칭 — 본문 문장이 사진을 번호로 부른다({', '.join(_pref[:4])}). "
+            "마커는 내용에 맞게 다시 배치되므로 문장에 박힌 번호는 어긋난다. "
+            "번호를 빼고 '아래 사진'으로 쓰거나, 그 문장을 사진 설명이 아닌 주제 서술로 바꿔라.")
+    if (_pref or (isinstance(score, int) and score < POLISH_TARGET)) \
+            and _time.monotonic() < _deadline:
         try:
             _body0 = pl.get("body") or ""
             _fixed = _trim_emoji(_body0, keep=1)
@@ -233,7 +257,7 @@ def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
             #   이모지(기계), 문단 연속, 도입 훅, 그리고 82점대에서 흔한 '키워드 노출 부족'·'과장 표현'
             _sw = [w for w in (au.get("warnings") or [])
                    if any(t in w for t in ("클리셰", "도입", "동어반복", "문단 연속", "연속(시각요소",
-                                           "키워드", "과장", "이모지"))]
+                                           "키워드", "과장", "이모지", "사진 지칭"))]
             if _sw:
                 _sfx = _surface_fix(pl, _sw)
                 if _sfx:

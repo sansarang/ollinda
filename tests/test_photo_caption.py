@@ -282,3 +282,23 @@ def test_H16_배치는_서로가_쓴_말을_안다():
     u = {}
     pd._tally(["PV5 유리막코팅", "유리막코팅만"], "PV5, 유리막코팅", u)
     assert u == {"PV5": 1, "유리막코팅": 2}, u
+
+
+def test_H17_본문_문장은_사진을_번호로_부르지_않는다():
+    """실물 사고(2026-08-04): 본문 '사진13은 짙은 회색 도어 패널을…'의 자리에 다른 사진이 있었다(3건).
+    우리는 LLM의 마커 배치를 신뢰하지 않고 어절 겹침으로 다시 옮긴다(실측 41%) —
+    마커를 옮기는 이상 산문에 박힌 번호는 확률이 아니라 구조적으로 어긋난다."""
+    import inspect
+    from app.services import qualitycheck as qc
+    assert qc.prose_photo_refs("사진13은 도어 패널이고 [사진13] 사진 7이 하부다") == ["사진13", "사진 7"]
+    assert qc.prose_photo_refs("[사진1]\n[사진2] 마커만 있다") == [], "마커를 결함으로 잡는다"
+    # 게이트가 실제로 이 검사를 쓰는가 — '존재'가 아니라 '사용' 기준(조항)
+    gsrc = inspect.getsource(qc.score_gate)
+    assert "prose_photo_refs" in gsrc, "게이트가 검사를 안 쓴다"
+    assert "사진 지칭" in gsrc, "재작성 사유로 안 올린다"
+    # 점수가 높아도 고친다 — 점수 미달일 때만 돌면 결함이 남는다
+    assert "_pref or (isinstance(score, int) and score < POLISH_TARGET)" in gsrc, \
+        "점수 미달일 때만 수선하면 이 결함이 남는다"
+    # 생성 단계에서도 금지한다(고치는 것보다 안 만드는 게 낫다)
+    from app.generators import text_claude as tc
+    assert "[사진 지칭 금지]" in inspect.getsource(tc), "생성 프롬프트에 금지가 없다"
