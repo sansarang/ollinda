@@ -652,6 +652,24 @@ def admin_gap_answer(tenant_id: str = "", token: str = "", verdict: str = "", ax
     return JSONResponse(_gs.answer(tenant_id, token, verdict, axis))
 
 
+@app.get("/admin/harvest")
+def admin_harvest(tenant_id: str = "", topic: str = ""):
+    """🌾 경험 수확 실측(2026-08-03) — 묻기 전에 자사 기록에서 무엇을 캤는가.
+    topic을 주면 그 주제로 인라인 질문을 물을지(ask) / 왜 안 묻는지도 함께 본다."""
+    if not db.get_tenant(tenant_id):
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    from app.services import gapscout as _gs, harvest as _hv
+    h = _hv.harvest(tenant_id)
+    out = {"ok": True, "counts": h["counts"],
+           "owner": [i["text"][:120] for i in h["owner"][:12]],
+           "fact": [i["text"] for i in h["fact"][:15]],
+           "review": [i["text"][:100] for i in h["review"][:5]]}
+    if topic:
+        out["inline"] = _gs.inline_question(tenant_id, topic)
+        out["note_block"] = _hv.as_note_block(tenant_id, topic)[:600]
+    return JSONResponse(out)
+
+
 @app.get("/admin/wiring")
 def admin_wiring():
     """🔌 자율 운행 배선 실증(2026-08-03) — 무엇이 스케줄로 실제 도는가.
