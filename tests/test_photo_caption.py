@@ -147,3 +147,40 @@ def test_constitution_has_silent_fallback_ban():
     assert "게이트 없는 표면 신설은 커밋 불가" in txt
     assert "표면 하나 고치는 것은 수정이 아니라 다음 재발 예약이다" in txt
     assert "파서를 하나로 만든다" in txt
+
+
+def test_H7_끊긴_문장은_캡션이_아니다():
+    """실물 판정(2026-08-03): '…시공 도구를 대'가 게이트를 통과해 사장님 화면에 나갔다.
+    LLM 출력이 잘렸을 때 옛 규격 깎기 결과가 그대로 나간 것 — 게이트에 완결성이 없었다.
+    되돌리면(_CLOSED 제거) 이 테스트가 실패한다."""
+    from app.services import photodesc as pd
+    for bad in ["차량 유리에 손으로 시공 도구를 대",
+                "PV5 손이 분홍색 스펀지로 차량 도장면",     # '도장면'의 '장면' 오매치 방지
+                "같은 차종의 좌측 뒷면 화물칸",
+                "손에 스퀴지를 들고 차량 트림 부분을 세정"]:
+        assert pd.caption_ok(bad) == "끊긴 문장", f"끊긴 문장이 통과했다: {bad}"
+    for ok in ["차량 도어 표면을 시공 도구로 닦아내고 있다.",
+               "PV5 차량 도장면을 문지르며 광택 작업을 하는 모습",
+               "차량 유리에 썬팅 필름을 시공하는 중이다"]:
+        assert pd.caption_ok(ok) == "", f"정상 문장이 막혔다: {ok} → {pd.caption_ok(ok)}"
+
+
+def test_H8_개수는_요구가_아니라_구조로_보장한다():
+    """실물 판정: 20장을 한 콜로 요구했더니 13줄에서 출력이 잘렸다.
+    '정확히 N줄'이라고 적는 것으로는 못 막는다 — 배치로 쪼개고 모자란 번호만 다시 묻는다."""
+    import inspect
+    from app.services import photodesc as pd
+    assert pd.BATCH <= 10, "한 콜에 너무 많이 요구하면 출력이 잘린다"
+    src = inspect.getsource(pd.write_captions)
+    assert "if n > BATCH" in src, "배치 분할이 없다"
+    assert "다시" in src and "miss" in src, "누락분 재요청이 없다"
+    # 폴백도 게이트를 통과해야 나간다 — 못 쓰면 빈칸(침묵 폴백 금지)
+    assert "caption_ok(fb)" in src and "blanks" in src, "폴백이 게이트를 우회한다"
+
+
+def test_H9_빈칸은_조용히_넘어가지_않는다():
+    """빈칸은 허용된 결과지만 조용한 빈칸은 버그다 — 몇 번 사진이 왜 비었는지 로그에 남는다."""
+    import inspect
+    from app.services import photodesc as pd
+    src = inspect.getsource(pd.write_captions)
+    assert "_log.warning" in src and "빈칸" in src, "빈칸 사유가 로그에 안 남는다"

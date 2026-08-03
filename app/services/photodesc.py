@@ -84,6 +84,7 @@ def desc_map(gen_source: str, count: int) -> dict:
 #   원리 하나: **아는 건 실값으로 말하고, 모르는 건 말하지 않는다.**
 #   "ST1로 추정"은 둘 다 위반이었다 — 아는 것(세트 차종)을 안 쓰고, 모르는 것(추측)을 썼다.
 CAPTION_MAX = 60
+BATCH = 8                    # 한 콜에 쓰는 캡션 수 — 출력 잘림을 구조로 막는다
 
 # 불확실 표현 — vision의 망설임이 손님 눈에 날것으로 나가면 안 된다(언어 규칙, 업종어 0)
 _GUESS_PAREN = re.compile(r"\(([^)]*?(추정|보이는|보이며|또는|인 ?듯|가능성|계열)[^)]*)\)")
@@ -167,6 +168,14 @@ def _finish(s: str) -> str:
     return t if len(t) >= 8 else ""
 
 
+# 한국어 종결 — 서술어로 끝나야 문장이다(어미 규칙만, 업종 무관)
+#   ① 서술어 종결(…있다/…한다/…중이다) ② 명사 종결은 '모습/장면/전경'처럼 캡션이 되는 말만.
+#   ★ 어절 경계를 요구한다 — 안 그러면 '차량 도장면'의 '장면'이 매치돼 끊긴 문장이 통과한다.
+_CLOSED = re.compile(
+    r"(다|요|음|임|중|함|됨|짐)[.!?]?$|"
+    r"(?:^|\s)(모습|장면|전경|모습이다|현장)[.!?]?$")
+
+
 def caption_ok(text: str) -> str:
     """캡션 게이트 — 통과면 빈 문자열, 아니면 사유. 게이트 없는 표면은 만들지 않는다(조항)."""
     t = " ".join((text or "").split())
@@ -180,6 +189,12 @@ def caption_ok(text: str) -> str:
         return "촬영 환경·소품 서술"
     if len(t) > CAPTION_MAX + 12:
         return f"너무 김({len(t)}자)"
+    # ★ 완결성(2026-08-03 실물 판정): '차량 유리에 손으로 시공 도구를 대' 같은 잘린 문장이
+    #   게이트를 그냥 통과해 사장님 화면에 나갔다. 끝나도 말이 되는 문장만 캡션이다.
+    #   상호 꼬리(— 가게명)는 본문 뒤에 붙는 서명이라 떼고 본다.
+    b = re.sub(r"\s*[—-]\s*[^—-]{2,20}$", "", t).rstrip()
+    if not _CLOSED.search(b):
+        return "끊긴 문장"
     return ""
 
 
@@ -197,6 +212,14 @@ def write_captions(descs: list, anchors=(), shop: str = "", kw: str = "") -> lis
     if not n:
         return []
     _fallback = [to_caption(d, anchors) for d in descs]
+    # ★ 한 콜에 다 담지 않는다(2026-08-03 실물 판정: 20장 중 13줄에서 출력이 잘렸고
+    #   나머지 7장은 옛 규격 깎기의 끊긴 문장이 그대로 사장님 화면에 나갔다).
+    #   개수는 요구가 아니라 구조로 보장한다 — 배치로 쪼개고, 모자라면 그 번호만 다시 묻는다.
+    if n > BATCH:
+        out = []
+        for s0 in range(0, n, BATCH):
+            out += write_captions(descs[s0:s0 + BATCH], anchors, shop if s0 == 0 else "", kw)
+        return out
     src = "\n".join(f"{i + 1}. {(d or '')[:160]}" for i, d in enumerate(descs))
     known = ", ".join([x for x in (anchors or []) if x] + ([shop] if shop else [])) or "(없음)"
     prompt = (
@@ -216,28 +239,47 @@ def write_captions(descs: list, anchors=(), shop: str = "", kw: str = "") -> lis
         "7. 관찰 기록에 없는 내용을 만들지 마라. 판별 안 되는 사진은 확실한 부분만 쓴다.\n"
         "8. 번호 매기기('1)')·제목·머리말 금지. 줄만 출력.\n\n"
         f"[관찰 기록]\n{src}")
-    try:
+    _log = logging.getLogger("shopcast.caption")
+
+    def _ask(text: str) -> dict:
         from app import llm as _llm
-        raw = _llm.call_task("spoken", prompt, max_tokens=900)
+        raw = _llm.call_task("spoken", text, max_tokens=180 * n + 200)
+        got = {}
+        for ln in (raw or "").splitlines():
+            m = re.match(r"^\s*(\d{1,2})\s*[.)]\s*(.+)$", ln.strip())
+            if m:
+                i = int(m.group(1)) - 1
+                if 0 <= i < n:
+                    c = " ".join(m.group(2).strip().strip('"“”').split())
+                    if c and not caption_ok(c):
+                        got[i] = c
+        return got
+
+    try:
+        got = _ask(prompt)
     except Exception as e:
-        logging.getLogger("shopcast.caption").warning("[caption] 일괄 작성 실패 — 규격 깎기로: %r",
-                                                      repr(e)[:100])
-        return _fallback
-    got = {}
-    for ln in (raw or "").splitlines():
-        m = re.match(r"^\s*(\d{1,2})\s*[.)]\s*(.+)$", ln.strip())
-        if m:
-            i = int(m.group(1)) - 1
-            if 0 <= i < n:
-                got[i] = m.group(2).strip().strip('"“”')
-    out, kept = [], 0
+        _log.warning("[caption] 일괄 작성 실패 — 규격 깎기로: %r", repr(e)[:100])
+        got = {}
+    miss = [i for i in range(n) if i not in got]
+    if miss and got:                     # 모자란 번호만 다시 묻는다(폴백보다 재요청이 먼저다)
+        try:
+            got.update(_ask(prompt + "\n\n[다시] " + ", ".join(str(i + 1) for i in miss) +
+                            "번이 빠졌거나 규격 미달이다. 그 번호만 규격대로 다시 써라."))
+        except Exception as e:
+            _log.warning("[caption] 재요청 실패: %r", repr(e)[:80])
+    out, blanks = [], []
     for i in range(n):
-        c = " ".join((got.get(i) or "").split())
-        if c and not caption_ok(c):
-            out.append(c)
-            continue
-        kept += 1
-        out.append(_fallback[i] if _fallback[i] and not caption_ok(_fallback[i]) else "")
-    logging.getLogger("shopcast.caption").info(
-        "[caption] 일괄 작성 %d/%d (규격 미달·폴백 %d)", n - kept, n, kept)
+        c = got.get(i) or ""
+        if not c:
+            # ★ 침묵 폴백 금지: 규격 깎기 결과도 게이트를 통과해야 나간다.
+            #   못 쓰면 빈칸이다 — 잘린 문장을 내보내는 것보다 낫다.
+            fb = _fallback[i]
+            c = fb if (fb and not caption_ok(fb)) else ""
+            if not c:
+                blanks.append(i + 1)
+        out.append(c)
+    if blanks:
+        _log.warning("[caption] %d/%d 빈칸 — 사진 %s (관찰 기록이 캡션 규격을 못 채웠다)",
+                     len(blanks), n, blanks)
+    _log.info("[caption] 작성 %d/%d", n - len(blanks), n)
     return out
