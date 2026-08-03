@@ -184,3 +184,14 @@ def test_H9_빈칸은_조용히_넘어가지_않는다():
     from app.services import photodesc as pd
     src = inspect.getsource(pd.write_captions)
     assert "_log.warning" in src and "빈칸" in src, "빈칸 사유가 로그에 안 남는다"
+
+
+def test_H10_주관_수식어는_관찰이_아니다():
+    """실물 판정(2026-08-03): '정성껏 문지르는', '세심하게 작업하는'이 캡션에 나갔다.
+    사진에 찍히지 않는 말이다 — 관찰 기록에 없는 내용을 넣은 것이므로 규격 위반이다."""
+    from app.services import photodesc as pd
+    for bad in ["차량 도장면을 정성껏 문지르는 모습.",
+                "도어 손잡이에 도구를 대고 세심하게 작업하는 손이 보인다.",
+                "차량 표면을 꼼꼼히 닦아내고 있다."]:
+        assert pd.caption_ok(bad) == "주관 수식어", f"주관 수식어가 통과했다: {bad}"
+    assert pd.caption_ok("차량 도장면을 패드로 문지르는 모습.") == ""
