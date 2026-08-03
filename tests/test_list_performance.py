@@ -41,6 +41,20 @@ def test_thumb_route_caches_and_shrinks():
     assert "status_code=404" in src or "RedirectResponse" in src
 
 
+def test_thumb_generation_restores_from_r2():
+    """B3. 로컬은 캐시고 원본은 R2다 — 컨테이너 재시작이면 로컬만 빈다.
+    실측(2026-08-03): 디스크 0장·R2 17장인 세트에서 썸네일 생성이 실패했고,
+    그 세트만 계속 원본을 직접 로드해 느렸다. 없으면 복원하고 만든다."""
+    import inspect
+    from app.services import derived as dv
+    src = inspect.getsource(dv.make_thumb)
+    assert "_restore_media" in src, "R2 복원 없이 '원본 없음'으로 끝낸다"
+    i, j = src.find("_restore_media"), src.find("Image.open")
+    assert 0 < i < j, "복원이 생성보다 뒤에 있다"
+    # 복원도 실패하면 조용히 채우지 않고 False(침묵 폴백 금지)
+    assert "return False" in src
+
+
 def test_thumb_path_rule_lives_in_one_place():
     """B2. 생성 경로와 참조 경로는 같은 함수 하나를 쓴다(2026-08-03 조항).
     규칙이 두 곳에 살면 '만들었는데 화면은 못 찾는' 어긋남이 난다 — 이번 반려의 원인 계열."""

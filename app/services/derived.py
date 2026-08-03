@@ -43,7 +43,17 @@ def make_thumb(tenant_id: str, fname: str) -> bool:
         return True
     src = original_path(tenant_id, fname)
     if not os.path.exists(src):
-        return False
+        # ★ 로컬은 캐시고 원본은 R2다(설계). 컨테이너가 재시작하면 로컬만 빈다 —
+        #   실측(2026-08-03): 주안 세트 하나가 디스크 0장·R2 17장이라 썸네일 생성이 실패했다.
+        #   '원본 없음'으로 끝내면 그 세트만 영원히 원본을 직접 로드한다(느림 잔존).
+        try:
+            from app.services.ingest import _restore_media
+            if not _restore_media(tenant_id, [src]):
+                return False
+        except Exception:
+            return False
+        if not os.path.exists(src):
+            return False
     try:
         from PIL import Image
         os.makedirs(os.path.dirname(tp), exist_ok=True)
