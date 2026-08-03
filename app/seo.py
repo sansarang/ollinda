@@ -1515,6 +1515,14 @@ def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> d
         if _intro and not re.search(_PREVIEW, _intro):
             warnings.append("도입에 '끝까지 읽을 이유' 예고 없음 → 초반 이탈 위험(v2 도입 훅 3요소)")
             score -= 6
+        # 📷 사진에 우연히 담긴 것(2026-08-03 사장님 지적) — 시계에 찍힌 시각, 배경 사물은
+        #   손님이 사는 것과 무관하다. 사진 분석에 나왔다고 글감으로 쓰면 글이 산만해진다.
+        #   실측 문장: "시계에 10시 21분이 찍혀 있는데, 이 검수·광택 단계에만 공을 들였습니다".
+        #   ※ 소요시간('10분이면 끝납니다')·영업시간은 정보다 — 시계·화면을 가리키는 서술만 잡는다.
+        if re.search(r"(시계|시각|화면)[^.\n]{0,24}\d{1,2}\s*[시:]\s*\d{1,2}\s*분?", text) \
+                or re.search(r"\d{1,2}시\s?\d{1,2}분[^.\n]{0,12}(찍혀|표시|보이)", text):
+            warnings.append("사진에 찍힌 시각을 본문에 서술 — 손님과 무관한 촬영 부수물(빼기)")
+            score -= 6
         # 🏷 입력 식별자 누락(2026-08-03 실사고) — 사장님이 준 모델명이 본문에 없으면
         #   글이 '신차 한 대'로 뭉개진다. 검색어이자 신뢰 근거를 버리는 것이다.
         _anch = [a for a in input_anchors(source or "") if a not in text]

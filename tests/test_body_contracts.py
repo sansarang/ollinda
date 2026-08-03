@@ -69,6 +69,30 @@ def test_clock_format_is_not_fabrication():
     assert seo._clock_nums("가격 2,990만원") == set(), "시계가 아닌 것을 시계로 읽음"
 
 
+def test_photo_incidentals_are_not_content():
+    """A5. 사장님 지적(2026-08-03): 사진에 우연히 찍힌 시계 시각을 본문이 서술했다 —
+    "시계에 10시 21분이 찍혀 있는데, 이 검수·광택 단계에만 공을 들였습니다".
+    날조냐 아니냐 이전에 **글의 내용과 맞지 않는다**. 손님은 시계를 사지 않는다.
+    사진에서 가져올 것은 상품·시공·상태뿐이다."""
+    bad = "## 소제목\n시계에 10시 21분이 찍혀 있는데, 이 검수 단계에 공을 들였습니다."
+    au = _audit(bad, source=bad)
+    assert [w for w in (au.get("warnings") or []) if "촬영 부수물" in w], au.get("warnings")
+    # 소요시간·영업시간은 정보다 — 과잉 차단 금지
+    for ok in ("## 소제목\n작업은 10분이면 끝납니다. 상태를 그대로 보여드립니다.",
+               "## 소제목\n영업시간은 10시부터 19시까지입니다. 방문 전 연락 주세요."):
+        au2 = _audit(ok, source=ok)
+        assert not [w for w in (au2.get("warnings") or []) if "촬영 부수물" in w], ok
+
+
+def test_prompt_bans_photo_incidentals():
+    """A5-2. 채점만으로는 늦다 — 생성 프롬프트가 먼저 못 박아야 한다."""
+    import inspect
+    from app.generators import text_claude as _tc
+    src = inspect.getsource(_tc)
+    assert "사진에서 쓰지 말 것" in src, "사진 부수물 배제 지시가 없다"
+    assert "시계에 찍힌 시각" in src and "상품·시공·상태" in src
+
+
 def test_real_fabrication_still_caught():
     """A-역: 입력에 없는 금액은 여전히 잡아야 한다(오탐 수정이 탐지를 죽이면 안 된다)."""
     src = "2022년식 투싼, 실주행 57,216km."
