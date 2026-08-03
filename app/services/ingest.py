@@ -282,6 +282,19 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
         pieces.extend(retry)
         if not retry and pieces:                       # 재시도도 실패 → 첫 피스에 사유 각인(워치독이 읽음)
             pieces[0].payload["_missing_blog"] = _LEb.get(str(ContentKind.BLOG), "생성 실패(로그 참조)")
+    # 🛑 아무것도 못 만들었으면 '완성'이라고 하지 않는다(2026-08-03 실사고).
+    #   크레딧 소진으로 전 채널이 400을 맞았는데 진행률은 done/1.0이었다. 화면상 성공,
+    #   실제로는 0개 — 사장님도 나도 '끝났다'고 읽었다. 실패는 실패라고 말해야 한다.
+    if not pieces:
+        from app.services.generate import LAST_ERRORS as _LE0
+        _why = " / ".join(f"{k.split('.')[-1]}: {v[:120]}" for k, v in list(_LE0.items())[:3]) or "사유 미상"
+        _human = _human_gen_error(_why)
+        try:
+            db.set_gen_progress(tenant.id, "failed", _human, _why[:400], 1.0,
+                                status="failed", error=_why[:400])
+        except Exception:
+            pass
+        raise RuntimeError(f"생성 0건 — {_why[:300]}")
     _prog("polish", "제목·태그 다듬는 중", "", 0.82)
     _exp = (intake.get("experience") or "").strip()[:200]       # 사장님 경험담 — 결과 하이라이트용(A2)
     # 🖼 대표 이미지 = 외관 대표컷(실측 결함 수정: 업로드 1번이 서류면 X·인스타 카드 대표가 서류 풀샷).
@@ -400,6 +413,25 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
         pass
     _polish_async(tenant, asset, pieces)
     return pieces
+
+
+_ERR_HUMAN = (
+    # 기계 오류를 사장님 말로 — 원인과 '무엇을 하면 되는지'까지. 없는 사유는 지어내지 않는다.
+    ("credit balance is too low", "AI 사용액이 떨어져서 글을 못 썼어요 — 충전하면 바로 다시 만듭니다"),
+    ("rate_limit", "요청이 몰려서 잠시 실패했어요 — 조금 뒤 다시 눌러주세요"),
+    ("overloaded", "AI가 몰려서 잠시 실패했어요 — 조금 뒤 다시 눌러주세요"),
+    ("timeout", "AI 응답이 너무 늦어 중단됐어요 — 다시 시도해 주세요"),
+    ("authentication", "AI 키에 문제가 있어요 — 운영자 확인이 필요합니다"),
+)
+
+
+def _human_gen_error(raw: str) -> str:
+    """실패 사유를 사장님이 읽을 말로. 못 알아본 사유는 뭉개지 않고 '생성 실패'로 두고 원문을 함께 남긴다."""
+    low = (raw or "").lower()
+    for key, msg in _ERR_HUMAN:
+        if key in low:
+            return msg
+    return "글을 만들지 못했어요 — 운영자가 사유를 확인 중입니다"
 
 
 def _polish_async(tenant: Tenant, asset, pieces: list) -> None:
