@@ -681,78 +681,19 @@ def _tables_with(col: str) -> list:
 
 @app.post("/admin/migrate-tenant")
 def admin_migrate_tenant(src: str = "", dst: str = "", dry: int = 1):
-    """가게 이관 — src의 데이터를 dst로 옮긴다(2026-08-03).
-    tenant_id 컬럼을 가진 전 테이블을 자동으로 훑는다(손으로 적으면 빠뜨린다).
-    dry=1이면 무엇이 몇 건 옮겨질지만 센다."""
-    if not (db.get_tenant(src) and db.get_tenant(dst)) or src == dst:
-        return JSONResponse({"ok": False, "error": "src/dst 확인 필요"}, status_code=400)
-    moved = {}
-    with db._conn() as c:
-        for t in _tables_with("tenant_id"):
-            n = c.execute(f"SELECT COUNT(*) FROM {t} WHERE tenant_id=?", (src,)).fetchone()[0]
-            if not n:
-                continue
-            moved[t] = n
-            if not dry:
-                try:
-                    c.execute(f"UPDATE OR REPLACE {t} SET tenant_id=? WHERE tenant_id=?", (dst, src))
-                except Exception as e:
-                    moved[t] = f"{n}건 실패: {repr(e)[:80]}"
-    return JSONResponse({"ok": True, "dry": bool(dry), "src": src, "dst": dst, "moved": moved})
+    """가게 이관 — DB·미디어·경로·R2를 한 번에(2026-08-03 사고 봉인).
+    ★ 이관은 tenant_move.migrate_tenant 하나만 쓴다. 수동 SQL·수동 파일 이동 금지 —
+      절차가 둘로 나뉘어 있으면 언젠가 한쪽만 하게 된다(오늘 사고의 원인)."""
+    from app.services import tenant_move as _tm
+    r = _tm.migrate_tenant(src, dst, dry=bool(dry))
+    return JSONResponse(r, status_code=200 if r.get("ok") else 400)
 
 
-@app.post("/admin/migrate-media")
-def admin_migrate_media(src: str = "", dst: str = "", dry: int = 1):
-    """가게 이관의 나머지 절반 — 사진·영상 파일과 그 경로(2026-08-03 실사고).
-
-    DB만 옮기고 미디어를 안 옮기면 화면에서 사진이 안 보인다. /dl은 'pieces[0].tenant_id'로
-    경로를 만드는데 파일은 옛 폴더에 남아 있기 때문이다. R2 미러도 옛 키에 있다.
-    ① 디스크 파일 이동 ② payload 안의 절대경로 치환 ③ R2 재미러.
-    """
-    # ★ src는 이미 지워진 tenant일 수 있다(정리 뒤에 미디어를 옮기는 경우) — 폴더만 있으면 된다.
-    #   dst는 실재해야 한다(엉뚱한 곳으로 파일을 옮기면 되돌리기 어렵다).
-    if not db.get_tenant(dst) or not src or src == dst:
-        return JSONResponse({"ok": False, "error": "dst는 실재해야 하고 src와 달라야 합니다"},
-                            status_code=400)
-    root = os.environ.get("SHOPCAST_STORAGE", "storage")
-    sdir, ddir = os.path.join(root, src), os.path.join(root, dst)
-    files = sorted(os.listdir(sdir)) if os.path.isdir(sdir) else []
-    rep = {"files": len(files), "moved": 0, "paths_rewritten": 0, "mirrored": 0, "errors": []}
-    if dry:
-        return JSONResponse({"ok": True, "dry": True, **rep})
-    os.makedirs(ddir, exist_ok=True)
-    import shutil as _sh
-    for fn in files:
-        try:
-            _sh.move(os.path.join(sdir, fn), os.path.join(ddir, fn))
-            rep["moved"] += 1
-        except Exception as e:
-            rep["errors"].append(f"{fn}: {repr(e)[:60]}")
-    # payload 안의 옛 경로를 새 경로로(사진·영상 모두 — 문자열 치환이라 키 이름에 의존하지 않는다)
-    import json as _js
-    with db._conn() as c:
-        rows = c.execute("SELECT id, payload FROM content_pieces WHERE tenant_id=?", (dst,)).fetchall()
-        for r in rows:
-            pl = r["payload"] or ""
-            if src not in pl:
-                continue
-            c.execute("UPDATE content_pieces SET payload=? WHERE id=?", (pl.replace(src, dst), r["id"]))
-            rep["paths_rewritten"] += 1
-        try:
-            arows = c.execute("SELECT id, path FROM assets WHERE tenant_id=?", (dst,)).fetchall()
-            for r in arows:
-                if r["path"] and src in r["path"]:
-                    c.execute("UPDATE assets SET path=? WHERE id=?", (r["path"].replace(src, dst), r["id"]))
-        except Exception:
-            pass
-    try:                                    # R2 재미러 — 원본 영구 보존은 미러가 담당한다
-        from app import storage as _st
-        for fn in os.listdir(ddir):
-            if _st.mirror_to_r2(os.path.join(ddir, fn)):
-                rep["mirrored"] += 1
-    except Exception as e:
-        rep["errors"].append(f"mirror: {repr(e)[:80]}")
-    return JSONResponse({"ok": True, "dry": False, **rep})
+@app.get("/admin/migrate-verify")
+def admin_migrate_verify(src: str = "", dst: str = ""):
+    """이관 완결 대조(읽기 전용) — '옮겼다'가 아니라 이 표가 완료의 정의다."""
+    from app.services import tenant_move as _tm
+    return JSONResponse(_tm.verify(src, dst))
 
 
 @app.post("/admin/purge-except")
