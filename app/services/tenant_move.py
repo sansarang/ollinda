@@ -83,11 +83,15 @@ def verify(src: str, dst: str) -> dict:
     sets, missing = [], 0
     for s in db.list_sets(tenant_id=dst, limit=200):
         aid = s.get("asset_id") or ""
+        # ★ 조각 하나만 보면 안 된다(2026-08-03, 같은 유형 두 번째 사고).
+        #   X 피스는 발행용으로 사진을 4장만 들고 있어서, 그게 먼저 잡히면 20장짜리 세트가
+        #   '4/4 정상'으로 보인다. 검증이 실제보다 느슨해진다 —
+        #   photo_pool에서 겪은 것과 같은 계열이라 여기서는 전 조각의 합집합을 본다.
         paths = []
         for p in db.get_set_pieces(aid):
-            paths = (p.payload or {}).get("image_paths") or []
-            if paths:
-                break
+            for x in ((p.payload or {}).get("image_paths") or []):
+                if x and x not in paths:
+                    paths.append(x)
         on_disk = sum(1 for x in paths if x and os.path.exists(x))
         if paths and on_disk < len(paths):
             missing += len(paths) - on_disk

@@ -86,6 +86,36 @@ def test_db_only_migration_fails_verification(tmp_path, monkeypatch):
         _cleanup(src.id, dst.id)
 
 
+def test_verify_reads_all_pieces_not_just_one(tmp_path, monkeypatch):
+    """B2. 검증이 조각 하나만 보면 실제보다 느슨해진다(2026-08-03, 같은 유형 두 번째).
+    X 피스는 발행용으로 사진을 4장만 들고 있어서, 그게 먼저 잡히면 20장짜리 세트가
+    '4/4 정상'으로 보인다. photo_pool에서 겪은 것과 같은 계열이다."""
+    monkeypatch.setenv("SHOPCAST_STORAGE", str(tmp_path))
+    t = db.create_tenant("합집합검증", "썬팅")
+    aid = str(uuid.uuid4())
+    d = os.path.join(str(tmp_path), t.id)
+    os.makedirs(d, exist_ok=True)
+    many = []
+    for i in range(9):
+        fp = os.path.join(d, f"m{i}.jpg")
+        open(fp, "wb").write(b"x")
+        many.append(fp)
+    few = many[:4]
+    try:
+        # X 피스(4장)가 먼저 저장되고, 블로그 피스(9장)가 뒤에 온다
+        for kind, paths in ((ContentKind.X_POST, few), (ContentKind.BLOG, many)):
+            db.save_piece(ContentPiece(id=str(uuid.uuid4()), tenant_id=t.id, asset_id=aid,
+                                       channel=Channel.NAVER_BLOG, kind=kind,
+                                       payload={"body": "b", "image_paths": paths},
+                                       status=ContentStatus.DRAFT))
+        v = tm.verify("NO_SUCH_SRC", t.id)
+        got = next((x for x in v["detail"] if x["asset"] == aid[:8]), None)
+        assert got, v
+        assert got["photos"] == 9, f"조각 하나만 읽어 세트를 {got['photos']}장으로 봤다"
+    finally:
+        _cleanup(t.id)
+
+
 def test_table_list_comes_from_schema():
     """C. 옮길 표 목록을 손으로 적으면 반드시 빠뜨린다 — 스키마에서 읽는다."""
     import inspect
