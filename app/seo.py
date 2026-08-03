@@ -1196,6 +1196,31 @@ _RHETORIC_TAIL = re.compile(r"^(이니(?!까)|이라느니|라느니|이라던|�
 _KR_DEC_UNIT = re.compile(r"(?<![\d.])(\d{1,4})\.(\d)(\d*)\s*(만|억)")
 
 
+_ANCHOR_RE = re.compile(r"\b([A-Za-z]{1,6}\d{1,4}[A-Za-z]?|\d{1,4}[A-Za-z]{1,6})\b")
+
+
+def input_anchors(note: str, limit: int = 4) -> list[str]:
+    """입력에 있는 고유 식별자(모델명·등급명 등) — 본문에 반드시 살려야 할 말.
+
+    ★ 2026-08-03 실사고: 사장님이 '기아 PV5'라고 주셨는데 본문에 PV5가 한 번도 안 나왔다.
+      전부 '신차 한 대'로 뭉갰다. 차종·모델명은 손님이 검색하는 말이자 신뢰 근거인데
+      통째로 사라진 것이다.
+    판정은 언어 규칙만 — 영문+숫자가 붙은 토큰(PV5·DN8·GV80·버텍스500)을 식별자로 본다.
+    업종어를 목록으로 갖지 않으므로 빵집·카페의 제품 코드에도 그대로 통한다.
+    """
+    out = []
+    for m in _ANCHOR_RE.finditer(note or ""):
+        w = m.group(1)
+        if w.lower() in ("mp4", "jpg", "png", "1080p", "4k") or w in out:
+            continue
+        out.append(w)
+    # 한글+숫자 결합형(버텍스500)도 식별자다
+    for m in re.finditer(r"[가-힣]{2,}\d{2,4}", note or ""):
+        if m.group(0) not in out:
+            out.append(m.group(0))
+    return out[:limit]
+
+
 def natural_kr_number(text: str) -> str:
     """'5.7만km' → '5만 7천km' — 한국어에 없는 소수점+만/억 표기를 자연 표기로(2026-08-02 사장님 지적).
 
@@ -1473,6 +1498,12 @@ def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> d
         if _intro and not re.search(_PREVIEW, _intro):
             warnings.append("도입에 '끝까지 읽을 이유' 예고 없음 → 초반 이탈 위험(v2 도입 훅 3요소)")
             score -= 6
+        # 🏷 입력 식별자 누락(2026-08-03 실사고) — 사장님이 준 모델명이 본문에 없으면
+        #   글이 '신차 한 대'로 뭉개진다. 검색어이자 신뢰 근거를 버리는 것이다.
+        _anch = [a for a in input_anchors(source or "") if a not in text]
+        if _anch:
+            warnings.append(f"입력의 모델·등급명 {_anch[:2]}가 본문에 없음 → 소재가 뭉개짐(그대로 쓰기)")
+            score -= min(10, 5 * len(_anch))
         # 🔢 비한국어 수 표기(2026-08-02) — 기계 교정이 있지만, 새는 경로가 생기면 눈에 보여야 한다
         _dec = _KR_DEC_UNIT.findall(title + " " + text)
         if _dec:

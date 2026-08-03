@@ -276,6 +276,48 @@ def test_template_leaves_room_for_body_emoji():
     assert not hits, f"본문 1개인데 감점: {hits}"
 
 
+# ── J. 입력 식별자 · 조건부 위협 ────────────────────────────────
+def test_input_model_must_survive_in_body():
+    """J1. 실사고(2026-08-03): 사장님이 '기아 PV5'라고 주셨는데 본문에 PV5가 한 번도 안 나왔다.
+    전부 '신차 한 대'로 뭉갰다. 차종·등급명은 손님이 검색하는 말이자 신뢰 근거다."""
+    note = "기아 PV5 신차. 루마 버텍스500 썬팅, 블랙박스 장착"
+    assert "PV5" in seo.input_anchors(note)
+    assert "버텍스500" in seo.input_anchors(note)
+    # 파일 확장자·해상도 같은 건 식별자가 아니다(오탐 방지)
+    assert seo.input_anchors("영상 mp4 1080p 파일") == []
+
+    missing = _audit("## 소제목\n신차 한 대를 시공했습니다. 상태를 확인했습니다.",
+                     title="부산 신차 시공", source=note)
+    hits = [w for w in (missing.get("warnings") or []) if "모델·등급명" in w]
+    assert hits, f"모델명 누락을 못 잡음: {missing.get('warnings')}"
+
+    kept = _audit("## 소제목\n기아 PV5에 루마 버텍스500으로 시공했습니다. 상태를 확인했습니다.",
+                  title="부산 신차 시공", source=note)
+    assert not [w for w in (kept.get("warnings") or []) if "모델·등급명" in w], "정상 글을 감점"
+
+
+def test_prompt_forces_the_anchor():
+    """J2. 채점만으로는 늦다 — 생성 프롬프트가 먼저 못 박아야 한다."""
+    import inspect
+    from app.generators import text_claude as _tc
+    src = inspect.getsource(_tc)
+    assert "input_anchors" in src, "생성 프롬프트가 식별자를 강제하지 않는다"
+    assert "지어내지 마라" in src, "없는 모델명을 만들어낼 위험을 막지 않는다"
+
+
+def test_conditional_threat_is_fear_marketing():
+    """J3. 실측 문장(2026-08-03): '신차 뽑자마자 이 작업 안 하면, 6개월 뒤에 후회합니다'.
+    기존 겁주기 목록이 낱말만 봐서 통과했다 — 조건부 위협도 불안 마케팅이다."""
+    for bad in ("이 작업 안 하면 6개월 뒤에 후회합니다",
+                "지금 놓치면 손해입니다",
+                "가격표만 보고 결정하기엔 불안하셨을 겁니다"):
+        au = _audit(f"## 소제목\n{bad} 성능점검기록부를 보여드립니다.")
+        assert [w for w in (au.get("warnings") or []) if "겁주기" in w], f"통과함: {bad}"
+    # 긍정형은 잡지 않는다 — 과잉 차단은 멀쩡한 문장을 죽인다
+    ok = _audit("## 소제목\n후회 없는 선택을 도와드립니다. 상태를 그대로 보여드립니다.")
+    assert not [w for w in (ok.get("warnings") or []) if "겁주기" in w], "긍정형을 오인"
+
+
 # ── D. 지역 정합 ──────────────────────────────────────────────────
 def test_region_conflict_fails_open(monkeypatch):
     """D. 지역 정합 게이트는 판정 불가일 때 막지 않는다(조용한 실패 금지의 반대편 —
