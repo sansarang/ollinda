@@ -242,6 +242,19 @@ def create_tenant(name: str, industry: str, region: str = "", biz_type: str = "l
         c.execute("INSERT INTO tenants(id,name,industry,region,biz_type,upload_token,created_at) "
                   "VALUES(?,?,?,?,?,?,?)",
                   (tid, name, industry, region, biz_type or "local", token, _now()))
+        # 🏷 무표기 tenant 금지(2026-08-03 사건) — 새로 만들어지는 가게는 실계정 목록에 없으므로
+        #   기본이 '테스트'다. 실계정은 config.PRODUCTION_TENANTS에 ID로 등록해야 실계정이 된다.
+        #   표기가 없으면 나중에 어느 것이 진짜인지 이름으로 가리게 되고, 그게 이번 사건이다.
+        try:
+            c.execute("ALTER TABLE tenants ADD COLUMN is_test INTEGER DEFAULT 1")
+        except Exception:
+            pass
+        try:
+            from app import config as _cfg
+            c.execute("UPDATE tenants SET is_test=? WHERE id=?",
+                      (0 if _cfg.is_production_tenant(tid) else 1, tid))
+        except Exception:
+            pass
     return Tenant(id=tid, name=name, industry=industry, region=region, biz_type=biz_type or "local")
 
 

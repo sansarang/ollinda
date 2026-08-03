@@ -28,6 +28,11 @@ def test_ingest_generate_publish_flow(tiny_png_bytes, monkeypatch):
     monkeypatch.setattr(ingest_mod, "_spawn_video_bundle", lambda *a, **k: None)
 
     tenant = db.create_tenant(name="스모크가게", industry="카페", region="부산 동구")
+    # 🚧 2026-08-03부터 테스트 tenant는 발행 경로에 못 들어간다(오배송 사건).
+    #   이 테스트가 보는 건 '발행 흐름'이지 격리 정책이 아니므로, 이 가게만 실계정으로 등록해 통과시킨다.
+    #   격리 정책 자체는 tests/test_tenant_isolation.py가 검사한다.
+    from app import config as _cfg
+    monkeypatch.setattr(_cfg, "PRODUCTION_TENANTS", tuple(_cfg.PRODUCTION_TENANTS) + (tenant.id,))
 
     # ingest → generate (키 없음 → 더미 생성기). 크래시 없이 초안 생성돼야 함
     pieces = ingest_upload(tenant, [(tiny_png_bytes, "photo.png")], "신메뉴 라떼 출시")

@@ -34,6 +34,21 @@ def publish_piece(account: ChannelAccount, content: ContentPiece) -> PublishResu
 
 def publish_and_record(content: ContentPiece) -> PublishResult:
     """검수 통과분을 발행하고 결과를 DB에 기록 + 상태 갱신(라우트에서 사용)."""
+    # 🚧 테스트 tenant는 발행 경로에 진입할 수 없다(2026-08-03 사건).
+    #   검증용으로 만든 글이 사장님 블로그로 나가면 되돌릴 수 없다.
+    try:
+        from app import config as _cfg
+        _tid = getattr(content, "tenant_id", "") or ""
+        if not _cfg.is_production_tenant(_tid):
+            import logging as _lgp
+            _lgp.getLogger("shopcast.publish").error(
+                "[publish] 차단 — 실계정 아님 tenant=%s", _tid)
+            raise PermissionError(f"테스트 tenant는 발행할 수 없습니다(tenant={_tid})")
+    except PermissionError:
+        raise
+    except Exception:
+        pass
+
     account = db.get_channel_account(content.tenant_id, content.channel) \
         or ChannelAccount(id="", tenant_id=content.tenant_id, channel=content.channel)
     result = publish_piece(account, content)

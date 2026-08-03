@@ -81,3 +81,37 @@ RANK_TRACK_KEYWORDS = int(os.environ.get("SHOPCAST_TRACK_KW", "5"))  # 가게당
 BLOG_WEEKLY_TARGET = int(os.environ.get("SHOPCAST_BLOG_WEEKLY", "3"))   # 기본 주 3회(C-Rank 지속성)
 WEEKLY_REPORT_DOW = int(os.environ.get("SHOPCAST_REPORT_DOW", "0"))     # 발송 요일(0=월요일, KST)
 WEEKLY_REPORT_HOUR = int(os.environ.get("SHOPCAST_REPORT_HOUR", "9"))   # 발송 시각(KST)
+
+
+# ── 실계정 canonical(2026-08-03 사건: tenant 오배송) ──────────────
+#   사건: 오늘 생성물이 사장님 실계정이 아닌 동명 tenant로 들어갔다.
+#   원인: 검증용 tenant가 실계정과 '같은 이름'으로 공존했고, 대상을 이름으로 잡았다.
+#   ★ 이름은 식별자가 아니다. ID만이 식별자다.
+#   등록은 환경변수로 덮을 수 있다(SHOPCAST_PROD_TENANTS="id,id").
+PRODUCTION_TENANTS = tuple(
+    x.strip() for x in os.environ.get(
+        "SHOPCAST_PROD_TENANTS",
+        "d9e0fbde-9a71-48d6-92e4-e97dc75dd41e,"      # 루마썬팅 현대상사
+        "95d0243f-7c9c-493a-aaf7-186fee2898b0"       # 주안모터스
+    ).split(",") if x.strip()
+)
+
+
+def is_production_tenant(tenant_id: str) -> bool:
+    """이 가게가 사장님 실계정인가 — 이름이 아니라 ID로만 판정한다."""
+    return (tenant_id or "").strip() in PRODUCTION_TENANTS
+
+
+def assert_target(tenant_id: str, where: str = "") -> dict:
+    """작업 시작 시 대상을 확인·명시한다(2026-08-03 절대 원칙).
+
+    실계정이 아니면 경고 로그를 남긴다 — 조용히 진행하면 오늘 같은 오배송을 또 못 본다.
+    반환 {tenant_id, production, label} — 보고서에 그대로 붙일 수 있는 형태.
+    """
+    import logging
+    prod = is_production_tenant(tenant_id)
+    if not prod:
+        logging.getLogger("shopcast.target").warning(
+            "[target] 실계정 아님 — %s tenant=%s (테스트 대상)", where or "?", tenant_id)
+    return {"tenant_id": tenant_id, "production": prod,
+            "label": "실계정" if prod else "테스트 tenant"}
