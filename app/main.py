@@ -652,6 +652,19 @@ def admin_gap_answer(tenant_id: str = "", token: str = "", verdict: str = "", ax
     return JSONResponse(_gs.answer(tenant_id, token, verdict, axis))
 
 
+@app.post("/admin/set-delete/{asset_id}")
+def admin_set_delete(asset_id: str, tenant_id: str = ""):
+    """운영 지원 — 잘못 만들어진 세트 정리(2026-08-03). 소유 검증을 그대로 탄다.
+    묘비를 남겨 뒤늦게 끝난 스레드가 되살리지 못하게 한다(2026-08-01 부활 실사고)."""
+    if not db.get_tenant(tenant_id):
+        return JSONResponse({"ok": False, "error": "tenant_id 필요"}, status_code=400)
+    before = len(db.get_set_pieces(asset_id))
+    db.delete_set(asset_id, tenant_id)
+    return JSONResponse({"ok": True, "asset_id": asset_id, "before": before,
+                         "after": len(db.get_set_pieces(asset_id)),
+                         "tombstoned": db.is_set_deleted(asset_id)})
+
+
 @app.get("/admin/harvest")
 def admin_harvest(tenant_id: str = "", topic: str = ""):
     """🌾 경험 수확 실측(2026-08-03) — 묻기 전에 자사 기록에서 무엇을 캤는가.
