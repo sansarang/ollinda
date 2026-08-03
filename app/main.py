@@ -709,8 +709,11 @@ def admin_migrate_media(src: str = "", dst: str = "", dry: int = 1):
     경로를 만드는데 파일은 옛 폴더에 남아 있기 때문이다. R2 미러도 옛 키에 있다.
     ① 디스크 파일 이동 ② payload 안의 절대경로 치환 ③ R2 재미러.
     """
-    if not (db.get_tenant(src) and db.get_tenant(dst)) or src == dst:
-        return JSONResponse({"ok": False, "error": "src/dst 확인 필요"}, status_code=400)
+    # ★ src는 이미 지워진 tenant일 수 있다(정리 뒤에 미디어를 옮기는 경우) — 폴더만 있으면 된다.
+    #   dst는 실재해야 한다(엉뚱한 곳으로 파일을 옮기면 되돌리기 어렵다).
+    if not db.get_tenant(dst) or not src or src == dst:
+        return JSONResponse({"ok": False, "error": "dst는 실재해야 하고 src와 달라야 합니다"},
+                            status_code=400)
     root = os.environ.get("SHOPCAST_STORAGE", "storage")
     sdir, ddir = os.path.join(root, src), os.path.join(root, dst)
     files = sorted(os.listdir(sdir)) if os.path.isdir(sdir) else []
