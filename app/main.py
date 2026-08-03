@@ -734,6 +734,33 @@ def admin_purge_except(keep_email: str = "", keep_tenants: str = "", dry: int = 
                          "keep_tenants": keep, "deleted": deleted})
 
 
+@app.get("/admin/caption-preview")
+def admin_caption_preview(asset_id: str = "", regen: int = 0):
+    """(진단) 그 세트의 캡션 실물 — 사장님 화면에 나가는 그 문장 그대로.
+    regen=1이면 캐시를 버리고 다시 쓴다(규격 변경 후 확인용)."""
+    from app.domain.models import ContentKind as _CK
+    from app.services import photodesc as _pd
+    ps = db.get_set_pieces(asset_id)
+    blog = next((p for p in ps if p.kind == _CK.BLOG), None)
+    if not blog:
+        return JSONResponse({"ok": False, "error": "블로그 피스 없음"}, status_code=404)
+    t = db.get_tenant(blog.tenant_id)
+    if regen:
+        try:
+            blog.payload.pop("photo_captions", None)
+            db.save_piece(blog)
+            blog = next((p for p in db.get_set_pieces(asset_id) if p.kind == _CK.BLOG), None)
+        except Exception:
+            pass
+    n = len((blog.payload or {}).get("image_paths") or [])
+    caps = _photo_captions(t, blog, n)
+    return JSONResponse({"ok": True, "n": n,
+                         "anchors": seo.input_anchors((blog.payload or {}).get("gen_source") or ""),
+                         "captions": [{"i": i + 1, "len": len(c), "text": c,
+                                       "gate": _pd.caption_ok(c) if c else "빈칸"}
+                                      for i, c in enumerate(caps)]})
+
+
 @app.get("/admin/thumb-audit")
 def admin_thumb_audit(tid: str = "", warm: int = 0, limit: int = 500):
     """🖼 파생본 대조 — '만든 수'가 아니라 '화면이 요청하는 그 경로에 있는가'(2026-08-03 조항).
