@@ -198,7 +198,8 @@ def caption_ok(text: str) -> str:
     return ""
 
 
-def write_captions(descs: list, anchors=(), shop: str = "", kw: str = "") -> list:
+def write_captions(descs: list, anchors=(), shop: str = "", kw: str = "",
+                   _diag: list = None) -> list:
     """사진 묘사 → 캡션 N개를 한 번에 쓴다(1콜, 2026-08-03 사장님 승인 B안).
 
     왜 깎지 않고 다시 쓰는가: 긴 관찰문에서 소품·추측·배경을 도려내면 문장 뼈대가 부서진다
@@ -218,7 +219,8 @@ def write_captions(descs: list, anchors=(), shop: str = "", kw: str = "") -> lis
     if n > BATCH:
         out = []
         for s0 in range(0, n, BATCH):
-            out += write_captions(descs[s0:s0 + BATCH], anchors, shop if s0 == 0 else "", kw)
+            out += write_captions(descs[s0:s0 + BATCH], anchors, shop if s0 == 0 else "",
+                                  kw, _diag)
         return out
     src = "\n".join(f"{i + 1}. {(d or '')[:160]}" for i, d in enumerate(descs))
     known = ", ".join([x for x in (anchors or []) if x] + ([shop] if shop else [])) or "(없음)"
@@ -251,8 +253,11 @@ def write_captions(descs: list, anchors=(), shop: str = "", kw: str = "") -> lis
                 i = int(m.group(1)) - 1
                 if 0 <= i < n:
                     c = " ".join(m.group(2).strip().strip('"“”').split())
-                    if c and not caption_ok(c):
+                    why = caption_ok(c) if c else "LLM 빈 줄"
+                    if not why:
                         got[i] = c
+                    elif _diag is not None:      # 조용한 실패 금지 — 왜 떨어졌는지 남긴다
+                        _diag.append({"llm": c, "reject": why})
         return got
 
     try:
@@ -277,6 +282,8 @@ def write_captions(descs: list, anchors=(), shop: str = "", kw: str = "") -> lis
             c = fb if (fb and not caption_ok(fb)) else ""
             if not c:
                 blanks.append(i + 1)
+                if _diag is not None:
+                    _diag.append({"fallback": fb, "reject": caption_ok(fb) if fb else "묘사 없음"})
         out.append(c)
     if blanks:
         _log.warning("[caption] %d/%d 빈칸 — 사진 %s (관찰 기록이 캡션 규격을 못 채웠다)",

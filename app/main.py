@@ -753,11 +753,13 @@ def admin_caption_preview(asset_id: str = "", regen: int = 0):
         except Exception:
             pass
     n = len((blog.payload or {}).get("image_paths") or [])
-    caps = _photo_captions(t, blog, n)
+    _dg = []
+    caps = _photo_captions(t, blog, n, _diag=_dg)
     _src = (blog.payload or {}).get("gen_source") or ""
     return JSONResponse({"ok": True, "n": n,
                          "descs": [{"i": i, "d": _pd.best_line(_src, i)} for i in range(1, n + 1)],
                          "anchors": seo.input_anchors(_src),
+                         "rejects": _dg,
                          "captions": [{"i": i + 1, "len": len(c), "text": c,
                                        "gate": _pd.caption_ok(c) if c else "빈칸"}
                                       for i, c in enumerate(caps)]})
@@ -4839,7 +4841,7 @@ def _blog_tags(tenant, blog) -> list[str]:
     return _kept
 
 
-def _photo_captions(tenant, blog, n: int) -> list[str]:
+def _photo_captions(tenant, blog, n: int, _diag: list = None) -> list[str]:
     """(이미지 SEO 5-2) 사진별 캡션 — 전수(N장=N개, 예외 없음)·정합(캡션[i]=image_paths[i]=본문[사진i]=
     파일명 i번=그리드 i번, 단일 인덱스)·중복 금지(동일 문구는 재생성/구분).
     인덱스 소스는 image_paths 하나. vision 실패 사진은 직접 재분석 1회 → 그래도 실패면 인접·순서 유래
@@ -4878,7 +4880,7 @@ def _photo_captions(tenant, blog, n: int) -> list[str]:
         _written = list(_cache["caps"])
     else:
         _descs = [_pdsc.best_line(srcnote, i) for i in range(1, n + 1)]
-        _written = _pdsc.write_captions(_descs, _anchors, _shop, kw)
+        _written = _pdsc.write_captions(_descs, _anchors, _shop, kw, _diag=_diag)
         try:
             blog.payload["photo_captions"] = {"n": n, "caps": _written}
             db.save_piece(blog)
