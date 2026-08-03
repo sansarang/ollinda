@@ -734,6 +734,42 @@ def admin_purge_except(keep_email: str = "", keep_tenants: str = "", dry: int = 
                          "keep_tenants": keep, "deleted": deleted})
 
 
+@app.get("/admin/thumb-audit")
+def admin_thumb_audit(tid: str = "", warm: int = 0, limit: int = 500):
+    """🖼 파생본 대조 — '만든 수'가 아니라 '화면이 요청하는 그 경로에 있는가'(2026-08-03 조항).
+
+    화면(목록)은 세트마다 image_paths[0]의 파일명으로 /thumb를 친다. 그 경로를 그대로 본다.
+    warm=1이면 없는 것만 생성(원본 읽기만·DB 무변경, 롤백은 .thumbs 삭제).
+    """
+    from app.services import derived as _dv
+    if not db.get_tenant(tid):
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    rows, hit, miss, made, failed = [], 0, 0, 0, 0
+    for s0 in db.list_sets(tenant_id=tid, limit=limit):
+        aid = s0.get("asset_id") or ""
+        imgs = []
+        for p0 in db.get_set_pieces(aid):
+            for x in ((p0.payload or {}).get("image_paths") or []):
+                if x and x not in imgs:
+                    imgs.append(x)
+        if not imgs:
+            continue
+        fn = os.path.basename(imgs[0])                 # 화면이 실제로 요청하는 그 한 장
+        ok = _dv.has_thumb(tid, fn)
+        if not ok and warm:
+            ok = _dv.make_thumb(tid, fn)
+            made += 1 if ok else 0
+            failed += 0 if ok else 1
+        hit += 1 if ok else 0
+        miss += 0 if ok else 1
+        rows.append({"asset": aid[:8], "file": fn, "thumb": ok})
+    return JSONResponse({"ok": True, "tid": tid, "sets": len(rows),
+                         "thumb_hit": hit, "thumb_miss": miss,
+                         "made": made, "failed": failed,
+                         "coverage": f"{(100*hit/len(rows)):.0f}%" if rows else "-",
+                         "detail": rows[:12]})
+
+
 @app.get("/admin/account-map")
 def admin_account_map():
     """운영 진단(읽기 전용) — 계정별로 어느 가게(tenant_id)를 갖고 있고 콘텐츠가 몇 개인지.
@@ -8106,9 +8142,6 @@ def kit_regen_naver(request: Request, asset_id: str):
     return RedirectResponse(f"/kit/{asset_id}/naver?{msg}", status_code=303)
 
 
-THUMB_PX = 320          # 목록 썸네일 한 변(56px 표시 × 레티나 여유). 데이터 필드 — 하드코딩 금지 원칙.
-
-
 @app.get("/thumb/{asset_id}/{fname}")
 def thumb_media(request: Request, asset_id: str, fname: str):
     """🖼 목록용 썸네일(2026-08-03 성능 사고) — 56px 자리에 3MB 원본을 보내던 것을 끊는다.
@@ -8121,24 +8154,14 @@ def thumb_media(request: Request, asset_id: str, fname: str):
     pieces = _owned_pieces(u, asset_id) if u else None
     if not pieces or not re.fullmatch(r"[A-Za-z0-9._-]+", fname):
         return HTMLResponse(status_code=404)
+    # ★ 경로는 단일 함수만 쓴다(2026-08-03 조항) — 데우기·대조가 같은 규칙을 봐야 한다.
+    from app.services import derived as _dv
     tid = pieces[0].tenant_id
-    root = os.environ.get("SHOPCAST_STORAGE", "storage")
-    src = os.path.join(root, tid, fname)
-    tdir = os.path.join(root, tid, ".thumbs")
-    tpath = os.path.join(tdir, os.path.splitext(fname)[0] + ".jpg")
-    if not os.path.exists(tpath):
-        if not os.path.exists(src):
-            return HTMLResponse(status_code=404)       # 원본 없으면 목록은 폴백 아이콘을 그린다
-        try:
-            from PIL import Image
-            os.makedirs(tdir, exist_ok=True)
-            im = Image.open(src)
-            im.thumbnail((THUMB_PX, THUMB_PX))
-            im.convert("RGB").save(tpath, "JPEG", quality=72, optimize=True)
-        except Exception:
-            logging.getLogger("shopcast.thumb").exception("[thumb] 생성 실패 %s", fname)
-            return RedirectResponse(f"/dl/{asset_id}/{fname}", status_code=302)
-    return FileResponse(tpath, media_type="image/jpeg",
+    if not _dv.make_thumb(tid, fname):                 # 이미 있으면 그대로, 없으면 생성
+        if not os.path.exists(_dv.original_path(tid, fname)):
+            return HTMLResponse(status_code=404)       # 원본 없음 → 목록은 폴백 아이콘
+        return RedirectResponse(f"/dl/{asset_id}/{fname}", status_code=302)   # 생성 실패 → 원본
+    return FileResponse(_dv.thumb_path(tid, fname), media_type="image/jpeg",
                         headers={"Cache-Control": "public, max-age=86400"})
 
 

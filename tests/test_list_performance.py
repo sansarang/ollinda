@@ -27,14 +27,28 @@ def test_list_uses_thumbnails_not_originals():
 
 
 def test_thumb_route_caches_and_shrinks():
-    """B. 썸네일은 작게 만들고 캐시한다 — 매 요청 리사이즈면 서버가 대신 느려진다."""
+    """B. 썸네일은 작게 만들고 캐시한다 — 매 요청 리사이즈면 서버가 대신 느려진다.
+    ★ 2026-08-03: 경로·생성은 단일 함수(services/derived.py)로 옮겼다 — 라우트는 그걸 쓴다."""
+    from app.services import derived as dv
     src = inspect.getsource(m.thumb_media)
-    assert "thumbnail((THUMB_PX, THUMB_PX))" in src, "축소하지 않는다"
-    assert ".thumbs" in src, "파생본을 캐시하지 않는다"
+    assert "derived" in src and "make_thumb" in src, "라우트가 단일 함수를 안 쓴다"
     assert "Cache-Control" in src, "브라우저 캐시를 안 준다"
-    assert m.THUMB_PX <= 480, f"썸네일이 너무 크다({m.THUMB_PX}px)"
+    assert dv.THUMB_PX <= 480, f"썸네일이 너무 크다({dv.THUMB_PX}px)"
+    dsrc = inspect.getsource(dv)
+    assert "thumbnail((THUMB_PX, THUMB_PX))" in dsrc, "축소하지 않는다"
+    assert "THUMB_DIR" in dsrc, "파생본 폴더 규칙이 없다"
     # 원본이 없어도 목록이 죽지 않아야 한다(폴백)
     assert "status_code=404" in src or "RedirectResponse" in src
+
+
+def test_thumb_path_rule_lives_in_one_place():
+    """B2. 생성 경로와 참조 경로는 같은 함수 하나를 쓴다(2026-08-03 조항).
+    규칙이 두 곳에 살면 '만들었는데 화면은 못 찾는' 어긋남이 난다 — 이번 반려의 원인 계열."""
+    from app.services import derived as dv
+    src = inspect.getsource(m)
+    assert '".thumbs"' not in src, "화면 쪽에 경로 규칙이 따로 살아 있다"
+    assert dv.thumb_path("T", "a.jpg").endswith(f"T/{dv.THUMB_DIR}/a.jpg")
+    assert dv.has_thumb("T_NOPE", "x.jpg") is False
 
 
 def test_list_does_not_touch_disk_or_r2():
