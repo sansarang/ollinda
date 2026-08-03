@@ -3888,6 +3888,8 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
     if sets:
         _cards = []
         _ccounts = db.content_click_counts(t.id)         # 콘텐츠별 클릭 뱃지(추적 P2)
+        # 🚅 세트 조각 일괄 조회(2026-08-03 성능 사고) — 세트마다 쿼리를 돌리면 세트 수만큼 왕복한다.
+        _pieces_by_asset = db.get_pieces_for_assets([s["asset_id"] for s in sets])
         _vol_budget = [3]                                 # 렌더당 searchad 미캐시 조회 상한(비용 가드)
 
         def _kw_volume_cached(kw: str):
@@ -3974,7 +3976,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                    + " class='mt-1.5 flex flex-wrap items-center gap-1'>" + chips + btn + "</div>")
             return row, gen_any
         for s in sets:
-            ps = db.get_set_pieces(s["asset_id"])
+            ps = _pieces_by_asset.get(s["asset_id"], [])
             _vrow, _ = _video_row(s["asset_id"], ps)
             _nclk = sum(_ccounts.get(p.id[:8], 0) for p in ps)
             _ebadge = _expose_badge(ps)
@@ -3992,7 +3994,8 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             thumb = ""
             for p in ps:
                 ips = p.payload.get("image_paths") or ([p.payload.get("image_path")] if p.payload.get("image_path") else [])
-                thumb = next((f"/dl/{s['asset_id']}/{os.path.basename(im)}" for im in ips if im), "")
+                # 목록은 썸네일만 — 원본은 상세 진입 때만(2026-08-03 성능 사고)
+                thumb = next((f"/thumb/{s['asset_id']}/{os.path.basename(im)}" for im in ips if im), "")
                 if thumb:
                     break
             seen, badges = set(), ""
@@ -8088,6 +8091,42 @@ def kit_regen_naver(request: Request, asset_id: str):
     msg = ("ok=네이버 영상을 만드는 중이에요 — 1~2분 뒤 이 페이지에 자동으로 나타나요"
            if ok else "err=영상 다시 만들기에 실패했어요 — 잠시 후 다시 시도해 주세요")
     return RedirectResponse(f"/kit/{asset_id}/naver?{msg}", status_code=303)
+
+
+THUMB_PX = 320          # 목록 썸네일 한 변(56px 표시 × 레티나 여유). 데이터 필드 — 하드코딩 금지 원칙.
+
+
+@app.get("/thumb/{asset_id}/{fname}")
+def thumb_media(request: Request, asset_id: str, fname: str):
+    """🖼 목록용 썸네일(2026-08-03 성능 사고) — 56px 자리에 3MB 원본을 보내던 것을 끊는다.
+
+    실측: 세트 19개 목록이 원본 19장(약 57MB)을 받았다. 목록은 썸네일만 본다.
+    파생본은 storage/<tenant>/.thumbs/ 에 캐시하고, 원본은 상세 진입 때만 쓴다.
+    """
+    import re
+    u = auth.current_user(request)
+    pieces = _owned_pieces(u, asset_id) if u else None
+    if not pieces or not re.fullmatch(r"[A-Za-z0-9._-]+", fname):
+        return HTMLResponse(status_code=404)
+    tid = pieces[0].tenant_id
+    root = os.environ.get("SHOPCAST_STORAGE", "storage")
+    src = os.path.join(root, tid, fname)
+    tdir = os.path.join(root, tid, ".thumbs")
+    tpath = os.path.join(tdir, os.path.splitext(fname)[0] + ".jpg")
+    if not os.path.exists(tpath):
+        if not os.path.exists(src):
+            return HTMLResponse(status_code=404)       # 원본 없으면 목록은 폴백 아이콘을 그린다
+        try:
+            from PIL import Image
+            os.makedirs(tdir, exist_ok=True)
+            im = Image.open(src)
+            im.thumbnail((THUMB_PX, THUMB_PX))
+            im.convert("RGB").save(tpath, "JPEG", quality=72, optimize=True)
+        except Exception:
+            logging.getLogger("shopcast.thumb").exception("[thumb] 생성 실패 %s", fname)
+            return RedirectResponse(f"/dl/{asset_id}/{fname}", status_code=302)
+    return FileResponse(tpath, media_type="image/jpeg",
+                        headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/dl/{asset_id}/{fname}")

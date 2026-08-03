@@ -2340,6 +2340,28 @@ def get_set_pieces(asset_id: str) -> list[ContentPiece]:
     return [_row_to_piece(r) for r in rows]
 
 
+def get_pieces_for_assets(asset_ids: list) -> dict:
+    """여러 세트의 조각을 한 번에(2026-08-03 성능 사고 — 목록이 세트마다 쿼리를 돌렸다).
+
+    반환 {asset_id: [ContentPiece, ...]}. 없는 세트는 키가 없다.
+    ★ 목록 화면은 이걸 쓴다. 세트당 get_set_pieces를 부르면 세트 수만큼 왕복한다.
+    """
+    ids = [a for a in (asset_ids or []) if a]
+    if not ids:
+        return {}
+    out: dict = {}
+    with _conn() as c:
+        for i in range(0, len(ids), 200):            # SQLite 변수 상한 여유
+            part = ids[i:i + 200]
+            ph = ",".join("?" * len(part))
+            rows = c.execute(
+                f"SELECT * FROM content_pieces WHERE asset_id IN ({ph}) ORDER BY created_at",
+                part).fetchall()
+            for r in rows:
+                out.setdefault(r["asset_id"], []).append(_row_to_piece(r))
+    return out
+
+
 def fmt_kst(ts: str | None, date_only: bool = False) -> str:
     """표시 전용 KST 변환 — DB 저장은 UTC 유지(저장 변경 금지). ISO UTC 문자열 → 'YYYY-MM-DD HH:MM'(KST).
     파싱 실패 시 원문 앞부분 반환(화면이 깨지지 않게)."""
