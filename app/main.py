@@ -4779,19 +4779,24 @@ def _photo_captions(tenant, blog, n: int) -> list[str]:
     #   상호가 하나도 없으면 '어느 업체 사진인지' 식별이 안 된다. 단 전 장에 박으면 도배로 읽히므로
     #   대표(첫) 사진 1장에만 — 본문 상호 표기를 1회로 제한한 것과 같은 원리. 업종 무관 공통.
     _shop = " ".join((getattr(tenant, "name", "") or "").split())
+    # 📷 묘사 파싱은 단일 파서만 쓴다(2026-08-03 — 캡션 10회 재발 종결).
+    #   옛 코드는 '첫 매치'를 썼다. gen_source에는 같은 번호가 10번까지 나오고 첫 줄이
+    #   헤더('사진 분석 (썬팅 업종 관점)')·라벨('피사체/제품')·마크다운 잔해('**')인 경우가 있다.
+    #   실측: 20장 중 8장이 그 헤더를 캡션으로 내보냈다. 영상 자막엔 있던 방어가 여기엔 없었다.
+    from app.services import photodesc as _pdsc
     for i in range(1, n + 1):
-        m = _r.search(rf"\[사진{i}\]\s*([^\n]+)", srcnote)
-        raw_line = m.group(1) if m else ""             # 원문(서류·번호판 검사용)
-        desc = _clean_caption_desc(raw_line)
-        if len(desc) < 4:                              # 누락·공백 → 해당 image_paths[i] 직접 재분석 1회(정합 보장)
+        raw_line = _pdsc.best_line(srcnote, i)         # 후보 전체에서 '가장 묘사다운' 줄
+        desc = raw_line
+        if not desc:                                   # 묘사가 없으면 해당 사진 1장만 재분석 1회
             try:
                 from app import vision as _vz
                 p_ = imgs_[i - 1] if i - 1 < len(imgs_) else ""
                 one = (_vz.analyze(p_, ind0) or "").strip() if (p_ and os.path.exists(p_)) else ""
-                first = next((l for l in one.splitlines() if len(_clean_caption_desc(l)) >= 6), "")
-                _d2 = _clean_caption_desc(first)
-                if len(_d2) >= 4:
-                    desc, raw_line, _patched = _d2, first, True
+                # ★ 첫 줄이 아니라 '묘사인 줄' 중 가장 긴 것(첫 줄도 헤더일 수 있다 — 같은 사고)
+                _cands = [_pdsc.clean(l) for l in one.splitlines() if _pdsc.is_description(l)]
+                _d2 = max(_cands, key=len) if _cands else ""
+                if _d2:
+                    desc, raw_line, _patched = _d2, _d2, True
                     srcnote += f"\n[사진{i}] {_d2}"
             except Exception:
                 pass
@@ -4820,9 +4825,17 @@ def _photo_captions(tenant, blog, n: int) -> list[str]:
         if not _key:
             continue                          # 빈칸은 중복 판정 대상이 아니다(직접 적어주세요 안내)
         if _key in _seen:
-            # 중복 구분은 필요하지만 '(N번째)'는 사람이 읽는 캡션에 어울리지 않는다(사장님 지적).
-            # 키워드를 덧붙여 자연스럽게 구분 — 이미지 검색에도 도움이 된다.
-            out[_ix] = (f"{_c.rstrip('. ')} — {kw}" if kw else f"{_c.rstrip('. ')} 상세").strip() + "."
+            # ★ 침묵 폴백 금지(2026-08-03 조항): 중복을 키워드로 덧붙여 가르지 않는다.
+            #   그 사진의 '다른 실제 묘사'로 가른다. 그것도 없으면 빈칸으로 두고 안내한다 —
+            #   채우는 순간 사장님은 결함을 못 본다.
+            _alt = next((a for a in _pdsc.alternates(srcnote, _ix + 1)
+                         if _r.sub(r"\s", "", a + ".") not in _seen), "")
+            if _alt:
+                out[_ix] = f"{_alt}."
+                _seen[_r.sub(r"\s", "", out[_ix])] = True
+            else:
+                _fails.append(_ix + 1)
+                out[_ix] = ""
         else:
             _seen[_key] = True
     if _fails:

@@ -1092,19 +1092,15 @@ def _lines_for_photos(imgs: list, gen_source: str, cand_lines: list, gate=None,
     # ★ gen_source에는 같은 [사진N]이 여러 번 나온다(실측: 분석 배치가 이어붙어 번호가 겹침).
     #   나중 것으로 덮어쓰면 '한국 소상공인 마케팅 관점의 분석 결과입니다' 같은 안내문이 자막이 된다.
     #   → 번호당 '가장 묘사다운 줄'을 고른다: 안내·메타 문장 배제 후 가장 긴 것.
-    _META = _r.compile(r"(분석 결과|분석입니다|관점의|다음과 같|촬영 팁|추천 활용|마케팅|사진 분석)")
+    # 📷 묘사 파싱은 단일 파서만 쓴다(2026-08-03 조항) — 캡션과 같은 재료를 읽는다.
+    #   여기만 방어하고 캡션을 안 고쳐서 같은 결함이 10회 재발했다. 파서는 하나여야 한다.
+    from app.services import photodesc as _pdsc
     _cands: dict = {}
-    # ★ 번호 상한은 '분석 당시 장수'다(2026-08-02). 영상에 들어간 장수로 자르면,
-    #   9장 상한·사용자 선택 때문에 뒤 번호 묘사가 통째로 사라진다(그 사진이 영상에 있어도).
-    _n_ref = len(order_ref) if order_ref else len(imgs)
-    for m in _r.finditer(r"\[사진(\d+)\]\s*([^\n]+)", gen_source or ""):
-        i = int(m.group(1)) - 1
-        if not (0 <= i < _n_ref):
-            continue
-        _t = (m.group(2) or "").strip()
-        if _META.search(_t):
-            continue
-        _cands.setdefault(i, []).append(_t)
+    _n_ref0 = len(order_ref) if order_ref else len(imgs)
+    for _i in range(_n_ref0):
+        _b = _pdsc.best_line(gen_source or "", _i + 1)
+        if _b:
+            _cands[_i] = [_b]
     if not _cands:
         return [], []
 
