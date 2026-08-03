@@ -4941,6 +4941,46 @@ def _photo_captions(tenant, blog, n: int, _diag: list = None) -> list[str]:
     return out
 
 
+def _renumber_photo_refs(body: str, newnum: dict, marks: bool = True) -> str:
+    """사진 번호 재부여 — 마커와 **본문 산문의 '사진N' 언급**을 같은 매핑으로 함께 바꾼다.
+
+    ★ 2026-08-04 실물 사고: 마커 `[사진N]`만 재번호하고 산문은 옛 번호로 뒀다.
+      본문은 "사진19는 회색 전기밴을 앞쪽에서 찍은 겁니다"라고 하는데 그 자리엔 사진3이 있었다.
+      4건이 그렇게 나갔다. 손님이 읽는 글이 다른 사진을 가리킨 것이다.
+      생성 경로와 참조 경로가 갈라지면 반드시 어긋난다 — 매핑은 이 함수 하나만 쓴다.
+    """
+    import re as _rn
+
+    def _mark(m):
+        v = int(m.group(1))
+        return f"[사진{newnum.get(v, v)}]"
+
+    b = _rn.sub(r"\[사진(\d+)\]", _mark, body or "") if marks else (body or "")
+
+    _PAIR = {"은": "는", "는": "은", "이": "가", "가": "이",
+             "을": "를", "를": "을", "과": "와", "와": "과", "으로": "로", "로": "으로"}
+    _JONG_SET = {"은", "이", "을", "과", "으로"}      # 받침 있는 말 뒤에 붙는 쪽
+
+    def _has_jong(num: int) -> bool:
+        """숫자를 소리내어 읽을 때 받침이 있는가 — 3(삼)·1(일)은 있고 2(이)·4(사)는 없다."""
+        n = num % 100
+        return True if n % 10 == 0 else str(n % 10) in ("1", "3", "6", "7", "8")
+
+    def _prose(m):
+        v = int(m.group(1))
+        nv = newnum.get(v, v)
+        josa = m.group(2) or ""
+        if josa:                       # 번호가 바뀌면 조사도 바뀐다('사진19는' → '사진3은')
+            want_jong = _has_jong(nv)
+            has = josa in _JONG_SET
+            if want_jong != has:
+                josa = _PAIR.get(josa, josa)
+        return f"사진{nv}{josa}"
+
+    # 대괄호로 감싸인 마커는 이미 바꿨으므로 제외한다(이중 치환 방지)
+    return _rn.sub(r"(?<!\[)사진\s*(\d+)(?!\])(으로|은|는|이|가|을|를|과|와|로)?", _prose, b)
+
+
 def _content_photo_layout(tenant, blog):
     """글 내용에 맞춰 사진 재배치·재정렬(글 텍스트 불변 — 마커 위치·번호와 사진 순서만).
     반환 (new_body, order, caps): order=콘텐츠 흐름순 원본 사진 인덱스, caps=per-photo 캡션(원순서).
@@ -4967,9 +5007,7 @@ def _content_photo_layout(tenant, blog):
     if len(_seen_i) >= max(2, n // 2):
         _order0 = _seen_i + [i for i in range(1, n + 1) if i not in _seen_i]   # 미등장은 뒤로
         _newnum = {orig: k + 1 for k, orig in enumerate(_order0)}
-        _nb = _rl.sub(r"\[사진(\d+)\]",
-                      lambda m: f"[사진{_newnum.get(int(m.group(1)), int(m.group(1)))}]", body)
-        return _nb, [i - 1 for i in _order0], caps
+        return _renumber_photo_refs(body, _newnum), [i - 1 for i in _order0], caps
     # 2차(구세트 폴백): 마커가 거의 없으면 기존 캡션↔문단 재매칭 경로
     if len([c for c in caps if (c or "").strip()]) < max(2, n // 2):   # 설명 태부족 → 원순서 유지(날조·오배치 금지)
         return body, list(range(n)), caps
@@ -5001,7 +5039,7 @@ def _content_photo_layout(tenant, blog):
         out.append(para)
         for i in sorted(by_para.get(j, []), key=lambda x: newnum[x]):
             out.append(f"[사진{newnum[i]}]")
-    return "\n\n".join(out), order, caps
+    return _renumber_photo_refs("\n\n".join(out), newnum, marks=False), order, caps
 
 
 def _caption_box(tenant, blog, n: int, caps=None) -> str:

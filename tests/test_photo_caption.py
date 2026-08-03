@@ -218,3 +218,26 @@ def test_H12_한_물건에_색이_둘일_수는_없다():
     from app.services import photodesc as pd
     assert pd.caption_ok("손에 초록색 빨간색 스퀴지에 흰색 천을 감싸 시공하는 모습") == "색상 나열 과다"
     assert pd.caption_ok("회색 차량 표면을 흰색 천으로 닦아내고 있다.") == ""
+
+
+def test_H13_본문_산문의_사진번호도_함께_재번호된다():
+    """실물 사고(2026-08-04): 마커 [사진N]만 재번호하고 본문 산문의 '사진N'은 옛 번호로 뒀다.
+    본문은 '사진19는 회색 전기밴을 앞쪽에서 찍은 겁니다'인데 그 자리엔 사진3이 있었다 — 4건.
+    손님이 읽는 글이 다른 사진을 가리켰다.
+    되돌리면(산문 치환 제거) 이 테스트가 실패한다."""
+    from app import main as m
+    body = "사진19는 앞쪽에서 찍은 겁니다.\n[사진19]\n사진1은 도어 패널입니다.\n[사진1]"
+    out = m._renumber_photo_refs(body, {19: 3, 1: 10})
+    assert "[사진3]" in out and "[사진10]" in out, "마커가 안 바뀌었다"
+    assert "사진3은 앞쪽에서" in out, f"산문이 옛 번호로 남았다: {out}"
+    assert "사진10은 도어 패널" in out, f"산문이 옛 번호로 남았다: {out}"
+    assert "사진19" not in out and "사진1은" not in out, "옛 번호가 남아 있다"
+    # 번호가 바뀌면 조사도 바뀐다 — '사진3는'은 사장님 글에 나가면 안 된다
+    assert "사진3는" not in out, "조사가 안 맞는다"
+    o2 = m._renumber_photo_refs("사진3은 이렇고 사진1이 저렇다", {3: 4, 1: 2})
+    assert "사진4는" in o2 and "사진2가" in o2, f"조사 교정 실패: {o2}"
+    # 매핑은 이 함수 하나만 쓴다(경로가 둘이면 갈라진다)
+    import inspect
+    src = inspect.getsource(m._content_photo_layout)
+    assert src.count("_renumber_photo_refs") >= 2, "재번호 경로가 둘로 갈라져 있다"
+    assert '_rl.sub(r"\\[사진(\\d+)\\]"' not in src, "마커만 바꾸는 옛 경로가 남아 있다"
