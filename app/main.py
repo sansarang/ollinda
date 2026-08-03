@@ -665,6 +665,38 @@ def admin_set_delete(asset_id: str, tenant_id: str = ""):
                          "tombstoned": db.is_set_deleted(asset_id)})
 
 
+@app.get("/admin/account-map")
+def admin_account_map():
+    """운영 진단(읽기 전용) — 계정별로 어느 가게(tenant_id)를 갖고 있고 콘텐츠가 몇 개인지.
+    같은 이름의 가게가 여러 개라 '어느 것이 진짜 사장님 것인가'를 눈으로 가리기 위한 표."""
+    out = []
+    try:
+        with db._conn() as c:
+            rows = c.execute(
+                "SELECT u.email, u.provider, s.tenant_id, t.name "
+                "FROM user_stores s JOIN users u ON u.id=s.user_id "
+                "LEFT JOIN tenants t ON t.id=s.tenant_id").fetchall()
+    except Exception:
+        try:
+            with db._conn() as c:
+                rows = c.execute(
+                    "SELECT u.email, '' AS provider, s.tenant_id, t.name "
+                    "FROM user_stores s JOIN users u ON u.id=s.user_id "
+                    "LEFT JOIN tenants t ON t.id=s.tenant_id").fetchall()
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": repr(e)[:200]}, status_code=500)
+    for r in rows:
+        tid = r["tenant_id"]
+        try:
+            n_sets = len(db.list_sets(tenant_id=tid, limit=100))
+        except Exception:
+            n_sets = -1
+        out.append({"email": r["email"], "provider": r["provider"],
+                    "tenant_id": tid, "tenant": r["name"], "sets": n_sets})
+    out.sort(key=lambda x: (x["email"] or "", -(x["sets"] or 0)))
+    return JSONResponse({"ok": True, "rows": out, "total": len(out)})
+
+
 @app.get("/admin/harvest")
 def admin_harvest(tenant_id: str = "", topic: str = ""):
     """🌾 경험 수확 실측(2026-08-03) — 묻기 전에 자사 기록에서 무엇을 캤는가.
