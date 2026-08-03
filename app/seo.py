@@ -1237,6 +1237,22 @@ def natural_kr_number(text: str) -> str:
     return _KR_DEC_UNIT.sub(_r, text or "")
 
 
+_CLOCK_RE = re.compile(r"(\d{1,2})\s*:\s*(\d{2})")
+
+
+def _clock_nums(s: str) -> set:
+    """시계 표기(10:21)를 한국어 말투와 같은 토큰으로 — '10시', '21분'.
+
+    ★ 2026-08-03 오탐: 사진에 찍힌 시계를 본문이 '10시 21분'으로 썼는데, 근거(사진 분석)에는
+      '10:21'로 적혀 있어 날조로 잡혔다. 같은 사실을 표기만 달리 쓴 것이다.
+      숫자를 느슨하게 봐주는 게 아니라, 같은 표기를 같은 것으로 읽게 만든다."""
+    out = set()
+    for m in _CLOCK_RE.finditer(s or ""):
+        out.add(f"{int(m.group(1))}시")
+        out.add(f"{int(m.group(2))}분")
+    return out
+
+
 def _money_nums(s: str) -> set:
     """텍스트에서 '금액·%·수치+단위'를 정규화 추출(콤마·공백 제거). 날조 탐지용(PHASE 7).
     ★ 오탐 2종 차단(2026-08-01 실측):
@@ -1376,7 +1392,8 @@ def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> d
     # source 미전달 호출(게이트 경로 등)은 생성 시 저장한 payload.gen_source로 폴백
     source = source or (payload.get("gen_source") or "")
     if source:
-        fabricated = [n for n in _money_nums(text) if n not in _money_nums(source)]
+        _src_nums = _money_nums(source) | _clock_nums(source)   # 시계 표기도 같은 사실로 읽는다
+        fabricated = [n for n in _money_nums(text) if n not in _src_nums]
         if fabricated:
             warnings.append(f"입력에 없는 수치/금액 {fabricated[:4]} → 날조 의심(제거 권장)")
             score -= min(20, 8 * len(fabricated))

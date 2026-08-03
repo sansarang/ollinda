@@ -57,6 +57,18 @@ def test_fabrication_does_not_fire_on_clean_body():
     assert not hits, f"멀쩡한 글이 날조로 잡힘: {hits}"
 
 
+def test_clock_format_is_not_fabrication():
+    """A4. 오탐(2026-08-03 실측): 사진에 찍힌 시계를 본문이 '10시 21분'으로 썼는데
+    근거(사진 분석)엔 '10:21'로 적혀 있어 날조로 잡혔다. 같은 사실을 표기만 달리 쓴 것이다.
+    ★ 숫자를 느슨하게 봐주는 게 아니라, 같은 표기를 같은 것으로 읽게 만든다."""
+    src = '시계 화면에 시간 "10:21" 표시 보임. 회색 도장면을 패드로 문지르는 손.'
+    body = "## 소제목\n시계에 10시 21분이 찍혀 있는데, 이 단계에만 공을 들였습니다."
+    hits = [w for w in (_audit(body, source=src).get("warnings") or []) if "날조" in w]
+    assert not hits, f"시계 표기를 날조로 잡음: {hits}"
+    assert seo._clock_nums('시계 "10:21"') == {"10시", "21분"}
+    assert seo._clock_nums("가격 2,990만원") == set(), "시계가 아닌 것을 시계로 읽음"
+
+
 def test_real_fabrication_still_caught():
     """A-역: 입력에 없는 금액은 여전히 잡아야 한다(오탐 수정이 탐지를 죽이면 안 된다)."""
     src = "2022년식 투싼, 실주행 57,216km."
