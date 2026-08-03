@@ -754,8 +754,10 @@ def admin_caption_preview(asset_id: str = "", regen: int = 0):
             pass
     n = len((blog.payload or {}).get("image_paths") or [])
     caps = _photo_captions(t, blog, n)
+    _src = (blog.payload or {}).get("gen_source") or ""
     return JSONResponse({"ok": True, "n": n,
-                         "anchors": seo.input_anchors((blog.payload or {}).get("gen_source") or ""),
+                         "descs": [{"i": i, "d": _pd.best_line(_src, i)} for i in range(1, n + 1)],
+                         "anchors": seo.input_anchors(_src),
                          "captions": [{"i": i + 1, "len": len(c), "text": c,
                                        "gate": _pd.caption_ok(c) if c else "빈칸"}
                                       for i, c in enumerate(caps)]})
