@@ -4880,7 +4880,9 @@ def _photo_captions(tenant, blog, n: int, _diag: list = None) -> list[str]:
         _written = list(_cache["caps"])
     else:
         _descs = [_pdsc.best_line(srcnote, i) for i in range(1, n + 1)]
-        _written = _pdsc.write_captions(_descs, _anchors, _shop, kw, _diag=_diag)
+        # 사장님이 쓰신 소재 메모 = 고유명사의 역할을 알려주는 유일한 문맥(사진 묘사 앞부분)
+        _ctx = _r.split(r"\[사진\s*1\]", srcnote)[0][-600:]
+        _written = _pdsc.write_captions(_descs, _anchors, _shop, kw, _diag=_diag, context=_ctx)
         try:
             blog.payload["photo_captions"] = {"n": n, "caps": _written}
             db.save_piece(blog)

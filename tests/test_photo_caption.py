@@ -112,9 +112,9 @@ def test_captions_are_written_not_carved():
     ('군용 스타일 시계를 착용한 손이' → '군용 스타일')."""
     src = inspect.getsource(pd.write_captions)
     assert "call_task" in src, "LLM으로 쓰지 않는다"
-    assert "40~60자" in src and "추측 금지" in src and "실값" in src, "규격 지시가 없다"
-    # ★ 실값을 엉뚱한 자리에 끼우면 날조다(실측: 필름 등급 '버텍스500'이 도구 이름으로 쓰였다)
-    assert "도구·재료·부위 이름으로 바꿔 쓰는 것은 날조" in src, "실값 오용 금지 지시가 없다"
+    assert "40~60자" in src and "추측 금지" in src, "규격 지시가 없다"
+    # 고유명사 오용 금지는 규칙의 실체를 문다(문구가 아니라) — 상세 계약은 H11이 진다.
+    assert "날조" in src, "고유명사 오용 금지 지시가 없다"
     assert "caption_ok(c)" in src, "쓴 결과를 게이트에 안 태운다"
     from app import main as m
     msrc = inspect.getsource(m._photo_captions)
@@ -195,3 +195,26 @@ def test_H10_주관_수식어는_관찰이_아니다():
                 "차량 표면을 꼼꼼히 닦아내고 있다."]:
         assert pd.caption_ok(bad) == "주관 수식어", f"주관 수식어가 통과했다: {bad}"
     assert pd.caption_ok("차량 도장면을 패드로 문지르는 모습.") == ""
+
+
+def test_H11_실값은_나열이_아니라_문맥으로_준다():
+    """실값 오용 2회 재발(2026-08-03): '버텍스500 패드'(필름 등급을 패드로), '루마썬팅 필름'(상호를 필름으로).
+    원인은 역할을 모르는 문자열을 나열해 주고 '제자리에 넣어라'고 요구한 것 — 불가능한 요구다.
+    되돌리면(context 제거) 이 테스트가 실패한다."""
+    import inspect
+    from app.services import photodesc as pd
+    src = inspect.getsource(pd.write_captions)
+    assert "context" in inspect.signature(pd.write_captions).parameters, "문맥 인자가 없다"
+    assert "사장님 메모" in src, "메모 문맥을 프롬프트에 안 준다"
+    assert "그 메모가 쓴 문맥 그대로" in src, "문맥 준수 지시가 없다"
+    assert "모르겠으면 그 이름을 아예 쓰지 마라" in src, "모를 때 쓰지 말라는 지시가 없다"
+    # 생성 경로가 실제로 넘기는가 — '존재'가 아니라 '사용' 기준(조항)
+    import app.main as m
+    assert "context=_ctx" in inspect.getsource(m._photo_captions), "생성 경로가 문맥을 안 넘긴다"
+
+
+def test_H12_한_물건에_색이_둘일_수는_없다():
+    """실물: '손에 초록색 빨간색 스퀴지(도구)에 흰색 천을 감싸' — 모순이 그대로 나갔다."""
+    from app.services import photodesc as pd
+    assert pd.caption_ok("손에 초록색 빨간색 스퀴지에 흰색 천을 감싸 시공하는 모습") == "색상 나열 과다"
+    assert pd.caption_ok("회색 차량 표면을 흰색 천으로 닦아내고 있다.") == ""
