@@ -42,4 +42,13 @@ if [ "$GATE" -ne 0 ]; then
 fi
 
 [ "${1:-}" = "--dry" ] && { echo "(--dry: push 생략)"; exit 0; }
+
+# 🧪 골든 전체 통과 없이는 push하지 않는다(2026-08-03 사고: 실패한 테스트가 커밋·배포됐다).
+#   원인은 파이프라인 종료코드를 잘못 읽은 것 — 사람 눈이 아니라 게이트가 막아야 한다.
+if [ "${SHOPCAST_SKIP_TESTS:-0}" != "1" ]; then
+  if ! SHOPCAST_SECRET=test python3 -m pytest tests/ -q >/tmp/_gold.log 2>&1; then
+    echo "🛑 골든 실패 — push 중단"; tail -5 /tmp/_gold.log; exit 4
+  fi
+  echo "✅ 골든 전체 통과 ($(grep -Eo '[0-9]+ passed' /tmp/_gold.log | tail -1))"
+fi
 git push origin "$(git rev-parse --abbrev-ref HEAD)"

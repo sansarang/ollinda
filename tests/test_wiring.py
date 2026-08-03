@@ -50,6 +50,16 @@ def test_last_run_is_recorded():
         assert "_mark(" in inspect.getsource(fn), f"{fn.__name__}이 실행 흔적을 안 남긴다"
 
 
+def test_push_gate_runs_goldens():
+    """G. 골든이 실패해도 배포된 사고(2026-08-03) — 파이프라인 종료코드를 잘못 읽었다.
+    사람 눈이 아니라 게이트가 막아야 한다."""
+    import pathlib
+    sh = (pathlib.Path(__file__).resolve().parents[1] / "scripts" / "safe-push.sh").read_text()
+    assert "pytest tests/" in sh, "push 전에 골든을 돌리지 않는다"
+    assert "exit 4" in sh, "골든 실패에도 push가 진행된다"
+    assert "SHOPCAST_SKIP_TESTS" in sh, "긴급 우회 경로가 없다(있어야 하되 명시적이어야 한다)"
+
+
 def test_wiring_endpoint_exposes_schedule_and_last_run():
     """F. 배선 상태는 화면에서 읽을 수 있어야 한다 — 코드를 열어봐야 알면 아무도 안 본다."""
     from app import main as _m

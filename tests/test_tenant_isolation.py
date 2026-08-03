@@ -77,9 +77,12 @@ def test_constitution_has_execution_discipline():
     import pathlib
     txt = (pathlib.Path(__file__).resolve().parents[1] / "CLAUDE.md").read_text()
     assert "무결점 실행 규율" in txt, "규율이 헌법에 없다"
+    # ★ 줄바꿈으로 끊길 수 있는 문구는 낱말로 검사한다(오늘 이미 겪은 실수 — 골든은
+    #   표현이 아니라 규칙의 실체를 물어야 한다).
+    flat = " ".join(txt.split())
     for must in ("실행 계획", "영향 범위", "롤백 방법", "완결 검증 기준",
-                 "전 자원 대조표", "함수화 + 골든 박제", "2회 재발"):
-        assert must in txt, f"규율 조항 누락: {must}"
+                 "전 자원 대조표", "함수화", "골든 박제", "2회 재발"):
+        assert must in flat, f"규율 조항 누락: {must}"
     # 규율은 절대 원칙 안에 있어야 한다(부록에 두면 안 읽힌다)
     assert txt.index("무결점 실행 규율") < txt.index("업종 중립"), "절대 원칙 최상단이 아니다"
 
