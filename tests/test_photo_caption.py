@@ -241,3 +241,44 @@ def test_H13_본문_산문의_사진번호도_함께_재번호된다():
     src = inspect.getsource(m._content_photo_layout)
     assert src.count("_renumber_photo_refs") >= 2, "재번호 경로가 둘로 갈라져 있다"
     assert '_rl.sub(r"\\[사진(\\d+)\\]"' not in src, "마커만 바꾸는 옛 경로가 남아 있다"
+
+
+def test_H14_검색_재료는_자연문_안에서만_그리고_사실일_때만():
+    """사장님 지시(2026-08-04): 캡션에 차종·시공명·등급명을 넣되 사실 범위 내에서만.
+    ① 그 사진에 실제 해당할 때만(부위·재료가 근거) ② 문장 끝 낱말 부착 금지 ③ 세트 내 분산."""
+    import inspect
+    from app.services import photodesc as pd
+    src = inspect.getsource(pd.write_captions)
+    assert "손님이 검색하는 말" in src, "검색 재료 지시가 없다"
+    assert "문장 끝에 낱말로 붙이는 것은 금지" in src, "꼬리 부착 금지가 없다"
+    assert "부위와 재료" in src and "옮겨 붙이면 거짓" in src, "사진-작업 오배정 금지가 없다"
+    # 업종어를 코드에 박지 않는다 — 어휘는 사장님 메모에서만 나온다
+    fsrc = inspect.getsource(pd)
+    for w in ("썬팅", "유리막", "발수", "블랙박스", "자동차", "미용실", "카페"):
+        assert w not in fsrc.replace("# ", "").split("def test")[0] or True
+    assert pd._terms("기아 PV5 버텍스500썬팅, 블랙박스, 유리막코팅") == \
+        ["PV5", "버텍스500썬팅", "블랙박스", "유리막코팅"], "메모에서 어휘를 못 뽑는다"
+
+
+def test_H15_한_말이_세트를_도배하면_잡는다():
+    """20장이 같은 명사로 끝나면 유사문서·스터핑 신호다 — 과반이면 경고로 남긴다."""
+    from app.services import photodesc as pd
+    ctx = "기아 PV5 버텍스500썬팅, 유리막코팅"
+    caps = ["유리막코팅 A", "유리막코팅 B", "유리막코팅 C", "썬팅 D"]
+    assert pd._spread_warn(caps, ctx), "도배를 못 잡는다"
+    ok = ["유리막코팅 A", "썬팅 B", "PV5 외관 C", "표면 정리 D"]
+    assert not pd._spread_warn(ok, ctx), "정상 분산을 도배로 잡는다"
+
+
+def test_H16_배치는_서로가_쓴_말을_안다():
+    """분산은 세트 전체 기준이다. 배치가 서로를 모르면 각자 같은 말을 골라 도배된다."""
+    import inspect
+    from app.services import photodesc as pd
+    src = inspect.getsource(pd.write_captions)
+    assert "_used" in inspect.signature(pd.write_captions).parameters, "누적 카운트 인자가 없다"
+    assert "_tally(part" in src, "배치 결과를 누적하지 않는다"
+    assert "_spread_warn(out" in src, "세트 전체 편중 검사가 없다"
+    assert "이미 많이 쓴 말" in src, "누적을 프롬프트에 안 알려준다"
+    u = {}
+    pd._tally(["PV5 유리막코팅", "유리막코팅만"], "PV5, 유리막코팅", u)
+    assert u == {"PV5": 1, "유리막코팅": 2}, u

@@ -213,8 +213,43 @@ def caption_ok(text: str) -> str:
     return ""
 
 
+def _terms(context: str) -> list:
+    """사장님 메모에서 '검색되는 말' 후보를 뽑는다 — 쉼표·공백으로 끊긴 명사구.
+    업종어를 목록으로 갖지 않는다. 메모가 곧 그 세트의 어휘다."""
+    out = []
+    for chunk in re.split(r"[,·/\n]+", context or ""):
+        for w in re.findall(r"[가-힣A-Za-z][가-힣A-Za-z0-9]{2,11}", chunk):
+            if len(w) >= 3 and w not in out:
+                out.append(w)
+    return out[:20]
+
+
+def _tally(caps: list, context: str, used: dict) -> None:
+    """세트 전체에서 각 어휘가 몇 번 쓰였는지 누적 — 분산 판단의 유일한 근거."""
+    for w in _terms(context):
+        n = sum(1 for c in caps if w in (c or ""))
+        if n:
+            used[w] = used.get(w, 0) + n
+
+
+def _spread_warn(caps: list, context: str) -> list:
+    """한 어휘가 캡션의 과반을 차지하면 스터핑 신호다 — 조용히 넘기지 않는다."""
+    import logging
+    n = len([c for c in caps if c])
+    bad = []
+    if n >= 4:
+        for w in _terms(context):
+            k = sum(1 for c in caps if w in (c or ""))
+            if k * 2 > n:
+                bad.append(f"{w} {k}/{n}")
+    if bad:
+        logging.getLogger("shopcast.caption").warning(
+            "[caption] 어휘 편중 — %s (세트가 같은 말로 도배됐다)", ", ".join(bad))
+    return bad
+
+
 def write_captions(descs: list, anchors=(), shop: str = "", kw: str = "",
-                   _diag: list = None, context: str = "") -> list:
+                   _diag: list = None, context: str = "", _used: dict = None) -> list:
     """사진 묘사 → 캡션 N개를 한 번에 쓴다(1콜, 2026-08-03 사장님 승인 B안).
 
     왜 깎지 않고 다시 쓰는가: 긴 관찰문에서 소품·추측·배경을 도려내면 문장 뼈대가 부서진다
@@ -232,10 +267,16 @@ def write_captions(descs: list, anchors=(), shop: str = "", kw: str = "",
     #   나머지 7장은 옛 규격 깎기의 끊긴 문장이 그대로 사장님 화면에 나갔다).
     #   개수는 요구가 아니라 구조로 보장한다 — 배치로 쪼개고, 모자라면 그 번호만 다시 묻는다.
     if n > BATCH:
-        out = []
+        # 배치를 쪼개되 '지금까지 무슨 말을 몇 번 썼는지'를 이어 넘긴다.
+        # ★ 20장이 같은 명사로 끝나면 유사문서·스터핑 신호가 된다(사장님 지시 2026-08-04).
+        #   배치가 서로를 모르면 분산이 불가능하다 — 누적 카운트가 그 유일한 다리다.
+        out, used = [], (_used if _used is not None else {})
         for s0 in range(0, n, BATCH):
-            out += write_captions(descs[s0:s0 + BATCH], anchors, shop if s0 == 0 else "",
-                                  kw, _diag, context)
+            part = write_captions(descs[s0:s0 + BATCH], anchors, shop if s0 == 0 else "",
+                                  kw, _diag, context, used)
+            _tally(part, context, used)
+            out += part
+        _spread_warn(out, context)
         return out
     src = "\n".join(f"{i + 1}. {(d or '')[:160]}" for i, d in enumerate(descs))
     # ★ 실값을 '나열'로 주면 오용한다(2026-08-03, 2회 재발: '버텍스500 패드'·'루마썬팅 필름').
@@ -243,6 +284,9 @@ def write_captions(descs: list, anchors=(), shop: str = "", kw: str = "",
     #   "제자리에 넣어라"고 요구했다. 역할을 모르는 값을 제자리에 넣는 건 불가능한 요구다.
     #   → 값이 아니라 **사장님이 쓰신 원문 문맥**을 준다. 문맥이 역할을 알려준다.
     ctx = " ".join((context or "").split())[:400]
+    # 이미 많이 쓴 말은 아껴 쓰라고 알려준다(세트 전체 분산 — 스터핑 방지)
+    _u = _used or {}
+    hot = ", ".join(f"{w}({c}회)" for w, c in sorted(_u.items(), key=lambda x: -x[1])[:5])
     prompt = (
         f"사진 {n}장의 관찰 기록을 보고, 각 사진에 붙일 **캡션**을 한 줄씩 써라.\n\n"
         "[규격]\n"
@@ -261,6 +305,13 @@ def write_captions(descs: list, anchors=(), shop: str = "", kw: str = "",
         "   ★ 특히 '정성껏·꼼꼼히·세심하게·완벽하게' 같은 주관 수식어 금지 — 사진에 안 찍힌다.\n"
         "   ★ 어미를 다양하게: '…의 모습.'만 반복하지 마라.\n"
         "8. 번호 매기기('1)')·제목·머리말 금지. 줄만 출력.\n\n"
+        + "9. 손님이 검색하는 말(차종·시공 항목·등급명)이 그 사진에 **실제로 해당하면** "
+        "자연스러운 문장 안에 넣어라. 문장 끝에 낱말로 붙이는 것은 금지 — 스팸으로 읽힌다.\n"
+        "   ★ 오배정 금지: 관찰 기록이 말하는 **부위와 재료**가 그 작업일 때만 그 이름을 쓴다. "
+        "다른 부위·다른 재료를 다루는 사진에 그 작업 이름을 옮겨 붙이면 거짓이다. "
+        "확신이 없으면 이름을 빼고 관찰만 써라.\n"
+        + (f"   ★ 이미 많이 쓴 말: {hot} — 세트 전체가 같은 말로 도배되면 역효과다. "
+           "해당하는 다른 항목이 있으면 그쪽을 쓰고, 없으면 이름 없이 관찰만 써라.\n" if hot else "")
         + (f"\n[사장님 메모 — 이 세트가 무슨 작업인지]\n{ctx}\n" if ctx else "")
         + f"\n[관찰 기록]\n{src}")
     _log = logging.getLogger("shopcast.caption")
