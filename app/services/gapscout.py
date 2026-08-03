@@ -352,16 +352,17 @@ def feed(tenant_id: str, limit: int = 3, dry: bool = True) -> dict:
                 "note": f"이번 주 빈자리 글감 상한({WEEKLY_CAP}건)을 이미 채웠습니다"}
 
     mats = _materials(tenant_id)
-    # ★ 재료 게이트(2026-08-02 사장님 결정) — 경험 한 줄이 없으면 큐에 넣지 않는다.
-    #   넣어두면 사장님이 사진 올리실 때 자동으로 그 글감이 쓰이는데, 재료가 부족한 채로
-    #   쓰이면 사진 설명만 있는 낮은 점수 글이 나간다. 자리를 한 번 잘못 먹는 것보다
-    #   늦게 제대로 먹는 게 낫다.
-    if not mats["ready"] and not dry:
+    # ★ 재료 게이트(2026-08-03 사장님 정정) — 경험이 없다고 글을 멈추지 않는다.
+    #   검색으로 확인한 사실을 3인칭으로 쓰는 것은 취재이고 정상 재료다.
+    #   보류는 '1인칭 서사가 형식상 필수인 글'에만 — 후기(review) 각도가 그렇다.
+    #   가격·방법 글은 사실 서술로 먼저 나가고, 답변이 들어오면 경험 보강판으로 올린다.
+    _needs_first_person = all(_angle(g["keyword"]) == "review" for g in rows[:limit])
+    if not mats["ready"] and not dry and _needs_first_person:
         return {"ok": True, "added": 0, "items": [], "materials": mats,
                 "blocked_by": mats["need"],
                 "questions": questions(tenant_id, limit=limit),
-                "note": f"재료가 부족해 큐에 넣지 않았습니다({', '.join(mats['need'])}). "
-                        "아래 질문에 한 줄씩만 답해 주시면 바로 진행합니다"}
+                "note": f"후기형 글은 1인칭 경험이 형식상 필수라 보류했습니다({', '.join(mats['need'])}). "
+                        "아래 질문에 한 줄만 답해 주시면 바로 진행합니다"}
     out, added = [], 0
     for g in rows:
         if added >= min(limit, room):

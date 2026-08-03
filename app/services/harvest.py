@@ -9,8 +9,9 @@
   ② 사진 vision 판독의 반복 패턴 — 이 가게가 '실제로 하는 것'
   ③ 플레이스 리뷰(사장님이 올린 캡처) — 손님 발화. 출처를 반드시 붙인다.
 
-★ 절대선: 웹에서 찾은 남의 경험·후기를 이 가게 경험으로 쓰지 않는다.
-  서치는 수요 정찰용이지 사장 대변용이 아니다. 여기 수확처에 외부 소스는 없다.
+★ 절대선(2026-08-03 정정): 검색은 취재다 — 확인된 사실·지식을 3인칭으로 쓰는 건 정상이다.
+  금지는 그것을 1인칭 경험("저희가 해보니")으로 바꾸는 인칭 위조뿐이다.
+  이 모듈은 '이 가게가 실제로 한 말'만 캔다(1인칭 재료) — 그래서 외부 소스가 없다.
 ★ 손님 발화는 사장 경험으로 위조하지 않는다 — 출처(kind='review')를 달아 구분한다.
 
 업종 중립: 판정 재료는 그 가게의 글·사진 묘사뿐이다. 업종어 하드코딩 0.
@@ -144,6 +145,18 @@ def harvest(tenant_id: str, _diag: dict = None) -> dict:
     return {"owner": owner, "fact": fact, "review": review,
             "covered": sorted(covered)[:400],
             "counts": {"owner": len(owner), "fact": len(fact), "review": len(review)}}
+
+
+# 1인칭 경험 주장 — 이 말을 쓰려면 사장님의 실제 답변·기록이 있어야 한다.
+#   검색으로 안 사실을 이 말투로 옮기면 인칭 위조다(언어 규칙만, 업종 무관).
+FIRST_PERSON = re.compile(
+    r"(저희가|저희는|제가|우리가|우리 ?손님|저희 ?손님|직접 (해|확인|시공|검수)|"
+    r"해보니|해봤|겪었|느꼈|들었습니다|하시더라|말씀하셨)")
+
+
+def first_person_claims(text: str) -> list[str]:
+    """본문에서 1인칭 경험 주장을 모두 뽑는다 — 근거 없는 글에 이 말이 있으면 위조다."""
+    return [m.group(0) for m in FIRST_PERSON.finditer(text or "")]
 
 
 def covers(tenant_id: str, topic: str, min_hit: int = 2) -> bool:

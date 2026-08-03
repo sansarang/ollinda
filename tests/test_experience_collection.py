@@ -93,10 +93,39 @@ def test_customer_words_are_labeled_not_forged():
     assert '"review"' in rsrc, "손님 발화가 사장 경험과 같은 종류로 저장된다"
 
 
-def test_constitution_bans_borrowed_experience():
-    """C2. 금지선이 헌법에 박혀 있어야 한다 — 코드에만 있으면 다음 세션이 모른다."""
+def test_constitution_scopes_the_ban_to_person_forgery():
+    """C2. 금지 범위가 정확해야 한다(2026-08-03 사장님 정정).
+    검색으로 확인한 사실을 3인칭으로 쓰는 것은 취재다 — 금지는 그것을 1인칭 경험으로
+    바꾸는 인칭 위조뿐이다. 범위를 넓게 잡으면 쓸 수 있는 재료까지 막는다."""
     import pathlib
     txt = (pathlib.Path(__file__).resolve().parents[1] / "CLAUDE.md").read_text()
-    assert "남의 경험을 이 가게 경험으로 쓰지 않는다" in txt
-    assert "서치는 수요 정찰용이지 사장 대변용이 아니다" in txt
+    assert "검색은 취재다" in txt, "검색 자체를 금지한 것처럼 읽힌다"
+    assert "3인칭 사실 서술" in txt and "1인칭 경험" in txt, "허용/금지 경계가 없다"
+    assert "경험이 없다고 글을 멈추지 않는다" in txt, "보류 원칙이 옛것 그대로다"
     assert '"실물" = 프로덕션' in txt, "실물 검증 표준이 없다"
+
+
+def test_third_person_rule_injected_when_no_experience():
+    """C3. 경험 기록이 없으면 3인칭 사실 서술로 쓰라고 지시한다 —
+    지시가 없으면 모델이 없는 경험을 지어낸다(1인칭 위조)."""
+    from app.services import generate as _g
+    src = inspect.getsource(_g.generate_for)
+    assert "인칭 규칙" in src, "인칭 규칙 주입이 없다"
+    assert "1인칭 경험 주장 금지" in src and "3인칭 사실 서술" in src
+    i, j = src.find("인칭 규칙"), src.find("_generate_sequential")
+    assert 0 < i < j, "생성 실행보다 뒤에 있으면 프롬프트에 안 들어간다"
+
+
+def test_hold_only_for_first_person_formats():
+    """C4. 보류는 1인칭 서사가 형식상 필수인 글(후기)에만 — 가격·방법 글은 사실로 먼저 나간다."""
+    src = inspect.getsource(gs.feed)
+    assert "_needs_first_person" in src, "모든 글을 경험 없다고 막는다"
+    assert '_angle(g["keyword"]) == "review"' in src, "후기형 판정이 없다"
+
+
+def test_first_person_detector():
+    """C5. 1인칭 위조를 실제로 잡아낼 수 있어야 검증이 된다."""
+    assert hv.first_person_claims("저희가 직접 확인했습니다")
+    assert hv.first_person_claims("우리 손님이 좋다고 하셨습니다")
+    assert not hv.first_person_claims("필름 등급에 따라 열차단 성능이 달라집니다")
+    assert not hv.first_person_claims("일반적으로 시공 후 하루는 창문을 내리지 않습니다")

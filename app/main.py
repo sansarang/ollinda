@@ -600,7 +600,7 @@ def admin_gap_scan(tenant_id: str = "", limit: int = 40, comp: int = 1):
 
 
 @app.post("/admin/queue-gen")
-def admin_queue_gen(tid: str = "", qid: int = 0):
+def admin_queue_gen(tid: str = "", qid: int = 0, force: int = 0):
     """운영 진단 — 큐의 특정 글감(qid)으로 글을 뽑는다. 백그라운드 실행.
     평소 소비 순서(P1→…)는 그대로다. 지목은 여기서만 한다(검증·실측용)."""
     t = db.get_tenant(tid)
@@ -611,7 +611,7 @@ def admin_queue_gen(tid: str = "", qid: int = 0):
 
     def _bg():
         try:
-            r = _aq.consume(t, plan="pro", only_id=qid)
+            r = _aq.consume(t, plan="pro", only_id=qid, allow_done=bool(force))
             logging.getLogger("shopcast.autoqueue").warning("[queue-gen] %s", r)
         except Exception:
             logging.getLogger("shopcast.autoqueue").exception("[queue-gen] 실패 qid=%s", qid)

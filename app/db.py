@@ -1921,7 +1921,7 @@ def info_track_count_since(tenant_id: str, days: int = 7) -> int:
         return 0
 
 
-def claim_writing(tenant_id: str, only_id: int = 0) -> Optional[dict]:
+def claim_writing(tenant_id: str, only_id: int = 0, allow_done: bool = False) -> Optional[dict]:
     """pending 1건을 P1→P2→P3→P4 순으로 원자적 클레임(status→generating).
     UPDATE ... RETURNING(SQLite 3.35+) — 동시 요청에도 이중 소비 없음.
 
@@ -1931,9 +1931,10 @@ def claim_writing(tenant_id: str, only_id: int = 0) -> Optional[dict]:
         with _conn() as c:
             if only_id:
                 # 지목 클레임은 skipped도 다시 잡는다 — 실패 원인을 고친 뒤 재시도해야 하기 때문(진단 경로).
+                _ok = "('pending','skipped','done')" if allow_done else "('pending','skipped')"
                 r = c.execute(
                     "UPDATE writing_queue SET status='generating', attempts=0 WHERE id=? AND tenant_id=? "
-                    "AND status IN ('pending','skipped') RETURNING *", (only_id, tenant_id)).fetchone()
+                    f"AND status IN {_ok} RETURNING *", (only_id, tenant_id)).fetchone()
             else:
                 r = c.execute(
                     "UPDATE writing_queue SET status='generating' WHERE id=("

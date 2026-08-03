@@ -468,7 +468,8 @@ def _schedule_date(t) -> str:
     return day.isoformat()
 
 
-def consume(t, files: list | None = None, plan: str = "free", only_id: int = 0) -> dict:
+def consume(t, files: list | None = None, plan: str = "free", only_id: int = 0,
+            allow_done: bool = False) -> dict:
     """큐 1건 소비 → 글 생성. files 없으면 photo_pool 재사용, 그것도 없으면 need_photos.
     반환 {ok, made?, keyword?, source?, need_photos?, empty?}.
     only_id: 특정 글감을 지목해 뽑는다(운영 진단 전용 — 평소 소비 순서는 그대로)."""
@@ -489,7 +490,7 @@ def consume(t, files: list | None = None, plan: str = "free", only_id: int = 0) 
         return {"ok": False, "need_photos": True}
     existing = _existing_kw_set(t)
     for _ in range(4):                                # 같은 키워드 skip 후 다음 항목
-        q = db.claim_writing(t.id, only_id=only_id)
+        q = db.claim_writing(t.id, only_id=only_id, allow_done=allow_done)
         if not q:
             return {"ok": False, "empty": True}
         kw = q["target_keyword"]

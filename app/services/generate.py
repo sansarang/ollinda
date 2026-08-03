@@ -63,15 +63,29 @@ def generate_for(tenant: Tenant, asset: Asset, kinds: list[ContentKind],
                 asset.note = _note + _blk
         # 🌾 자사 기록 수확 주입(2026-08-03) — 묻기 전에 이미 아는 것부터 쓴다.
         #   과거 글에서 사장님이 하신 말, 손님 후기(출처 표기)를 근거로 넘긴다.
-        #   ★ 외부(웹서치) 경험은 넣지 않는다 — 남의 경험을 이 가게 것으로 쓰면 날조다.
+        #   ★ 외부(웹서치) 내용은 여기 넣지 않는다 — 이 블록은 '1인칭 재료'다.
+        #     검색으로 안 사실은 3인칭 서술로 쓰면 되고, 그건 아래 인칭 규칙이 지시한다.
         if "[이 가게가 이미 말한 것" not in (getattr(asset, "note", "") or ""):
             from app.services import harvest as _hv
             _hb = _hv.as_note_block(tenant.id, (getattr(asset, "target_kw", "") or ""))
             if _hb:
                 asset.note = (getattr(asset, "note", "") or "") + _hb
-                import logging as _lge
-                _lge.getLogger("shopcast.generate").info(
-                    "[generate] 실경험 자동 주입 t=%s kw=%r", tenant.id, _kw_for_exp)
+        # 🗣 인칭 규칙(2026-08-03 사장님 정정) — 경험 근거가 없으면 3인칭 사실 서술로 쓴다.
+        #   검색·업계 지식으로 아는 것을 쓰는 건 취재다. 그걸 1인칭으로 옮기는 것만 위조다.
+        _n2 = getattr(asset, "note", "") or ""
+        if "[사장님 실제 답변" not in _n2 and "[이 가게가 이미 말한 것" not in _n2:
+            asset.note = _n2 + (
+                "\n[인칭 규칙 — 이 글엔 사장님 경험 기록이 없다]\n"
+                "① 1인칭 경험 주장 금지: '저희가 해보니', '제가 직접 확인했습니다', "
+                "'우리 손님이 …라고 하셨습니다' 류를 쓰지 마라. 겪지 않은 것을 겪은 것처럼 쓰면 날조다.\n"
+                "② 대신 3인칭 사실 서술로 써라: '…는 …에 따라 달라집니다', '…가 일반적입니다'. "
+                "업계에서 확인되는 사실·기준·주의점은 그대로 쓰되 과장하지 마라.\n"
+                "③ 사진에 실제로 보이는 것은 그대로 서술해도 된다(그건 이 세트의 사실이다).")
+        import logging as _lge
+        _lge.getLogger("shopcast.generate").info(
+            "[generate] 재료 주입 t=%s kw=%r 경험=%s 수확=%s", tenant.id,
+            getattr(asset, "target_kw", ""), "[사장님 실제 답변" in (asset.note or ""),
+            "[이 가게가 이미 말한 것" in (asset.note or ""))
     except Exception:
         pass                                          # 주입 실패가 생성을 막지 않는다
 
