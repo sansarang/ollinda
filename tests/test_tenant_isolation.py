@@ -70,6 +70,20 @@ def test_target_must_be_declared():
     assert "tenant_id" in r2, "보고서에 붙일 형태가 아니다"
 
 
+def test_constitution_has_execution_discipline():
+    """F. 무결점 실행 규율(2026-08-03) — 오늘 tenant 이관을 절반만 하고 '완료'라고 보고했다.
+    DB만 옮기고 미디어를 안 옮겨 사장님 화면의 사진이 전부 깨졌다.
+    계획·영향범위·롤백·완결검증을 먼저 쓰지 않은 것이 원인이고, 그 자체가 실패다."""
+    import pathlib
+    txt = (pathlib.Path(__file__).resolve().parents[1] / "CLAUDE.md").read_text()
+    assert "무결점 실행 규율" in txt, "규율이 헌법에 없다"
+    for must in ("실행 계획", "영향 범위", "롤백 방법", "완결 검증 기준",
+                 "전 자원 대조표", "함수화 + 골든 박제", "2회 재발"):
+        assert must in txt, f"규율 조항 누락: {must}"
+    # 규율은 절대 원칙 안에 있어야 한다(부록에 두면 안 읽힌다)
+    assert txt.index("무결점 실행 규율") < txt.index("업종 중립"), "절대 원칙 최상단이 아니다"
+
+
 def test_constitution_bans_name_based_targeting():
     """E. 원칙이 헌법에 있어야 다음 세션이 안다 — 코드에만 있으면 잊힌다."""
     import pathlib
