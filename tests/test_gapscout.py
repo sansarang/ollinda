@@ -354,8 +354,12 @@ def test_questions_only_for_certain_domain():
     assert "score" in src, "관문 미달 키워드까지 묻는다"
     # 각도별로 질문이 갈린다(가격 의도에 후기 질문을 하면 답이 안 나온다)
     assert set(gs._Q_BY_ANGLE) == {"price", "howto", "review"}
+    # ★ 2026-08-03 계약 변경: 질문에 주방(SEO) 용어와 특정 업종 말투를 넣지 않는다.
+    #   사장님은 결과만 보신다 — 왜 이 질문인지는 시스템이 알면 된다.
     for tmpl in gs._Q_BY_ANGLE.values():
-        assert "{kw}" in tmpl and "한 줄" in tmpl or "하나만" in tmpl, tmpl
+        for banned in ("{kw}", "검색", "키워드", "자리", "상위", "노출", "회)", "작업"):
+            assert banned not in tmpl, f"주방 용어·업종 말투 노출: {banned} in {tmpl}"
+        assert len(tmpl) <= 60, f"질문이 길면 안 읽는다: {tmpl}"
 
 
 def test_experience_page_shows_gap_questions():

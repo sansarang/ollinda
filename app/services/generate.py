@@ -61,6 +61,14 @@ def generate_for(tenant: Tenant, asset: Asset, kinds: list[ContentKind],
             _blk = _expn_fn(tenant.id, _kw_for_exp) if _kw_for_exp else ""
             if _blk:
                 asset.note = _note + _blk
+        # 🌾 자사 기록 수확 주입(2026-08-03) — 묻기 전에 이미 아는 것부터 쓴다.
+        #   과거 글에서 사장님이 하신 말, 손님 후기(출처 표기)를 근거로 넘긴다.
+        #   ★ 외부(웹서치) 경험은 넣지 않는다 — 남의 경험을 이 가게 것으로 쓰면 날조다.
+        if "[이 가게가 이미 말한 것" not in (getattr(asset, "note", "") or ""):
+            from app.services import harvest as _hv
+            _hb = _hv.as_note_block(tenant.id, (getattr(asset, "target_kw", "") or ""))
+            if _hb:
+                asset.note = (getattr(asset, "note", "") or "") + _hb
                 import logging as _lge
                 _lge.getLogger("shopcast.generate").info(
                     "[generate] 실경험 자동 주입 t=%s kw=%r", tenant.id, _kw_for_exp)

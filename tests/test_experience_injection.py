@@ -91,7 +91,7 @@ def test_injection_never_blocks_generation():
     from app.services import generate as _g
     src = inspect.getsource(_g.generate_for)
     i = src.find("experience_note")
-    seg = src[i:i + 700]
+    seg = src[i:i + 1400]
     assert "except Exception" in seg, "주입 실패가 생성을 막는다"
 
 

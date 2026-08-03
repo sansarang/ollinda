@@ -386,11 +386,44 @@ def feed(tenant_id: str, limit: int = 3, dry: bool = True) -> dict:
 # 각도별 경험 질문 틀 — 업종·지명 하드코딩 0(키워드와 검색 의도만 들어간다).
 #   왜 질문이 필요한가: 사진은 결과만 보여준다. 왜 그렇게 했는지·무엇이 갈리는지는
 #   사장님만 안다. 그 한 줄이 없으면 사진 설명만 있는 글이 된다(영상 자막에서 겪은 것과 같다).
+# 손님 문의 프레임만 쓴다(2026-08-03 사장님 지시) — 검색량·자리·키워드·상위글 같은
+#   주방 용어는 사장님 화면에 한 글자도 나가지 않는다. 사장님은 결과만 보신다.
+# '작업'처럼 특정 업종 말투도 쓰지 않는다 — 빵집·카페에도 그대로 통해야 한다.
 _Q_BY_ANGLE = {
-    "price": "'{kw}' 찾는 손님이 많아요. 가격이 갈리는 이유가 뭔가요? 한 줄이면 됩니다",
-    "howto": "'{kw}' 할 때 사장님이 꼭 확인하시는 것 하나만 알려주세요",
-    "review": "'{kw}' 작업하고 나서 손님이 가장 만족하신 점이 뭐였나요? 한 줄이면 됩니다",
+    "price": "손님들이 값 차이를 자주 물으시죠. 뭐에 따라 달라지나요? 한 줄이면 됩니다",
+    "howto": "이거 하실 때 사장님이 꼭 확인하시는 것 하나만 알려주세요",
+    "review": "이번에 하고 나서 손님이 뭐라고 하셨어요? 한 줄이면 글이 더 좋아져요",
 }
+
+
+def inline_question(tenant_id: str, topic: str) -> dict:
+    """🗣 생성 시점 인라인 질문(2026-08-03) — 이 세트의 주제에만 딱 하나.
+
+    왜 상시 상자가 아니라 여기인가: 맥락 없는 질문은 답이 안 나온다.
+    지금 막 사진을 올리신 그 소재에 대해 물어야 사장님이 답할 말이 있다.
+
+    묻지 않는 경우(둘 다 '이미 안다'):
+      ① 수확이 그 주제를 커버한다(과거 글·사진 반복에서 이미 캤다)
+      ② 같은 주제로 이미 답하신 적이 있다
+    반환 {ask: bool, question, topic, why_skip}
+    """
+    topic = " ".join((topic or "").split())
+    if not topic:
+        return {"ask": False, "why_skip": "주제 없음"}
+    try:
+        from app.services import harvest as _hv
+        if _hv.covers(tenant_id, topic):
+            return {"ask": False, "why_skip": "이미 아는 내용(과거 글·사진에서 수확)"}
+    except Exception:
+        pass
+    try:
+        from app.services.autoqueue import relevant_experience as _rel
+        if _rel(tenant_id, topic):
+            return {"ask": False, "why_skip": "같은 주제로 이미 답하심"}
+    except Exception:
+        pass
+    return {"ask": True, "topic": topic,
+            "question": _Q_BY_ANGLE.get(_angle(topic), _Q_BY_ANGLE["review"])}
 
 
 def questions(tenant_id: str, limit: int = 3) -> list[dict]:
