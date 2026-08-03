@@ -665,6 +665,80 @@ def admin_set_delete(asset_id: str, tenant_id: str = ""):
                          "tombstoned": db.is_set_deleted(asset_id)})
 
 
+def _tables_with(col: str) -> list:
+    """그 컬럼을 가진 테이블 전부 — 테이블 목록을 손으로 적으면 반드시 빠뜨린다."""
+    out = []
+    with db._conn() as c:
+        for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall():
+            t = r["name"]
+            if t.startswith("sqlite_"):
+                continue
+            cols = [x["name"] for x in c.execute(f"PRAGMA table_info({t})")]
+            if col in cols:
+                out.append(t)
+    return sorted(out)
+
+
+@app.post("/admin/migrate-tenant")
+def admin_migrate_tenant(src: str = "", dst: str = "", dry: int = 1):
+    """가게 이관 — src의 데이터를 dst로 옮긴다(2026-08-03).
+    tenant_id 컬럼을 가진 전 테이블을 자동으로 훑는다(손으로 적으면 빠뜨린다).
+    dry=1이면 무엇이 몇 건 옮겨질지만 센다."""
+    if not (db.get_tenant(src) and db.get_tenant(dst)) or src == dst:
+        return JSONResponse({"ok": False, "error": "src/dst 확인 필요"}, status_code=400)
+    moved = {}
+    with db._conn() as c:
+        for t in _tables_with("tenant_id"):
+            n = c.execute(f"SELECT COUNT(*) FROM {t} WHERE tenant_id=?", (src,)).fetchone()[0]
+            if not n:
+                continue
+            moved[t] = n
+            if not dry:
+                try:
+                    c.execute(f"UPDATE OR REPLACE {t} SET tenant_id=? WHERE tenant_id=?", (dst, src))
+                except Exception as e:
+                    moved[t] = f"{n}건 실패: {repr(e)[:80]}"
+    return JSONResponse({"ok": True, "dry": bool(dry), "src": src, "dst": dst, "moved": moved})
+
+
+@app.post("/admin/purge-except")
+def admin_purge_except(keep_email: str = "", keep_tenants: str = "", dry: int = 1):
+    """정리 — 남길 계정·가게만 두고 나머지를 지운다(2026-08-03 사장님 지시).
+    ★ 되돌릴 수 없다. keep 목록이 비면 거부한다(전체 삭제 사고 방지).
+    ★ dry=1 기본 — 무엇이 몇 건 지워질지 먼저 보여준다."""
+    keep = [x.strip() for x in (keep_tenants or "").split(",") if x.strip()]
+    if not (keep_email and keep):
+        return JSONResponse({"ok": False, "error": "keep_email과 keep_tenants가 모두 필요합니다"},
+                            status_code=400)
+    for tid in keep:
+        if not db.get_tenant(tid):
+            return JSONResponse({"ok": False, "error": f"남길 가게가 실재하지 않음: {tid}"},
+                                status_code=400)
+    ph = ",".join("?" * len(keep))
+    deleted = {}
+    with db._conn() as c:
+        for t in _tables_with("tenant_id"):
+            n = c.execute(f"SELECT COUNT(*) FROM {t} WHERE tenant_id NOT IN ({ph})", keep).fetchone()[0]
+            if n:
+                deleted[t] = n
+                if not dry:
+                    c.execute(f"DELETE FROM {t} WHERE tenant_id NOT IN ({ph})", keep)
+        n = c.execute(f"SELECT COUNT(*) FROM tenants WHERE id NOT IN ({ph})", keep).fetchone()[0]
+        if n:
+            deleted["tenants"] = n
+            if not dry:
+                c.execute(f"DELETE FROM tenants WHERE id NOT IN ({ph})", keep)
+        nu = c.execute("SELECT COUNT(*) FROM users WHERE email<>?", (keep_email,)).fetchone()[0]
+        if nu:
+            deleted["users"] = nu
+            if not dry:
+                c.execute("DELETE FROM user_stores WHERE user_id IN "
+                          "(SELECT id FROM users WHERE email<>?)", (keep_email,))
+                c.execute("DELETE FROM users WHERE email<>?", (keep_email,))
+    return JSONResponse({"ok": True, "dry": bool(dry), "keep_email": keep_email,
+                         "keep_tenants": keep, "deleted": deleted})
+
+
 @app.get("/admin/account-map")
 def admin_account_map():
     """운영 진단(읽기 전용) — 계정별로 어느 가게(tenant_id)를 갖고 있고 콘텐츠가 몇 개인지.
