@@ -113,6 +113,8 @@ def test_captions_are_written_not_carved():
     src = inspect.getsource(pd.write_captions)
     assert "call_task" in src, "LLM으로 쓰지 않는다"
     assert "40~60자" in src and "추측 금지" in src and "실값" in src, "규격 지시가 없다"
+    # ★ 실값을 엉뚱한 자리에 끼우면 날조다(실측: 필름 등급 '버텍스500'이 도구 이름으로 쓰였다)
+    assert "도구·재료·부위 이름으로 바꿔 쓰는 것은 날조" in src, "실값 오용 금지 지시가 없다"
     assert "caption_ok(c)" in src, "쓴 결과를 게이트에 안 태운다"
     from app import main as m
     msrc = inspect.getsource(m._photo_captions)

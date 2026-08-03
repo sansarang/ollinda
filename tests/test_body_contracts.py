@@ -321,6 +321,9 @@ def test_input_model_must_survive_in_body():
     assert "버텍스500" in seo.input_anchors(note)
     # 파일 확장자·해상도 같은 건 식별자가 아니다(오탐 방지)
     assert seo.input_anchors("영상 mp4 1080p 파일") == []
+    # ★ 우리 내부 표기는 실값이 아니다(2026-08-03 실측: '사진13'이 캡션에 실값으로 쓰였다)
+    got = seo.input_anchors("기아 PV5 신차.\n[사진13] 어쩌고\n[사진14] 저쩌고")
+    assert "PV5" in got and not [g for g in got if g.startswith("사진")], got
 
     missing = _audit("## 소제목\n신차 한 대를 시공했습니다. 상태를 확인했습니다.",
                      title="부산 신차 시공", source=note)

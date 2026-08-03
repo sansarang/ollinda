@@ -1214,10 +1214,14 @@ def input_anchors(note: str, limit: int = 4) -> list[str]:
         if w.lower() in ("mp4", "jpg", "png", "1080p", "4k") or w in out:
             continue
         out.append(w)
-    # 한글+숫자 결합형(버텍스500)도 식별자다
+    # 한글+숫자 결합형(버텍스500)도 식별자다.
+    #   ★ 우리 내부 표기는 뺀다(2026-08-03 실측: '사진13'·'사진14'가 실값으로 잡혀
+    #     캡션에 그대로 쓰였다). 시스템이 만든 말은 사장님이 준 실값이 아니다.
+    _SYS = ("사진", "표", "항목", "단계", "번호")
     for m in re.finditer(r"[가-힣]{2,}\d{2,4}", note or ""):
-        if m.group(0) not in out:
-            out.append(m.group(0))
+        w = m.group(0)
+        if w not in out and not any(w.startswith(x) for x in _SYS):
+            out.append(w)
     return out[:limit]
 
 
