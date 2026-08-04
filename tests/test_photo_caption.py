@@ -403,3 +403,37 @@ def test_H23_순차_배치도_끝에_몰지_않는다():
     # 포기했으면 조용히 넘기지 않는다 — 왜 의미 배치를 못 했는지 남는다
     import inspect
     assert "의미 배치 포기" in inspect.getsource(tc._semantic_photo_placement), "폴백 사유가 안 남는다"
+
+
+def test_H24_배치_규칙은_한_함수에만_산다():
+    """실물 사고(2026-08-04): 소제목 뒤에 사진 8장이 몰렸다.
+    생성 본문의 마커는 상위 선별분만(20장 중 4개)이라 렌더가 '2차 재매칭' 경로를 탔는데,
+    그 경로에는 생성 경로가 가진 문단당 상한·금지 구역(소제목·표·FAQ·요약)이 없었다.
+    배치 규칙이 두 곳에 살면 한쪽만 고치게 된다 — 생성 경로와 참조 경로는 같은 함수 하나다."""
+    import inspect
+    import re
+    from app import main as m
+    src = inspect.getsource(m._content_photo_layout)
+    assert "_semantic_photo_placement" in src, "렌더가 생성 때 쓰는 배치 함수를 안 쓴다"
+    assert "best_para" not in src, "독자 재매칭 로직이 남아 있다"
+    assert "by_para" not in src, "독자 재매칭 로직이 남아 있다"
+    # 실동작 — 소제목·표·FAQ가 섞인 글에 사진 20장을 넣어도 한 곳에 뭉치지 않는다
+    from app.generators import text_claude as tc
+    paras = ["## 소제목 하나", "본문 문단입니다 썬팅 유리막 코팅 작업 내용.",
+             "## 소제목 둘", "또 다른 문단 도장면 표면 정리 작업입니다.",
+             "## 한눈 요약", "- 요약 항목", "## 자주 묻는 질문", "**Q. 질문입니다**",
+             "마지막 문단 마감 작업 내용입니다.", "추가 문단 필름 시공 내용입니다."]
+    body = "\n\n".join(paras)
+    note = "\n".join(f"[사진{i}] 차량 표면을 도구로 문지르는 모습" for i in range(1, 21))
+    out = tc._semantic_photo_placement(body, note, 20)
+    runs, cur = [], 0
+    for b in out.split("\n\n"):
+        if re.fullmatch(r"\[사진\d+\]", b.strip()):
+            cur += 1
+        elif b.strip():
+            if cur:
+                runs.append(cur)
+            cur = 0
+    if cur:
+        runs.append(cur)
+    assert max(runs) <= 5, f"한 곳에 뭉친다: {runs}"

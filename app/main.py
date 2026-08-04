@@ -5029,38 +5029,26 @@ def _content_photo_layout(tenant, blog):
         _order0 = _seen_i + [i for i in range(1, n + 1) if i not in _seen_i]   # 미등장은 뒤로
         _newnum = {orig: k + 1 for k, orig in enumerate(_order0)}
         return _renumber_photo_refs(body, _newnum), [i - 1 for i in _order0], caps
-    # 2차(구세트 폴백): 마커가 거의 없으면 기존 캡션↔문단 재매칭 경로
-    if len([c for c in caps if (c or "").strip()]) < max(2, n // 2):   # 설명 태부족 → 원순서 유지(날조·오배치 금지)
+    # 2차: 본문 마커가 사진 수보다 적을 때(생성은 상위 선별분만 마커로 넣는다).
+    #   ★ 2026-08-04 실물 사고: 여기에 독자 재매칭 로직이 살아 있었고, 생성 경로에 있는
+    #     문단당 상한·금지 구역(소제목·표·FAQ·요약)이 없었다. 그래서 소제목 뒤에 8장이 몰렸다.
+    #     배치 규칙이 두 곳에 살면 한쪽만 고치게 된다 — 생성 때 쓰는 그 함수를 그대로 쓴다.
+    from app.generators.text_claude import _semantic_photo_placement as _place
+    src = (pl.get("gen_source") or "")
+    try:
+        nb = _place(body, src, n)
+    except Exception as _e:
+        import logging as _lg2
+        _lg2.getLogger("shopcast.kit").warning("[배치] 재배치 실패 — 원순서 유지: %r", repr(_e)[:80])
         return body, list(range(n)), caps
-    clean = _rl.sub(r"[ \t]*\[사진\d+\][ \t]*\n?", "", body).strip()
-    paras = [p.strip() for p in _rl.split(r"\n\s*\n", clean) if p.strip()]
-    if len(paras) < 2:
-        return body, list(range(n)), caps
-
-    def _tok(s):
-        return {t for t in _rl.split(r"[^가-힣A-Za-z0-9]+", s or "") if len(t) >= 2}
-
-    ptoks = [_tok(caps[i] if i < len(caps) else "") for i in range(n)]
-    jtoks = [_tok(p) for p in paras]
-    best_para = []
-    for i in range(n):
-        scored = [(len(ptoks[i] & jtoks[j]), -j) for j in range(len(paras))]
-        mx = max(scored) if scored else (0, 0)
-        if mx[0] == 0:                                    # 무겹침 → 원 순서 비례 균등 분산(뭉침 방지)
-            best_para.append(min(len(paras) - 1, int(i * len(paras) / max(n, 1))))
-        else:
-            best_para.append(scored.index(mx))
-    order = sorted(range(n), key=lambda i: (best_para[i], i))   # 콘텐츠 흐름순
-    newnum = {orig: k + 1 for k, orig in enumerate(order)}      # 원인덱스 → 새 사진번호(오름차순)
-    by_para = {}
-    for i in range(n):
-        by_para.setdefault(best_para[i], []).append(i)
-    out = []
-    for j, para in enumerate(paras):
-        out.append(para)
-        for i in sorted(by_para.get(j, []), key=lambda x: newnum[x]):
-            out.append(f"[사진{newnum[i]}]")
-    return _renumber_photo_refs("\n\n".join(out), newnum, marks=False), order, caps
+    seen2 = []
+    for mm in _rl.finditer(r"\[사진(\d+)\]", nb):
+        v = int(mm.group(1))
+        if 1 <= v <= n and v not in seen2:
+            seen2.append(v)
+    order2 = seen2 + [i for i in range(1, n + 1) if i not in seen2]
+    newnum2 = {orig: k + 1 for k, orig in enumerate(order2)}
+    return _renumber_photo_refs(nb, newnum2), [i - 1 for i in order2], caps
 
 
 def _caption_box(tenant, blog, n: int, caps=None) -> str:
