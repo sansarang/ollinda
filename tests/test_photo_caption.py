@@ -379,3 +379,27 @@ def test_H22_본문은_사진을_가리켜_설명하지_않는다():
     src = inspect.getsource(tc)
     assert "특정 사진을 가리켜 설명하지 마라" in src, "지시 표현 금지가 없다"
     assert "각 [사진N] 바로 앞 또는 " not in src, "지킬 수 없는 옛 요구가 남아 있다"
+
+
+def test_H23_순차_배치도_끝에_몰지_않는다():
+    """의미 배치가 포기되면(묘사 부족) 순차 배치로 폴백한다. 그 경로가 '남으면 끝에' 몰았다 —
+    문단보다 사진이 많으면 나머지가 통째로 한 곳에 붙는다. 폴백도 뭉치면 안 된다."""
+    import re
+    from app.generators import text_claude as tc
+    body = "\n\n".join(f"문단{k}입니다." for k in range(8))
+    out = tc._ensure_photo_markers(body, 20)
+    runs, cur = [], 0
+    for b in out.split("\n\n"):
+        if b.startswith("[사진"):
+            cur += 1
+        else:
+            if cur:
+                runs.append(cur)
+            cur = 0
+    if cur:
+        runs.append(cur)
+    assert max(runs) <= 3, f"폴백 경로가 뭉친다: {runs}"
+    assert len(re.findall(r"\[사진\d+\]", out)) == 20, "마커가 새거나 늘었다"
+    # 포기했으면 조용히 넘기지 않는다 — 왜 의미 배치를 못 했는지 남는다
+    import inspect
+    assert "의미 배치 포기" in inspect.getsource(tc._semantic_photo_placement), "폴백 사유가 안 남는다"

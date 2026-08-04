@@ -688,6 +688,9 @@ def _semantic_photo_placement(body: str, note: str, n: int) -> str:
     from app.services import photodesc as _pdsc
     descs: dict[int, str] = {k: v for k, v in _pdsc.desc_map(note or "", n).items() if v}
     if len(descs) < max(2, n // 2):          # 설명 태부족 → 기존 로직(날조 대신 순차)
+        import logging
+        logging.getLogger("shopcast.gen").warning(
+            "[배치] 묘사 %d/%d — 의미 배치 포기, 순차 배치로 폴백", len(descs), n)
         return _ensure_photo_markers(body, n)
     # 2) 기존 마커 제거 + 문단 분할(빈줄 기준; 소제목도 개별 문단)
     clean = re.sub(r"[ \t]*\[사진\d+\][ \t]*\n?", "", body).strip()
@@ -782,14 +785,17 @@ def _ensure_photo_markers(body: str, n: int) -> str:
     remaining = n - 1
     # 남은 마커를 문단들 사이에 고르게
     slots = len(paras)
-    step = max(1, slots // max(remaining, 1)) if remaining else slots + 1
+    # ★ 2026-08-04: 옛 방식은 step으로 띄엄띄엄 놓고 '남으면 끝에' 몰았다.
+    #   문단보다 사진이 많으면 그 나머지가 통째로 한 곳에 붙는다 — 그게 뭉침이다.
+    #   문단 진행 비율에 맞춰 그때까지 놓여야 할 수만큼 놓는다(어느 곳도 몰리지 않는다).
     mi = 2
     for idx, p in enumerate(paras):
         out.append(p)
-        if mi <= n and (idx + 1) % step == 0:
+        want = 1 + round((idx + 1) * remaining / max(1, slots))
+        while mi <= n and mi <= want:
             out.append(f"[사진{mi}]")
             mi += 1
-    while mi <= n:                          # 남으면 끝에
+    while mi <= n:                          # 반올림 오차분만 — 최대 1장
         out.append(f"[사진{mi}]")
         mi += 1
     return "\n\n".join(out)
