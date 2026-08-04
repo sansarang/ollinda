@@ -291,6 +291,9 @@ def test_H17_본문_문장은_사진을_번호로_부르지_않는다():
     import inspect
     from app.services import qualitycheck as qc
     assert qc.prose_photo_refs("사진13은 도어 패널이고 [사진13] 사진 7이 하부다") == ["사진13", "사진 7"]
+    # 번호를 지시어로 바꿔도 똑같이 어긋난다 — 배치가 옮겨지기 때문이다(실물 2건)
+    assert qc.prose_photo_refs("위 사진이 오늘 입고된 밴입니다") == ["위 사진이"]
+    assert qc.prose_photo_refs("아래 장면이 시공 과정입니다") == ["아래 장면이"]
     assert qc.prose_photo_refs("[사진1]\n[사진2] 마커만 있다") == [], "마커를 결함으로 잡는다"
     # 게이트가 실제로 이 검사를 쓰는가 — '존재'가 아니라 '사용' 기준(조항)
     gsrc = inspect.getsource(qc.score_gate)
@@ -346,3 +349,33 @@ def test_H20_사진_선별에_업종어가_없다():
     assert KEY.search("반죽을 밀대로 미는 손"), "빵집 과정 사진을 못 고른다"
     assert KEY.search("머리를 감기는 중이다"), "미용실 과정 사진을 못 고른다"
     assert not KEY.search("완성된 케이크 진열장"), "완성 컷을 과정으로 잡는다"
+
+
+def test_H21_사진이_한곳에_뭉치지_않는다():
+    """실물(2026-08-04): 20장 중 9장이 도입부에 연달아 붙었다.
+    문단당 상한은 있었지만 허용 문단이 사진 수보다 적을 때 폴백이 상한을 무시하고(or allowed_idx)
+    앞쪽으로 몰았다. 상한은 고정값이 아니라 '사진 수 ÷ 담을 문단 수'여야 한다."""
+    import inspect
+    from app.generators import text_claude as tc
+    src = inspect.getsource(tc._semantic_photo_placement)
+    assert "MAX_PER = max(2, -(-n // len(allowed_idx)))" in src, "상한이 글 길이에 안 맞춘다"
+    assert "or [j for j in allowed_idx if used[j] < MAX_PER] or allowed_idx" not in src, \
+        "폴백이 상한을 무시한다"
+    assert "min(cand, key=lambda j: (used[j]" in src, "폴백이 덜 찬 문단을 안 고른다"
+    # 실동작 — 문단 6개에 사진 12장이면 어느 문단도 3장을 넘지 않는다
+    import re
+    body = "\n\n".join(f"문단{k} 썬팅 유리막 코팅 작업 내용입니다." for k in range(6))
+    note = "\n".join(f"[사진{i}] 차량 표면을 도구로 문지르는 모습" for i in range(1, 13))
+    out = tc._semantic_photo_placement(body, note, 12)
+    per = [len(re.findall(r"\[사진\d+\]", blk)) for blk in out.split("문단")]
+    assert max(per) <= 3, f"한 곳에 뭉쳤다: {per}"
+
+
+def test_H22_본문은_사진을_가리켜_설명하지_않는다():
+    """지킬 수 없는 요구를 시키면 반드시 깨진다 — 우리는 마커를 다시 배치하므로
+    '사진 옆 문장에 그 사진 설명을 써라'는 요구 자체가 성립하지 않는다."""
+    import inspect
+    from app.generators import text_claude as tc
+    src = inspect.getsource(tc)
+    assert "특정 사진을 가리켜 설명하지 마라" in src, "지시 표현 금지가 없다"
+    assert "각 [사진N] 바로 앞 또는 " not in src, "지킬 수 없는 옛 요구가 남아 있다"

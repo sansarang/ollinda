@@ -449,10 +449,15 @@ class BlogDraftGenerator(Generator):
               "문장에서 가리켜야 하면 '아래 사진', '이 장면'처럼 번호 없이 쓴다.\n"
             # ★ 이미지 검색 유입(2026-08-01 실측: 이미지탭 상위 50에 우리 사진 0건) — 네이버 이미지
             #   검색은 '사진 주변 문맥'을 크게 본다. 파일명 SEO만으로는 부족. 업종·업태 공통 원칙.
-            + f"[이미지 검색 노출 — 전 업종 공통] 사진은 '검색되는 자산'이다. 각 [사진N] 바로 앞 또는 "
-              f"뒤 문장에 그 사진이 무엇인지 알려주는 구체 설명을 두되, 최소 2곳에서는 '{kw0}'의 "
-              "자연 변형(또는 그 사진의 핵심 대상 이름)이 그 문장 안에 자연스럽게 들어가게 하라. "
-              "예: 사진 앞 문장에서 무엇을 찍은 장면인지 밝히고, 뒤 문장에서 그 결과를 서술. "
+            # ★ 2026-08-04: '사진 옆 문장에 그 사진 설명을 써라'는 요구를 폐기했다.
+            #   우리는 마커를 어절 겹침으로 다시 배치한다 — 옆 문장이 어떤 사진 옆에 남을지
+            #   LLM은 알 수 없다. 지킬 수 없는 요구를 시키면 '위 사진이 …입니다'가 틀린 사진을
+            #   가리킨다(실물 2건). 사진 한 장의 설명은 캡션이 맡고, 본문은 주제를 쓴다.
+            + f"[이미지 검색 노출 — 전 업종 공통] 사진은 '검색되는 자산'이다. 사진이 놓일 문단은 "
+              f"그 사진이 다루는 주제를 구체적으로 서술하고, 최소 2곳에서는 '{kw0}'의 "
+              "자연 변형이 문장 안에 자연스럽게 들어가게 하라. "
+              "★ 단, 특정 사진을 가리켜 설명하지 마라 — '위 사진은', '아래 장면이', '이 사진에서'는 "
+              "모두 금지다. 사진 위치는 글이 완성된 뒤 내용에 맞춰 다시 배치되므로 가리키면 어긋난다. "
               "★키워드 나열·캡션 남발 금지 — 읽는 사람에게 필요한 설명이 우선이고, 검색어는 그 안에 "
               "자연스럽게 담길 때만 효과가 있다(억지 삽입은 저품질 신호).\n\n"
             "아래 형식 그대로(대괄호 머리표 유지) 출력:\n"
@@ -699,7 +704,7 @@ def _semantic_photo_placement(body: str, note: str, n: int) -> str:
     # ★ 금지 구역(실측 결함 수정: 요약·FAQ 사이에 사진이 꽂히고 서두에 6장 뭉텅이):
     #   소제목 단독·요약·FAQ·표·목록·고정정보·지도 마커 문단엔 사진 배정 금지 + 문단당 최대 2장.
     _FORBID = ("한눈 요약", "자주 묻는", "찾아오는 길", "함께 보면 좋은", "[여기 네이버")
-    MAX_PER = 2
+    MAX_PER = 2                                # 허용 문단 수를 센 뒤 아래에서 다시 계산한다
 
     def _allowed(j: int) -> bool:
         p = paras[j]
@@ -711,6 +716,10 @@ def _semantic_photo_placement(body: str, note: str, n: int) -> str:
     allowed_idx = [j for j in range(len(paras)) if _allowed(j)]
     if not allowed_idx:
         return _ensure_photo_markers(body, n)
+    # ★ 2026-08-04 실물: 20장 중 9장이 도입부에 연달아 붙었다. 상한은 있었지만
+    #   허용 문단이 사진 수보다 적으면 폴백이 상한을 무시하고(or allowed_idx) 앞으로 몰았다.
+    #   상한은 고정값이 아니라 '사진 수 ÷ 담을 문단 수'다 — 그래야 어떤 글 길이에서도 고르게 퍼진다.
+    MAX_PER = max(2, -(-n // len(allowed_idx)))
     assign: dict[int, int] = {}
     # 정보량 많은 사진부터 배정(강한 신호 우선 선점)
     order = sorted(range(1, n + 1), key=lambda i: -len(ptoks.get(i) or set()))
@@ -727,11 +736,10 @@ def _semantic_photo_placement(body: str, note: str, n: int) -> str:
                 score += 0.4                          # 대표(외관) 컷은 글 앞 문단 선호
             if score > best_score:
                 best_score, best = score, j
-        if best is None or best_score <= 0:           # 매칭 실패 → 허용 문단에 비례 위치로 고른 분산
-            cand = ([j for j in allowed_idx if used[j] == 0]
-                    or [j for j in allowed_idx if used[j] < MAX_PER] or allowed_idx)
-            _tgt = int((i - 1) / max(1, n) * len(cand))
-            best = cand[min(len(cand) - 1, _tgt)]
+        if best is None or best_score <= 0:           # 매칭 실패 → 가장 덜 찬 문단으로(앞쪽 몰림 금지)
+            cand = [j for j in allowed_idx if used[j] < MAX_PER] or allowed_idx
+            _tgt = int((i - 1) / max(1, n) * len(paras))
+            best = min(cand, key=lambda j: (used[j], abs(j - _tgt)))
         assign[i] = best
         used[best] += 1
     # 3) 재조립 — 각 문단 뒤에 배정된 사진 마커(사진번호 오름차순)

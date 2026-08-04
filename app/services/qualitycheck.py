@@ -202,7 +202,10 @@ def _save_gate_fields(blog, pl: dict) -> None:
 
 
 # 본문 산문의 사진 번호 지칭 — 마커([사진N])는 제외하고 문장 안의 것만 잡는다.
-_PROSE_PHOTO_REF = re.compile(r"(?<!\[)사진\s*(\d+)(?!\])")
+_PROSE_PHOTO_REF = re.compile(
+    r"(?<!\[)사진\s*(\d+)(?!\])|"
+    # 번호를 지시어로 바꿔도 똑같이 어긋난다 — 배치가 옮겨지기 때문이다(2026-08-04 실물 2건)
+    r"(위|아래|이|다음)\s*(사진|장면|이미지)(은|는|이|가|에서|을|를)")
 
 
 def prose_photo_refs(body: str) -> list:
