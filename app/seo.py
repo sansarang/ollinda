@@ -1387,6 +1387,18 @@ def mobile_spec_gate(body: str, content_type: str = "sell") -> dict:
             "range": [lo, hi], "below": below, "above": above}
 
 
+def photo_count(payload: dict) -> int:
+    """이 글에 실제로 딸린 사진 수 — 세는 곳은 여기 하나뿐이다.
+
+    ★ 2026-08-05 실측 사고: 두 곳이 본문의 '[사진N]' 마커를 세어 사진 수라고 했다.
+      마커는 '본문에 몇 장을 걸었나'이지 사진 수가 아니다 — 생성은 상위 선별분만 마커로 넣는다.
+      실제 20장짜리 글이 순위 분석에서 '사진 4장'으로, 품질 채점에서도 4장으로 세어졌다.
+      전체를 부분 표면으로 세는 계열의 세 번째 재발이다(photo_pool·tenant_move.verify).
+      진실은 image_paths다.
+    """
+    return len((payload or {}).get("image_paths") or [])
+
+
 def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> dict:
     """네이버 랭킹 신호(C-Rank·D.I.A.+·플레이스) 기준 채점(0~100) + 개선 경고.
     가점: 검색의도 정합·1차 경험·구체 수치·이미지 4+·Q&A·제목-본문 일치·롱테일.
@@ -1628,8 +1640,9 @@ def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> d
         if len(re.findall(r"\d", text)) < 5:      # 구체 수치(소요시간·단계·전후) 부족(PHASE 9)
             warnings.append("구체 수치(시간·단계·전후) 부족 → D.I.A. 구체성↓")
             score -= 6
-        if text.count("[사진") < 4:               # 이미지 4장 미만 → 정합·체류 신호 약함(PHASE 9)
-            warnings.append(f"이미지 {text.count('[사진')}장 < 4 → 이미지 정합·체류 신호 약함")
+        _np = photo_count(payload)                # 마커가 아니라 실제 사진 수(단일 관문)
+        if _np < 4:                               # 이미지 4장 미만 → 정합·체류 신호 약함(PHASE 9)
+            warnings.append(f"이미지 {_np}장 < 4 → 이미지 정합·체류 신호 약함")
             score -= 4
     elif kind in ("short",):
         if not payload.get("hook_strategy"):

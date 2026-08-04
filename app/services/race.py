@@ -33,10 +33,15 @@ def _kw_for(piece, publish: dict) -> str:
 
 
 def _days_since(ts: str) -> int:
-    try:
-        return max(0, (datetime.utcnow() - datetime.fromisoformat((ts or "")[:19])).days)
-    except Exception:
-        return -1
+    """N일차 — 계산은 whynot 하나뿐이다.
+
+    ★ 2026-08-05 실물 사고: 여기에 따로 살던 계산은 UTC 경과시간의 .days(24시간 단위)였고,
+      whynot은 KST 달력 기준이었다. 8/04 저녁 발행 글이 다음 날 아침 화면에서
+      한쪽은 '1일차', 한쪽은 '0일차'로 동시에 떴다.
+      같은 것을 세는 코드가 두 곳에 살면 반드시 갈라진다 — 사장님 체감 날짜는 KST 달력이다.
+    """
+    from app.services.whynot import _days_since as _ds
+    return _ds(ts)
 
 
 def track_publish(t, piece, publish: dict) -> dict:

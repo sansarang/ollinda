@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
-from app import db
+from app import db, seo
 
 _log = logging.getLogger("shopcast.analyst")
 
@@ -140,9 +141,67 @@ def collect(t, piece, publish: dict) -> dict:
     my = {"rank": my_rank, "days": whynot._days_since((publish or {}).get("published_at") or ""),
           "title": (publish or {}).get("post_title") or pl.get("title") or "",
           "audit": (pl.get("ranking_audit") or {}).get("score"),
-          "chars": (len(body) or None), "photos": (body.count("[사진") or None) if body else None,
+          "chars": (len(body) or None), "photos": (seo.photo_count(pl) or None),
           "angle": pl.get("angle") or "", "power": my_power}
     return {"kw": kw, "my": my, "top": top, "pattern": pattern}
+
+
+# 축 이름 → 사장님 화면의 말(데이터 키에서 나온다 — 업종어 하드코딩 아님)
+_AXIS_KR = {"chars": ("자", "글자", "분량", "길이"), "photos": ("사진", "이미지"),
+            "audit": ("품질점수", "점수"), "angle": ("성격", "각도"),
+            "age": ("발행", "신선도", "오래", "최근", "일차", "일 전"),
+            "power": ("체급", "발행량", "꾸준"),
+            "rank": ("순위",), "title": ("제목", "키워드"), "blogger": ("블로그",),
+            "desc": ("요약", "내용"), "exposure": ("재등장", "노출 빈도")}
+# 비교를 뜻하는 말 + 비교 대상을 가리키는 말(언어 규칙만)
+_CMP_TARGET = re.compile(r"(상위\s*글|상위권|1위|경쟁\s*글|다른\s*글|윗글|타\s*블로그)")
+_CMP_VERB = re.compile(r"(비교|보다|격차|부족|모자|앞서|뒤지|우위|열세|밀리|차이가|더 많|더 적)")
+
+
+# 같은 것을 다른 이름으로 담은 키 — 이름이 다르다고 '비교 불가'로 몰면 정당한 비교까지 잘린다
+#   (실측: 내 글은 days, 상위 글은 postdate로 같은 '발행 시점'을 담고 있었다)
+_AXIS_ALIAS = {"days": "age", "postdate": "age"}
+
+
+def _norm_axes(keys) -> set:
+    return {_AXIS_ALIAS.get(k, k) for k in keys}
+
+
+def comparable_axes(my: dict, top: list) -> tuple:
+    """상위 글과 정말로 견줄 수 있는 축 / 내 글만 아는 축을 데이터에서 가른다.
+
+    ★ 2026-08-05 사고: 상위 글 데이터에는 사진·글자수·품질점수가 아예 없는데
+      분석은 "상위 글들과 비교해도 구조상 뚜렷하게 부족한 점은 안 보입니다"라고 썼다.
+      비교한 적이 없다 — 비교할 데이터가 존재하지 않는데 비교 결론을 냈다.
+      원인은 프롬프트가 '상위 글과의 격차'를 쓰라고 **요구**한 것이다.
+      가진 데이터로 지킬 수 없는 요구를 시키면 지어낸다(캡션·사진 지칭과 같은 계열).
+    """
+    tk = set()
+    for d in (top or []):
+        tk |= _norm_axes(k for k, v in (d or {}).items() if v not in (None, "", {}, []))
+    mk = _norm_axes(k for k, v in (my or {}).items() if v not in (None, "", {}, []))
+    return tuple(sorted(mk & tk)), tuple(sorted(mk - tk))
+
+
+def strip_blind_compare(text: str, known: tuple) -> tuple:
+    """상위 글과 비교하는 문장은 '아는 축'을 근거로 대야 남는다. 반환 (정리본, 버린 문장들).
+
+    ★ 처음엔 '모르는 축 이름이 들어간 비교'만 걸렀는데 실제 문장을 못 잡았다 —
+      "상위 글들과 비교해도 **구조상** 뚜렷하게 부족한 점은 안 보입니다"에는 축 이름이 없다.
+      뭉뚱그린 말은 근거가 아니다. 그래서 규칙을 뒤집었다: 비교하려면 근거를 대라.
+    허위 양성보다 미표시가 낫다 — 검증 불가능한 주장은 표시하지 않는다(정직 게이트).
+    """
+    ok_words = [w for k in (known or []) for w in _AXIS_KR.get(k, ())]
+    if not (text or "").strip():
+        return "", []
+    keep, dropped = [], []
+    for sent in re.split(r"(?<=[.!?])\s+|\n+", text or ""):
+        if (_CMP_TARGET.search(sent) and _CMP_VERB.search(sent)
+                and not any(w in sent for w in ok_words)):
+            dropped.append(sent.strip()[:80])       # 근거 없는 비교 — 버린다
+            continue
+        keep.append(sent)
+    return (" ".join(k for k in keep if k.strip()).strip(), dropped)
 
 
 def _gap_flags(data: dict) -> list[dict]:
@@ -191,10 +250,19 @@ def analyze(t, piece, publish: dict) -> dict:
         f"최근4주 {d['power'].get('posts_4w')}건·주제비율 {d['power'].get('topic_ratio')}, "
         f"관련 키워드 상위 재등장 {d.get('exposure', 0)}회)\n  요약: {d['desc']}"
         for d in top) or "(상위 글 조회 불가)"
+    _cmp_ax, _blind_ax = comparable_axes(my, top)
+    _blind_kr = sorted({w for k in _blind_ax for w in _AXIS_KR.get(k, ())[:1]})
     prompt = (
         "너는 네이버 블로그 검색 순위 분석가다. 소상공인 사장님에게 쉬운 말로 설명하라(전문용어 최소).\n"
         "아래는 전부 실측 데이터다. 여기 없는 사실을 지어내지 마라. 본문 전체는 못 봤으므로 "
-        "글 성격 추론은 '~로 보임'으로 말하라. 순위 보장 표현 금지 — '가능성'까지만.\n\n"
+        "글 성격 추론은 '~로 보임'으로 말하라. 순위 보장 표현 금지 — '가능성'까지만.\n"
+        # ★ 2026-08-05: 상위 글 데이터에 없는 축으로 '비교해보니 부족하지 않다'를 지어냈다.
+        #   가진 데이터로 지킬 수 없는 요구를 시키면 지어낸다 — 요구 자체를 정확히 한다.
+        + ("★ 상위 글에 대해 우리가 아는 것은 [제목·요약·발행일·블로그 체급]뿐이다. "
+           f"상위 글의 [{', '.join(_blind_kr)}]는 **모른다** — 이 항목으로 상위 글과 비교하거나 "
+           "'부족하지 않다/앞선다'고 말하지 마라. 내 글 값을 소개하는 것은 되지만 "
+           "비교·우열 판단은 아는 항목으로만 하라.\n" if _blind_kr else "")
+        + "\n"
         f"[타겟 키워드] {data['kw']}\n"
         f"[내 글] 순위 {my.get('rank') or '10위 밖'} · 발행 {my.get('days')}일차 · 제목 '{my.get('title')}' · "
         f"품질점수 {my.get('audit')} · {my.get('chars') or '?'}자 · 사진 {my.get('photos') or '?'}장 · "
@@ -205,7 +273,8 @@ def analyze(t, piece, publish: dict) -> dict:
         f"[실측 격차(이미 계산됨)]\n" + "\n".join("- " + g["why"] for g in gaps) + "\n\n"
         "형식 그대로(대괄호 머리표 유지, 각 2~3문장):\n"
         "[왜 이 순위]\n(내 글이 이 순위까지 온 이유 — 실측 강점 인용)\n"
-        "[왜 1위가 아닌가]\n(상위 글과의 격차 — 위 실측 격차를 쉬운 말로)\n"
+        "[왜 1위가 아닌가]\n(위 [실측 격차]에 적힌 것만 쉬운 말로. 격차가 비어 있으면 "
+        "'아는 범위에선 뚜렷한 차이를 못 찾았다'고 솔직히 쓰고 모르는 축을 지어내지 마라)\n"
         "[한 줄 요약]\n(브리핑용 한 문장: 현재 상태+격차 핵심+다음 수)")
     try:
         from app import llm
@@ -215,10 +284,20 @@ def analyze(t, piece, publish: dict) -> dict:
     except Exception:
         _log.exception("[analyst] LLM 분석 실패")
         sec = {}
+    _why_h, _d1 = strip_blind_compare((sec.get("왜 이 순위") or "").strip(), _cmp_ax)
+    _why_n, _d2 = strip_blind_compare((sec.get("왜 1위가 아닌가") or "").strip(), _cmp_ax)
+    _brief, _d3 = strip_blind_compare(
+        (sec.get("한 줄 요약") or "").strip().split("\n")[0], _cmp_ax)
+    if _d1 or _d2 or _d3:                       # 조용히 지우지 않는다 — 무엇을 왜 버렸는지 남긴다
+        _log.warning("[analyst] 근거 없는 비교 %d문장 제거(모르는 축 %s): %s",
+                     len(_d1) + len(_d2) + len(_d3), _blind_kr, (_d1 + _d2 + _d3)[:3])
+    if not _why_n.strip():                      # 전부 걸러졌으면 빈칸이 아니라 사실을 말한다
+        _why_n = ("상위 글에 대해 우리가 아는 것은 제목·발행일·블로그 체급뿐이라, "
+                  "그 범위에선 뚜렷한 차이를 찾지 못했습니다.")
     out = {"kw": data["kw"], "rank": my.get("rank"),
-           "why_here": (sec.get("왜 이 순위") or "").strip(),
-           "why_not_first": (sec.get("왜 1위가 아닌가") or "").strip(),
-           "brief_line": (sec.get("한 줄 요약") or "").strip().split("\n")[0][:120],
+           "why_here": _why_h,
+           "why_not_first": _why_n,
+           "brief_line": _brief[:120],
            "gaps": gaps, "pattern": pat, "top": [{k: d[k] for k in ("rank", "title", "blogger")} for d in top],
            "note": HONEST_NOTE}
     _cache_set(ck, out)
