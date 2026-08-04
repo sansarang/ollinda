@@ -764,7 +764,24 @@ def admin_caption_preview(asset_id: str = "", regen: int = 0):
                       lambda m: (lambda k: f"\n  🖼 [사진{k + 1}]\n  💬 " +
                                  ((_seq[k] if 0 <= k < len(_seq) else "") or "(캡션 없음)"))(
                           int(m.group(1)) - 1), _body)
+    # 어느 단계에서 뭉치는지 가른다 — 생성 직후(raw)와 렌더 후(merged)를 나란히 본다
+    _raw = (blog.payload or {}).get("body") or ""
+    def _runs(txt):
+        import re as _rr
+        out, cur = [], 0
+        for ln in (txt or "").splitlines():
+            if _rr.match(r"^\s*\[사진\d+\]\s*$", ln):
+                cur += 1
+            elif ln.strip():
+                if cur:
+                    out.append(cur)
+                cur = 0
+        if cur:
+            out.append(cur)
+        return out
     return JSONResponse({"ok": True, "n": n, "merged": _merged,
+                         "raw_body": _raw, "raw_runs": _runs(_raw),
+                         "layout_path": ("1차-재번호" if len(_order) == n else "2차-재매칭"),
                          "descs": [{"i": i, "d": _pd.best_line(_src, i)} for i in range(1, n + 1)],
                          "anchors": seo.input_anchors(_src),
                          "rejects": _dg,
