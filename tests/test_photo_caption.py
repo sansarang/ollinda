@@ -463,3 +463,18 @@ def test_H25_관련글_링크는_클릭된다():
         assert "f\"- {t} : {u}\"" not in src, f"{mod.__name__}에 옛 형식이 남아 있다"
     assert "related_links_block" in inspect.getsource(tc)
     assert "related_links_block" in inspect.getsource(m)
+
+
+def test_H26_짝_없는_괄호는_사장님_화면에_안_나간다():
+    """실물(2026-08-04): '…값이 갈리는 두 가지 기준부터 짚어보겠습니다.)' —
+    여는 괄호 없이 닫는 괄호만 남아 그대로 붙여넣기 화면에 나갔다.
+    재작성·문장 정리 과정에서 깨진 흔적이다. 셈으로 판정한다(언어·업종 무관)."""
+    import inspect
+    from app.services import qualitycheck as qc
+    assert qc.fix_orphan_parens("짚어보겠습니다.)") == "짚어보겠습니다."
+    assert qc.fix_orphan_parens("앞유리(전면 포함") == "앞유리전면 포함"
+    ok = "(이건 개인 체감이라 단정은 못 드립니다.)"
+    assert qc.fix_orphan_parens(ok) == ok, "정상 괄호를 지운다"
+    assert qc.fix_orphan_parens("여러 줄\n(정상)\n깨짐)") == "여러 줄\n(정상)\n깨짐"
+    # 게이트가 실제로 쓰는가 — '존재'가 아니라 '사용' 기준(조항)
+    assert "fix_orphan_parens(" in inspect.getsource(qc.score_gate), "게이트가 안 쓴다"

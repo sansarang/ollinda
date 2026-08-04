@@ -219,6 +219,36 @@ def prose_photo_refs(body: str) -> list:
     return [m.group(0) for m in _PROSE_PHOTO_REF.finditer(body or "")]
 
 
+def fix_orphan_parens(body: str) -> str:
+    """짝 없는 괄호 제거 — 기계 수선(LLM 0원).
+
+    ★ 2026-08-04 실물: "…값이 갈리는 두 가지 기준부터 짚어보겠습니다.)" —
+      여는 괄호 없이 닫는 괄호만 남았다. 재작성·문장 정리 과정에서 깨진 흔적인데
+      사장님이 그대로 붙여넣게 된다. 줄 안에서 짝이 맞는지는 셈으로 판정한다(언어 무관).
+    """
+    out = []
+    for ln in (body or "").split("\n"):
+        keep, depth = [], 0
+        for ch in ln:
+            if ch in "([{（":
+                depth += 1
+            elif ch in ")]}）":
+                if depth <= 0:
+                    continue                      # 짝 없는 닫는 괄호 — 버린다
+                depth -= 1
+            keep.append(ch)
+        if depth > 0:                             # 줄 끝까지 안 닫힌 여는 괄호 — 뒤에서부터 지운다
+            res, need = [], depth
+            for ch in reversed(keep):
+                if need and ch in "([{（":
+                    need -= 1
+                    continue
+                res.append(ch)
+            keep = list(reversed(res))
+        out.append("".join(keep).rstrip())
+    return "\n".join(out)
+
+
 def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
     """📮 발행 게이트 — ranking_audit<80이면 감점 사유를 피드백으로 자동 재작성(최대 2회,
     사실·마커·구조 보존). 그래도 미달이면 payload.publish_blocked_score 봉인 플래그(발행 버튼 숨김).
@@ -253,7 +283,7 @@ def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
             and _time.monotonic() < _deadline:
         try:
             _body0 = pl.get("body") or ""
-            _fixed = _trim_emoji(_body0, keep=1)
+            _fixed = fix_orphan_parens(_trim_emoji(_body0, keep=1))
             if _fixed != _body0:
                 pl["body"] = _fixed
             # 수선 대상 = '문장·구조만 손보면 되는' 감점(사실·수치 불변). 실측 반복 3종 포함:
