@@ -779,7 +779,14 @@ def admin_caption_preview(asset_id: str = "", regen: int = 0):
         if cur:
             out.append(cur)
         return out
+    _au = (blog.payload or {}).get("ranking_audit") or {}
     return JSONResponse({"ok": True, "n": n, "merged": _merged,
+                         "audit": {"score": _au.get("score"),
+                                   "warnings": _au.get("warnings") or [],
+                                   "detail": {k: v for k, v in _au.items()
+                                              if k not in ("warnings",)}},
+                         "surface_pass": (blog.payload or {}).get("surface_pass"),
+                         "gate_stops": (blog.payload or {}).get("score_gate_stops"),
                          "raw_body": _raw, "raw_runs": _runs(_raw),
                          "layout_path": ("1차-재번호" if len(_order) == n else "2차-재매칭"),
                          "descs": [{"i": i, "d": _pd.best_line(_src, i)} for i in range(1, n + 1)],
