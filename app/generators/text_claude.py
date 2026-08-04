@@ -625,11 +625,16 @@ def _select_slot_photos(imgs: list, analysis: str, cap: int = SLOT_RECOMMENDED) 
     import re as _r
     if len(imgs) <= cap:
         return list(imgs)
-    KEY = _r.compile(r"세척|재단|성형|시공|부착|제거|검수|전후|완성|마감|코팅|건조")
+    # ★ 2026-08-04: 업종어 목록(세척·재단·성형·코팅…)을 언어 규칙으로 바꿨다.
+    #   저건 시공업 어휘라 빵집·미용실에서는 '과정 사진'을 하나도 못 고른다(업종 중립 조항).
+    #   과정이란 '무엇을 하고 있는 장면'이다 — 관형형·진행 어미가 그 신호다.
+    KEY = _r.compile(r"[가-힣](는|던)\s|[가-힣](는|던)$|중인|중이|하며|하면서")
+    # ★ 묘사 파싱은 단일 파서만 쓴다(첫 매치는 헤더·라벨을 집는다 — 캡션 10회 재발 계열).
+    from app.services import photodesc as _pdsc
     scored = []
     for i, p in enumerate(imgs):
-        m = _r.search(rf"\[사진{i + 1}\]\s*([^\n]+)", analysis or "")
-        has_process = bool(m and KEY.search(m.group(1)))
+        _d = _pdsc.best_line(analysis or "", i + 1)
+        has_process = bool(_d and KEY.search(_d))
         scored.append((0 if has_process else 1, i, p))    # 과정 묘사 우선, 동순위는 순서 보존
     ordered = [p for _, _, p in sorted(scored)]
     return ordered[:cap] + [p for p in imgs if p not in ordered[:cap]]
@@ -660,7 +665,8 @@ def _tpl_sequence(tenant) -> str:
         return ""
 
 
-_HERO_HINT = ("외관", "전면", "전체", "정면", "측면", "앞모습", "차량 전체", "풀샷")
+# 대표 컷 신호 — 촬영 각도·범위를 뜻하는 말만(업종어 금지: '차량 전체'는 뺐다 2026-08-04)
+_HERO_HINT = ("외관", "전면", "전체", "정면", "측면", "앞모습", "풀샷", "전경")
 
 
 def _semantic_photo_placement(body: str, note: str, n: int) -> str:
@@ -672,11 +678,10 @@ def _semantic_photo_placement(body: str, note: str, n: int) -> str:
     if n <= 0:
         return re.sub(r"[ \t]*\[사진\d+\][ \t]*\n?", "", body)
     # 1) 사진별 설명 파싱([사진N] <설명> — 다음 [사진 또는 줄바꿈까지)
-    descs: dict[int, str] = {}
-    for m in re.finditer(r"\[사진(\d+)\][:\s]*([^\[\n]{2,240})", note or ""):
-        i = int(m.group(1))
-        if 1 <= i <= n:
-            descs.setdefault(i, m.group(2).strip())
+    # ★ 묘사 파싱은 단일 파서만 쓴다(2026-08-04) — setdefault는 '첫 매치'라 헤더를 집는다.
+    #   같은 재료를 읽는 소비자가 둘 이상이면 파서를 하나로(조항).
+    from app.services import photodesc as _pdsc
+    descs: dict[int, str] = {k: v for k, v in _pdsc.desc_map(note or "", n).items() if v}
     if len(descs) < max(2, n // 2):          # 설명 태부족 → 기존 로직(날조 대신 순차)
         return _ensure_photo_markers(body, n)
     # 2) 기존 마커 제거 + 문단 분할(빈줄 기준; 소제목도 개별 문단)

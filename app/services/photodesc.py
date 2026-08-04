@@ -186,8 +186,14 @@ _SUBJ = re.compile(
 _COLOR = re.compile(r"(빨간색|붉은색|분홍색|초록색|파란색|노란색|검정색|검은색|흰색|하얀색|회색|은색|남색|보라색)")
 
 
+# 우리 내부 흔적 — 프롬프트·마크다운·분석 머리말이 캡션에 새어 나온 것.
+#   ★ main._caption_gate가 따로 들고 있던 규칙을 여기로 흡수했다(2026-08-04).
+#     같은 재료를 읽는 게이트가 둘이면 한쪽만 고치는 재발이 예약된다 — 캡션 10회 재발과 같은 계열.
+_LEAK = re.compile(r"[*`#]{2}|보이는가|관점에서 분석|분석한 결과|프롬프트|\[사진\d")
+
+
 def caption_ok(text: str) -> str:
-    """캡션 게이트 — 통과면 빈 문자열, 아니면 사유. 게이트 없는 표면은 만들지 않는다(조항)."""
+    """캡션 게이트 — 통과면 빈 문자열, 아니면 사유. 캡션을 보는 게이트는 이 함수 하나뿐이다."""
     t = " ".join((text or "").split())
     if not t:
         return "빈 캡션"
@@ -195,6 +201,8 @@ def caption_ok(text: str) -> str:
         return "추측 표현"
     if _LIST_NO.match(t):
         return "분석 넘버링"
+    if _LEAK.search(t):
+        return "내부 라벨/프리앰블 잔재"
     if _SCENE.search(t):
         return "촬영 환경·소품 서술"
     if _SUBJ.search(t):

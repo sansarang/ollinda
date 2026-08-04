@@ -4739,11 +4739,15 @@ def _clean_caption_desc(raw: str) -> str:
 
 
 def _caption_gate(text: str) -> str:
-    """캡션 게이트(렌더 직전) — 내부 라벨·프리앰블·마크다운 잔재 검출 시 차단 사유 반환(자막 게이트 패턴 재사용)."""
-    import re as _r
-    if _r.search(r"[*`#]{2}|보이는가|관점에서 분석|분석한 결과|프롬프트|\[사진\d", text or ""):
-        return "내부 라벨/프리앰블 잔재"
-    return ""
+    """캡션 게이트 — 판정은 photodesc.caption_ok 하나뿐이다.
+
+    ★ 2026-08-04 통합: 여기에 별도 규칙(내부 라벨·프리앰블)이 살고 있었다.
+      같은 재료를 읽는 게이트가 둘이면 한쪽만 고치는 재발이 예약된다 —
+      사진 묘사 파서를 하나로 만든 것과 같은 이유다(캡션 10회 재발 계열).
+      규칙은 photodesc로 옮겼고 이 함수는 이름만 남긴 얇은 껍질이다.
+    """
+    from app.services import photodesc as _pd
+    return _pd.caption_ok(text)
 
 
 def _body_core(body: str) -> str:

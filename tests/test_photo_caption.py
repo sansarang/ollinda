@@ -302,3 +302,47 @@ def test_H17_본문_문장은_사진을_번호로_부르지_않는다():
     # 생성 단계에서도 금지한다(고치는 것보다 안 만드는 게 낫다)
     from app.generators import text_claude as tc
     assert "[사진 지칭 금지]" in inspect.getsource(tc), "생성 프롬프트에 금지가 없다"
+
+
+def test_H18_캡션을_보는_게이트는_하나뿐이다():
+    """main._caption_gate가 photodesc와 별개 규칙을 들고 있었다(2026-08-04).
+    같은 재료를 읽는 게이트가 둘이면 한쪽만 고치는 재발이 예약된다 — 캡션 10회 재발과 같은 계열.
+    되돌리면(main에 규칙 복원) 이 테스트가 실패한다."""
+    import inspect
+    from app import main as m
+    from app.services import photodesc as pd
+    src = inspect.getsource(m._caption_gate)
+    assert "caption_ok" in src, "단일 게이트를 안 쓴다"
+    assert "re.search" not in src and "_r.search" not in src, "자체 규칙이 남아 있다"
+    # 흡수된 규칙이 실제로 단일 게이트에서 동작하는가 — '존재'가 아니라 '사용' 기준
+    for leak in ["**사진 분석 (관점)**", "[사진3] 어쩌고", "관점에서 분석한 결과"]:
+        assert pd.caption_ok(leak) == "내부 라벨/프리앰블 잔재", leak
+        assert m._caption_gate(leak) == pd.caption_ok(leak), "두 경로 판정이 갈린다"
+
+
+def test_H19_사진_묘사_파서는_하나뿐이다():
+    """text_claude가 '첫 매치'로 묘사를 파싱했다 — 헤더·라벨을 집는 그 방식이다.
+    같은 재료(gen_source)를 읽는 소비자가 셋(캡션·배치·선별)인데 파서가 갈라져 있었다."""
+    import inspect
+    from app.generators import text_claude as tc
+    src = inspect.getsource(tc)
+    assert "descs.setdefault" not in src, "첫 매치 파싱이 남아 있다"
+    assert 'search(rf"\\[사진{i + 1}\\]' not in src, "첫 매치 파싱이 남아 있다"
+    assert src.count("photodesc") >= 2, "단일 파서를 안 쓴다"
+
+
+def test_H20_사진_선별에_업종어가_없다():
+    """'세척·재단·성형·코팅'은 시공업 어휘다 — 빵집·미용실에서는 과정 사진을 하나도 못 고른다.
+    과정이란 '무엇을 하고 있는 장면'이고, 그 신호는 관형형·진행 어미다(언어 규칙)."""
+    import inspect
+    import re as _re
+    from app.generators import text_claude as tc
+    src = inspect.getsource(tc._pick_photos) if hasattr(tc, "_pick_photos") else ""
+    if not src:                       # 이름이 바뀌어도 규칙은 남아야 한다
+        src = inspect.getsource(tc)
+    for w in ("재단", "성형", "세척", "건조"):
+        assert f'"{w}' not in src and f"|{w}" not in src, f"업종어가 남아 있다: {w}"
+    KEY = _re.compile(r"[가-힣](는|던)\s|[가-힣](는|던)$|중인|중이|하며|하면서")
+    assert KEY.search("반죽을 밀대로 미는 손"), "빵집 과정 사진을 못 고른다"
+    assert KEY.search("머리를 감기는 중이다"), "미용실 과정 사진을 못 고른다"
+    assert not KEY.search("완성된 케이크 진열장"), "완성 컷을 과정으로 잡는다"
