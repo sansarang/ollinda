@@ -786,6 +786,8 @@ def admin_caption_preview(asset_id: str = "", regen: int = 0):
                                    "detail": {k: v for k, v in _au.items()
                                               if k not in ("warnings",)}},
                          "surface_pass": (blog.payload or {}).get("surface_pass"),
+                         "polish_job": (blog.payload or {}).get("polish_job"),
+                         "self_review": (blog.payload or {}).get("self_review"),
                          "gate_stops": (blog.payload or {}).get("score_gate_stops"),
                          "raw_body": _raw, "raw_runs": _runs(_raw),
                          "layout_path": ("1차-재번호" if len(_order) == n else "2차-재매칭"),
