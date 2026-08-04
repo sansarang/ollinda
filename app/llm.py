@@ -356,3 +356,16 @@ def call_task(task: str, prompt: str, max_tokens: int = 1200,
             model=am, max_tokens=max_tokens, messages=[{"role": "user", "content": content}])
         return next((b.text for b in resp.content if b.type == "text"), "").strip()
     return call(prompt, am, max_tokens, cache_prefix=cache_prefix)
+
+def tokens_for(text: str, ratio: float = 2.4, extra: int = 800,
+               floor: int = 1500, cap: int = 16000) -> int:
+    """이 글을 '통째로 다시 쓰게' 할 때 필요한 출력 토큰 — 계산은 여기 하나뿐이다.
+
+    ★ 2026-08-04 실물 사고: 표면 수선이 max_tokens=2691로 요청했다가
+      stop_reason=max_tokens로 빈 응답을 받고 실패했다. 본문 2,990자짜리였다.
+      한글은 1자가 대략 1.5~2.4 토큰이라 len(body)*0.9는 애초에 완성될 수 없는 요청이다.
+      같은 실수를 캡션에서도 냈다(20줄을 900토큰에 요구) — 그래서 계산을 한 곳으로 모은다.
+      요청이 구조적으로 완성 불가능하면 그건 모델 탓이 아니라 우리 탓이다.
+    """
+    n = len(text or "")
+    return max(floor, min(cap, int(n * ratio) + extra))

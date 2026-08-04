@@ -108,13 +108,14 @@ def _revise_text(text: str, problems: list[str], is_blog: bool) -> str:
     try:
         from app.generators.text_claude import _call_llm
         from app.llm import SONNET as _SN
+        from app import llm as _llmtok
         keep = ("소제목(##)·표·FAQ·[사진N] 마커·링크·숫자·사실 전부 그대로 유지, "
                 if is_blog else "해시태그·사실·숫자 그대로 유지, ")
         out = _call_llm(
             "아래 글의 '문제'만 고쳐서 전체를 다시 출력하라. 문장 표현만 다듬고 "
             + keep + "내용 추가·삭제 금지. 설명 없이 결과 텍스트만.\n"
             f"[문제] {'; '.join(problems)}\n\n[글]\n{text}",
-            model=_SN, max_tokens=(6000 if is_blog else 900))
+            model=_SN, max_tokens=(_llmtok.tokens_for(text) if is_blog else 900))
         out = (out or "").strip()
         # 안전 게이트: 지나친 축소·마커 소실이면 원문 유지
         if is_blog:
@@ -162,6 +163,7 @@ def _surface_fix(pl: dict, warns: list) -> "str | None":
         return None
     from app.generators.text_claude import _call_llm
     from app.llm import SONNET as _SN
+    from app import llm as _llmtok
     _n_mk = len(re.findall(r"\[사진\d+\]", body))
     raw = (_call_llm(
         "아래 블로그에서 '지적된 표면 문제'만 최소 수정으로 고쳐라 — 문장 다듬기 수준이며 "
@@ -177,7 +179,7 @@ def _surface_fix(pl: dict, warns: list) -> "str | None":
         "'과장·광고성 표현'은 사실 서술로 바꿔라(없는 근거를 만들지 마라).\n"
         "출력: 고친 전체 본문만(머리말·설명 금지).\n\n"
         f"[지적된 표면 문제]\n- " + "\n- ".join(w[:120] for w in warns[:5]) + f"\n\n[본문]\n{body}",
-        model=_SN, max_tokens=min(6000, max(2500, int(len(body) * 0.9)))) or "").strip()
+        model=_SN, max_tokens=_llmtok.tokens_for(body)) or "").strip()
     raw = re.sub(r"^```[a-z]*\n?|\n?```$", "", raw).strip()
     if (len(raw) >= len(body) * 0.75
             and len(re.findall(r"\[사진\d+\]", raw)) == _n_mk):
@@ -313,6 +315,7 @@ def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
         body = pl.get("body") or ""
         try:
             from app.generators.text_claude import _call_llm, _parse_sections
+            from app import llm as _llmtok2
             from app.llm import SONNET as _SN2, MODEL as _OP
             # 2026-07-29 개선: ①제목 감점도 고치게 [제목] 출력 포함 ②2라운드는 Opus 승격
             #   ③펜스·머리말 세척 후 안전 게이트 ④중단 사유 기록(70점 정체 조사 재발 방지)
@@ -327,7 +330,8 @@ def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
                 "출력 형식(머리표 유지, 설명 금지):\n[제목]\n(고친 제목 — 문제 없으면 원래 제목 그대로)\n"
                 "[본문]\n(고친 전체 본문)\n\n"
                 f"[감점 사유] {warns}\n[제목] {_title0}\n\n[본문]\n{body}",
-                model=(_SN2 if rounds == 1 else _OP), max_tokens=6000) or "").strip()
+                model=(_SN2 if rounds == 1 else _OP),
+                max_tokens=_llmtok2.tokens_for(body)) or "").strip()
             d = _parse_sections(raw, ["제목", "본문"])
             new = (d.get("본문") or raw).strip()
             new = re.sub(r"^```[a-z]*\n?|\n?```$", "", new).strip()      # 코드펜스 세척

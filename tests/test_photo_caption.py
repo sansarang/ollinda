@@ -505,3 +505,36 @@ def test_H27_완성_화면은_어느_세트인지_추측하지_않는다():
     src = inspect.getsource(m._upload_form_html)
     assert "if(!aid&&pr.asset_id)aid=pr.asset_id;" in src, "화면이 서버 값을 안 쓴다"
     assert "'/me?tab=content'" in src, "못 구했을 때 같은 화면으로 보낸다(눌러도 변화 없음)"
+
+
+def test_H28_다시_쓰게_할_때_토큰이_모자라지_않는다():
+    """실물 사고(2026-08-04, 주안모터스 62점): 표면 수선이 max_tokens=2691로 요청했다가
+    stop_reason=max_tokens로 빈 응답을 받고 실패했다. 본문은 2,990자였다.
+    한글은 1자가 1.5~2.4 토큰이라 len(body)*0.9는 애초에 완성될 수 없는 요청이다.
+    요청이 구조적으로 완성 불가능하면 모델 탓이 아니라 우리 탓이다.
+    같은 실수를 캡션에서도 냈다(20줄을 900토큰) — 그래서 계산은 한 곳에만 산다."""
+    import inspect
+    from app import llm
+    from app.services import qualitycheck as qc
+    body = "가" * 3000
+    assert llm.tokens_for(body) >= 6000, "한글 본문을 다시 쓸 토큰이 모자란다"
+    assert llm.tokens_for("") >= 1500, "최소 예산이 없다"
+    assert llm.tokens_for("가" * 100000) <= 16000, "상한이 없다"
+    # 글을 통째로 다시 쓰는 세 곳이 모두 이 계산을 쓴다(존재가 아니라 사용 기준)
+    src = inspect.getsource(qc)
+    assert "int(len(body) * 0.9)" not in src, "옛 토큰 계산이 남아 있다"
+    for fn in (qc._revise_text, qc._surface_fix, qc.score_gate):
+        assert "tokens_for(" in inspect.getsource(fn), f"{fn.__name__}이 단일 계산을 안 쓴다"
+
+
+def test_H29_글쓰기_게이트는_업체를_가리지_않는다():
+    """사장님 지시(2026-08-04): 모든 글쓰기는 모든 업체에 동일하게 적용되어야 한다.
+    게이트·수선 경로에 특정 가게·업종·tenant 분기가 있으면 안 된다."""
+    import inspect
+    from app.services import qualitycheck as qc
+    src = inspect.getsource(qc)
+    for w in ("루마", "주안", "썬팅", "중고차", "모터스", "d9e0fbde", "95d0243f"):
+        assert w not in src, f"게이트에 특정 가게·업종이 박혀 있다: {w}"
+    # 게이트 진입은 tenant가 아니라 점수·결함으로만 갈린다
+    gsrc = inspect.getsource(qc.score_gate)
+    assert "tenant" not in gsrc.replace("tenant_id", ""), "게이트가 가게를 본다"
