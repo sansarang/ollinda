@@ -1211,6 +1211,10 @@ def input_anchors(note: str, limit: int = 4) -> list[str]:
     out = []
     for m in _ANCHOR_RE.finditer(note or ""):
         w = m.group(1)
+        # ★ 시각·파일명 꼬리는 식별자가 아니다(2026-08-04 실측: 사진 파일명의 '54PM'·'55PM'이
+        #   모델명으로 잡혀 '본문에 없다'는 오탐 감점이 났다). '사진13'을 뺀 것과 같은 계열.
+        if re.fullmatch(r"\d{1,4}(AM|PM|am|pm)", w):
+            continue
         if w.lower() in ("mp4", "jpg", "png", "1080p", "4k") or w in out:
             continue
         out.append(w)

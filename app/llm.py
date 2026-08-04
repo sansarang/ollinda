@@ -47,10 +47,11 @@ def _is_credit_error(e) -> bool:
 
 def note_credit_out(e=None) -> None:
     """크레딧 소진 기록 + 관리자 1회 통보(중복 억제는 watchtower가 담당)."""
-    global CREDIT_OUT_TS
+    global CREDIT_OUT_TS, _LAST_PROBE_TS
     import time as _tc
     first = (_tc.time() - CREDIT_OUT_TS) > _CREDIT_HOLD_SEC
     CREDIT_OUT_TS = _tc.time()
+    _LAST_PROBE_TS = CREDIT_OUT_TS      # 막 실패한 걸 곧바로 다시 찌르지 않는다
     import logging as _lgc
     _lgc.getLogger("shopcast.llm").error("[llm] 크레딧 소진 — 신규 작업 차단: %s", repr(e)[:200])
     if first:
@@ -65,10 +66,48 @@ def note_credit_out(e=None) -> None:
             pass
 
 
+_PROBE_EVERY_SEC = 60          # 회복 확인 주기 — 이보다 자주 찔러봐야 소용없다
+_LAST_PROBE_TS = 0.0
+
+
+def _probe_ok() -> bool:
+    """크레딧이 돌아왔는지 가장 싼 호출로 확인 — 1토큰짜리 haiku 한 번.
+
+    ★ 성공했을 때만 푼다. 키 없음·네트워크 오류를 '회복'으로 읽으면 크레딧이 없는데도
+      작업을 재개해 전부 실패시킨다(골든이 잡았다) — 확인 못 한 것은 회복이 아니다.
+    """
+    try:
+        import anthropic
+        anthropic.Anthropic(timeout=20.0, max_retries=0).messages.create(
+            model=HAIKU, max_tokens=1, messages=[{"role": "user", "content": "."}])
+        return True
+    except Exception:
+        return False
+
+
 def credit_out() -> bool:
-    """지금 크레딧 소진 상태인가(감지 후 30분). 새 작업 진입점이 이걸 보고 즉시 중지한다."""
+    """지금 크레딧 소진 상태인가. 새 작업 진입점이 이걸 보고 즉시 중지한다.
+
+    ★ 2026-08-04: 감지는 잘 됐는데 해제가 '30분 대기' 아니면 '사람이 admin을 누르기'였다.
+      충전은 사장님이 언제 하실지 모른다 — 기다리게 하거나 부르게 하는 건 우리 일을
+      사장님에게 미루는 것이다. 1분에 한 번 스스로 찔러보고 돌아왔으면 즉시 푼다.
+    """
+    global CREDIT_OUT_TS, _LAST_PROBE_TS
     import time as _tc
-    return CREDIT_OUT_TS > 0 and (_tc.time() - CREDIT_OUT_TS) < _CREDIT_HOLD_SEC
+    if CREDIT_OUT_TS <= 0:
+        return False
+    now = _tc.time()
+    if (now - CREDIT_OUT_TS) >= _CREDIT_HOLD_SEC:
+        CREDIT_OUT_TS = 0.0
+        return False
+    if (now - _LAST_PROBE_TS) >= _PROBE_EVERY_SEC:
+        _LAST_PROBE_TS = now
+        if _probe_ok():
+            CREDIT_OUT_TS = 0.0
+            import logging as _lgr
+            _lgr.getLogger("shopcast.llm").info("[llm] 크레딧 회복 확인 — 차단 자동 해제")
+            return False
+    return True
 
 
 def _retryable(e) -> bool:
@@ -357,8 +396,10 @@ def call_task(task: str, prompt: str, max_tokens: int = 1200,
         return next((b.text for b in resp.content if b.type == "text"), "").strip()
     return call(prompt, am, max_tokens, cache_prefix=cache_prefix)
 
-# 모델이 한 번에 뱉을 수 있는 상한 — 넘겨 요청하면 400이 난다(2026-08-04 실측).
-MAX_OUT = int(os.environ.get("SHOPCAST_MAX_OUT", "8000"))
+# 한 번에 뱉게 할 상한. 8000으로 묶었다가 되돌렸다(2026-08-04) —
+# 그때 본 400은 모델 상한 초과가 아니라 크레딧 소진이었다. 원인을 잘못 읽고 예산을 깎으면
+# '글을 다 못 쓰는 요청'이 된다. thinking이 예산을 나눠 쓰므로 본문 분량에 여유를 둔다.
+MAX_OUT = int(os.environ.get("SHOPCAST_MAX_OUT", "16000"))
 
 
 def tokens_for(text: str, ratio: float = 2.4, extra: int = 800,

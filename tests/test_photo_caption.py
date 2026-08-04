@@ -519,8 +519,9 @@ def test_H28_다시_쓰게_할_때_토큰이_모자라지_않는다():
     body = "가" * 3000
     assert llm.tokens_for(body) >= 6000, "한글 본문을 다시 쓸 토큰이 모자란다"
     assert llm.tokens_for("") >= 1500, "최소 예산이 없다"
-    assert llm.tokens_for("가" * 100000) <= llm.MAX_OUT, "모델 출력 상한을 넘겨 요청한다(400)"
-    assert llm.MAX_OUT <= 16000, "상한이 너무 크다"
+    assert llm.tokens_for("가" * 100000) <= llm.MAX_OUT, "상한 없이 요청한다"
+    # 본문 3,000자를 통째로 다시 쓰려면 thinking 몫까지 여유가 있어야 한다(8000은 빠듯해 절단됐다)
+    assert llm.MAX_OUT >= 16000, "예산을 깎으면 글을 다 못 쓰는 요청이 된다"
     # 글을 통째로 다시 쓰는 세 곳이 모두 이 계산을 쓴다(존재가 아니라 사용 기준)
     src = inspect.getsource(qc)
     assert "int(len(body) * 0.9)" not in src, "옛 토큰 계산이 남아 있다"
@@ -539,3 +540,33 @@ def test_H29_글쓰기_게이트는_업체를_가리지_않는다():
     # 게이트 진입은 tenant가 아니라 점수·결함으로만 갈린다
     gsrc = inspect.getsource(qc.score_gate)
     assert "tenant" not in gsrc.replace("tenant_id", ""), "게이트가 가게를 본다"
+
+
+def test_H30_시각_꼬리는_모델명이_아니다():
+    """실측(2026-08-04): 사진 파일명의 '54PM'·'55PM'이 모델·등급명으로 잡혀
+    '입력의 모델명이 본문에 없음'이라는 오탐 감점이 났다. '사진13'을 뺀 것과 같은 계열 —
+    우리 파일명·시각 표기는 사장님이 준 실값이 아니다."""
+    from app import seo
+    got = seo.input_anchors("KakaoTalk_Photo_2026-08-04-18-28-26 54PM 55PM 흰색 토레스 TORRES")
+    assert not [g for g in got if g.upper().endswith(("AM", "PM"))], f"시각이 실값으로 잡힌다: {got}"
+    # 진짜 모델명은 그대로 살아야 한다
+    assert "PV5" in seo.input_anchors("기아 PV5 신차 5PM 입고")
+
+
+def test_H31_크레딧_회복은_스스로_확인한다():
+    """감지는 잘 됐는데 해제가 '30분 대기' 아니면 '사람이 admin을 누르기'였다.
+    충전 시점은 우리가 모른다 — 기다리게 하거나 부르게 하는 건 우리 일을 사장님에게 미루는 것이다."""
+    import inspect
+    from app import llm
+    src = inspect.getsource(llm.credit_out)
+    assert "_probe_ok()" in src, "스스로 회복을 확인하지 않는다"
+    assert "CREDIT_OUT_TS = 0.0" in src, "회복해도 차단이 안 풀린다"
+    assert "_PROBE_EVERY_SEC" in src, "확인 주기가 없다(매 호출마다 찌른다)"
+    psrc = inspect.getsource(llm._probe_ok)
+    assert "max_tokens=1" in psrc, "회복 확인이 비싸다"
+    assert "HAIKU" in psrc, "회복 확인에 비싼 모델을 쓴다"
+    # ★ 확인 못 한 것은 회복이 아니다 — 키 없음·네트워크 오류를 회복으로 읽으면 안 된다
+    assert "except Exception:\n        return False" in psrc, "실패를 회복으로 읽는다"
+    # 감지 직후에는 곧바로 다시 찌르지 않는다(막 실패한 것을 즉시 재확인해봐야 소용없다)
+    assert "_LAST_PROBE_TS = CREDIT_OUT_TS" in inspect.getsource(llm.note_credit_out), \
+        "감지 직후 차단이 곧바로 풀릴 수 있다"
