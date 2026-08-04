@@ -478,3 +478,30 @@ def test_H26_짝_없는_괄호는_사장님_화면에_안_나간다():
     assert qc.fix_orphan_parens("여러 줄\n(정상)\n깨짐)") == "여러 줄\n(정상)\n깨짐"
     # 게이트가 실제로 쓰는가 — '존재'가 아니라 '사용' 기준(조항)
     assert "fix_orphan_parens(" in inspect.getsource(qc.score_gate), "게이트가 안 쓴다"
+
+
+def test_H27_완성_화면은_어느_세트인지_추측하지_않는다():
+    """사장님 실측(2026-08-04): '콘텐츠 완성!'은 떴는데 결과 화면으로 안 넘어갔다.
+    서버는 어느 세트가 완성됐는지 아는데 화면엔 안 알려줬고, 화면은 '세트 개수가 늘었나'로
+    추측했다 — 저장이 done 표시보다 늦으면 못 잡는다(경합). 값을 넘겨 추측을 없앤다."""
+    import inspect
+    import os
+    os.environ.setdefault("SHOPCAST_SECRET", "test")
+    from app import db
+    from app import main as m
+    from app.services import ingest as ing
+    db.set_gen_progress("TGOLD", "running", "시작", new=True)
+    db.set_gen_progress("TGOLD", "done", "완성", status="done", asset_id="AID-GOLD")
+    got = db.get_gen_progress("TGOLD") or {}
+    assert got.get("asset_id") == "AID-GOLD", "완성된 세트 ID가 안 남는다"
+    # 새 생성이 시작되면 옛 ID는 버린다 — 엉뚱한 세트로 보내면 안 된다
+    db.set_gen_progress("TGOLD", "running", "새 생성", new=True)
+    assert (db.get_gen_progress("TGOLD") or {}).get("asset_id") in ("", None), "옛 세트 ID가 남는다"
+    # 생성 경로가 실제로 넘기는가 — '존재'가 아니라 '사용' 기준(조항)
+    assert "asset_id=getattr(asset" in inspect.getsource(ing), "생성 완료 시 세트 ID를 안 넘긴다"
+    assert '"asset_id": pr.get("asset_id")' in inspect.getsource(m._progress_payload), \
+        "진행률 응답에 세트 ID가 없다"
+    # 화면이 그 값을 먼저 쓰는가 + 못 구했을 때도 실제로 이동하는가
+    src = inspect.getsource(m._upload_form_html)
+    assert "if(!aid&&pr.asset_id)aid=pr.asset_id;" in src, "화면이 서버 값을 안 쓴다"
+    assert "'/me?tab=content'" in src, "못 구했을 때 같은 화면으로 보낸다(눌러도 변화 없음)"

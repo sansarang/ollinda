@@ -2091,7 +2091,8 @@ def _progress_payload(t) -> dict:
     pr = db.get_gen_progress(t.id) or {}
     rng = db.gen_duration_range()
     out = {"stage": pr.get("stage"), "label": pr.get("label") or "", "detail": pr.get("detail") or "",
-           "pct": pr.get("pct"), "status": pr.get("status") or "idle"}
+           "pct": pr.get("pct"), "status": pr.get("status") or "idle",
+           "asset_id": pr.get("asset_id") or ""}      # 완성된 세트 — 화면이 그대로 쓴다(추측 금지)
     # 실측 범위 문구(p25~p90) — 표본 충분할 때만. vision 병렬화 효과 즉시 반영.
     if rng:
         def _kr(sec):
@@ -11389,8 +11390,11 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
           # ★ 완성의 순간(테트리스 원칙 4): done 신호 → 보러가기 버튼 + 3초 자동 이동 + (딴 탭이면) 브라우저 알림.
           #   구조건(피스 5개)은 영상 온디맨드 이후 영원히 안 채워져 사용자가 100%에서 방치됐음(캡처 실측).
           "if(pr.status==='done'){clearInterval(iv);"
+          # ★ 서버가 알려준 세트 ID를 먼저 쓴다(2026-08-04) — 개수 비교는 저장 시점 경합에 진다.
+          "if(!aid&&pr.asset_id)aid=pr.asset_id;"
           "if(!aid){try{var d0=await (await fetch('/me/sets/count')).json();if(d0.n>base)aid=d0.latest;}catch(_){}}"
-          "var url=aid?('/me?view='+aid):'/me';"
+          # 그래도 못 구하면 목록으로 — '/me'는 지금 있는 화면과 같아서 눌러도 아무 일이 없다.
+          "var url=aid?('/me?view='+aid):'/me?tab=content';"
           "setBar(100);setLabel('✅ 콘텐츠 완성!');setDetail('영상은 목록에서 원하는 플랫폼을 골라 만들 수 있어요');setSlow('');"
           "var tm=document.getElementById('gTeam');if(tm)tm.textContent='3초 뒤 자동으로 이동해요';"
           "var go=document.getElementById('gGo');if(go){go.href=url;go.classList.remove('hidden');}"

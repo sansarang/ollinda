@@ -502,23 +502,32 @@ def _ensure_progress_tables(c) -> None:
     c.execute("CREATE TABLE IF NOT EXISTS gen_progress("
               "tenant_id TEXT PRIMARY KEY, stage TEXT, label TEXT, detail TEXT, pct REAL, "
               "status TEXT DEFAULT 'running', error TEXT, started_at TEXT, updated_at TEXT)")
+    # ★ 2026-08-04: 완성된 세트가 무엇인지 서버는 아는데 화면엔 안 알려줬다.
+    #   화면은 '세트 개수가 늘었나'로 추측했고, 저장이 done 표시보다 늦으면 못 잡아
+    #   결과 화면으로 못 넘어갔다(사장님 실측). 추측 대신 값을 넘긴다.
+    try:
+        c.execute("ALTER TABLE gen_progress ADD COLUMN asset_id TEXT")
+    except Exception:
+        pass                                   # 이미 있으면 그만
     c.execute("CREATE TABLE IF NOT EXISTS gen_durations("
               "id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, seconds REAL, at TEXT)")
 
 
 def set_gen_progress(tenant_id: str, stage: str, label: str = "", detail: str = "",
                      pct: "float | None" = None, status: str = "running", error: str = "",
-                     new: bool = False) -> None:
+                     new: bool = False, asset_id: str = "") -> None:
     """생성 단계 기록(upsert). new=True면 started_at 갱신(새 생성 시작). 조용한 실패 금지 — 실패도 기록."""
     try:
         with _conn() as c:
             _ensure_progress_tables(c)
-            ex = c.execute("SELECT started_at FROM gen_progress WHERE tenant_id=?", (tenant_id,)).fetchone()
+            ex = c.execute("SELECT * FROM gen_progress WHERE tenant_id=?", (tenant_id,)).fetchone()
             started = (None if new else (ex["started_at"] if ex else None)) or _now()
+            # 새 생성이 시작되면 옛 세트 ID는 버린다(엉뚱한 세트로 보내지 않는다)
+            aid = asset_id or ("" if new else ((ex["asset_id"] if ex else "") or ""))
             c.execute("INSERT OR REPLACE INTO gen_progress"
-                      "(tenant_id, stage, label, detail, pct, status, error, started_at, updated_at) "
-                      "VALUES(?,?,?,?,?,?,?,?,?)",
-                      (tenant_id, stage, label, detail, pct, status, error, started, _now()))
+                      "(tenant_id, stage, label, detail, pct, status, error, started_at, updated_at, asset_id) "
+                      "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                      (tenant_id, stage, label, detail, pct, status, error, started, _now(), aid))
     except sqlite3.OperationalError:
         pass
 

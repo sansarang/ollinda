@@ -425,8 +425,10 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
     except Exception:
         pass
     try:
+        # ★ 어느 세트가 완성됐는지 함께 넘긴다 — 화면이 개수로 추측하지 않게(2026-08-04)
         db.set_gen_progress(tenant.id, "done", "콘텐츠 완성",
-                            "영상은 목록에서 원하는 플랫폼을 골라 만들 수 있어요", 1.0, status="done")
+                            "영상은 목록에서 원하는 플랫폼을 골라 만들 수 있어요", 1.0,
+                            status="done", asset_id=getattr(asset, "id", "") or "")
     except Exception:
         pass
     _polish_async(tenant, asset, pieces)
