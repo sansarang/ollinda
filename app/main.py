@@ -7727,7 +7727,8 @@ def _internal_link_box(blog, sec: str) -> str:
     if not rel:
         return ""
     rel = [dict(r, url=(r.get("url") or "").split("?")[0]) for r in rel]   # 구세트 저장분 추적 파라미터 정리
-    links_text = "\n".join(f"▶ 함께 보면 좋은 글: {r.get('title') or r['url']}\n{r['url']}" for r in rel[:3])
+    from app.services.blogsync import related_links_block as _rlb
+    links_text = _rlb(rel[:3])          # 붙여넣기용 — 생성기와 같은 형식(URL 줄 단독 = 클릭됨)
     rows = "".join(
         f"<div class='flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2 mb-1.5'>"
         f"<span class='text-sm text-slate-600 truncate'>{esc(r.get('title') or r['url'])}</span>"

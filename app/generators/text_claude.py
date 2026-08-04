@@ -537,8 +537,11 @@ class BlogDraftGenerator(Generator):
                 if len(_rel) >= 2:
                     break
             if _rel:
-                body = body.rstrip() + "\n\n## 함께 보면 좋은 글\n" + "\n".join(
-                    f"- {t} : {u}" for t, u in _rel)
+                # 블록은 한 곳에서만 만든다 — 클릭되는 형태(URL 줄 단독)를 두 경로가 공유한다
+                from app.services.blogsync import related_links_block as _rlb
+                _blk = _rlb([{"title": t, "url": u} for t, u in _rel])
+                if _blk:
+                    body = body.rstrip() + "\n\n" + _blk
         except Exception:
             pass
         # ③ FAQ 섹션 누락 대비 최소 보강(스마트블록·체류 신호)

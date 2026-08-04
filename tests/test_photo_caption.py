@@ -437,3 +437,29 @@ def test_H24_배치_규칙은_한_함수에만_산다():
     if cur:
         runs.append(cur)
     assert max(runs) <= 5, f"한 곳에 뭉친다: {runs}"
+
+
+def test_H25_관련글_링크는_클릭된다():
+    """사장님 지적(2026-08-04): 붙여넣은 글의 관련글 링크가 눌리지 않았다.
+    '- 제목 : URL'처럼 한 줄에 섞으면 네이버 에디터가 URL을 링크로 인식하지 못한다 —
+    URL이 줄 단독으로 있어야 자동 링크가 된다. 되돌리면 이 테스트가 실패한다."""
+    import inspect
+    from app.services.blogsync import related_links_block as blk
+    out = blk([{"title": "제목 하나", "url": "https://blog.naver.com/x/111?from=rss"},
+               {"title": "제목 둘", "url": "https://blog.naver.com/x/222"}])
+    for ln in out.splitlines():
+        if ln.startswith("http"):
+            assert ln.strip() == ln and " " not in ln, f"URL 줄에 다른 게 섞였다: {ln!r}"
+    assert "\nhttps://blog.naver.com/x/111\n" in out + "\n", "URL이 줄 단독이 아니다"
+    assert "?from=rss" not in out, "추적 파라미터가 남았다(복붙 청결)"
+    assert " : " not in out, "제목과 URL이 한 줄에 섞였다(클릭 안 됨)"
+    assert blk([]) == "" and blk([{"url": ""}]) == "", "빈 입력에 껍데기를 만든다"
+    # ★ 블록을 만드는 곳은 한 곳뿐이다 — 두 곳에 살면 형식이 갈라진다(실제로 갈라져 있었다)
+    from app.generators import text_claude as tc
+    from app import main as m
+    for mod in (tc, m):
+        src = inspect.getsource(mod)
+        assert '"## 함께 보면 좋은 글\\n"' not in src, f"{mod.__name__}이 블록을 따로 만든다"
+        assert "f\"- {t} : {u}\"" not in src, f"{mod.__name__}에 옛 형식이 남아 있다"
+    assert "related_links_block" in inspect.getsource(tc)
+    assert "related_links_block" in inspect.getsource(m)

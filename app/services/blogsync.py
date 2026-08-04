@@ -175,6 +175,29 @@ def is_my_post_url(url: str, blog_id: str) -> bool:
     return bool(blog_id) and normalize_blog_id(url) == blog_id
 
 
+def related_links_block(rel: list) -> str:
+    """'함께 보면 좋은 글' 블록 — 네이버 본문에 붙였을 때 **클릭되는** 형태로만 만든다.
+
+    ★ 2026-08-04 사장님 지적: 붙여넣은 글의 링크가 눌리지 않았다.
+      '- 제목 : URL'처럼 한 줄에 섞으면 네이버 에디터가 URL을 링크로 인식하지 못한다.
+      URL이 **줄 단독**으로 있어야 자동으로 링크(카드)가 된다.
+    ★ 이 블록을 만드는 코드가 두 곳(생성기·키트)에 따로 살아 형식이 갈라져 있었다 —
+      한쪽만 고치면 다른 쪽은 그대로다. 만드는 곳은 이 함수 하나뿐이다.
+
+    업종 중립: 재료는 그 가게의 발행 기록(제목·URL)뿐이다.
+    """
+    lines = []
+    for r in rel or []:
+        u = (r.get("url") or "").split("?")[0]
+        if not u:
+            continue
+        t = (r.get("title") or "").strip()
+        lines.append(f"{t}\n{u}" if t else u)       # 제목 줄 + URL 줄 단독
+    if not lines:
+        return ""
+    return "## 함께 보면 좋은 글\n\n" + "\n\n".join(lines)
+
+
 def related_published(tenant_id: str, keywords: list[str], limit: int = 3) -> list[dict]:
     """내부링크 제안(상위노출 PHASE 4) — 같은 주제(키워드 겹침)의 '발행 확인된' 내 글.
     같은 주제 글끼리 서로 링크 = 블로그 주제 응집도(C-Rank 신호). [{url, title}]"""
