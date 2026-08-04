@@ -303,7 +303,7 @@ def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
             pl["surface_pass"] = {"applied": bool(_sw) or (_fixed != _body0), "after": score}
             _save_gate_fields(blog, pl)
         except Exception as _e:
-            pl.setdefault("score_gate_stops", []).append(f"surface: 예외 {repr(_e)[:60]}")
+            pl.setdefault("score_gate_stops", []).append(f"surface: 예외 {repr(_e)[:300]}")
     # 라운드는 '새로 시작'할 때만 상한을 검사한다(진행 중인 콜은 끊지 않는다 — 지불한 비용 보존).
     while isinstance(score, int) and score < PUBLISH_MIN and rounds < max_rounds:
         if _time.monotonic() > _deadline:
@@ -347,7 +347,7 @@ def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
                     f"{len(re.findall(chr(91)+'사진'+chr(92)+'d+'+chr(93), new))})")
                 break                                    # 안전 게이트 위반 → 원문 유지·중단
         except Exception as _e:
-            pl.setdefault("score_gate_stops", []).append(f"r{rounds}: 예외 {repr(_e)[:60]}")
+            pl.setdefault("score_gate_stops", []).append(f"r{rounds}: 예외 {repr(_e)[:300]}")
             break
         au = seo.quality_audit(blog.channel.value, blog.kind.value, pl, source=source)
         pl["ranking_audit"] = au

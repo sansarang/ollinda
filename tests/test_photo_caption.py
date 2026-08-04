@@ -519,7 +519,8 @@ def test_H28_다시_쓰게_할_때_토큰이_모자라지_않는다():
     body = "가" * 3000
     assert llm.tokens_for(body) >= 6000, "한글 본문을 다시 쓸 토큰이 모자란다"
     assert llm.tokens_for("") >= 1500, "최소 예산이 없다"
-    assert llm.tokens_for("가" * 100000) <= 16000, "상한이 없다"
+    assert llm.tokens_for("가" * 100000) <= llm.MAX_OUT, "모델 출력 상한을 넘겨 요청한다(400)"
+    assert llm.MAX_OUT <= 16000, "상한이 너무 크다"
     # 글을 통째로 다시 쓰는 세 곳이 모두 이 계산을 쓴다(존재가 아니라 사용 기준)
     src = inspect.getsource(qc)
     assert "int(len(body) * 0.9)" not in src, "옛 토큰 계산이 남아 있다"

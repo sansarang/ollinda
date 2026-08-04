@@ -357,8 +357,12 @@ def call_task(task: str, prompt: str, max_tokens: int = 1200,
         return next((b.text for b in resp.content if b.type == "text"), "").strip()
     return call(prompt, am, max_tokens, cache_prefix=cache_prefix)
 
+# 모델이 한 번에 뱉을 수 있는 상한 — 넘겨 요청하면 400이 난다(2026-08-04 실측).
+MAX_OUT = int(os.environ.get("SHOPCAST_MAX_OUT", "8000"))
+
+
 def tokens_for(text: str, ratio: float = 2.4, extra: int = 800,
-               floor: int = 1500, cap: int = 16000) -> int:
+               floor: int = 1500, cap: int = 0) -> int:
     """이 글을 '통째로 다시 쓰게' 할 때 필요한 출력 토큰 — 계산은 여기 하나뿐이다.
 
     ★ 2026-08-04 실물 사고: 표면 수선이 max_tokens=2691로 요청했다가
@@ -368,4 +372,4 @@ def tokens_for(text: str, ratio: float = 2.4, extra: int = 800,
       요청이 구조적으로 완성 불가능하면 그건 모델 탓이 아니라 우리 탓이다.
     """
     n = len(text or "")
-    return max(floor, min(cap, int(n * ratio) + extra))
+    return max(floor, min(cap or MAX_OUT, int(n * ratio) + extra))
