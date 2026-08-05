@@ -61,21 +61,15 @@ _JS = """() => {
 
 
 def scan(keywords: list, my_blog: str = "", show: bool = False) -> list:
+    # ★ 브라우저를 여는 코드는 session 하나뿐이다(R4) — 역설계 수집기와 같은 규칙을 쓴다.
     from playwright.sync_api import sync_playwright
+    from app.services.scout import session as _ss
     rows = []
     with sync_playwright() as p:
-        b = p.chromium.launch(headless=not show)
-        pg = b.new_page(viewport={"width": 420, "height": 900},
-                        user_agent=("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
-                                    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 "
-                                    "Mobile/15E148 Safari/604.1"))
+        b, pg = _ss.open_page(p, show)
         for kw in keywords:
             try:
-                pg.goto("https://m.search.naver.com/search.naver?query=" + kw.replace(" ", "+"),
-                        wait_until="networkidle", timeout=45000)
-                for _ in range(5):                       # 지연 로딩 유도(사람 스크롤 수준)
-                    pg.mouse.wheel(0, 2000)
-                    pg.wait_for_timeout(900)
+                _ss.load_query(pg, kw)
                 d = pg.evaluate(_JS)
             except Exception as e:
                 rows.append({"keyword": kw, "error": repr(e)[:80]})
@@ -107,7 +101,7 @@ def scan(keywords: list, my_blog: str = "", show: bool = False) -> list:
                              "reasons": _v["reasons"], "blocks": [], "blog_blocks": [],
                              "blogs_seen": [], "my_blocks": [], "my_real_blocks": [],
                              "my_visible": None})
-                time.sleep(2.5)
+                _ss.gap()
                 continue
             rows.append({"keyword": kw,
                          "blocks": [blk["title"] for blk in blocks],
@@ -128,7 +122,7 @@ def scan(keywords: list, my_blog: str = "", show: bool = False) -> list:
                          "visible_evidence": {"my_blog": my_blog,
                                               "links": (d.get("allBlogs") or [])[:12],
                                               "basis": "결과 링크에 내 블로그 ID 존재"}})
-            time.sleep(2.5)                              # 저속(사람 속도)
+            _ss.gap()                                    # 저속(사람 속도·무작위 지연)
         b.close()
     os.makedirs(OUT, exist_ok=True)
     json.dump(rows, open(f"{OUT}/last_blocks.json", "w"), ensure_ascii=False, indent=1)

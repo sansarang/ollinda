@@ -1005,6 +1005,36 @@ def admin_scout_probe(kw: str = "부산 썬팅", blog: str = ""):
                             status_code=500)
 
 
+@app.get("/admin/reverse/report")
+def admin_reverse_report(limit: int = 400):
+    """🔬 역설계 정답 인자 리포트 — 상위/하위를 가르는 인자(읽기 전용).
+
+    ★ 미확정은 미확정으로 표기한다. 표본이 적으면 유의여도 인자로 채택하지 않는다(R5).
+    """
+    from app.services.reverse import contrast as _con, pipeline as _pl
+    rows = _pl.load(limit)
+    if not rows:
+        return JSONResponse({"ok": True, "n": 0, "note": "수집된 정답지 없음 — /admin/reverse/collect 먼저"})
+    hi = [r for r in rows if (r.get("rank") or 99) <= _pl.TOP_N]
+    lo = [r for r in rows if (r.get("rank") or 99) > _pl.TOP_N]
+    keys = [k for k in rows[0] if isinstance(rows[0].get(k), (int, float, bool)) and k != "rank"]
+    res = _con.summarize(_con.compare(hi, lo, keys))
+    return JSONResponse({"ok": True, "n": len(rows), "n_hi": len(hi), "n_lo": len(lo),
+                         "keywords": sorted({r.get("keyword") for r in rows if r.get("keyword")}),
+                         "cited_channels": sorted({r["blog"] for r in rows if r.get("channel_cited")}),
+                         **res})
+
+
+@app.get("/admin/reverse/collect")
+def admin_reverse_collect(kw: str = "", llm: int = 0, fetch: int = 14):
+    """정답지 수집 1회(쉼표로 여러 키워드). 공개 결과만 읽고 사람 속도로 돈다."""
+    kws = [x.strip() for x in (kw or "").split(",") if x.strip()]
+    if not kws:
+        return JSONResponse({"ok": False, "error": "kw 필요"}, status_code=400)
+    from app.services.reverse import pipeline as _pl
+    return JSONResponse(_pl.run(kws, fetch_limit=fetch, use_llm=bool(llm)))
+
+
 @app.get("/admin/immune/report")
 def admin_immune_report():
     """🛡 면역계 한 장 — 원장 집계·유형별 재발·월간 지표·대기 진단서(읽기 전용)."""
