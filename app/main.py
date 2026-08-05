@@ -830,6 +830,30 @@ def admin_scout_feasible():
     return JSONResponse(out)
 
 
+@app.get("/admin/scout-probe")
+def admin_scout_probe(kw: str = "부산 썬팅", blog: str = ""):
+    """(진단) 서버에서 지면 파싱이 실제로 되는가 — 맥북 결과와 같은 모양이 나오는지.
+
+    blocked_hint 같은 낱말 검사로는 판정할 수 없다(883KB 페이지엔 아무 단어나 있다).
+    실제로 블록이 파싱되는지가 유일한 증거다.
+    """
+    try:
+        from app.services.scout import blocks as _bk
+        rows = _bk.scan([kw], my_blog=blog)
+        r = (rows or [{}])[0]
+        return JSONResponse({"ok": True, "keyword": r.get("keyword"),
+                             "error": r.get("error"),
+                             "n_blocks": len(r.get("blocks") or []),
+                             "blocks": (r.get("blocks") or [])[:8],
+                             "n_blog_blocks": len(r.get("blog_blocks") or []),
+                             "blogs_seen": (r.get("blogs_seen") or [])[:5],
+                             "parsed": bool(r.get("blocks"))})
+    except Exception as e:
+        import traceback
+        return JSONResponse({"ok": False, "error": traceback.format_exc()[-600:]},
+                            status_code=500)
+
+
 @app.get("/admin/immune/report")
 def admin_immune_report():
     """🛡 면역계 한 장 — 원장 집계·유형별 재발·월간 지표·대기 진단서(읽기 전용)."""
