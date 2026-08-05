@@ -60,6 +60,12 @@ def start() -> None:
         #   판정만 한다. 글감 편입·카드 노출은 사장님 화면에서 사장님 판단으로.
         sch.add_job(_gap_scan_all, "cron", hour=6, minute=10,
                     id="gap_scan_daily", replace_existing=True)
+        # 🛡 야간 자가 스캔(2026-08-05) — 사장님보다 시스템이 먼저 발견한다.
+        #   새벽 3시: 생성이 도는 낮 시간과 겹치지 않게, 지면 정찰(4시)보다도 앞에.
+        #   ★ 크레딧 잔량을 먼저 보고 부족하면 탐지만 한다(R7) — 야간 작업이 크레딧을 말려
+        #     아침 생성을 죽이는 것이 면역계가 만드는 새 사고다.
+        sch.add_job(_immune_nightscan, "cron", hour=3, minute=0,
+                    id="immune_nightscan", replace_existing=True)
         # 🧹 디스크 정리(2026-08-03) — 원본은 R2에 영구 보존되고 로컬은 캐시다. 새벽에 오래된 미디어 정리.
         sch.add_job(_disk_prune, "cron", hour=4, minute=40,
                     id="disk_prune_daily", replace_existing=True)
@@ -159,6 +165,27 @@ def _fresh_index_check() -> None:
             watchtower.daily_summary()
     except Exception:
         logging.getLogger("shopcast.watchtower").exception("[watchtower] 크론 실패")
+
+
+def _immune_nightscan() -> None:
+    """🛡 야간 자가 스캔 — 산출물 표면을 원장 유형별로 훑는다.
+
+    ★ 크레딧이 없으면 탐지만 하고 수선은 건너뛴다(R7). 자동 수정은 무비용 기계 수선뿐이고,
+      재생성·코드 수정이 필요한 것은 진단서로 대기시킨다(자동 실행 금지).
+    ★ 원장도 함께 갱신한다 — 어제 고친 사고가 오늘의 항체가 되어야 루프가 닫힌다.
+    """
+    try:
+        from app import llm as _llm
+        from app.services.immune import ledger as _led, nightscan as _ns
+        _led.write(_led.build())                      # 사고 → 데이터 → 방어(폐루프)
+        ok = not _llm.credit_out()
+        r = _ns.run(allow_fix=ok)                     # 크레딧 없으면 탐지만
+        logging.getLogger("shopcast.immune").info(
+            "[immune] 야간 스캔 — 탐지 %d · 수선 %d · 진단서 %d%s",
+            len(r.get("detected") or []), len(r.get("fixed") or []),
+            len(r.get("diagnoses") or []), "" if ok else " (크레딧 없음 — 탐지만)")
+    except Exception:
+        logging.exception("[scheduler] 면역 야간 스캔 실패")
 
 
 def _rss_autosync() -> None:

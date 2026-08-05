@@ -127,3 +127,21 @@ def test_사고_1회는_항체_1개다():
     assert RU.derive_for("경로 이원화", st)["status"] == "이미 있음"
     r = RU.derive_for("새로운유형", st)
     assert "대기" in r["status"] and "_pending" in st, "새 유형이 흔적 없이 사라진다"
+
+
+def test_스케줄러에_야간_스캔이_등록돼_있다():
+    """수동 호출만 되면 '사장님보다 먼저 발견'이 성립하지 않는다.
+    등록이 빠지면 면역계는 있으나 마나다 — 그래서 회귀로 문다."""
+    import inspect
+    from app import scheduler as S
+    src = inspect.getsource(S)
+    assert 'id="immune_nightscan"' in src, "야간 스캔이 스케줄러에 없다"
+    assert "_immune_nightscan" in src and "cron" in src, "주기 실행이 아니다"
+    job = inspect.getsource(S._immune_nightscan)
+    # ★ R7 — 크레딧을 먼저 보고, 없으면 수선하지 않는다
+    assert "credit_out()" in job, "크레딧 잔량을 안 본다"
+    assert "allow_fix=ok" in job, "크레딧이 없어도 수선을 시도한다"
+    # 폐루프 — 어제 고친 사고가 오늘의 항체가 된다
+    assert "_led.write(_led.build())" in job, "원장을 갱신하지 않는다(루프가 안 닫힌다)"
+    # 야간 작업이 낮 생성과 겹치지 않는다
+    assert "hour=3" in src.split('id="immune_nightscan"')[0][-300:], "생성 시간대와 겹친다"
