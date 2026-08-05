@@ -799,6 +799,37 @@ def admin_caption_preview(asset_id: str = "", regen: int = 0):
                                       for i, c in enumerate(caps)]})
 
 
+@app.get("/admin/scout-feasible")
+def admin_scout_feasible():
+    """(진단) 정찰을 서버로 옮길 수 있는가 — 추측 말고 실측.
+
+    맥북에서 도는 데는 이유가 있을 수 있다(데이터센터 IP 차단).
+    옮겼다가 안 되면 정찰이 통째로 죽으므로, 옮기기 전에 여기서 확인한다.
+    """
+    out = {"playwright_import": False, "chromium_launch": False,
+           "naver_reachable": False, "naver_search_ok": False, "error": ""}
+    try:
+        from playwright.sync_api import sync_playwright
+        out["playwright_import"] = True
+        with sync_playwright() as p:
+            b = p.chromium.launch(headless=True)
+            out["chromium_launch"] = True
+            pg = b.new_page()
+            r = pg.goto("https://search.naver.com/search.naver?query=%EB%B6%80%EC%82%B0+%EC%8D%AC%ED%8C%85",
+                        timeout=25000, wait_until="domcontentloaded")
+            out["naver_reachable"] = bool(r and r.status == 200)
+            out["http_status"] = getattr(r, "status", None)
+            html = pg.content()
+            out["html_len"] = len(html)
+            # 검색 결과 지면이 실제로 그려졌는가(차단 페이지면 안 그려진다)
+            out["naver_search_ok"] = ("검색결과" in html or "blog" in html) and len(html) > 20000
+            out["blocked_hint"] = ("자동" in html and "차단" in html) or "captcha" in html.lower()
+            b.close()
+    except Exception as e:
+        out["error"] = repr(e)[:300]
+    return JSONResponse(out)
+
+
 @app.get("/admin/immune/report")
 def admin_immune_report():
     """🛡 면역계 한 장 — 원장 집계·유형별 재발·월간 지표·대기 진단서(읽기 전용)."""
