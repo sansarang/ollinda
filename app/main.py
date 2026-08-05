@@ -914,6 +914,63 @@ def admin_scout_contamination(flag: int = 0):
     return JSONResponse({"ok": True, **out})
 
 
+@app.get("/admin/exposure-recheck")
+def admin_exposure_recheck(tenant: str = "", apply: int = 0):
+    """(진단) 지금 '노출됨'으로 뜨는 키워드를 새 기준(링크 근거)으로 다시 판정한다.
+
+    옛 mine은 미검증 블록 귀속 기반이라 거짓 양성이 섞여 있다.
+    apply=1이면 재판정 결과를 mine에 반영하되 옛 값을 mine_legacy에 보존한다(원본 보존).
+    """
+    from app.services.scout import blocks as _bk
+    rows_out, changed = [], 0
+    with db._conn() as c:
+        cols = [r["name"] for r in c.execute("PRAGMA table_info(kw_blocks)")]
+        if apply and "mine_legacy" not in cols:
+            try:
+                c.execute("ALTER TABLE kw_blocks ADD COLUMN mine_legacy INTEGER")
+            except Exception:
+                pass
+        q = "SELECT rowid, tenant_id, keyword, mine FROM kw_blocks WHERE mine"
+        args = ()
+        if tenant:
+            q += " AND tenant_id=?"
+            args = (tenant,)
+        targets = c.execute(q, args).fetchall()
+    for t in targets:
+        tn = db.get_tenant(t["tenant_id"])
+        blog = (getattr(tn, "blog_id", "") or "") if tn else ""
+        if not blog:
+            rows_out.append({"keyword": t["keyword"], "old": 1, "new": None,
+                             "note": "블로그 ID 없음 — 판정 불가"})
+            continue
+        try:
+            r = _bk.scan([t["keyword"]], my_blog=blog)[0]
+        except Exception as e:
+            rows_out.append({"keyword": t["keyword"], "old": 1, "new": None,
+                             "note": f"재수집 실패: {repr(e)[:60]}"})
+            continue
+        new = bool(r.get("my_visible"))
+        rows_out.append({"keyword": t["keyword"], "shop": getattr(tn, "name", "")[:12],
+                         "old": 1, "new": new,
+                         "links": len(r.get("blogs_seen") or []),
+                         "false_positive": (not new)})
+        if apply:
+            with db._conn() as c2:
+                try:
+                    c2.execute("UPDATE kw_blocks SET mine_legacy=COALESCE(mine_legacy, mine), "
+                               "mine=? WHERE rowid=?", (1 if new else 0, t["rowid"]))
+                    changed += 1
+                except Exception:
+                    pass
+    fp = sum(1 for r in rows_out if r.get("false_positive"))
+    judged = sum(1 for r in rows_out if r.get("new") is not None)
+    return JSONResponse({"ok": True, "checked": len(rows_out), "judged": judged,
+                         "false_positive": fp,
+                         "fp_rate": (round(fp * 100.0 / judged, 1) if judged else None),
+                         "applied": changed, "rows": rows_out,
+                         "note": "옛 값은 mine_legacy에 보존했다 — 원본을 지우지 않는다"})
+
+
 @app.get("/admin/scout-probe")
 def admin_scout_probe(kw: str = "부산 썬팅", blog: str = ""):
     """(진단) 서버에서 지면 파싱이 실제로 되는가 — 맥북 결과와 같은 모양이 나오는지.
