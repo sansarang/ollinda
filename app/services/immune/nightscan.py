@@ -17,8 +17,11 @@ import time
 from app import db
 
 _log = logging.getLogger("shopcast.immune")
-BACKUP_DIR = os.environ.get("SHOPCAST_IMMUNE_BACKUP", "data/immune_backup")
-DIAG_PATH = os.environ.get("SHOPCAST_IMMUNE_DIAG", "data/immune_diagnoses.jsonl")
+from app.services.immune import is_persistent as _persistent
+from app.services.immune import path as _ipath
+
+BACKUP_DIR = os.environ.get("SHOPCAST_IMMUNE_BACKUP", "") or _ipath("immune_backup")
+DIAG_PATH = os.environ.get("SHOPCAST_IMMUNE_DIAG", "") or _ipath("immune_diagnoses.jsonl")
 MAX_SETS = int(os.environ.get("SHOPCAST_SCAN_SETS", "40"))
 
 
@@ -102,6 +105,12 @@ def run(limit_sets: int = 0, allow_fix: bool = True) -> dict:
     from app.domain.models import ContentKind as _CK
     from app import llm as _llm
     credit_ok = not _llm.credit_out()
+    # ★ 백업이 배포를 못 넘기는 경로면 수선하지 않는다(R2를 구조로 지킨다).
+    #   보존한다고 해놓고 배포 때 지워지면 그건 침묵 수정이다.
+    persist = _persistent()
+    if allow_fix and not persist:
+        _log.warning("[immune] 백업 경로가 영속이 아니다(%s) — 탐지만 한다", BACKUP_DIR)
+        allow_fix = False
     detected, fixed, diags = [], [], []
     tenants = {}
     for s in db.list_sets(limit=limit_sets or MAX_SETS) or []:
@@ -133,9 +142,11 @@ def run(limit_sets: int = 0, allow_fix: bool = True) -> dict:
         with open(DIAG_PATH, "a", encoding="utf-8") as fh:
             for d in diags:
                 fh.write(json.dumps(d, ensure_ascii=False) + "\n")
-    return {"credit_ok": credit_ok, "scanned": len(tenants),
+    return {"credit_ok": credit_ok, "persistent": persist, "backup_dir": BACKUP_DIR,
+            "scanned": len(tenants),
             "detected": detected, "fixed": fixed, "diagnoses": diags,
-            "note": ("크레딧이 없어 탐지만 했습니다(수정·재생성 안 함)" if not credit_ok else "")}
+            "note": ("크레딧이 없어 탐지만 했습니다(수정·재생성 안 함)" if not credit_ok
+                     else ("백업이 배포를 못 넘기는 경로라 탐지만 했습니다" if not persist else ""))}
 
 
 def pending_diagnoses(limit: int = 50) -> list:

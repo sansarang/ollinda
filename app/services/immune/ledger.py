@@ -15,7 +15,9 @@ import os
 import re
 import subprocess
 
-LEDGER_PATH = os.environ.get("SHOPCAST_LEDGER", "data/incidents.jsonl")
+from app.services.immune import path as _ipath
+
+LEDGER_PATH = os.environ.get("SHOPCAST_LEDGER", "") or _ipath("incidents.jsonl")
 DOC_PATH = "docs/incidents.md"
 
 # 원인 유형 — 실사고에서 귀납한 것이지 미리 정한 목록이 아니다.

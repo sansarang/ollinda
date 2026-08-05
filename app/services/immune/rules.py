@@ -16,7 +16,10 @@ import os
 import re
 import time
 
-STATE_PATH = os.environ.get("SHOPCAST_RULE_STATE", "data/immune_rules.json")
+from app.services.immune import path as _ipath
+
+# 규칙 강등 이력(R4)도 배포를 넘어 살아야 한다 — 안 그러면 매 배포마다 규칙이 되살아난다
+STATE_PATH = os.environ.get("SHOPCAST_RULE_STATE", "") or _ipath("immune_rules.json")
 RETIRE_DAYS = 90                      # 3개월 무탐지 → 주 1회로 강등(R4)
 
 

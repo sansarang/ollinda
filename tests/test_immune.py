@@ -145,3 +145,41 @@ def test_스케줄러에_야간_스캔이_등록돼_있다():
     assert "_led.write(_led.build())" in job, "원장을 갱신하지 않는다(루프가 안 닫힌다)"
     # 야간 작업이 낮 생성과 겹치지 않는다
     assert "hour=3" in src.split('id="immune_nightscan"')[0][-300:], "생성 시간대와 겹친다"
+
+
+def test_R2_백업이_배포를_못_넘기면_고치지_않는다():
+    """실측(2026-08-05): 백업·진단서를 상대경로 data/ 에 두었다. 컨테이너 파일시스템이라
+    배포 한 번에 사라진다 — '원본 보존'이라 해놓고 지워지면 침묵 수정과 같다.
+    설정 실수로도 그 일이 안 생기게 규율이 아니라 구조로 막는다."""
+    import inspect
+    import os
+    from app.services import immune as I
+    # 경로는 DB가 사는 곳(영속 볼륨)을 따른다
+    old = os.environ.get("SHOPCAST_DB")
+    try:
+        os.environ["SHOPCAST_DB"] = "/data/shopcast.sqlite"
+        assert I.data_root() == "/data", I.data_root()
+        assert I.path("immune_backup") == "/data/immune_backup"
+        os.environ["SHOPCAST_DB"] = ""
+        assert I.data_root() == "data", "볼륨 설정이 없을 때 폴백이 없다"
+        assert I.is_persistent() is False, "상대경로를 영속이라고 한다"
+    finally:
+        if old is None:
+            os.environ.pop("SHOPCAST_DB", None)
+        else:
+            os.environ["SHOPCAST_DB"] = old
+    # 영속이 아니면 수선하지 않는다
+    src = inspect.getsource(N.run)
+    assert "_persistent()" in src and "allow_fix = False" in src, \
+        "백업이 안 남는 경로인데도 고친다"
+    assert "탐지만 한다" in src
+
+
+def test_경로_규칙은_면역계_안에서도_한_곳이다():
+    """면역계가 감시하는 '경로 이원화'를 스스로 어기면 그 항체는 가짜다."""
+    import inspect
+    from app.services.immune import ledger as L2, nightscan as N2, rules as RU2
+    for mod in (L2, RU2, N2):
+        src = inspect.getsource(mod)
+        assert '"data/' not in src, f"{mod.__name__}이 경로를 직접 박았다"
+        assert "_ipath(" in src, f"{mod.__name__}이 단일 경로 함수를 안 쓴다"
