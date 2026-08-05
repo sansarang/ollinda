@@ -63,12 +63,12 @@ fi
 # 📒 사고 원장 갱신(2026-08-05) — 원장은 git 이력에서 파생되는데 배포 이미지엔 .git이 없다.
 #   그래서 배포 시점에 코드 트리에서 다시 뽑아 싣는다. 서버는 읽기만 한다.
 if [ "${SHOPCAST_SKIP_IMMUNE:-0}" != "1" ]; then
-  SHOPCAST_SECRET=test python3 -c "
+  SHOPCAST_SECRET=test python3 -c '
 from app.services.immune import ledger as L
 d = L.build()
 n = L.write(d)
-print(f'📒 원장 갱신 — {n}행(확정 {d["confirmed"]} · 구전 {d["hearsay"]})')
-" && {
+print("📒 원장 갱신 — %d행(확정 %d · 구전 %d)" % (n, d["confirmed"], d["hearsay"]))
+' && {
     if ! git diff --quiet -- data/incidents.jsonl 2>/dev/null; then
       git add data/incidents.jsonl && git commit -q -m "원장 갱신(자동) — 사고가 항체가 되는 폐루프"         && echo "  → 원장 변경분을 커밋했습니다"
     fi
