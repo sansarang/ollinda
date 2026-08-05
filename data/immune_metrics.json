@@ -1,0 +1,59 @@
+{
+ "generated_by": "safe-push",
+ "months": [
+  {
+   "month": "2026-08",
+   "commits": 109,
+   "user_found": 8,
+   "system_found": 0,
+   "unknown": 26,
+   "per100": 7.34,
+   "note": "발견 주체 미상 26건 — 이 수치는 하한이다"
+  },
+  {
+   "month": "2026-07",
+   "commits": 757,
+   "user_found": 0,
+   "system_found": 0,
+   "unknown": 25,
+   "per100": 0.0,
+   "note": "발견 주체 미상 25건 — 이 수치는 하한이다"
+  },
+  {
+   "month": "2026-06",
+   "commits": 0,
+   "user_found": 0,
+   "system_found": 0,
+   "unknown": 0,
+   "per100": null,
+   "note": ""
+  },
+  {
+   "month": "2026-05",
+   "commits": 0,
+   "user_found": 0,
+   "system_found": 0,
+   "unknown": 0,
+   "per100": null,
+   "note": ""
+  },
+  {
+   "month": "2026-04",
+   "commits": 0,
+   "user_found": 0,
+   "system_found": 0,
+   "unknown": 0,
+   "per100": null,
+   "note": ""
+  },
+  {
+   "month": "2026-03",
+   "commits": 0,
+   "user_found": 0,
+   "system_found": 0,
+   "unknown": 0,
+   "per100": null,
+   "note": ""
+  }
+ ]
+}

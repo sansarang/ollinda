@@ -16,8 +16,10 @@ references/
 deploy.sh
 # ★ 디렉터리를 통째로 빼면 하위 파일 예외가 안 먹는다(git 동작) — data/* 로 적어야 한다
 data/*
-!data/incidents.jsonl      # 사고 원장은 배포에 실려야 한다(코드 트리)
-!data/immune_metrics.json  # 월간 지표 — 분모(커밋 수)는 git에서만 나온다
+# 사고 원장·월간 지표는 배포 이미지에 실려야 한다(서버엔 git이 없다).
+# ★ 패턴 줄에 인라인 주석을 달면 그 주석까지 패턴이 된다(git 동작) — 주석은 따로 쓴다.
+!data/incidents.jsonl
+!data/immune_metrics.json
 *.zip
 
 # pytest

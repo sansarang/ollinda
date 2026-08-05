@@ -220,6 +220,14 @@ def test_원장은_코드트리에_살고_런타임_산출물은_볼륨에_산�
     r2 = subprocess.run(["git", "ls-files", "data/incidents.jsonl"],
                         capture_output=True, text=True)
     assert r2.stdout.strip(), "원장이 git에 없다"
+    # ★ 인라인 주석을 달면 그 주석까지 패턴이 된다(git 동작, 2026-08-05 실측:
+    #   예외가 안 먹었는데 -f 강제 추가 덕에 되는 것처럼 보였다)
+    for ln in gi.split("\n"):
+        if ln.strip().startswith("!"):
+            assert "#" not in ln, f"부정 패턴에 인라인 주석이 있다(패턴이 깨진다): {ln}"
+    for f2 in ("data/incidents.jsonl", "data/immune_metrics.json"):
+        assert subprocess.run(["git", "check-ignore", f2],
+                              capture_output=True).returncode != 0, f"{f2}가 무시된다"
     # ★ git에 있어도 이미지에 안 실리면 서버는 못 읽는다(실측: Dockerfile이 app·assets만 복사했다)
     with open("Dockerfile", encoding="utf-8") as f:
         assert "COPY data" in f.read(), "원장이 배포 이미지에 안 실린다"
