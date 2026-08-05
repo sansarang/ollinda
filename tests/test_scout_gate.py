@@ -15,28 +15,42 @@ SHELL = ["최근 검색어", "추천 검색어이 정보가 표시된 이유", "
          "네이버 클립", "네이버 가격비교", "네이버플러스 스토어"]
 
 
-def test_빈_껍데기는_수집_실패다():
-    v = G.verdict(SHELL, ["option2575"], 7102)
+def test_결과_링크가_없으면_수집_실패다():
+    """수집 성공의 증거는 결과 링크다."""
+    v = G.verdict(SHELL, [], 7102)
     assert v["ok"] is False and v["status"] == "수집 실패"
-    assert v["real_blocks"] == [], v["real_blocks"]
-    assert v["reasons"], "사유를 안 남긴다"
-    assert any("결과 지면 0" in r for r in v["reasons"])
-    assert any("7102" in r for r in v["reasons"]), "본문 길이 근거가 없다"
+    assert any("결과 링크 0" in r for r in v["reasons"])
+
+
+def test_본문_길이로_막지_않는다():
+    """★ 처음 만든 게이트가 MIN_TEXT_LEN=20000으로 정상 수집을 막았다(내 오탐).
+    실측: 정상 수집되는 키워드도 본문이 6,162~6,871자다(모바일 지면은 원래 짧다).
+    되돌리면(길이 문턱 복원) 이 테스트가 실패한다."""
+    v = G.verdict(SHELL + ["이미지"], ["hd8788", "no1motorss", "bkjh0412"], 6162)
+    assert v["ok"] is True, f"정상 수집을 막는다: {v['reasons']}"
+    assert v["n_links"] == 3
+    src = inspect.getsource(G.verdict)
+    assert "MIN_TEXT_LEN" not in src, "근거 없는 길이 문턱이 남아 있다"
 
 
 def test_진짜_지면은_통과한다():
     real = ["인기글", "블로그", "플레이스", "웹사이트", "최근 검색어"]
-    v = G.verdict(real, ["ksmrnd1", "abc"], 48000)
+    v = G.verdict(real, ["ksmrnd1", "abc"], 6800)
     assert v["ok"] is True and v["status"] == "수집"
     assert "최근 검색어" not in v["real_blocks"], "UI 껍데기가 결과로 남는다"
     assert v["chrome_dropped"] == 1
 
 
-def test_본문이_짧으면_결과가_있어도_실패다():
-    """렌더가 안 끝났거나 껍데기를 받은 것이다 — 그것도 실패다."""
-    v = G.verdict(["블로그"], ["x"], 5000)
-    assert v["ok"] is False
-    assert any("안 그려졌다" in r for r in v["reasons"])
+def test_노출_판정은_귀속을_쓰지_않는다():
+    """실측 사고: 미검증 블록 귀속이 노출 판정에 샜다 —
+    my_real_blocks=['숏텐츠 NOW'](UI 껍데기), my_visible=True. 거짓 양성이다.
+    노출은 '내 블로그 ID가 결과 링크에 있는가'만으로 판정하고 지면 이름은 말하지 않는다."""
+    src = inspect.getsource(B.scan)
+    assert 'my_blog in (d.get("allBlogs")' in src, "노출 판정이 아직 귀속에 의존한다"
+    assert "bool(mine_real)" not in src, "옛 귀속 기반 판정이 남아 있다"
+    assert "is_chrome" in src, "UI 껍데기가 귀속 후보에 남아 있다"
+    assert G.verdict(SHELL, ["x"], 6000)["attribution_verified"] is False, \
+        "귀속을 검증된 것처럼 말한다"
 
 
 def test_수집_경로가_게이트를_실제로_쓴다():

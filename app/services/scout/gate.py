@@ -13,7 +13,10 @@ from __future__ import annotations
 UI_CHROME = ("최근 검색어", "추천 검색어", "이 정보가 표시된 이유", "숏텐츠", "플레이스 MY",
              "네이버 클립", "네이버 가격비교", "네이버플러스", "쇼핑 광고", "관련 검색어",
              "도움말", "검색 옵션", "자주 찾는", "인기 주제")
-MIN_TEXT_LEN = 20000          # 실제 통합검색 결과 페이지의 본문 길이(실측: 껍데기는 7,102자)
+# ★ 2026-08-05 정정: 처음엔 MIN_TEXT_LEN=20000을 걸었다. 근거 없는 숫자였다.
+#   실측하니 정상 수집되는 키워드도 본문이 6,162~6,871자다(모바일 지면은 원래 짧다).
+#   그 문턱이 정상 수집을 '실패'로 막았다 — 내가 만든 게이트가 오탐을 냈다.
+#   수집 성공의 증거는 본문 길이가 아니라 **결과 링크가 잡혔는가**다.
 
 
 def is_chrome(title: str) -> bool:
@@ -29,17 +32,19 @@ def real_blocks(blocks: list) -> list:
 def verdict(blocks: list, blogs_seen: list = None, text_len: int = 0) -> dict:
     """이 수집을 지면 지도에 써도 되는가.
 
-    쓸 수 있는 조건: 진짜 결과 블록이 하나라도 있을 것.
-    본문이 너무 짧으면 렌더가 안 끝났거나 껍데기를 받은 것이다 — 그것도 실패다.
+    ★ 판정 기준은 **결과 링크가 잡혔는가**다. 블록 제목이 아니다 —
+      실측(2026-08-05): 네이버 모바일 통합검색의 h2/h3에는 실제 결과 블록 제목이 없다.
+      '최근 검색어·숏텐츠 NOW·플레이스 MY' 같은 UI 껍데기뿐이다.
+      그래서 블록 귀속은 아직 신뢰할 수 없고(HANDOVER 미결), 노출 판정은 링크로만 한다.
     """
     real = real_blocks(blocks)
     reasons = []
-    if not real:
-        reasons.append("결과 지면 0 — UI 껍데기만 잡혔다")
-    if text_len and text_len < MIN_TEXT_LEN:
-        reasons.append(f"본문 {text_len}자 < {MIN_TEXT_LEN} — 검색 결과가 안 그려졌다")
+    if not (blogs_seen or []):
+        reasons.append("결과 링크 0 — 페이지에서 아무 블로그도 못 캤다")
     ok = not reasons
     return {"ok": ok, "real_blocks": real, "chrome_dropped": len(blocks or []) - len(real),
+            "n_links": len(blogs_seen or []), "text_len": text_len,
+            "attribution_verified": False,      # 블록 귀속은 미검증 — 지면 이름을 말하지 않는다
             "status": "수집" if ok else "수집 실패", "reasons": reasons}
 
 

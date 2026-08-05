@@ -837,6 +837,7 @@ def admin_scout_contamination(flag: int = 0):
     ★ 지우지 않는다. flag=1이면 'suspect' 컬럼에 표시만 한다(원본 보존).
       삭제하면 오염 규모의 증거가 사라지고 어느 판정이 그 위에서 내려졌는지 못 찾는다.
     """
+    import json as _j
     from app.services.scout import gate as _g
     out = {"total": 0, "suspect": 0, "clean": 0, "flagged": 0, "samples": []}
     with db._conn() as c:
@@ -875,6 +876,38 @@ def admin_scout_contamination(flag: int = 0):
             ).fetchone()[0]
         except Exception as e:
             out["range_error"] = repr(e)[:80]
+    # ★ 거짓 양성 재판정(2026-08-05) — 옛 노출 판정은 미검증 블록 귀속에 기댔다.
+    #   mine 값이 UI 껍데기 이름이면 그 '노출됨'은 거짓 양성이다.
+    #   원본은 지우지 않는다. 재판정 결과를 별도 컬럼(fp_suspect)에만 남긴다 —
+    #   전후를 비교해야 '노출됐다고 본 것 중 몇 %가 거짓이었나'가 나오고,
+    #   그 숫자가 곧 게이트 구멍의 크기다. 지우면 그 진단을 영영 못 한다.
+    with db._conn() as c:
+        cols2 = [r["name"] for r in c.execute("PRAGMA table_info(kw_blocks)")]
+        if flag and "fp_suspect" not in cols2:
+            try:
+                c.execute("ALTER TABLE kw_blocks ADD COLUMN fp_suspect INTEGER DEFAULT 0")
+            except Exception:
+                pass
+        vis = fp = 0
+        for r in c.execute("SELECT rowid, mine FROM kw_blocks").fetchall():
+            try:
+                mine = _j.loads(r["mine"] or "[]") if isinstance(r["mine"], str) else (r["mine"] or [])
+            except Exception:
+                mine = []
+            if not mine:
+                continue
+            vis += 1
+            names = [x if isinstance(x, str) else (x or {}).get("title", "") for x in mine]
+            if names and all(_g.is_chrome(n) for n in names):
+                fp += 1
+                if flag:
+                    try:
+                        c.execute("UPDATE kw_blocks SET fp_suspect=1 WHERE rowid=?", (r["rowid"],))
+                    except Exception:
+                        pass
+        out["visible_rows"] = vis
+        out["false_positive"] = fp
+        out["fp_rate"] = (round(fp * 100.0 / vis, 1) if vis else None)
     out["note"] = ("오염 의심 행은 표시만 했고 지우지 않았다 — 증거 보존"
                    if flag else "집계만 했다(flag=1이면 표시)")
     return JSONResponse({"ok": True, **out})

@@ -87,8 +87,15 @@ def scan(keywords: list, my_blog: str = "", show: bool = False) -> list:
                     continue
                 seen.add(t)
                 blocks.append(blk)
+            # ★ 2026-08-05 사고: 미검증 블록 귀속이 노출 판정에 샜다.
+            #   실측 '부산 기장 중고차 후기' → my_real_blocks=['숏텐츠 NOW'], my_visible=True.
+            #   '숏텐츠 NOW'는 검색 결과가 아니라 네이버 UI 껍데기다. 거짓 양성이다.
+            #   원인: h2/h3를 순서대로 늘어놓고 '링크 앞의 마지막 제목'에 귀속시키는데,
+            #   실제 결과 블록 제목이 h2/h3가 아니거나 UI 요소가 사이에 끼면 엉뚱하게 붙는다.
+            #   → ① 귀속 후보에서 UI 껍데기를 뺀다 ② 노출 판정은 귀속을 쓰지 않는다.
+            from app.services.scout import gate as _gate2
+            blocks = [b for b in blocks if not _gate2.is_chrome(b["title"])]
             mine = [blk["title"] for blk in blocks if my_blog and my_blog in blk["blogs"]]
-            # 노출 판정도 같은 기준: 내 플레이스에 걸린 내 블로그 링크는 '검색 노출'이 아니다.
             mine_real = [blk["title"] for blk in blocks
                          if my_blog and my_blog in blk["blogs"] and len(blk["blogs"]) >= 2]
             # 🚧 수집 게이트 — 결과 지면이 0이면 '수집 실패'다(빈칸+사유). 껍데기를 지도로 쓰지 않는다.
@@ -111,7 +118,11 @@ def scan(keywords: list, my_blog: str = "", show: bool = False) -> list:
                          "blogs_seen": d.get("allBlogs", [])[:10],
                          "my_blocks": mine,
                          "my_real_blocks": mine_real,
-                         "my_visible": bool(mine_real)})
+                         # ★ 노출 판정은 '내 블로그 ID가 결과 링크에 있는가'만 본다.
+                         #   어느 블록인지는 말하지 않는다 — 귀속은 아직 검증되지 않았다
+                         #   (HANDOVER: 블록명 표시 금지). 정밀해 보이는 미확인보다 사실이 낫다.
+                         "my_visible": bool(my_blog and my_blog in (d.get("allBlogs") or [])),
+                         "attribution_verified": False})
             time.sleep(2.5)                              # 저속(사람 속도)
         b.close()
     os.makedirs(OUT, exist_ok=True)
