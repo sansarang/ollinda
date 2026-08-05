@@ -210,6 +210,12 @@ def test_원장은_코드트리에_살고_런타임_산출물은_볼륨에_산�
     r = subprocess.run(["git", "check-ignore", "data/incidents.jsonl"],
                        capture_output=True, text=True)
     assert r.returncode != 0, "원장이 여전히 무시된다(배포에 안 실린다)"
+    r2 = subprocess.run(["git", "ls-files", "data/incidents.jsonl"],
+                        capture_output=True, text=True)
+    assert r2.stdout.strip(), "원장이 git에 없다"
+    # ★ git에 있어도 이미지에 안 실리면 서버는 못 읽는다(실측: Dockerfile이 app·assets만 복사했다)
+    with open("Dockerfile", encoding="utf-8") as f:
+        assert "COPY data" in f.read(), "원장이 배포 이미지에 안 실린다"
 
 
 def test_빈_원장으로_덮어쓰지_않는다():

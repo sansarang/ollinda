@@ -19,6 +19,9 @@ RUN python -m playwright install --with-deps chromium || echo "playwright chromi
 
 COPY app ./app
 COPY assets ./assets
+# 📒 사고 원장 — git 이력에서 파생되는 산출물이라 이미지에 실어야 서버가 읽는다.
+#   (실측 2026-08-05: 이게 없어서 프로덕션 원장이 계속 0행이었다. .git은 이미지에 없다.)
+COPY data ./data
 
 # 영속 데이터(가능하면 디스크 마운트). 기본은 컨테이너 내부.
 ENV SHOPCAST_DB=/data/shopcast.sqlite \
