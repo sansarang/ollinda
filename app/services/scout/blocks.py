@@ -91,6 +91,17 @@ def scan(keywords: list, my_blog: str = "", show: bool = False) -> list:
             # 노출 판정도 같은 기준: 내 플레이스에 걸린 내 블로그 링크는 '검색 노출'이 아니다.
             mine_real = [blk["title"] for blk in blocks
                          if my_blog and my_blog in blk["blogs"] and len(blk["blogs"]) >= 2]
+            # 🚧 수집 게이트 — 결과 지면이 0이면 '수집 실패'다(빈칸+사유). 껍데기를 지도로 쓰지 않는다.
+            from app.services.scout import gate as _gate
+            _v = _gate.verdict([blk["title"] for blk in blocks],
+                               d.get("allBlogs") or [], d.get("textLen") or 0)
+            if not _v["ok"]:
+                rows.append({"keyword": kw, "collect_failed": True,
+                             "reasons": _v["reasons"], "blocks": [], "blog_blocks": [],
+                             "blogs_seen": [], "my_blocks": [], "my_real_blocks": [],
+                             "my_visible": None})
+                time.sleep(2.5)
+                continue
             rows.append({"keyword": kw,
                          "blocks": [blk["title"] for blk in blocks],
                          # ★ '블로그 지면'은 블로그 글이 여러 개 나열된 블록만 인정한다.

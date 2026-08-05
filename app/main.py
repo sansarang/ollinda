@@ -830,6 +830,47 @@ def admin_scout_feasible():
     return JSONResponse(out)
 
 
+@app.get("/admin/scout-contamination")
+def admin_scout_contamination(flag: int = 0):
+    """(진단) 지면 지도 오염 범위 — UI 껍데기만 잡힌 행을 센다.
+
+    ★ 지우지 않는다. flag=1이면 'suspect' 컬럼에 표시만 한다(원본 보존).
+      삭제하면 오염 규모의 증거가 사라지고 어느 판정이 그 위에서 내려졌는지 못 찾는다.
+    """
+    from app.services.scout import gate as _g
+    out = {"total": 0, "suspect": 0, "clean": 0, "flagged": 0, "samples": []}
+    with db._conn() as c:
+        try:
+            cols = [r["name"] for r in c.execute("PRAGMA table_info(kw_blocks)")]
+        except Exception:
+            return JSONResponse({"ok": False, "error": "kw_blocks 없음"}, status_code=404)
+        if flag and "suspect" not in cols:
+            try:
+                c.execute("ALTER TABLE kw_blocks ADD COLUMN suspect INTEGER DEFAULT 0")
+            except Exception:
+                pass
+        rows = c.execute("SELECT rowid, tenant_id, keyword, blocks, checked_at "
+                         "FROM kw_blocks").fetchall()
+        for r in rows:
+            out["total"] += 1
+            if _g.suspect_row(r["blocks"]):
+                out["suspect"] += 1
+                if len(out["samples"]) < 6:
+                    out["samples"].append({"kw": r["keyword"], "at": r["checked_at"],
+                                           "blocks": (r["blocks"] or "")[:120]})
+                if flag:
+                    try:
+                        c.execute("UPDATE kw_blocks SET suspect=1 WHERE rowid=?", (r["rowid"],))
+                        out["flagged"] += 1
+                    except Exception:
+                        pass
+            else:
+                out["clean"] += 1
+    out["note"] = ("오염 의심 행은 표시만 했고 지우지 않았다 — 증거 보존"
+                   if flag else "집계만 했다(flag=1이면 표시)")
+    return JSONResponse({"ok": True, **out})
+
+
 @app.get("/admin/scout-probe")
 def admin_scout_probe(kw: str = "부산 썬팅", blog: str = ""):
     """(진단) 서버에서 지면 파싱이 실제로 되는가 — 맥북 결과와 같은 모양이 나오는지.
