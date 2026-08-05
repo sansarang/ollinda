@@ -31,8 +31,47 @@ SURFACE_BY_TPL = {
     "kinItem": "kin",                    # 지식iN
 }
 
-# 브리핑 인용 라벨을 붙일 수 있는 지면 — 이것만이 R6의 '실제 브리핑 출처 표시'다.
-CITED_SURFACES = ("ai_brief_channel",)
+# ★ 2026-08-06 실물 판정 — 근본 질문의 답:
+#   글 단위 인용은 공개 표면에 **존재한다**. 브리핑 답변 섹션 안에 출처 글 URL이 붙어 있다
+#   (실측: '자동차 썬팅 농도 기준' → 브리핑 섹션 len=1056에 글 링크 7개).
+#   ★ aipickItem은 브리핑 답변의 출처가 아니라 **채널 소개 카드**다(링크 0개, 인용수만).
+#     그걸 인용 라벨로 쓰면 '이 채널이 잘 인용됨'을 '이 글이 인용됨'으로 바꿔치는 것이다(R6).
+#   ★ 브리핑 섹션의 글 링크에는 data-template-id가 없다 — template만 훑으면 통째로 놓친다.
+CITED_SURFACES = ("ai_brief_post",)
+
+# 브리핑 답변 섹션에서 인용 글을 캔다. 'AI 브리핑'을 품은 요소 중 **가장 작은 것**을 고른다 —
+# 부모 전체를 잡으면 다른 지면 링크까지 인용으로 오염된다.
+BRIEF_JS = """() => {
+  const POST = /(blog|cafe)\\.naver\\.com\\/([A-Za-z0-9_-]+)\\/(\\d{6,})/;
+  let best = null;
+  for (const el of document.querySelectorAll('div, section, article')) {
+    const t = el.innerText || '';
+    if (!(t.includes('AI 브리핑') || t.includes('AI브리핑'))) continue;
+    let n = 0;
+    for (const a of el.querySelectorAll('a[href]')) {
+      let h = a.getAttribute('href') || '';
+      try { h = decodeURIComponent(h); } catch (e) {}
+      if (POST.test(h)) n++;
+    }
+    if (!n) continue;
+    if (!best || t.length < best.len) best = {el: el, len: t.length, n: n};
+  }
+  if (!best) return {found: false, posts: [], answer: '', len: 0};
+  const seen = new Set(), posts = [];
+  for (const a of best.el.querySelectorAll('a[href]')) {
+    let h = a.getAttribute('href') || '';
+    try { h = decodeURIComponent(h); } catch (e) {}
+    const m = h.match(POST);
+    if (!m) continue;
+    const key = m[2] + '/' + m[3];
+    if (seen.has(key)) continue;
+    seen.add(key);
+    posts.push({kind: m[1], blog: m[2], post: m[3],
+                title: (a.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 120)});
+  }
+  return {found: true, len: best.len, posts: posts,
+          answer: (best.el.innerText || '').replace(/\\s+/g, ' ').slice(0, 600)};
+}"""
 # 지면이 아닌 것 — 수집 대상에서 뺀다(R3: UI_CHROME 제외)
 NOT_SURFACE = ("layout", "header", "footer", "reply", "contentList", "sdsVerticalLayout")
 

@@ -43,6 +43,9 @@ def collect(keywords: list, show: bool = False) -> dict:
                     _ss.gap()
                     continue
                 d = pg.evaluate(_sf.EXTRACT_JS)
+                # ★ 브리핑 인용 글은 template-id가 없어 별도로 캔다(2026-08-06 실물 판정).
+                #   이것만이 '이 글이 인용됐다'의 공개 근거다 — aipickItem은 채널 소개 카드다(R6).
+                brief = pg.evaluate(_sf.BRIEF_JS)
                 v = _sf.verify(d["items"], d["hasBrief"])
                 if not v["ok"]:
                     failed.append({"keyword": kw, "error": "지면 식별 실패", "verify": v})
@@ -50,7 +53,8 @@ def collect(keywords: list, show: bool = False) -> dict:
                     continue                    # ★ 지면이 안 갈리면 정답지로 쓰지 않는다(R3)
                 rows.append({"keyword": kw, "at": int(time.time()),
                              "text_len": d["textLen"], "has_brief": d["hasBrief"],
-                             "verify": v, "items": d["items"]})
+                             "verify": v, "items": d["items"],
+                             "brief": brief})
                 _ss.gap()
         finally:
             b.close()
@@ -137,8 +141,10 @@ def load_raw(limit: int = 500) -> list:
 def labeled_posts(rows: list) -> list:
     """수집 결과 → 글 단위 정답지. 라벨을 섞지 않는다(R6).
 
-    label_cited : 브리핑 인용 채널로 표시됨(채널 단위 사실이다 — 글 단위 인용이 아니다)
-    label_rank  : 그 지면에서의 등장 순서(상위/하위 대조군 구분용)
+    cited        : **이 글이** 브리핑 답변의 출처로 표시됨(글 단위 — 유일한 인용 근거)
+    channel_cited: 이 채널이 aipick 소개 카드에 있음(채널 단위 사실. 글 인용이 아니다)
+    rank         : 그 지면에서의 등장 순서(상위/하위 대조군 구분용)
+    ★ 셋을 섞지 않는다. 섞는 순간 라벨이 거짓이 된다(R6).
     """
     out = []
     for r in (rows or []):
@@ -147,15 +153,35 @@ def labeled_posts(rows: list) -> list:
         _cited = by.get("ai_brief_channel", [])
         cited_channels = {it.get("blog") for it in _cited if it.get("blog")}
         cited_names = [it.get("name") for it in _cited if not it.get("blog")]
+        # 글 단위 인용 — 브리핑 답변 섹션에서 확인된 것만
+        _bp = ((r.get("brief") or {}).get("posts") or [])
+        cited_posts = {(p0.get("blog"), p0.get("post")) for p0 in _bp
+                       if p0.get("blog") and p0.get("post")}
         for i, it in enumerate(by.get("ugc", []), 1):
             out.append({
                 "keyword": r["keyword"], "at": r["at"], "surface": "ugc",
                 "rank": i, "blog": it.get("blog"), "post": it.get("post"),
                 "href": it.get("href"), "text": it.get("text"), "kind": it.get("kind"),
                 # ★ 채널이 인용 목록에 있다는 사실이지, 이 글이 인용됐다는 뜻이 아니다(R6)
+                # ★ 글 단위 인용(정답 라벨) — 브리핑 출처에서 실물 확인된 것만
+                "cited": (it.get("blog"), it.get("post")) in cited_posts,
                 "channel_cited": bool(it.get("blog") and it["blog"] in cited_channels),
                 "has_brief": r.get("has_brief"),
                 # ID를 못 캔 인용 항목이 몇 개인지 — 라벨 미확보를 숨기지 않는다
                 "cited_unresolved": len(cited_names),
             })
+        # 브리핑에만 나오고 ugc 목록엔 없는 인용 글도 정답지다 — 빠뜨리면 인용군이 텅 빈다.
+        #   실측: 인용 4건 중 ugc와 겹친 것은 1건뿐이었다(1 vs 12).
+        have = {(o["blog"], o["post"]) for o in out}
+        for p0 in _bp:
+            key = (p0.get("blog"), p0.get("post"))
+            if not all(key) or key in have:
+                continue
+            out.append({"keyword": r["keyword"], "at": r["at"], "surface": "ai_brief_post",
+                        "rank": None, "blog": p0["blog"], "post": p0["post"],
+                        "kind": p0.get("kind"), "href": "", "text": p0.get("title") or "",
+                        "cited": True,
+                        "channel_cited": p0["blog"] in cited_channels,
+                        "has_brief": r.get("has_brief"),
+                        "cited_unresolved": len(cited_names)})
     return out

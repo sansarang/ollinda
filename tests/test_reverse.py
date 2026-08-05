@@ -87,12 +87,19 @@ def test_R6_인용_라벨과_순위_라벨을_섞지_않는다():
     """'채널이 159만 번 인용됨'과 '이 글이 인용됨'은 다른 주장이다."""
     src = inspect.getsource(S)
     assert "CITED_SURFACES" in src and "aipickItem" in src
-    assert S.CITED_SURFACES == ("ai_brief_channel",), "브리핑 인용 근거가 넓다"
+    # ★ 실물 판정(2026-08-06): aipickItem은 채널 소개 카드다(링크 0개, 인용수만).
+    #   글 단위 인용은 브리핑 답변 섹션의 출처 링크에서만 확인된다.
+    assert S.CITED_SURFACES == ("ai_brief_post",), "채널 카드를 글 인용 근거로 쓴다"
+    assert "BRIEF_JS" in src and "채널 소개 카드" in src, "브리핑 출처 추출이 없다"
     # articleSource는 브리핑 없는 질의에도 나온다 — 인용 근거가 아니다(실측 반증)
     assert S.SURFACE_BY_TPL["articleSource"] == "article_source", "일반 출처를 인용으로 라벨한다"
     lsrc = inspect.getsource(C.labeled_posts)
-    assert "channel_cited" in lsrc, "채널 단위임을 이름으로 구분하지 않는다"
-    assert "글 단위 인용이 아니다" in lsrc, "라벨 의미가 문서화되지 않았다"
+    assert "channel_cited" in lsrc and '"cited"' in lsrc, "두 축을 한 이름으로 뭉갠다"
+    assert "글 인용이 아니다" in lsrc, "라벨 의미가 문서화되지 않았다"
+    # 파이프라인이 두 축을 따로 대조하는가 — 섞으면 무엇이 무엇을 가른 건지 모른다
+    psrc = inspect.getsource(P.run)
+    assert "contrast_rank" in psrc and "contrast_cited" in psrc, "두 축을 한 결과로 뭉갠다"
+    assert '"cited"' in psrc and "not in (" in psrc, "라벨을 인자로 넣어 자기 자신을 설명한다"
 
 
 def test_R7_크레딧이_없으면_LLM을_안_부른다():
@@ -133,3 +140,13 @@ def test_R9_생성_발행_경로를_건드리지_않는다():
         for banned in ("save_piece", "update_piece_payload", "generate_for", "score_gate",
                        "publish"):
             assert banned not in src, f"{mod.__name__}이 본체를 건드린다: {banned}"
+
+
+def test_같은_글을_두_번_세지_않는다():
+    """실측(2026-08-06): 같은 글이 두 키워드에서 잡혀 인용군이 5로 부풀었다.
+    중복을 남기면 표본 부족이 인자 후보로 둔갑한다 — 미확정을 확정으로 바꾸는 가장 쉬운 길이다."""
+    src = inspect.getsource(P.run)
+    assert "_seen" in src and "한 번만 센다" in src, "중복 글을 그대로 센다"
+    i_seen = src.index("_seen.add")
+    i_rows = src.index("rows.append")
+    assert i_seen < i_rows, "중복 확인이 집계보다 뒤에 있다"
