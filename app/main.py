@@ -915,7 +915,8 @@ def admin_scout_contamination(flag: int = 0):
 
 
 @app.get("/admin/exposure-recheck")
-def admin_exposure_recheck(tenant: str = "", apply: int = 0):
+def admin_exposure_recheck(tenant: str = "", apply: int = 0,
+                           only: str = "visible", limit: int = 40, offset: int = 0):
     """(진단) 지금 '노출됨'으로 뜨는 키워드를 새 기준(링크 근거)으로 다시 판정한다.
 
     옛 mine은 미검증 블록 귀속 기반이라 거짓 양성이 섞여 있다.
@@ -930,30 +931,37 @@ def admin_exposure_recheck(tenant: str = "", apply: int = 0):
                 c.execute("ALTER TABLE kw_blocks ADD COLUMN mine_legacy INTEGER")
             except Exception:
                 pass
-        q = "SELECT rowid, tenant_id, keyword, mine FROM kw_blocks WHERE mine"
-        args = ()
+        # only: visible(거짓 양성 찾기) / hidden(거짓 음성 찾기) / all
+        # ★ 거짓 음성이 사업적으로 더 아프다 — 되는 걸 안 된다고 하면 제품이 실제보다 못해 보인다.
+        where = {"visible": "mine", "hidden": "(mine IS NULL OR mine=0)"}.get(only, "1=1")
+        q = f"SELECT rowid, tenant_id, keyword, mine FROM kw_blocks WHERE {where}"
+        args = []
         if tenant:
             q += " AND tenant_id=?"
-            args = (tenant,)
-        targets = c.execute(q, args).fetchall()
+            args.append(tenant)
+        q += " ORDER BY checked_at DESC LIMIT ? OFFSET ?"
+        args += [limit, offset]
+        targets = c.execute(q, tuple(args)).fetchall()
     for t in targets:
         tn = db.get_tenant(t["tenant_id"])
         blog = (getattr(tn, "blog_id", "") or "") if tn else ""
+        old = 1 if t["mine"] else 0
         if not blog:
-            rows_out.append({"keyword": t["keyword"], "old": 1, "new": None,
+            rows_out.append({"keyword": t["keyword"], "old": old, "new": None,
                              "note": "블로그 ID 없음 — 판정 불가"})
             continue
         try:
             r = _bk.scan([t["keyword"]], my_blog=blog)[0]
         except Exception as e:
-            rows_out.append({"keyword": t["keyword"], "old": 1, "new": None,
+            rows_out.append({"keyword": t["keyword"], "old": old, "new": None,
                              "note": f"재수집 실패: {repr(e)[:60]}"})
             continue
         new = bool(r.get("my_visible"))
         rows_out.append({"keyword": t["keyword"], "shop": getattr(tn, "name", "")[:12],
-                         "old": 1, "new": new,
+                         "old": old, "new": new, "blog_id": blog,
                          "links": len(r.get("blogs_seen") or []),
-                         "false_positive": (not new)})
+                         "false_positive": (old == 1 and not new),
+                         "false_negative": (old == 0 and new)})
         if apply:
             with db._conn() as c2:
                 try:
@@ -963,10 +971,12 @@ def admin_exposure_recheck(tenant: str = "", apply: int = 0):
                 except Exception:
                     pass
     fp = sum(1 for r in rows_out if r.get("false_positive"))
+    fn = sum(1 for r in rows_out if r.get("false_negative"))
     judged = sum(1 for r in rows_out if r.get("new") is not None)
-    return JSONResponse({"ok": True, "checked": len(rows_out), "judged": judged,
-                         "false_positive": fp,
+    return JSONResponse({"ok": True, "mode": only, "checked": len(rows_out), "judged": judged,
+                         "false_positive": fp, "false_negative": fn,
                          "fp_rate": (round(fp * 100.0 / judged, 1) if judged else None),
+                         "fn_rate": (round(fn * 100.0 / judged, 1) if judged else None),
                          "applied": changed, "rows": rows_out,
                          "note": "옛 값은 mine_legacy에 보존했다 — 원본을 지우지 않는다"})
 
