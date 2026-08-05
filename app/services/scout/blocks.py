@@ -122,7 +122,12 @@ def scan(keywords: list, my_blog: str = "", show: bool = False) -> list:
                          #   어느 블록인지는 말하지 않는다 — 귀속은 아직 검증되지 않았다
                          #   (HANDOVER: 블록명 표시 금지). 정밀해 보이는 미확인보다 사실이 낫다.
                          "my_visible": bool(my_blog and my_blog in (d.get("allBlogs") or [])),
-                         "attribution_verified": False})
+                         "attribution_verified": False,
+                         # ★ 판정 근거를 함께 남긴다 — 옛 스키마는 0/1만 저장해서
+                         #   나중에 '그 노출이 진짜였나'를 되짚을 수 없었다(2026-08-05).
+                         "visible_evidence": {"my_blog": my_blog,
+                                              "links": (d.get("allBlogs") or [])[:12],
+                                              "basis": "결과 링크에 내 블로그 ID 존재"}})
             time.sleep(2.5)                              # 저속(사람 속도)
         b.close()
     os.makedirs(OUT, exist_ok=True)

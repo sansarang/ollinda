@@ -889,26 +889,23 @@ def admin_scout_contamination(flag: int = 0):
                 c.execute("ALTER TABLE kw_blocks ADD COLUMN fp_suspect INTEGER DEFAULT 0")
             except Exception:
                 pass
-        vis = fp = 0
+        # ★ 실측(2026-08-05): mine은 0/1 플래그다. 어느 블록에서 노출됐는지는 저장된 적이 없다.
+        #   그래서 '그 노출이 UI 껍데기 귀속이었나'는 **사후에 알 수 없다** — 원자료가 없다.
+        #   거짓 양성 비율을 추정으로 적으면 그게 날조다. 셀 수 있는 것만 센다.
+        vis = 0
         for r in c.execute("SELECT rowid, mine FROM kw_blocks").fetchall():
-            try:
-                mine = _j.loads(r["mine"] or "[]") if isinstance(r["mine"], str) else (r["mine"] or [])
-            except Exception:
-                mine = []
-            if not mine:
-                continue
-            vis += 1
-            names = [x if isinstance(x, str) else (x or {}).get("title", "") for x in mine]
-            if names and all(_g.is_chrome(n) for n in names):
-                fp += 1
-                if flag:
-                    try:
-                        c.execute("UPDATE kw_blocks SET fp_suspect=1 WHERE rowid=?", (r["rowid"],))
-                    except Exception:
-                        pass
+            m = r["mine"]
+            if isinstance(m, int) and m:
+                vis += 1
+            elif isinstance(m, str) and m.strip() not in ("", "0", "[]", "null"):
+                vis += 1
         out["visible_rows"] = vis
-        out["false_positive"] = fp
-        out["fp_rate"] = (round(fp * 100.0 / vis, 1) if vis else None)
+        out["false_positive"] = None
+        out["fp_rate"] = None
+        out["fp_note"] = (
+            "거짓 양성 비율은 계산할 수 없다 — 옛 스키마의 mine은 0/1 플래그라 "
+            "'어느 블록에서 노출로 봤는지'가 저장된 적이 없다. 원자료 없이 비율을 적으면 날조다. "
+            "재수집분부터는 귀속 후보와 링크 근거를 함께 남겨 이 진단이 가능해진다.")
     except Exception as _e:                 # 조용한 실패 금지 — 왜 못 셌는지 남긴다
         import traceback as _tb
         out["fp_error"] = _tb.format_exc()[-300:]
