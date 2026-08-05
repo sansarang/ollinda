@@ -881,7 +881,8 @@ def admin_scout_contamination(flag: int = 0):
     #   원본은 지우지 않는다. 재판정 결과를 별도 컬럼(fp_suspect)에만 남긴다 —
     #   전후를 비교해야 '노출됐다고 본 것 중 몇 %가 거짓이었나'가 나오고,
     #   그 숫자가 곧 게이트 구멍의 크기다. 지우면 그 진단을 영영 못 한다.
-    with db._conn() as c:
+    try:
+      with db._conn() as c:
         cols2 = [r["name"] for r in c.execute("PRAGMA table_info(kw_blocks)")]
         if flag and "fp_suspect" not in cols2:
             try:
@@ -908,6 +909,9 @@ def admin_scout_contamination(flag: int = 0):
         out["visible_rows"] = vis
         out["false_positive"] = fp
         out["fp_rate"] = (round(fp * 100.0 / vis, 1) if vis else None)
+    except Exception as _e:                 # 조용한 실패 금지 — 왜 못 셌는지 남긴다
+        import traceback as _tb
+        out["fp_error"] = _tb.format_exc()[-300:]
     out["note"] = ("오염 의심 행은 표시만 했고 지우지 않았다 — 증거 보존"
                    if flag else "집계만 했다(flag=1이면 표시)")
     return JSONResponse({"ok": True, **out})
