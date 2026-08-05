@@ -6,13 +6,13 @@
    "commits": 214,
    "user_found": 8,
    "system_found": 3,
-   "unknown": 34,
+   "unknown": 35,
    "per100": 3.74,
-   "note": "발견 주체 미상 34건 — 이 수치는 하한이다"
+   "note": "발견 주체 미상 35건 — 이 수치는 하한이다"
   },
   {
    "month": "2026-07",
-   "commits": 681,
+   "commits": 683,
    "user_found": 0,
    "system_found": 0,
    "unknown": 25,
