@@ -201,7 +201,15 @@ def test_원장은_코드트리에_살고_런타임_산출물은_볼륨에_산�
     assert "_ipath(" in src, "백업·진단서가 볼륨을 안 쓴다"
     # 배포에 실리는가 — .gitignore 예외가 없으면 이미지에 안 들어간다
     with open(".gitignore", encoding="utf-8") as f:
-        assert "!data/incidents.jsonl" in f.read(), "원장이 git에서 제외돼 배포에 안 실린다"
+        gi = f.read()
+    assert "!data/incidents.jsonl" in gi, "원장이 git에서 제외돼 배포에 안 실린다"
+    # ★ 디렉터리를 통째로 빼면 하위 파일 예외가 안 먹는다(git 동작, 2026-08-05 실측)
+    assert not any(ln.strip() == "data/" for ln in gi.split("\n")), \
+        "data/ 통째 제외가 남아 있어 예외가 안 먹는다"
+    import subprocess
+    r = subprocess.run(["git", "check-ignore", "data/incidents.jsonl"],
+                       capture_output=True, text=True)
+    assert r.returncode != 0, "원장이 여전히 무시된다(배포에 안 실린다)"
 
 
 def test_빈_원장으로_덮어쓰지_않는다():

@@ -14,7 +14,8 @@ references/
 
 # 비밀키(절대 커밋 금지)
 deploy.sh
-data/
+# ★ 디렉터리를 통째로 빼면 하위 파일 예외가 안 먹는다(git 동작) — data/* 로 적어야 한다
+data/*
 !data/incidents.jsonl      # 사고 원장은 배포에 실려야 한다(코드 트리)
 *.zip
 
