@@ -813,7 +813,7 @@ def admin_immune_report():
         "blocking_types": [t for t, n in _L.recurrence(rows).items() if n >= 2],
         "undetectable": _RU.UNDETECTABLE,
         "rule_frequency": {r.id: _RU.frequency(r.id) for r in _RU.STATIC_RULES},
-        "monthly": _R.monthly(rows),
+        "monthly": _R.cached_monthly(),      # 분모는 git에서만 나온다 — 배포 스냅샷을 읽는다
         "baseline": _R.BASELINE_NOTE,
         "pending_diagnoses": _N.pending_diagnoses(20),
     })

@@ -68,9 +68,13 @@ from app.services.immune import ledger as L
 d = L.build()
 n = L.write(d)
 print("📒 원장 갱신 — %d행(확정 %d · 구전 %d)" % (n, d["confirmed"], d["hearsay"]))
+from app.services.immune import report as R
+m = R.snapshot(d["rows"])["months"][0]
+print("📊 지표 — %s: 커밋 %d건, 사장님 발견 %d건 (100커밋당 %s)"
+      % (m["month"], m["commits"], m["user_found"], m["per100"]))
 ' && {
-    if ! git diff --quiet -- data/incidents.jsonl 2>/dev/null; then
-      git add data/incidents.jsonl && git commit -q -m "원장 갱신(자동) — 사고가 항체가 되는 폐루프"         && echo "  → 원장 변경분을 커밋했습니다"
+    if ! git diff --quiet -- data/ 2>/dev/null || [ -n "$(git ls-files -o --exclude-standard data/)" ]; then
+      git add data/incidents.jsonl data/immune_metrics.json && git commit -q -m "원장 갱신(자동) — 사고가 항체가 되는 폐루프"         && echo "  → 원장 변경분을 커밋했습니다"
     fi
   }
 fi

@@ -22,6 +22,34 @@ def _count_commits(since: str, until: str) -> int:
         return 0
 
 
+METRICS_PATH = "data/immune_metrics.json"
+
+
+def snapshot(rows: list = None, months: int = 6) -> dict:
+    """지표를 파일로 굳힌다 — 분모(커밋 수)는 git에서만 나오는데 서버엔 git이 없다.
+
+    ★ 2026-08-05 실측: 서버에서 monthly()를 부르면 커밋 수가 0이라 per100이 None이 된다.
+      분모 없는 지표는 R5 위반이다. 원장과 같은 원리로 배포 시점에 계산해 이미지에 싣는다.
+    """
+    import json as _j
+    import os as _os
+    data = {"generated_by": "safe-push", "months": monthly(rows, months)}
+    _os.makedirs(_os.path.dirname(METRICS_PATH) or ".", exist_ok=True)
+    with open(METRICS_PATH, "w", encoding="utf-8") as f:
+        _j.dump(data, f, ensure_ascii=False, indent=1)
+    return data
+
+
+def cached_monthly() -> list:
+    """서버가 읽는 쪽 — 배포에 실린 스냅샷. 없으면 빈 목록(0을 지표로 내밀지 않는다)."""
+    import json as _j
+    try:
+        with open(METRICS_PATH, encoding="utf-8") as f:
+            return (_j.load(f) or {}).get("months") or []
+    except Exception:
+        return []
+
+
 def monthly(rows: list = None, months: int = 3) -> list:
     """월별 [변경 커밋 수 / 사용자 발견 / 시스템 발견 / 100커밋당 사용자 발견]."""
     rows = rows if rows is not None else _led.read()

@@ -90,6 +90,13 @@ def test_R5_지표에는_분모가_있다():
     rows = [{"at": int(time.time()), "found_by": "사용자"}]
     m = R.monthly(rows, months=1)[0]
     assert "commits" in m and "per100" in m, "분모가 없다"
+    # ★ 분모는 git에서만 나오는데 서버엔 git이 없다 — 배포 스냅샷을 읽어야 한다(실측: 0으로 나왔다)
+    import inspect
+    from app import main as _m
+    assert "cached_monthly()" in inspect.getsource(_m.admin_immune_report), \
+        "서버가 분모 없는 0을 지표로 내민다"
+    with open("scripts/safe-push.sh", encoding="utf-8") as f:
+        assert "R.snapshot(" in f.read(), "배포 시점에 지표를 안 굳힌다"
     assert m["per100"] is None or isinstance(m["per100"], float)
     # 기준선은 추측 위에 서지 않는다
     assert R.BASELINE_NOTE["confidence"] == "추정(미확정)", "기준선을 확정으로 적었다"
