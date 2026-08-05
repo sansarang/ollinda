@@ -1005,11 +1005,43 @@ def admin_scout_probe(kw: str = "부산 썬팅", blog: str = ""):
                             status_code=500)
 
 
+@app.get("/admin/coexpose/report")
+def admin_coexpose_report(limit: int = 200):
+    """🏪 동시 노출 리포트 — 상업성 질의에서 플레이스·글이 함께 뜨는 구조(읽기 전용)."""
+    import json as _j
+    from app.services.coexpose import collector as _cc
+    rows = []
+    try:
+        with open(_cc.RAW_PATH, encoding="utf-8") as f:
+            rows = [_j.loads(x) for x in f if x.strip()][-limit:]
+    except Exception:
+        pass
+    if not rows:
+        return JSONResponse({"ok": True, "n": 0, "note": "수집 없음"})
+    co = [r for r in rows if r.get("coexposed")]
+    return JSONResponse({
+        "ok": True, "n": len(rows), "coexposed": len(co),
+        "industries": sorted({r.get("industry") for r in rows if r.get("industry")}),
+        "regions": sorted({r.get("region") for r in rows if r.get("region")}),
+        "by_query": [{"q": r["q"], "industry": r.get("industry"),
+                      "n_place": r.get("n_place"), "n_post": r.get("n_post"),
+                      "coexposed": r.get("coexposed"), "evidence": r.get("evidence")}
+                     for r in rows[-20:]],
+        "note": "동시노출은 같은 화면에 플레이스와 글이 함께 뜬 실물 근거로만 판정한다(R6). "
+                "상업성 질의에서는 두 지면이 기본으로 함께 뜨므로 '동시노출 여부'는 "
+                "대조 축이 되지 못한다 — 대조는 그 화면의 지면에 뽑힌 글 vs 아닌 글이어야 한다.",
+    })
+
+
 @app.get("/admin/reverse/report")
 def admin_reverse_report(limit: int = 400):
     """🔬 역설계 정답 인자 리포트 — 상위/하위를 가르는 인자(읽기 전용).
 
-    ★ 미확정은 미확정으로 표기한다. 표본이 적으면 유의여도 인자로 채택하지 않는다(R5).
+    ★ 브리핑 축 = 보류(2026-08-06 사장님 결정, 완주 아님 중단).
+      브리핑은 정보성 질의에만 뜨는데 매출은 상업성 질의(플레이스가 뜨는 곳)에서 난다.
+      브리핑을 완벽히 파도 파는 질의엔 안 뜬다 — 방향을 매출 지면(coexpose)으로 틀었다.
+      배관(지면 식별·인용 라벨·대조 엔진)은 자산으로 보존한다. 정보성 콘텐츠용으로 재개 가능.
+    ★ 여기 남은 인자는 전부 미확정이다. 확정된 척 쓰지 않는다(R5).
     """
     from app.services.reverse import contrast as _con, pipeline as _pl
     rows = _pl.load(limit)
@@ -1019,7 +1051,11 @@ def admin_reverse_report(limit: int = 400):
     lo = [r for r in rows if (r.get("rank") or 99) > _pl.TOP_N]
     keys = [k for k in rows[0] if isinstance(rows[0].get(k), (int, float, bool)) and k != "rank"]
     res = _con.summarize(_con.compare(hi, lo, keys))
-    return JSONResponse({"ok": True, "n": len(rows), "n_hi": len(hi), "n_lo": len(lo),
+    return JSONResponse({"ok": True, "status": "브리핑 축 = 보류(중단, 완주 아님)",
+                         "why": "브리핑은 정보성 질의에만 뜬다 — 매출은 상업성 질의에서 난다. "
+                                "배관은 자산으로 보존, 정보성 콘텐츠용으로 재개 가능.",
+                         "frozen": "인자는 전부 미확정 상태로 동결한다",
+                         "n": len(rows), "n_hi": len(hi), "n_lo": len(lo),
                          "keywords": sorted({r.get("keyword") for r in rows if r.get("keyword")}),
                          "cited_channels": sorted({r["blog"] for r in rows if r.get("channel_cited")}),
                          **res})

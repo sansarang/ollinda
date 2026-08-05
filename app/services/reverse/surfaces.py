@@ -161,3 +161,48 @@ def verify(items: list, has_brief: bool) -> dict:
         "unknown_templates": unknown[:6],
         "ok": bool(by) and not unknown,
     }
+
+
+# ── 플레이스 지면 (2026-08-06, 동시노출 역설계용) ─────────────────────────
+# ★ 플레이스 업체 항목에는 data-template-id가 없다 — 브리핑 인용 링크와 같은 패턴이다.
+#   업체 ID URL로 식별한다. UI 링크(launchApp·place/my)는 ID 패턴이 아니라 자동으로 빠진다.
+#   실측(2026-08-06): '부산 동구 썬팅업체' 5건, '강남 미용실 추천' 17건 — 업종 무관하게 잡힌다.
+PLACE_JS = """() => {
+  const ENT = /(?:m\\.place|pcmap\\.place|map)\\.naver\\.com\\/(?:[a-z]+\\/)?(?:place\\/)?(\\d{6,})/;
+  const POST = /(blog|cafe)\\.naver\\.com\\/([A-Za-z0-9_-]+)\\/(\\d{6,})/;
+  const places = [], posts = [], sp = new Set(), sq = new Set();
+  for (const a of document.querySelectorAll('a[href]')) {
+    let h = a.getAttribute('href') || '';
+    try { h = decodeURIComponent(h); } catch (e) {}
+    const mp = h.match(ENT);
+    if (mp && !sp.has(mp[1])) {
+      sp.add(mp[1]);
+      places.push({id: mp[1], name: (a.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 60)});
+    }
+    const mq = h.match(POST);
+    if (mq) {
+      const k = mq[2] + '/' + mq[3];
+      if (!sq.has(k)) {
+        sq.add(k);
+        posts.push({kind: mq[1], blog: mq[2], post: mq[3],
+                    title: (a.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 120)});
+      }
+    }
+  }
+  return {places: places, posts: posts, textLen: (document.body.innerText || '').length};
+}"""
+
+
+def coexpose_verify(d: dict) -> dict:
+    """R3 — 상업성 질의에서 플레이스와 글이 실제로 갈렸는가.
+
+    ★ 동시노출은 '같은 화면에 둘 다 떴다'는 실물 근거로만 판정한다(R6).
+      한쪽만 떴으면 동시노출이 아니다 — 추측으로 라벨을 붙이지 않는다.
+    """
+    pl = d.get("places") or []
+    po = d.get("posts") or []
+    return {"n_place": len(pl), "n_post": len(po),
+            "coexposed": bool(pl) and bool(po),
+            "ok": bool(pl) or bool(po),
+            "evidence": {"place_ids": [x["id"] for x in pl[:5]],
+                         "posts": [f"{x['blog']}/{x['post']}" for x in po[:5]]}}
