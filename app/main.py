@@ -866,6 +866,15 @@ def admin_scout_contamination(flag: int = 0):
                         pass
             else:
                 out["clean"] += 1
+    with db._conn() as c:
+        try:
+            rs = c.execute("SELECT MIN(checked_at) a, MAX(checked_at) b FROM kw_blocks").fetchone()
+            out["oldest"], out["newest"] = rs["a"], rs["b"]
+            out["recent7"] = c.execute(
+                "SELECT COUNT(*) FROM kw_blocks WHERE checked_at >= date('now','-7 day')"
+            ).fetchone()[0]
+        except Exception as e:
+            out["range_error"] = repr(e)[:80]
     out["note"] = ("오염 의심 행은 표시만 했고 지우지 않았다 — 증거 보존"
                    if flag else "집계만 했다(flag=1이면 표시)")
     return JSONResponse({"ok": True, **out})
