@@ -43,6 +43,23 @@ fi
 
 [ "${1:-}" = "--dry" ] && { echo "(--dry: push 생략)"; exit 0; }
 
+# 🛡 배포 전 면역 검진(2026-08-05) — 이 변경이 과거 사고와 같은 모양인가.
+#   기본은 경고다. 차단은 원장상 재발 2회 이상 유형에만(R3) —
+#   오탐이 쌓여 검진을 꺼버리게 만드는 것이 최악의 결말이라 기본값을 통과로 둔다.
+if [ "${SHOPCAST_SKIP_IMMUNE:-0}" != "1" ]; then
+  SHOPCAST_SECRET=test python3 -c "
+from app.services.immune import prediag as P
+r = P.inspect(P.staged_diff())
+print(P.render(r))
+raise SystemExit(9 if r.get('blocked') else 0)
+" || {
+    _rc=$?
+    if [ "$_rc" = "9" ] && [ "${SHOPCAST_IMMUNE_OVERRIDE:-0}" != "1" ]; then
+      echo "→ SHOPCAST_IMMUNE_OVERRIDE=1 로 넘길 수 있습니다."; exit 5
+    fi
+  }
+fi
+
 # 🧪 골든 전체 통과 없이는 push하지 않는다(2026-08-03 사고: 실패한 테스트가 커밋·배포됐다).
 #   원인은 파이프라인 종료코드를 잘못 읽은 것 — 사람 눈이 아니라 게이트가 막아야 한다.
 if [ "${SHOPCAST_SKIP_TESTS:-0}" != "1" ]; then

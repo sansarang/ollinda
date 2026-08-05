@@ -799,6 +799,44 @@ def admin_caption_preview(asset_id: str = "", regen: int = 0):
                                       for i, c in enumerate(caps)]})
 
 
+@app.get("/admin/immune/report")
+def admin_immune_report():
+    """🛡 면역계 한 장 — 원장 집계·유형별 재발·월간 지표·대기 진단서(읽기 전용)."""
+    from app.services.immune import ledger as _L, report as _R, nightscan as _N, rules as _RU
+    rows = _L.read()
+    return JSONResponse({
+        "ok": True,
+        "ledger": {"total": len(rows),
+                   "confirmed": sum(1 for r in rows if r.get("confirmed")),
+                   "hearsay": sum(1 for r in rows if not r.get("confirmed"))},
+        "recurrence": _L.recurrence(rows),
+        "blocking_types": [t for t, n in _L.recurrence(rows).items() if n >= 2],
+        "undetectable": _RU.UNDETECTABLE,
+        "rule_frequency": {r.id: _RU.frequency(r.id) for r in _RU.STATIC_RULES},
+        "monthly": _R.monthly(rows),
+        "baseline": _R.BASELINE_NOTE,
+        "pending_diagnoses": _N.pending_diagnoses(20),
+    })
+
+
+@app.get("/admin/immune/ledger")
+def admin_immune_ledger(rebuild: int = 0, limit: int = 200):
+    """사고 원장 실물. rebuild=1이면 git·lessons에서 다시 뽑아 저장한다."""
+    from app.services.immune import ledger as _L
+    if rebuild:
+        d = _L.build()
+        _L.write(d)
+    rows = _L.read()
+    return JSONResponse({"ok": True, "n": len(rows), "rows": rows[:limit]})
+
+
+@app.get("/admin/immune/rescan")
+def admin_immune_rescan(sets: int = 0, fix: int = 1):
+    """야간 스캔 수동 1회 — 탐지·무비용 수선(전후 diff 포함)·대기 진단서."""
+    from app.services.immune import nightscan as _N
+    return JSONResponse({"ok": True, **_N.run(limit_sets=sets, allow_fix=bool(fix))})
+
+
 @app.get("/admin/thumb-audit")
 def admin_thumb_audit(tid: str = "", warm: int = 0, limit: int = 500):
     """🖼 파생본 대조 — '만든 수'가 아니라 '화면이 요청하는 그 경로에 있는가'(2026-08-03 조항).
