@@ -141,8 +141,8 @@ def test_스케줄러에_야간_스캔이_등록돼_있다():
     # ★ R7 — 크레딧을 먼저 보고, 없으면 수선하지 않는다
     assert "credit_out()" in job, "크레딧 잔량을 안 본다"
     assert "allow_fix=ok" in job, "크레딧이 없어도 수선을 시도한다"
-    # 폐루프 — 어제 고친 사고가 오늘의 항체가 된다
-    assert "_led.write(_led.build())" in job, "원장을 갱신하지 않는다(루프가 안 닫힌다)"
+    # ★ 폐루프는 배포 시점에 닫힌다 — 서버엔 git이 없어 여기서 원장을 만들 수 없다(실측: 0행)
+    assert "_led.write" not in job, "서버가 원장을 덮어쓴다(0행으로 지워진다)"
     # 야간 작업이 낮 생성과 겹치지 않는다
     assert "hour=3" in src.split('id="immune_nightscan"')[0][-300:], "생성 시간대와 겹친다"
 
@@ -178,8 +178,59 @@ def test_R2_백업이_배포를_못_넘기면_고치지_않는다():
 def test_경로_규칙은_면역계_안에서도_한_곳이다():
     """면역계가 감시하는 '경로 이원화'를 스스로 어기면 그 항체는 가짜다."""
     import inspect
-    from app.services.immune import ledger as L2, nightscan as N2, rules as RU2
-    for mod in (L2, RU2, N2):
+    from app.services.immune import nightscan as N2, rules as RU2
+    for mod in (RU2, N2):                       # 런타임 산출물 — 볼륨 단일 함수를 쓴다
         src = inspect.getsource(mod)
         assert '"data/' not in src, f"{mod.__name__}이 경로를 직접 박았다"
         assert "_ipath(" in src, f"{mod.__name__}이 단일 경로 함수를 안 쓴다"
+    # 원장만은 코드 트리다(성격이 다르다) — 그 이유가 코드에 적혀 있어야 한다
+    lsrc = inspect.getsource(L)
+    assert "볼륨이 아니라 **코드 트리**" in lsrc, "원장이 왜 볼륨 밖인지 근거가 없다"
+
+
+def test_원장은_코드트리에_살고_런타임_산출물은_볼륨에_산다():
+    """실측(2026-08-05): 원장까지 볼륨으로 옮겼더니 프로덕션에서 0행이 됐다.
+    원장은 git 이력에서 파생되는데 배포 이미지엔 .git이 없다(.dockerignore).
+    성격이 다른 둘을 같은 곳에 두면 한쪽이 죽는다."""
+    import inspect
+    import os
+    assert not os.path.isabs(L.LEDGER_PATH), "원장이 볼륨에 있다(프로덕션에서 못 읽는다)"
+    assert "data/incidents.jsonl" in L.LEDGER_PATH
+    # 런타임 산출물은 볼륨이 맞다
+    src = inspect.getsource(N)
+    assert "_ipath(" in src, "백업·진단서가 볼륨을 안 쓴다"
+    # 배포에 실리는가 — .gitignore 예외가 없으면 이미지에 안 들어간다
+    with open(".gitignore", encoding="utf-8") as f:
+        assert "!data/incidents.jsonl" in f.read(), "원장이 git에서 제외돼 배포에 안 실린다"
+
+
+def test_빈_원장으로_덮어쓰지_않는다():
+    """git 없는 환경에서 build()는 0행을 낸다. 그걸 쓰면 기억을 통째로 잃는다."""
+    import json
+    import os
+    import tempfile
+    d = tempfile.mkdtemp()
+    p = os.path.join(d, "led.jsonl")
+    L.write({"rows": [{"id": "x", "confirmed": True, "cause_types": []}]}, p)
+    assert len(L.read(p)) == 1
+    try:
+        L.write({"rows": []}, p)
+        raise AssertionError("빈 원장으로 덮어썼다")
+    except RuntimeError as e:
+        assert "덮어쓰기 거부" in str(e)
+    assert len(L.read(p)) == 1, "원장이 지워졌다"
+
+
+def test_야간스캔은_원장을_갱신하지_않는다():
+    """서버엔 git이 없다 — 거기서 build()를 부르면 0행을 쓴다. 갱신은 배포 시점의 일이다."""
+    import inspect
+    from app import scheduler as S
+    job = inspect.getsource(S._immune_nightscan)
+    # 규칙의 실체를 문다 — 주석에 'build()'가 적혀 있는 것은 위반이 아니다(문구가 아니라 호출)
+    body = "\n".join(ln for ln in job.split("\n")
+                     if ln.strip() and not ln.strip().startswith("#") and '"""' not in ln)
+    assert "_led.write" not in body and "_led.build" not in body, "서버가 원장을 덮어쓴다"
+    with open("scripts/safe-push.sh", encoding="utf-8") as f:
+        sp = f.read()
+    assert "원장 갱신" in sp and "L.build()" in sp and "data/incidents.jsonl" in sp, \
+        "배포 시점에 원장을 안 싣는다"

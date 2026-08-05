@@ -172,12 +172,13 @@ def _immune_nightscan() -> None:
 
     ★ 크레딧이 없으면 탐지만 하고 수선은 건너뛴다(R7). 자동 수정은 무비용 기계 수선뿐이고,
       재생성·코드 수정이 필요한 것은 진단서로 대기시킨다(자동 실행 금지).
-    ★ 원장도 함께 갱신한다 — 어제 고친 사고가 오늘의 항체가 되어야 루프가 닫힌다.
+    ★ 원장은 읽기만 한다 — 갱신은 배포 시점(safe-push)이 맡는다.
     """
     try:
         from app import llm as _llm
-        from app.services.immune import ledger as _led, nightscan as _ns
-        _led.write(_led.build())                      # 사고 → 데이터 → 방어(폐루프)
+        from app.services.immune import nightscan as _ns
+        # ★ 원장은 여기서 갱신하지 않는다 — 배포 이미지에 .git이 없어 build()가 0행을 낸다.
+        #   원장 갱신은 배포 시점(safe-push)에 코드 트리에서 이뤄지고, 서버는 읽기만 한다.
         ok = not _llm.credit_out()
         r = _ns.run(allow_fix=ok)                     # 크레딧 없으면 탐지만
         logging.getLogger("shopcast.immune").info(

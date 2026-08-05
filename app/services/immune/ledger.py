@@ -17,7 +17,11 @@ import subprocess
 
 from app.services.immune import path as _ipath
 
-LEDGER_PATH = os.environ.get("SHOPCAST_LEDGER", "") or _ipath("incidents.jsonl")
+# ★ 2026-08-05 정정: 원장만은 볼륨이 아니라 **코드 트리**에 산다.
+#   원장은 git 이력에서 파생되는 산출물인데, 배포 이미지에는 .git이 없다(.dockerignore).
+#   볼륨에 두면 프로덕션이 원장을 만들 수도, 읽을 수도 없다(실측: rebuild → 0행).
+#   런타임 산출물(백업·진단서·규칙 상태)은 볼륨이 맞다 — 둘의 성격이 다르다.
+LEDGER_PATH = os.environ.get("SHOPCAST_LEDGER", "") or "data/incidents.jsonl"
 DOC_PATH = "docs/incidents.md"
 
 # 원인 유형 — 실사고에서 귀납한 것이지 미리 정한 목록이 아니다.
@@ -200,6 +204,14 @@ def build() -> dict:
 
 
 def write(data: dict, path: str = LEDGER_PATH) -> int:
+    """원장 저장. ★ 빈 결과로 기존 원장을 덮어쓰지 않는다.
+
+    실측(2026-08-05): git이 없는 환경에서 build()는 0행을 낸다. 그걸 그대로 쓰면
+    원장이 통째로 사라진다 — 기억을 잃은 면역계는 항체가 아니라 껍데기다.
+    """
+    rows = data.get("rows") or []
+    if not rows and read(path):
+        raise RuntimeError("빈 원장으로 덮어쓰기 거부 — git 이력이 없는 환경으로 보인다")
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         for r in data.get("rows") or []:

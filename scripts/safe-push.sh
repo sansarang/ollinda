@@ -60,6 +60,21 @@ raise SystemExit(9 if r.get('blocked') else 0)
   }
 fi
 
+# 📒 사고 원장 갱신(2026-08-05) — 원장은 git 이력에서 파생되는데 배포 이미지엔 .git이 없다.
+#   그래서 배포 시점에 코드 트리에서 다시 뽑아 싣는다. 서버는 읽기만 한다.
+if [ "${SHOPCAST_SKIP_IMMUNE:-0}" != "1" ]; then
+  SHOPCAST_SECRET=test python3 -c "
+from app.services.immune import ledger as L
+d = L.build()
+n = L.write(d)
+print(f'📒 원장 갱신 — {n}행(확정 {d["confirmed"]} · 구전 {d["hearsay"]})')
+" && {
+    if ! git diff --quiet -- data/incidents.jsonl 2>/dev/null; then
+      git add data/incidents.jsonl && git commit -q -m "원장 갱신(자동) — 사고가 항체가 되는 폐루프"         && echo "  → 원장 변경분을 커밋했습니다"
+    fi
+  }
+fi
+
 # 🧪 골든 전체 통과 없이는 push하지 않는다(2026-08-03 사고: 실패한 테스트가 커밋·배포됐다).
 #   원인은 파이프라인 종료코드를 잘못 읽은 것 — 사람 눈이 아니라 게이트가 막아야 한다.
 if [ "${SHOPCAST_SKIP_TESTS:-0}" != "1" ]; then

@@ -15,6 +15,7 @@ references/
 # 비밀키(절대 커밋 금지)
 deploy.sh
 data/
+!data/incidents.jsonl      # 사고 원장은 배포에 실려야 한다(코드 트리)
 *.zip
 
 # pytest
