@@ -364,18 +364,44 @@ def blocks_ingest(tenant_id: str, rows: list) -> dict:
                       "tenant_id TEXT, keyword TEXT, blocks TEXT, blog_blocks TEXT,"
                       "mine INTEGER, checked_at TEXT, PRIMARY KEY(tenant_id, keyword))")
             from datetime import datetime as _d
+            # ★ 2026-08-06 회귀 복구 2건:
+            #   ① VALUES(?,?,?,?,?,?)는 컬럼 순서에 기댄다. 진단용 컬럼 3개(suspect·fp_suspect·
+            #      mine_legacy)를 추가하자 개수가 안 맞아 저장이 전부 실패했다(밤새 0건).
+            #      컬럼을 명시한다 — 스키마가 늘어도 안 깨진다.
+            #   ② INSERT OR REPLACE는 행을 통째로 갈아끼운다. 그러면 어제 보존한 mine_legacy가
+            #      NULL로 덮인다. UPSERT로 바꿔 '이번에 잰 것만' 갱신하고 나머지는 보존한다.
+            for col, ddl in (("suspect", "INTEGER DEFAULT 0"), ("fp_suspect", "INTEGER DEFAULT 0"),
+                             ("mine_legacy", "INTEGER"), ("evidence", "TEXT"),
+                             ("collect_note", "TEXT")):
+                try:
+                    c.execute(f"ALTER TABLE kw_blocks ADD COLUMN {col} {ddl}")
+                except Exception:
+                    pass
+            import json as _js
             for r in (rows or [])[:40]:
                 kw = (r.get("keyword") or "").strip()
                 if not kw:
                     continue
-                c.execute("INSERT OR REPLACE INTO kw_blocks VALUES(?,?,?,?,?,?)",
-                          (tenant_id, kw, "|".join(r.get("blocks") or [])[:400],
-                           "|".join(r.get("blog_blocks") or [])[:200],
-                           1 if r.get("my_visible") else 0, _d.utcnow().isoformat()))
+                # 수집 실패는 지면 지도에 쓰지 않는다(게이트 원칙) — 사유만 남긴다
+                if r.get("collect_failed"):
+                    c.execute("UPDATE kw_blocks SET collect_note=? WHERE tenant_id=? AND keyword=?",
+                              ("; ".join(r.get("reasons") or [])[:200], tenant_id, kw))
+                    continue
+                c.execute(
+                    "INSERT INTO kw_blocks(tenant_id, keyword, blocks, blog_blocks, mine, "
+                    "checked_at, evidence, collect_note) VALUES(?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(tenant_id, keyword) DO UPDATE SET "
+                    "blocks=excluded.blocks, blog_blocks=excluded.blog_blocks, mine=excluded.mine, "
+                    "checked_at=excluded.checked_at, evidence=excluded.evidence, collect_note=NULL",
+                    (tenant_id, kw, "|".join(r.get("blocks") or [])[:400],
+                     "|".join(r.get("blog_blocks") or [])[:200],
+                     1 if r.get("my_visible") else 0, _d.utcnow().isoformat(),
+                     _js.dumps(r.get("visible_evidence") or {}, ensure_ascii=False)[:600], None))
                 saved += 1
-    except Exception:
+    except Exception as e:
         _log.exception("[blogreach] 블록 저장 실패")
-        return {"ok": False, "error": "저장 실패"}
+        # 조용한 실패 금지 — 사유를 응답에 담는다. 밤새 '저장 실패'만 찍히고 원인을 못 봤다.
+        return {"ok": False, "error": f"저장 실패: {repr(e)[:160]}"}
     return {"ok": True, "saved": saved}
 
 
