@@ -263,3 +263,23 @@ def test_야간스캔은_원장을_갱신하지_않는다():
         sp = f.read()
     assert "원장 갱신" in sp and "L.build()" in sp and "data/incidents.jsonl" in sp, \
         "배포 시점에 원장을 안 싣는다"
+
+
+def test_트레일러가_있으면_제목과_무관하게_등재된다():
+    """실측(2026-08-05): 트레일러를 달았는데 등재가 안 됐다.
+    제목에 '수정·사고·버그' 낱말이 없으면 후보에서 빠지는 구조였다.
+    기록 의무를 만들어놓고 기록이 무시되면 그 의무는 없는 것과 같다."""
+    import inspect
+    src = inspect.getsource(L.extract_from_git)
+    assert 'tr0.get("incident") or FIX_SIGNS' in src, "트레일러가 제목에 밀린다"
+    assert "사람이 선언한 유형은 근거로 친다" in src, "선언한 유형이 버려진다"
+    tr = L.parse_trailer("본문\n\nIncident: 경로 이원화\nRecurrence: 4\nGolden: tests/x.py")
+    assert tr["incident"] == "경로 이원화" and tr["recurrence"] == "4"
+
+
+def test_자가_점검_발견도_시스템_발견이다():
+    """장치(골든·스캔)만 시스템 발견으로 세면, 마무리 전 스스로 물어서 잡은 건이 미상으로 빠진다.
+    목표는 '사용자보다 시스템이 먼저 발견'이고 자가 점검도 그 한 건이다."""
+    assert L._found_by("마무리 직전에 자가 점검으로 스스로 물어서 잡았다") == "시스템"
+    assert L._found_by("골든이 잡았다") == "시스템"
+    assert L._found_by("사장님 지적에서 시작해") == "사용자"

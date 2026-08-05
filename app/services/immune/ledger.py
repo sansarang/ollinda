@@ -108,12 +108,20 @@ def extract_from_git(limit: int = 2000) -> list:
         h, at, subj = parts[0], parts[1], parts[2]
         body = parts[3] if len(parts) > 3 else ""
         full = f"{subj}\n{body}"
-        if not FIX_SIGNS.search(subj):
+        tr0 = parse_trailer(body)
+        # ★ 2026-08-05: 트레일러를 달았는데도 등재가 안 됐다.
+        #   제목에 '수정·사고·버그' 같은 낱말이 없으면 후보에서 빠지는 구조였는데,
+        #   트레일러(Incident:)는 '이건 사고다'라는 명시적 선언이다 — 제목보다 강해야 한다.
+        #   기록 의무를 만들어놓고 기록이 무시되면 그 의무는 없는 것과 같다.
+        if not (tr0.get("incident") or FIX_SIGNS.search(subj)):
             continue                                  # 기능 추가·진단 추가는 사고가 아니다
         types, ev = classify(full)
+        if tr0.get("incident") and tr0["incident"] not in types:
+            types.append(tr0["incident"])             # 사람이 선언한 유형은 근거로 친다
+            ev.append({"type": tr0["incident"], "signs": ["트레일러 선언"]})
         if not types:
             continue                                  # 근거 없는 것은 짐작하지 않는다
-        tr = parse_trailer(body)
+        tr = tr0
         rows.append({
             "id": h[:8],
             "commit": h,
