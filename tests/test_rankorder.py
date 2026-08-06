@@ -63,3 +63,16 @@ def test_새_축이_기록된다():
 
 def test_R8_원본_보존():
     assert '"a"' in inspect.getsource(C.collect), "원본을 덮어쓴다"
+
+
+def test_수집_절차의_흔적을_인자로_보고하지_않는다():
+    """실측(2026-08-06): at(수집 시각)이 rho=1.0으로 잡혔다.
+    1위부터 순서대로 수집했으니 수집 시각이 곧 순위다 — 완벽한 순환 논리다.
+    이런 값을 두면 '가장 강한 인자'로 보고된다."""
+    rows = [{"rank": i, "at": 1000 + i, "images": 5, "industry": "A"} for i in range(1, 11)]
+    rows += [{"rank": i, "at": 2000 + i, "images": 5, "industry": "B"} for i in range(1, 11)]
+    r = M.analyze(rows)
+    for ind, d in r["industries"].items():
+        assert "at" not in (d.get("factors") or {}), "수집 시각을 인자로 잰다"
+    assert all(c["factor"] != "at" for c in r["candidates"]), "순환 논리를 후보로 올린다"
+    assert "at" in M.EXCLUDE_KEYS and "rank" in M.EXCLUDE_KEYS

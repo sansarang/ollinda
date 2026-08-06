@@ -1075,6 +1075,22 @@ def admin_coexpose_semantic(industry: str = "", q: str = "", region: str = "",
                                  "불안정 항목은 값을 쓰지 않는다."})
 
 
+@app.get("/admin/rankorder/report")
+def admin_rankorder_report(limit: int = 2000):
+    """📶 순위 서열 리포트 — 업종별 인자-순위 상관 + 교차 공통 단조 인자(읽기 전용)."""
+    from app.services.rankorder import collector as _rc, monotone as _mo
+    rows = _rc.load(limit)
+    if not rows:
+        return JSONResponse({"ok": True, "n": 0, "note": "수집 없음"})
+    for r in rows:
+        r["text_len"] = len(r.get("text") or "")
+    res = _mo.analyze(rows)
+    return JSONResponse({"ok": True, "n": len(rows),
+                         "industries_sampled": sorted({r.get("industry") for r in rows}),
+                         "excluded_keys": list(_mo.EXCLUDE_KEYS),
+                         **res})
+
+
 @app.get("/admin/botlog")
 def admin_botlog(limit: int = 5000, raw: int = 0):
     """🤖 크롤러 방문 실측 — Yeti 흔적(진짜/자칭 분리)·URL·UA 종류·응답 코드.

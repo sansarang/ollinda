@@ -13,6 +13,11 @@ MIN_N = 6          # 한 업종에서 이만큼은 있어야 상관을 말한다
 ALPHA = 0.05
 MIN_INDUSTRIES = 2  # 교차 최소 업종 수
 
+# ★ 2026-08-06 실측: at(수집 시각)이 rho=1.0으로 잡혔다.
+#   1위부터 순서대로 수집했으니 수집 시각이 곧 순위다 — 인자가 아니라 **우리 절차의 흔적**이다.
+#   이런 값을 그냥 두면 완벽한 순환 논리가 '가장 강한 인자'로 보고된다.
+EXCLUDE_KEYS = ("at", "rank", "saved_at", "post", "at_utc")
+
 
 def _ranks(xs: list) -> list:
     """동점은 평균 순위(Spearman 표준)."""
@@ -58,7 +63,7 @@ def analyze(rows: list, keys: list = None) -> dict:
     if not rows:
         return {"industries": {}, "candidates": [], "note": "표본 없음"}
     keys = keys or sorted({k for r in rows for k, v in r.items()
-                           if isinstance(v, (int, float)) and k != "rank"
+                           if isinstance(v, (int, float)) and k not in EXCLUDE_KEYS
                            and not isinstance(v, bool)})
     per = {}
     for ind in sorted({r.get("industry") or "?" for r in rows}):
