@@ -1226,7 +1226,7 @@ def admin_kw_resolve(tid: str = "", kw: str = "", ctype: str = "info"):
     t = db.get_tenant(tid)
     if not t:
         return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
-    from app.services.industry import resolve_industry as _ri
+    from app.industries import resolve_industry as _ri
     prof = _ri(getattr(t, "industry", "") or "")
     kw0, kws = seo.resolve_target_keyword(
         industry=(getattr(t, "industry", "") or prof.name), region=getattr(t, "region", "") or "",
