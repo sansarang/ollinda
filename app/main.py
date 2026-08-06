@@ -1019,8 +1019,12 @@ def admin_coexpose_report(limit: int = 200):
     if not rows:
         return JSONResponse({"ok": True, "n": 0, "note": "수집 없음"})
     co = [r for r in rows if r.get("coexposed")]
+    from app.services.coexpose import pipeline as _cp
+    feats = _cp.load(400)
+    ana = _cp.analyze(feats) if feats else {}
     return JSONResponse({
         "ok": True, "n": len(rows), "coexposed": len(co),
+        "contrast": ana,
         "industries": sorted({r.get("industry") for r in rows if r.get("industry")}),
         "regions": sorted({r.get("region") for r in rows if r.get("region")}),
         "by_query": [{"q": r["q"], "industry": r.get("industry"),

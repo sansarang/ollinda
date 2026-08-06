@@ -81,3 +81,40 @@ def test_브리핑_자산은_삭제되지_않았다():
         doc = f.read()
     assert "브리핑 역설계 — 보류" in doc, "보류 상태가 문서에 없다"
     assert "재개 가능" in doc, "재개 가능 표기가 없다"
+
+
+def test_대조군은_같은_채널_같은_주제다():
+    """축을 두 번 바꿨다: ①동시노출 여부(대조군 없음) ②2페이지 밖(URL 페이징이 안 먹음)
+    → ③같은 채널의 같은 주제 글. 채널 파워·발행 이력이 상수로 통제된다."""
+    import inspect
+    from app.services.coexpose import control as CT
+    src = inspect.getsource(CT)
+    assert "상수로 통제" in src, "왜 이 대조군인지 근거가 없다"
+    assert "폐기" in src and "불가" in src, "버린 축의 이유가 기록되지 않았다"
+    r = CT.build("부산 동구 썬팅업체",
+                 [{"blog": "x", "post": "1", "title": "t"}])
+    assert r["picked"] and "control" in r
+    # 뽑힌 글이 대조군에 섞이면 안 된다
+    keys = {(c["blog"], c["post"]) for c in r["control"]}
+    assert ("x", "1") not in keys
+
+
+def test_한_업종_신호는_인자가_아니다():
+    """업종 교차 검증 — 한 업종에만 나오는 신호는 잡음이다(R5·업종 중립)."""
+    import inspect
+    from app.services.coexpose import pipeline as PP
+    src = inspect.getsource(PP.analyze)
+    assert "cross_industry" in src and "단일 업종 신호(잡음 의심)" in src, "교차 검증이 없다"
+    assert "len(hits) >= 2" in src, "한 업종만으로 인자를 채택한다"
+    # 발행 이력은 인자 목록에 없다(대조군이 이미 통제한다)
+    fsrc = inspect.getsource(__import__("app.services.coexpose.features",
+                                        fromlist=["x"]).measure)
+    for banned in ("per_month", "history", "발행"):
+        assert banned not in fsrc, f"발행 이력이 구조 인자에 섞였다: {banned}"
+
+
+def test_라벨은_인자에서_제외된다():
+    """picked를 인자에 넣으면 자기 자신을 설명한다."""
+    import inspect
+    from app.services.coexpose import pipeline as PP
+    assert 'k != "picked"' in inspect.getsource(PP.analyze), "라벨이 인자에 들어간다"
