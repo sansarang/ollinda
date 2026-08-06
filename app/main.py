@@ -1220,6 +1220,35 @@ def admin_vacantq_purge(tid: str = "", dry: int = 1):
                                   if dry else "무관한 글감만 지웠다")})
 
 
+@app.get("/admin/vacantq/why-held")
+def admin_vacantq_why_held(tid: str = "", limit: int = 3):
+    """🔎 왜 보류됐나 — 게이트 체인 실패 사유를 payload에서 꺼낸다.
+
+    ★ queue-gen 응답에는 'geo' 같은 이름만 오고 어느 항목인지 안 온다.
+      사유가 진단으로 읽히지 않으면 남긴 의미가 없다.
+    """
+    from app.domain.models import ContentKind as _CK
+    out = []
+    for s0 in (db.list_sets(tenant_id=tid, limit=12) or []):
+        aid = s0.get("asset_id") or ""
+        blog = next((p for p in db.get_set_pieces(aid) if p.kind == _CK.BLOG), None)
+        if not blog:
+            continue
+        pl = blog.payload or {}
+        if not (pl.get("geo_gate") or pl.get("_publish_blocked") or pl.get("chain_fails")):
+            continue
+        gg = pl.get("geo_gate") or {}
+        out.append({"asset_id": aid[:8], "title": (pl.get("title") or "")[:60],
+                    "kw": pl.get("target_keyword") or (pl.get("target_keywords") or [None])[0],
+                    "geo_passed": gg.get("passed"), "geo_fails": gg.get("fails"),
+                    "geo_checks": gg.get("checks"),
+                    "blocked": pl.get("_publish_blocked"),
+                    "audit": (pl.get("ranking_audit") or {}).get("score")})
+        if len(out) >= limit:
+            break
+    return JSONResponse({"ok": True, "n": len(out), "held": out})
+
+
 @app.get("/admin/vacantq/retrack")
 def admin_vacantq_retrack(tid: str = "", dry: int = 1):
     """🔀 이미 큐에 있는 빈자리 글감을 정보 글 경로(info)로 옮긴다.
