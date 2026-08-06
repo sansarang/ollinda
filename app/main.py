@@ -1088,7 +1088,8 @@ def admin_vacantq_feed(tid: str = "", limit: int = 12, cap: int = 3):
     if not works:
         return JSONResponse({"ok": False, "error": "하는 일을 못 캤다(과거 글 부족)"})
     seeds = _sg.seeds_for(works, region, mats.get("anchors"))
-    cand = [x for x in _sg.expand(seeds[:4], depth=2)["rows"] if x["depth"] == 2]
+    cand = _sg.relevant([x for x in _sg.expand(seeds[:4], depth=2)["rows"] if x["depth"] == 2],
+                        works)                # 하는 일과 무관한 질문은 버린다
     res = _sc.scan(cand[:limit], limit=limit)
     got = _fd.feed(tid, res["vacant"], cap=cap)
     return JSONResponse({"ok": True, "shop": getattr(t, "name", ""),
@@ -1098,6 +1099,38 @@ def admin_vacantq_feed(tid: str = "", limit: int = 12, cap: int = 3):
                                     for v in res["vacant"]],
                          "queued": got["added"], "skipped": got["skipped"],
                          "blocked": res.get("blocked")})
+
+
+@app.get("/admin/vacantq/purge")
+def admin_vacantq_purge(tid: str = "", dry: int = 1):
+    """🧹 잘못 들어간 빈자리 글감 제거 — 하는 일과 무관한 것만.
+
+    ★ 실물 사고(2026-08-06): '오늘 부산 날씨'가 썬팅집 큐에 들어갔다.
+      게이트를 고쳤지만 이미 들어간 것은 남아 있다. 무관한 것만 골라 뺀다.
+    """
+    from app.services.vacantq import finder as _fn, suggest as _sg
+    t = db.get_tenant(tid)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    works = _fn.work_terms(_fn.materials(tid), getattr(t, "region", "") or "")
+    rows = [r for r in (db.writing_queue_rows(tid, limit=200) or [])
+            if (r.get("source_type") or "") == "vacant_q"]
+    bad = [r for r in rows
+           if not _sg.relevant([{"q": r.get("target_keyword") or ""}], works)]
+    removed = 0
+    if not dry and bad:
+        with db._conn() as c:
+            for r in bad:
+                try:
+                    c.execute("DELETE FROM writing_queue WHERE id=?", (r.get("id"),))
+                    removed += 1
+                except Exception:
+                    pass
+    return JSONResponse({"ok": True, "work_terms": works, "total_vacant_q": len(rows),
+                         "off_topic": [r.get("target_keyword") for r in bad],
+                         "removed": removed,
+                         "note": ("dry=1은 판정만 한다. dry=0으로 실제 제거."
+                                  if dry else "무관한 글감만 지웠다")})
 
 
 @app.get("/admin/vacantq/claims")

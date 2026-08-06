@@ -84,7 +84,16 @@ def work_terms(mats: dict, region: str = "", limit: int = 6) -> list:
     # ★ 2026-08-06: 빈도만 세면 '동구·부산·후기·기아'가 '하는 일'로 잡힌다.
     #   지역어(가게 실값)·형식어(후기·추천)·모델명(anchors)을 빼야 시술명이 남는다.
     noise = _noise_words()
-    rt = {t for t in _TOK.findall(region or "") if len(t) >= 2}
+    # ★ 2026-08-06 사고: region이 '부산광역시 동구'라 '부산'이 안 걸러졌고,
+    #   '부산'이 '하는 일'로 잡혀 자동완성이 '오늘 부산 날씨'를 줬다.
+    #   썬팅집 글감 큐에 날씨가 들어갔다 — 부분 문자열까지 지역으로 본다.
+    rt = set()
+    for t in _TOK.findall(region or ""):
+        if len(t) < 2:
+            continue
+        rt.add(t)
+        for i in range(2, len(t)):
+            rt.add(t[:i])                     # '부산광역시' → 부산, 부산광, …
     anchors = set(mats.get("anchors") or [])
     freq = {}
     for t in (mats.get("titles") or []):

@@ -215,7 +215,8 @@ def _vacantq_nightly() -> None:
                     "[vacantq] %s — 하는 일을 못 캤다(과거 글 부족). 건너뜀", tid[:8])
                 continue
             seeds = _sg.seeds_for(works, getattr(t, "region", "") or "", mats.get("anchors"))
-            cand = [x for x in _sg.expand(seeds[:4], depth=2)["rows"] if x["depth"] == 2]
+            cand = _sg.relevant(
+                [x for x in _sg.expand(seeds[:4], depth=2)["rows"] if x["depth"] == 2], works)
             res = _sc.scan(cand[:12], limit=12)
             got = _fd.feed(tid, res["vacant"])
             logging.getLogger("shopcast.vacantq").info(

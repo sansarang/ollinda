@@ -99,3 +99,21 @@ def test_야간에_다시_훑는다():
     job = inspect.getsource(S._vacantq_nightly)
     assert "feed" in job and "verify_claims" in job, "훑기만 하고 큐·검증을 안 한다"
     assert "PRODUCTION_TENANTS" in job, "실계정 대상이 아니다"
+
+
+def test_하는_일과_무관한_질문은_글감이_아니다():
+    """실물 사고(2026-08-06): '오늘 부산 날씨'가 썬팅집 글감 큐에 들어갔다.
+    region이 '부산광역시 동구'라 '부산'이 안 걸러졌고, 그게 '하는 일'로 잡혔다."""
+    from app.services.vacantq import suggest as SG
+    rows = [{"q": "오늘 부산 날씨"}, {"q": "부산 썬팅 가격"}, {"q": "썬팅 농도 법"}]
+    out = SG.relevant(rows, ["썬팅", "유리막코팅"])
+    assert [r["q"] for r in out] == ["부산 썬팅 가격", "썬팅 농도 법"], out
+    assert SG.relevant(rows, []) == [], "하는 일을 모르면 전부 통과시킨다"
+    # 지역은 부분 문자열까지 막는다
+    mats = {"anchors": [], "titles": ["부산 동구 썬팅 후기", "부산광역시 동구 썬팅 시공"]}
+    assert "부산" not in F.work_terms(mats, "부산광역시 동구")
+    # 두 경로가 모두 이 게이트를 탄다(존재가 아니라 사용)
+    import inspect
+    from app import main as m, scheduler as s
+    assert "_sg.relevant(" in inspect.getsource(m.admin_vacantq_feed)
+    assert "_sg.relevant(" in inspect.getsource(s._vacantq_nightly)

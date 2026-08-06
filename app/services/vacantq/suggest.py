@@ -45,6 +45,19 @@ def fetch(seed: str, timeout: int = 15) -> list:
     return out
 
 
+def relevant(rows: list, work_terms: list) -> list:
+    """★ 자동완성이 준 말이 **우리가 하는 일과 관련 있는가**.
+
+    2026-08-06 사고: 씨앗에 '부산'이 섞여 '오늘 부산 날씨'가 글감 큐까지 갔다.
+    씨앗을 아무리 걸러도 자동완성은 엉뚱한 데로 샌다 — 결과에서 한 번 더 막는다.
+    판정: 질문에 '하는 일' 낱말이 하나라도 있어야 한다. 없으면 우리 글감이 아니다.
+    """
+    ws = [w for w in (work_terms or []) if w]
+    if not ws:
+        return []
+    return [r for r in (rows or []) if any(w in (r.get("q") or "") for w in ws)]
+
+
 def expand(seeds: list, depth: int = 1, per_seed: int = 10, max_total: int = 60) -> dict:
     """씨앗들을 자동완성으로 넓힌다. depth=2면 나온 말로 한 번 더 판다(더 깊은 롱테일).
 
