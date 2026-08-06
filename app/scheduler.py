@@ -193,6 +193,21 @@ def _immune_nightscan() -> None:
         logging.exception("[scheduler] 면역 야간 스캔 실패")
 
 
+def _vacantq_run_log(row: dict) -> None:
+    """야간 잡 결과를 남긴다 — 아침에 '제대로 돌았나'를 확인할 수 있어야 한다."""
+    try:
+        import json as _j
+        import os as _os
+        import time as _t
+        from app.services.immune import data_root as _dr
+        p = _os.path.join(_dr(), "vacantq_runs.jsonl")
+        _os.makedirs(_os.path.dirname(p) or ".", exist_ok=True)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(_j.dumps({**row, "at": int(_t.time())}, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 def _vacantq_nightly() -> None:
     """🎯 빈 질문 훑기 — 실수요 질문 중 아직 답이 없는 자리를 찾아 글감 큐로.
 
@@ -223,13 +238,24 @@ def _vacantq_nightly() -> None:
                 "[vacantq] %s — 실수요 %d · 빈자리 %d · 큐 편입 %d%s",
                 tid[:8], len(cand), res["n_vacant"], got["n_added"],
                 " (차단)" if res.get("blocked") else "")
+            _run = {"tenant": tid[:8], "shop": getattr(t, "name", ""),
+                    "works": works[:5], "n_demand": len(cand),
+                    "n_vacant": res["n_vacant"], "n_queued": got["n_added"],
+                    "queued": [a["q"] for a in got["added"]],
+                    "blocked": res.get("blocked")}
             try:
                 v = _fd.verify_claims(tid)
                 if v.get("checked"):
                     logging.getLogger("shopcast.vacantq").info(
                         "[vacantq] 선점 검증 %d건 중 %d건 떴다", v["checked"], v["won"])
+                _run["claims_checked"] = v.get("checked", 0)
+                _run["claims_won"] = v.get("won", 0)
+                _run["claims"] = [{"q": x["q"], "rank": x["our_rank"], "days": x["days"]}
+                                  for x in (v.get("rows") or [])]
             except Exception:
                 logging.exception("[vacantq] 선점 검증 실패")
+                _run["claims_error"] = True
+            _vacantq_run_log(_run)
     except Exception:
         logging.exception("[scheduler] 빈 질문 훑기 실패")
 

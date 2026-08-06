@@ -1101,6 +1101,40 @@ def admin_vacantq_feed(tid: str = "", limit: int = 12, cap: int = 3):
                          "blocked": res.get("blocked")})
 
 
+@app.get("/admin/vacantq/simulate-nightly")
+def admin_vacantq_simulate(bg: int = 1):
+    """🌙 야간 잡 시뮬레이션 — 스케줄러가 부르는 **그 함수**를 그대로 실행한다.
+
+    ★ 별도 코드로 흉내 내지 않는다. 흉내는 진짜가 아니다 —
+      스케줄러 경로에 문제가 있어도 시뮬레이션은 통과해버린다.
+    오래 걸리므로 기본은 백그라운드. 결과는 /admin/vacantq/runs 로 본다.
+    """
+    from app.scheduler import _vacantq_nightly
+    if not bg:
+        _vacantq_nightly()
+        return JSONResponse({"ok": True, "mode": "동기 실행 완료"})
+    import threading as _th
+    _th.Thread(target=_vacantq_nightly, daemon=True).start()
+    return JSONResponse({"ok": True, "mode": "백그라운드 시작",
+                         "note": "몇 분 걸린다. /admin/vacantq/runs 로 결과 확인."})
+
+
+@app.get("/admin/vacantq/runs")
+def admin_vacantq_runs(limit: int = 10):
+    """🌙 야간 잡 실행 기록 — 아침에 '제대로 돌았나'를 본다."""
+    import json as _j
+    import os as _os
+    from app.services.immune import data_root as _dr
+    p = _os.path.join(_dr(), "vacantq_runs.jsonl")
+    try:
+        with open(p, encoding="utf-8") as f:
+            rows = [_j.loads(x) for x in f if x.strip()][-limit:]
+    except Exception:
+        rows = []
+    return JSONResponse({"ok": True, "n": len(rows), "runs": rows,
+                         "note": "실행 기록이 없으면 야간 잡이 안 돈 것이다"})
+
+
 @app.get("/admin/vacantq/purge")
 def admin_vacantq_purge(tid: str = "", dry: int = 1):
     """🧹 잘못 들어간 빈자리 글감 제거 — 하는 일과 무관한 것만.

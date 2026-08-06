@@ -117,3 +117,17 @@ def test_하는_일과_무관한_질문은_글감이_아니다():
     from app import main as m, scheduler as s
     assert "_sg.relevant(" in inspect.getsource(m.admin_vacantq_feed)
     assert "_sg.relevant(" in inspect.getsource(s._vacantq_nightly)
+
+
+def test_시뮬레이션은_진짜_그_함수를_부른다():
+    """흉내는 진짜가 아니다 — 별도 코드로 흉내 내면 스케줄러 경로 문제를 못 잡는다."""
+    import inspect
+    from app import main as m
+    src = inspect.getsource(m.admin_vacantq_simulate)
+    assert "from app.scheduler import _vacantq_nightly" in src, "스케줄러 함수를 안 쓴다"
+    assert "_vacantq_nightly()" in src
+    # 실행 기록이 남아야 아침에 확인된다
+    from app import scheduler as s
+    assert "_vacantq_run_log" in inspect.getsource(s._vacantq_nightly), "결과를 안 남긴다"
+    for k in ("n_vacant", "n_queued", "claims_won"):
+        assert k in inspect.getsource(s._vacantq_nightly), f"기록 항목 누락: {k}"
