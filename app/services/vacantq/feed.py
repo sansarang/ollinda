@@ -125,3 +125,69 @@ def verify_claims(tenant_id: str, limit: int = 6) -> dict:
     return {"checked": len(out), "won": len(got), "blocked": blocked, "rows": out,
             "note": ("빈 자리에 쓰면 뜨는가 — 이 숫자가 그 답이다. "
                      "발행 후 며칠 지났는지(days)를 함께 본다.")}
+
+
+# ── 주제 일치 게이트 ──────────────────────────────────────────────────────
+# ★ 2026-08-07 실물 사고: '썬팅 계급도 버텍스' 글감으로 글을 뽑았더니
+#   본문이 'PV5 열차단 썬팅 시공기'였다. 계급도 0회·등급 1회.
+#   원인은 photo_pool이 과거 사진을 재활용했고 생성기는 **사진 내용대로** 쓰기 때문이다.
+#   기존 파이프라인은 '이 사진을 설명하는 글'을 만들고,
+#   빈자리 선점은 '그 질문에 답하는 글'이 필요하다 — 근본적으로 다르다.
+#   ★ 게이트가 없으면 자리도 못 먹고 유사 시공기만 늘어난다.
+TOPIC_MIN = 0.5            # 질문 낱말이 본문에 이만큼은 살아 있어야 '답한 글'이다
+
+
+def topic_match(query: str, title: str, body: str, work_terms: list = None) -> dict:
+    """이 글이 그 질문에 답하는가.
+
+    ★ 낱말 개수만 세면 안 된다(2026-08-07 실측): '썬팅 계급도 버텍스'에서
+      '썬팅·버텍스'만 있어도 2/3으로 통과했는데, 정작 **핵심어 '계급도'가 빠져 있었다.**
+      하는 일 낱말(썬팅)은 그 가게 글이면 어디나 있다 — 그건 답의 증거가 아니다.
+      **질문에서 하는 일을 뺀 나머지**가 핵심어이고, 그게 본문에 없으면 답한 글이 아니다.
+    """
+    import re as _re
+    qt = [w for w in _re.findall(r"[가-힣A-Za-z0-9]+", query or "") if len(w) >= 2]
+    if not qt:
+        return {"ok": True, "cover": 1.0, "missing": [], "core_missing": []}
+    text = f"{title or ''}\n{body or ''}"
+    ws = {w for w in (work_terms or []) if w}
+    core = [w for w in qt if w not in ws] or qt          # 하는 일을 뺀 핵심어
+    hit = [w for w in qt if w in text]
+    miss = [w for w in qt if w not in text]
+    core_miss = [w for w in core if w not in text]
+    cover = len(hit) / len(qt)
+    return {"ok": (not core_miss) and cover >= TOPIC_MIN,
+            "cover": round(cover, 2), "missing": miss,
+            "core": core, "core_missing": core_miss}
+
+
+def seal_if_offtopic(asset_id: str, query: str) -> dict:
+    """주제가 어긋나면 발행을 막는다 — 사장님 화면에서 발행 버튼이 사라진다.
+
+    ★ 지우지 않는다. 왜 어긋났는지 봐야 다음에 안 만든다(원본 보존).
+    """
+    from app.domain.models import ContentKind as _CK
+    pieces = db.get_set_pieces(asset_id)
+    blog = next((p for p in pieces if p.kind == _CK.BLOG), None)
+    if not blog:
+        return {"ok": False, "error": "블로그 피스 없음"}
+    pl = blog.payload or {}
+    try:
+        from app.services.vacantq import finder as _fn
+        t = db.get_tenant(blog.tenant_id)
+        works = _fn.work_terms(_fn.materials(blog.tenant_id), getattr(t, "region", "") or "")
+    except Exception:
+        works = []
+    m = topic_match(query, pl.get("title") or "", pl.get("body") or "", works)
+    if m["ok"]:
+        return {"ok": True, "sealed": False, **m}
+    try:
+        db.update_piece_payload(blog.id, {
+            "_publish_blocked": "vacantq_offtopic",
+            "vacantq_topic": {"query": query, **m},
+        })
+    except Exception as e:
+        return {"ok": False, "error": repr(e)[:80]}
+    _log.warning("[vacantq] 주제 불일치 봉인 %s — '%s' 커버 %.2f, 빠진 말 %s",
+                 asset_id[:8], query, m["cover"], m["missing"][:4])
+    return {"ok": True, "sealed": True, **m}

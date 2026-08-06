@@ -218,3 +218,22 @@ def test_안_해요_버튼이_사장님_권한으로_동작한다():
     assert "_ensure_user_tenant" in src, "가게를 안 특정한다"
     assert "_dm.decline" in src and "DELETE FROM writing_queue" in src, "큐에서 안 뺀다"
     assert "/me/topic-decline" in inspect.getsource(m), "화면 버튼이 이 경로를 안 부른다"
+
+
+def test_주제가_어긋난_글은_발행을_막는다():
+    """실물 사고(2026-08-07): '썬팅 계급도 버텍스' 글감으로 뽑았더니 'PV5 열차단 시공기'가 나왔다.
+    photo_pool이 과거 사진을 재활용했고 생성기는 사진 내용대로 쓴다 —
+    기존 파이프라인은 '사진을 설명하는 글'을 만들고, 빈자리 선점은 '질문에 답하는 글'이 필요하다."""
+    from app.services.vacantq import feed as FD
+    W = ["썬팅", "유리막코팅", "시공"]
+    ok = FD.topic_match("썬팅 계급도 버텍스", "루마 버텍스 계급도 정리",
+                        "버텍스 계급도는 등급별로 나뉩니다", W)
+    assert ok["ok"] and not ok["core_missing"]
+    bad = FD.topic_match("썬팅 계급도 버텍스", "PV5 열차단 썬팅",
+                         "오늘 PV5에 열차단 썬팅을 시공했습니다. 버텍스 필름입니다.", W)
+    assert not bad["ok"] and "계급도" in bad["core_missing"]
+    # ★ 낱말 개수만 세면 안 된다 — 둘 다 cover 0.67이지만 하나는 핵심어가 빠졌다
+    assert ok["cover"] == bad["cover"] == 0.67, "개수로만 판정하면 이 둘이 안 갈린다"
+    import inspect
+    src = inspect.getsource(FD.seal_if_offtopic)
+    assert "_publish_blocked" in src and "지우지 않는다" in src, "봉인 대신 삭제한다"

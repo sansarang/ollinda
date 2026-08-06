@@ -1220,6 +1220,15 @@ def admin_vacantq_purge(tid: str = "", dry: int = 1):
                                   if dry else "무관한 글감만 지웠다")})
 
 
+@app.get("/admin/vacantq/seal")
+def admin_vacantq_seal(asset_id: str = "", q: str = ""):
+    """🔒 빈자리 글감으로 만든 글이 그 질문에 답하는지 검사하고, 어긋나면 발행을 막는다."""
+    from app.services.vacantq import feed as _fd
+    if not (asset_id and q):
+        return JSONResponse({"ok": False, "error": "asset_id·q 필요"}, status_code=400)
+    return JSONResponse(_fd.seal_if_offtopic(asset_id, q))
+
+
 @app.get("/admin/vacantq/claims")
 def admin_vacantq_claims(tid: str = "", verify: int = 0):
     """🏁 선점 검증 — 우리가 쓴 뒤 그 질문에서 실제로 뜨는지."""
