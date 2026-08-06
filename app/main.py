@@ -150,6 +150,21 @@ app = FastAPI(title="shopcast", version="0.3.0")
 
 
 @app.middleware("http")
+async def bot_access_log(request, call_next):
+    """🤖 크롤러 방문 기록 — 글 밖 신호 중 우리가 직접 잴 수 있는 유일한 것.
+
+    사람 방문은 남기지 않는다(개인정보·용량). 기록 실패가 서비스를 막지 않는다.
+    """
+    resp = await call_next(request)
+    try:
+        from app.services import botlog as _bl
+        _bl.record(request, getattr(resp, "status_code", 0))
+    except Exception:
+        pass
+    return resp
+
+
+@app.middleware("http")
 async def admin_basic_auth(request, call_next):
     """/admin* 운영자 보호(HTTP Basic). SHOPCAST_ADMIN_PASS 미설정 시 fail-closed로 /admin/* 전면 차단
     (/admin/cleanup·/admin/testaccount 등 파괴적·민감 라우트 무인증 노출 방지).
@@ -1058,6 +1073,21 @@ def admin_coexpose_semantic(industry: str = "", q: str = "", region: str = "",
     return JSONResponse({"ok": True, "n": len(out), "rows": out,
                          "note": "LLM 판정은 '인자 후보'까지다. 확정 인자로 쓰지 않는다. "
                                  "불안정 항목은 값을 쓰지 않는다."})
+
+
+@app.get("/admin/botlog")
+def admin_botlog(limit: int = 5000, raw: int = 0):
+    """🤖 크롤러 방문 실측 — Yeti 흔적(진짜/자칭 분리)·URL·UA 종류·응답 코드.
+
+    ★ 네이버 블로그에 오는 Yeti 로그는 네이버 서버에 있어 우리가 못 본다.
+      여기 잡히는 것은 자체 도메인(ollinda.kr)에 온 방문뿐이다.
+    """
+    from app.services import botlog as _bl
+    rows = _bl.load(limit)
+    out = {"ok": True, **_bl.summary(rows)}
+    if raw:
+        out["raw_tail"] = rows[-40:]
+    return JSONResponse(out)
 
 
 @app.get("/admin/coexpose/calibrate")
