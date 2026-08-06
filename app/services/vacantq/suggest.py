@@ -45,6 +45,21 @@ def fetch(seed: str, timeout: int = 15) -> list:
     return out
 
 
+# ★ 2026-08-06 실물: 주안모터스 글감에 '중고차사이트추천'·'믿을만한중고차사이트'가 들어갔다.
+#   이건 엔카·KB차차차 같은 **플랫폼을 찾는 사람**이지 기장에서 차를 사려는 손님이 아니다.
+#   지역 업체가 그 글을 써도 답이 될 수 없다 — 손님으로 이어지지 않는다.
+#   업종어가 아니라 '무엇을 찾는가'를 가르는 말이라 업종 중립이다.
+PLATFORM_SEEK = ("사이트", "앱", "어플", "플랫폼", "홈페이지", "카페", "커뮤니티",
+                 "순위", "랭킹", "top", "TOP", "비교사이트", "직거래", "중개")
+# 지역 업체가 답이 될 수 있는 질문인지 — 이 말이 있으면 플랫폼 탐색으로 본다
+_SEEK = None
+
+
+def is_platform_seek(q: str) -> bool:
+    """플랫폼·앱·순위를 찾는 질문인가 — 지역 업체는 답이 될 수 없다."""
+    return any(w in (q or "") for w in PLATFORM_SEEK)
+
+
 def relevant(rows: list, work_terms: list) -> list:
     """★ 자동완성이 준 말이 **우리가 하는 일과 관련 있는가**.
 
@@ -55,7 +70,15 @@ def relevant(rows: list, work_terms: list) -> list:
     ws = [w for w in (work_terms or []) if w]
     if not ws:
         return []
-    return [r for r in (rows or []) if any(w in (r.get("q") or "") for w in ws)]
+    out = []
+    for r in (rows or []):
+        q = r.get("q") or ""
+        if not any(w in q for w in ws):
+            continue
+        if is_platform_seek(q):
+            continue                       # 플랫폼을 찾는 사람 — 우리 가게로 안 온다
+        out.append(r)
+    return out
 
 
 def expand(seeds: list, depth: int = 1, per_seed: int = 10, max_total: int = 60) -> dict:
@@ -97,7 +120,11 @@ def seeds_for(work_terms: list, region: str = "", anchors: list = None) -> list:
         out.append(w)
         if r_full:
             out.append(f"{r_full} {w}")
-    for a in (anchors or [])[:2]:
+    # ★ 수치 실값(216km·30만원)은 씨앗이 못 된다 — '216km 중고차 얼마나 걸리나요'는 헛질문이다.
+    #   본문에서는 살아야 할 정보지만(주행거리) 검색어의 축은 아니다.
+    import re as _re
+    _num = _re.compile(r"^\d[\d,.]*\s*(km|KM|원|만원|천원|cc|kg|년|월|%)?$")
+    for a in [x for x in (anchors or []) if x and not _num.match(str(x))][:2]:
         for w in ws[:2]:
             out.append(f"{a} {w}")
     return list(dict.fromkeys([x for x in out if x]))[:10]

@@ -131,3 +131,24 @@ def test_시뮬레이션은_진짜_그_함수를_부른다():
     assert "_vacantq_run_log" in inspect.getsource(s._vacantq_nightly), "결과를 안 남긴다"
     for k in ("n_vacant", "n_queued", "claims_won"):
         assert k in inspect.getsource(s._vacantq_nightly), f"기록 항목 누락: {k}"
+
+
+def test_플랫폼을_찾는_질문은_우리_글감이_아니다():
+    """실물 사고(2026-08-06): 주안모터스 글감에 '중고차사이트추천'이 들어갔다.
+    이건 엔카·KB차차차를 찾는 사람이지 기장에서 차를 사려는 손님이 아니다 —
+    지역 업체가 그 글을 써도 답이 될 수 없다."""
+    from app.services.vacantq import suggest as SG
+    rows = [{"q": "중고차사이트추천"}, {"q": "믿을만한중고차사이트"}, {"q": "중고차 순위"},
+            {"q": "중고차 앱 추천"}, {"q": "기장 중고차 시세"}, {"q": "중고차 실매물 확인"}]
+    got = [r["q"] for r in SG.relevant(rows, ["중고차"])]
+    assert got == ["기장 중고차 시세", "중고차 실매물 확인"], got
+    assert SG.is_platform_seek("중고차 비교사이트") and not SG.is_platform_seek("기장 중고차")
+
+
+def test_수치는_질문_씨앗이_아니다():
+    """'216km 중고차 얼마나 걸리나요'는 헛질문이다.
+    본문에서는 살아야 할 정보지만(주행거리) 검색어의 축은 아니다."""
+    from app.services.vacantq import suggest as SG
+    seeds = SG.seeds_for(["중고차"], "부산 기장", ["216km", "토레스", "30만원", "7km"])
+    assert not [s for s in seeds if "km" in s or "만원" in s], seeds
+    assert "토레스 중고차" in seeds

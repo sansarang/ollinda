@@ -1151,6 +1151,7 @@ def admin_vacantq_purge(tid: str = "", dry: int = 1):
             if (r.get("source_type") or "") == "vacant_q"]
     bad = [r for r in rows
            if not _sg.relevant([{"q": r.get("target_keyword") or ""}], works)]
+    # 플랫폼 탐색 질문도 뺀다 — 지역 업체가 답이 될 수 없다(2026-08-06)
     removed = 0
     if not dry and bad:
         with db._conn() as c:
