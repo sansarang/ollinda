@@ -237,3 +237,19 @@ def test_주제가_어긋난_글은_발행을_막는다():
     import inspect
     src = inspect.getsource(FD.seal_if_offtopic)
     assert "_publish_blocked" in src and "지우지 않는다" in src, "봉인 대신 삭제한다"
+
+
+def test_빈자리_글감은_정보글_경로로_간다():
+    """실물 사고(2026-08-07): content_type을 안 줘서 기본값 'sell'(트랙 A)로 들어갔고,
+    시공기 파이프라인이 '썬팅 계급도 버텍스' 글감으로 'PV5 시공기'를 썼다.
+    빈 질문은 그 질문에 답하는 정보 글이라 트랙 B(GEO)로 가야 한다 —
+    질문형 소제목·결론 먼저·비교표·FAQ 구조가 거기 있다."""
+    import inspect
+    from app.services.vacantq import feed as FD
+    src = inspect.getsource(FD.feed)
+    assert 'content_type="info"' in src, "트랙 A(시공기)로 들어간다"
+    # 트랙 B가 실제로 '질문에 답하는 글'을 만드는지 — 프롬프트가 그렇게 지시하는가
+    from app.services import geo_track as G
+    p = inspect.getsource(G.info_prompt)
+    assert "매물·시공 홍보가 아니라" in p and "답하는 정보 글" in p
+    assert "질문형" in p and "완결 정답" in p

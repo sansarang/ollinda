@@ -49,7 +49,12 @@ def feed(tenant_id: str, vacant: list, cap: int = WEEKLY_CAP) -> dict:
         reason = ("이 질문에 답하는 글이 아직 없습니다. "
                   f"지금 상위: {', '.join((v.get('top_titles') or [])[:2])[:160]}")
         try:
-            ok = db.enqueue_writing(tenant_id, SOURCE, q, angle="review", reason=reason)
+            # ★ 2026-08-07 사고 교정: content_type을 안 주면 기본값 'sell'(트랙 A)로 들어가
+            #   시공기 파이프라인이 글을 쓴다. '썬팅 계급도 버텍스' 글감으로 'PV5 시공기'가 나온 원인이다.
+            #   빈 질문은 **그 질문에 답하는 정보 글**이라 트랙 B(info/GEO)로 보내야 한다 —
+            #   질문형 소제목·결론 먼저·비교표·FAQ 구조가 거기 있다.
+            ok = db.enqueue_writing(tenant_id, SOURCE, q, angle="review", reason=reason,
+                                    content_type="info")
         except Exception as e:
             skipped.append({"q": q, "why": f"큐 추가 실패: {repr(e)[:60]}"})
             continue
