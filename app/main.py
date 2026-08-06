@@ -1005,6 +1005,51 @@ def admin_scout_probe(kw: str = "부산 썬팅", blog: str = ""):
                             status_code=500)
 
 
+@app.get("/admin/coexpose/semantic")
+def admin_coexpose_semantic(industry: str = "", limit_pairs: int = 2, twice: int = 1):
+    """🧠 의미 계측 — 뽑힘/안뽑힘 쌍에 LLM 판정(서버에서만 돈다. 로컬엔 API 키가 없다).
+
+    ★ 재현성 먼저(twice=1): 같은 글을 두 번 넣어 흔들리면 그 항목은 값을 쓰지 않는다.
+    ★ 판정 근거 문장을 함께 저장한다 — 의미 계측은 기계보다 오판 위험이 크다(R8).
+    """
+    import json as _j
+    from app.services.coexpose import collector as _cc, control as _ct, semantic as _sm
+    from app.services.reverse import collector as _rc
+    from app import llm as _llm
+    if _llm.credit_out():
+        return JSONResponse({"ok": False, "error": "크레딧 소진 — 수집만 하고 판정 보류(R7)"})
+    try:
+        raw = [_j.loads(x) for x in open(_cc.RAW_PATH, encoding="utf-8") if x.strip()][-12:]
+    except Exception:
+        return JSONResponse({"ok": False, "error": "수집 원본 없음"}, status_code=404)
+    pr = _ct.pairs_for(raw)
+    pairs = [p for p in pr["pairs"] if not industry or p["industry"] == industry][:limit_pairs]
+    if not pairs:
+        return JSONResponse({"ok": False, "error": "쌍 없음", "have": pr["industries"]})
+    out = []
+    for pair in pairs:
+        tg = ([{**x, "kind": "blog", "lab": "뽑힘"} for x in pair["picked"][:1]]
+              + [{**x, "kind": "blog", "lab": "안뽑힘"} for x in pair["control"][:1]])
+        f = _rc.fetch_posts(tg, limit=len(tg))
+        if f.get("blocked"):
+            return JSONResponse({"ok": False, "blocked": f["blocked"]})
+        by = {p0["post"]: p0 for p0 in f["posts"]}
+        for t in tg:
+            p0 = by.get(t["post"])
+            if not p0:
+                out.append({"industry": pair["industry"], "label": t["lab"],
+                            "error": "본문 실패"})
+                continue
+            d = (_sm.judge_twice(p0, pair["q"]) if twice else _sm.judge(p0, pair["q"]))
+            out.append({"industry": pair["industry"], "label": t["lab"],
+                        "blog": t["blog"], "post": t["post"],
+                        "title": (p0.get("title") or "")[:60],
+                        "text_len": len(p0.get("text") or ""), **d})
+    return JSONResponse({"ok": True, "n": len(out), "rows": out,
+                         "note": "LLM 판정은 '인자 후보'까지다. 확정 인자로 쓰지 않는다. "
+                                 "불안정 항목은 값을 쓰지 않는다."})
+
+
 @app.get("/admin/coexpose/report")
 def admin_coexpose_report(limit: int = 200):
     """🏪 동시 노출 리포트 — 상업성 질의에서 플레이스·글이 함께 뜨는 구조(읽기 전용)."""
