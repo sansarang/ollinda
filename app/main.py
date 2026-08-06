@@ -1075,6 +1075,51 @@ def admin_coexpose_semantic(industry: str = "", q: str = "", region: str = "",
                                  "불안정 항목은 값을 쓰지 않는다."})
 
 
+@app.get("/admin/vacantq/candidates")
+def admin_vacantq_candidates(tid: str = "", limit: int = 24):
+    """🎯 빈 질문 후보 — 그 가게 재료로 만든다(검색은 안 한다, 빠름)."""
+    from app.services.vacantq import finder as _f, scan as _s
+    t = db.get_tenant(tid)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    mats = _f.materials(tid)
+    region = getattr(t, "region", "") or ""
+    ind = ((getattr(t, "industry", "") or "").replace("/", ",").split(",")[0] or "").strip()
+    works = _f.work_terms(mats, region)
+    cands = _f.candidates(mats, ind, limit=limit, region=region)
+    dem = _s.with_demand(cands)
+    return JSONResponse({"ok": True, "shop": getattr(t, "name", ""), "region": region,
+                         "materials": {"answers": len(mats["answers"]),
+                                       "titles": len(mats["titles"]),
+                                       "anchors": mats["anchors"][:8]},
+                         "work_terms": works,
+                         "n_candidates": len(dem["candidates"]),
+                         "dropped_no_demand": len(dem.get("dropped") or []),
+                         "demand_checked": dem.get("checked"),
+                         "volumes": dem.get("volumes"),
+                         "candidates": dem["candidates"][:limit],
+                         "note": dem.get("note")})
+
+
+@app.get("/admin/vacantq/scan")
+def admin_vacantq_scan(tid: str = "", limit: int = 8, offset: int = 0):
+    """🛰 빈자리 실측 — 후보를 실제로 검색해 답하는 글이 있는지 본다(느림)."""
+    from app.services.vacantq import finder as _f, scan as _s
+    t = db.get_tenant(tid)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    mats = _f.materials(tid)
+    region = getattr(t, "region", "") or ""
+    ind = ((getattr(t, "industry", "") or "").replace("/", ",").split(",")[0] or "").strip()
+    cands = _s.with_demand(_f.candidates(mats, ind, limit=40, region=region))["candidates"]
+    part = cands[offset:offset + limit]
+    if not part:
+        return JSONResponse({"ok": True, "n_vacant": 0, "note": "후보 없음"})
+    r = _s.scan(part, limit=limit)
+    return JSONResponse({"ok": True, "shop": getattr(t, "name", ""),
+                         "checked": len(part), **r})
+
+
 @app.get("/admin/rankorder/report")
 def admin_rankorder_report(limit: int = 2000):
     """📶 순위 서열 리포트 — 업종별 인자-순위 상관 + 교차 공통 단조 인자(읽기 전용)."""
