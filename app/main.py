@@ -1006,7 +1006,8 @@ def admin_scout_probe(kw: str = "부산 썬팅", blog: str = ""):
 
 
 @app.get("/admin/coexpose/semantic")
-def admin_coexpose_semantic(industry: str = "", limit_pairs: int = 2, twice: int = 1):
+def admin_coexpose_semantic(industry: str = "", q: str = "", region: str = "",
+                            limit_pairs: int = 2, twice: int = 1):
     """🧠 의미 계측 — 뽑힘/안뽑힘 쌍에 LLM 판정(서버에서만 돈다. 로컬엔 API 키가 없다).
 
     ★ 재현성 먼저(twice=1): 같은 글을 두 번 넣어 흔들리면 그 항목은 값을 쓰지 않는다.
@@ -1018,10 +1019,19 @@ def admin_coexpose_semantic(industry: str = "", limit_pairs: int = 2, twice: int
     from app import llm as _llm
     if _llm.credit_out():
         return JSONResponse({"ok": False, "error": "크레딧 소진 — 수집만 하고 판정 보류(R7)"})
-    try:
-        raw = [_j.loads(x) for x in open(_cc.RAW_PATH, encoding="utf-8") if x.strip()][-12:]
-    except Exception:
-        return JSONResponse({"ok": False, "error": "수집 원본 없음"}, status_code=404)
+    if q:                                   # 즉석 수집 — 서버 볼륨에 원본이 없을 때
+        got = _cc.collect([{"q": q, "industry": industry, "region": region}])
+        if got.get("blocked"):
+            return JSONResponse({"ok": False, "blocked": got["blocked"]})
+        raw = got["rows"]
+        if not raw:
+            return JSONResponse({"ok": False, "error": "수집 실패", "detail": got.get("failed")})
+    else:
+        try:
+            raw = [_j.loads(x) for x in open(_cc.RAW_PATH, encoding="utf-8") if x.strip()][-12:]
+        except Exception:
+            return JSONResponse({"ok": False, "error": "수집 원본 없음 — q= 로 즉석 수집하라"},
+                                status_code=404)
     pr = _ct.pairs_for(raw)
     pairs = [p for p in pr["pairs"] if not industry or p["industry"] == industry][:limit_pairs]
     if not pairs:
