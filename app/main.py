@@ -1220,6 +1220,23 @@ def admin_vacantq_purge(tid: str = "", dry: int = 1):
                                   if dry else "무관한 글감만 지웠다")})
 
 
+@app.get("/admin/kw-resolve")
+def admin_kw_resolve(tid: str = "", kw: str = "", ctype: str = "info"):
+    """(진단) 키워드 단일 관문을 실제로 돌려 본다 — 큐 키워드가 왜 바뀌는지."""
+    t = db.get_tenant(tid)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    from app.services.industry import resolve_industry as _ri
+    prof = _ri(getattr(t, "industry", "") or "")
+    kw0, kws = seo.resolve_target_keyword(
+        industry=(getattr(t, "industry", "") or prof.name), region=getattr(t, "region", "") or "",
+        note="", biz=(getattr(t, "biz_type", "local") or "local"), content_type=ctype,
+        brand=getattr(t, "brand_name", "") or "", keyword_axis="local",
+        target_kw_override=kw, tenant_id=tid, prof_name=prof.name)
+    return JSONResponse({"ok": True, "requested": kw, "resolved": kw0,
+                         "kept": kw0 == kw, "all": kws[:8]})
+
+
 @app.get("/admin/vacantq/why-held")
 def admin_vacantq_why_held(tid: str = "", limit: int = 3):
     """🔎 왜 보류됐나 — 게이트 체인 실패 사유를 payload에서 꺼낸다.
