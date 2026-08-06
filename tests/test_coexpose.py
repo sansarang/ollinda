@@ -118,3 +118,21 @@ def test_라벨은_인자에서_제외된다():
     import inspect
     from app.services.coexpose import pipeline as PP
     assert 'k != "picked"' in inspect.getsource(PP.analyze), "라벨이 인자에 들어간다"
+
+
+def test_실운영_업종은_수집_자체가_막힌다():
+    """썬팅·중고차는 사장님 실운영 업종이라 편향이 낀다 — 규율이 아니라 구조로 막는다."""
+    import inspect
+    from app.services.coexpose import scope as SC
+    assert SC.is_excluded("부산 동구 썬팅업체")
+    assert SC.is_excluded("", "자동차시공", "")
+    assert SC.is_excluded("부산 기장 중고차 추천")
+    assert not SC.is_excluded("강남 미용실 추천")
+    assert not SC.is_excluded("수원 영통 치과 추천")
+    ok, dropped = SC.filter_queries([{"q": "강남 미용실 추천", "industry": "미용"},
+                                     {"q": "부산 동구 썬팅업체", "industry": "자동차시공"}])
+    assert len(ok) == 1 and len(dropped) == 1
+    # 수집기가 실제로 이 필터를 탄다(존재가 아니라 사용)
+    src = inspect.getsource(C.collect)
+    assert "_sc.filter_queries" in src, "수집이 제외 규칙을 안 탄다"
+    assert "영구 제외" in src, "제외 사유를 안 남긴다"

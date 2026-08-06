@@ -16,10 +16,17 @@ RAW_PATH = os.environ.get("SHOPCAST_COEXPOSE_RAW", "") or os.path.join(_dr(), "c
 
 
 def collect(queries: list, show: bool = False) -> dict:
-    """queries: [{"q": 질의, "industry": 업종, "region": 지역}] — 업종·지역을 함께 남긴다."""
+    """queries: [{"q": 질의, "industry": 업종, "region": 지역}] — 업종·지역을 함께 남긴다.
+
+    ★ 사장님 실운영 업종(썬팅·중고차)은 수집 자체를 하지 않는다(scope). 규율이 아니라 구조로 막는다.
+    """
     from playwright.sync_api import sync_playwright
     from app.services.scout import session as _ss
+    from app.services.coexpose import scope as _sc
+    queries, _dropped = _sc.filter_queries(queries)
     rows, blocked, failed = [], None, []
+    for _d in _dropped:
+        failed.append({"q": str(_d), "error": "실운영 업종 — 영구 제외(업종 중립 보호)"})
     with sync_playwright() as p:
         b, pg = _ss.open_page(p, show)
         try:

@@ -72,3 +72,40 @@ def build(query: str, ranked_posts: list, limit_per_channel: int = 6) -> dict:
             "channels": channels, "skipped": skipped,
             "note": ("대조군은 같은 채널·같은 주제 글이다 — 채널 파워와 발행 이력이 "
                      "상수로 통제되므로 남는 차이가 구조다")}
+
+
+def pairs_for(rows: list, per_industry: int = 1, min_control: int = 1) -> dict:
+    """업종별 ②쌍 확보 — 같은 채널에서 뽑힘/안뽑힘이 **둘 다** 나오는 경우만.
+
+    ★ 확보 안 되는 업종은 억지로 다른 채널을 섞지 않는다 — 채널 통제가 깨지면 대조가 무의미하다.
+      '쌍 확보 실패'로 정직하게 남기고 그 업종은 뺀다.
+    """
+    from app.services.coexpose import scope as _sc
+    out, failed = [], []
+    for r in (rows or []):
+        ind = r.get("industry") or ""
+        if _sc.is_excluded(r.get("q"), ind):
+            failed.append({"industry": ind, "q": r.get("q"), "why": "실운영 업종 제외"})
+            continue
+        picked = [p for p in (r.get("posts") or []) if p.get("kind") == "blog"][:5]
+        if not picked:
+            failed.append({"industry": ind, "q": r.get("q"), "why": "블로그 상위 글 없음"})
+            continue
+        c = build(r["q"], picked)
+        got = 0
+        for ch in c["channels"]:
+            hi = [p for p in c["picked"] if p["blog"] == ch]
+            lo = [p for p in c["control"] if p["blog"] == ch]
+            if not hi or len(lo) < min_control:
+                continue
+            out.append({"industry": ind, "region": r.get("region"), "q": r["q"],
+                        "channel": ch, "picked": hi[:2], "control": lo[:3]})
+            got += 1
+            if got >= per_industry:
+                break
+        if not got:
+            failed.append({"industry": ind, "q": r.get("q"),
+                           "why": "같은 채널에서 뽑힘/안뽑힘 쌍이 안 나옴"})
+    return {"pairs": out, "failed": failed,
+            "industries": sorted({p["industry"] for p in out if p["industry"]}),
+            "note": "각 쌍은 같은 채널이라 채널 파워·발행 이력이 상수로 통제된다"}
