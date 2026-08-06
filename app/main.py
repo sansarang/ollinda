@@ -1060,6 +1060,16 @@ def admin_coexpose_semantic(industry: str = "", q: str = "", region: str = "",
                                  "불안정 항목은 값을 쓰지 않는다."})
 
 
+@app.get("/admin/coexpose/calibrate")
+def admin_coexpose_calibrate(q: str = "강남 미용실 추천"):
+    """🎚 판정 해상도 검증 — answer_fit이 도구인지 둔한 자인지 가른다."""
+    from app import llm as _llm
+    from app.services.coexpose import semantic as _sm
+    if _llm.credit_out():
+        return JSONResponse({"ok": False, "error": "크레딧 소진 — 보류(R7)"})
+    return JSONResponse({"ok": True, **_sm.calibrate(q)})
+
+
 @app.get("/admin/coexpose/report")
 def admin_coexpose_report(limit: int = 200):
     """🏪 동시 노출 리포트 — 상업성 질의에서 플레이스·글이 함께 뜨는 구조(읽기 전용)."""
