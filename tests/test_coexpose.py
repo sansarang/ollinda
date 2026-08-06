@@ -152,3 +152,15 @@ def test_지역이_다른_글은_대조군이_아니다():
     import inspect
     src = inspect.getsource(CT.build)
     assert "rt & tt" in src and "다른 지역" in src, "지역 불일치 글을 거르지 않는다"
+
+
+def test_업종이_다른_글도_대조군이_아니다():
+    """실측(2026-08-06): '강남 미용실 추천' 대조군에 '[강남 네일샵 추천]'이 섞였다.
+    '강남'+'추천' 두 토큰만으로 통과했다 — 상업 의도어는 어느 질의에나 붙어 주제를 못 가른다."""
+    from app.services.coexpose import control as CT
+    assert CT.topic_tokens("강남 미용실 추천", "강남") == {"미용실"}
+    assert CT.topic_tokens("대구 수성구 필라테스 가격", "대구 수성구") == {"필라테스"}
+    assert "추천" not in CT.topic_tokens("인천 송도 카페 추천", "인천 송도")
+    import inspect
+    src = inspect.getsource(CT.build)
+    assert "pt & tt" in src and "다른 업종" in src, "업종 불일치 글을 거르지 않는다"

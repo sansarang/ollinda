@@ -28,6 +28,27 @@ MIN_TOPIC_HIT = 2          # 질의 토큰이 이만큼 겹쳐야 '같은 주제
 #   → 질의의 지역 토큰이 제목에 살아 있는 글만 대조군에 넣는다.
 _REGION_TAIL = ("시", "군", "구", "동", "읍", "면", "역", "리")
 
+# ★ 2026-08-06 두 번째 대조군 결함: 지역은 맞췄는데 **업종**이 다른 글이 들어왔다.
+#   '강남 미용실 추천'의 대조군에 '[강남 네일샵 추천]'이 섞였다 —
+#   '강남'+'추천' 두 토큰만으로 '같은 주제' 판정을 통과한 것이다.
+#   상업 의도어는 어느 질의에나 붙는 말이라 주제를 가르지 못한다. 빼고 봐야 한다.
+INTENT_WORDS = ("추천", "가격", "비용", "후기", "순위", "잘하는곳", "잘하는", "베스트",
+                "위치", "예약", "문의", "저렴", "리뷰", "정보", "비교", "top", "TOP")
+
+
+def topic_tokens(query: str, region: str = "") -> set:
+    """질의에서 **주제(업종)**만 남긴다 — 지역어·의도어를 뺀 나머지.
+
+    이게 겹쳐야 '같은 주제'다. 지역과 의도어만 겹치는 글은 다른 업종일 수 있다.
+    """
+    rt = region_tokens(query, region)
+    out = set()
+    for t in _TOK.findall(query or ""):
+        if len(t) < 2 or t in rt or t in INTENT_WORDS:
+            continue
+        out.add(t)
+    return out
+
 
 def region_tokens(query: str, region: str = "") -> set:
     """대조군 판정에 쓸 지역 토큰.
@@ -88,13 +109,17 @@ def build(query: str, ranked_posts: list, limit_per_channel: int = 6,
             skipped.append({"blog": ch, "why": "RSS 없음/실패"})
             continue
         rt = region_tokens(query, region)
+        pt = topic_tokens(query, region)
         same = []
         for i in items:
             tt = _tokens(i["title"])
-            if len(qt & tt) < MIN_TOPIC_HIT:
-                continue
             # 질의에 지역이 있으면 그 지역이 제목에 살아 있어야 한다(다른 지역 글 배제)
             if rt and not (rt & tt):
+                continue
+            # ★ 주제(업종)가 겹쳐야 한다 — 지역+의도어만 겹치면 다른 업종이다
+            if pt and not (pt & tt):
+                continue
+            if not pt and len(qt & tt) < MIN_TOPIC_HIT:
                 continue
             same.append(i)
         cand = [i for i in same if (i["blog"], i["post"]) not in ranked_key]
