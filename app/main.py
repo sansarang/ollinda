@@ -1088,8 +1088,9 @@ def admin_vacantq_feed(tid: str = "", limit: int = 12, cap: int = 3):
     if not works:
         return JSONResponse({"ok": False, "error": "하는 일을 못 캤다(과거 글 부족)"})
     seeds = _sg.seeds_for(works, region, mats.get("anchors"))
+    from app.services.vacantq import domain as _dm
     cand = _sg.relevant([x for x in _sg.expand(seeds[:4], depth=2)["rows"] if x["depth"] == 2],
-                        works)                # 하는 일과 무관한 질문은 버린다
+                        works, _dm.declined(tid))   # 무관 + 사장님이 '안 한다'고 한 것 제외
     res = _sc.scan(cand[:limit], limit=limit)
     got = _fd.feed(tid, res["vacant"], cap=cap)
     return JSONResponse({"ok": True, "shop": getattr(t, "name", ""),
@@ -1133,6 +1134,33 @@ def admin_vacantq_runs(limit: int = 10):
         rows = []
     return JSONResponse({"ok": True, "n": len(rows), "runs": rows,
                          "note": "실행 기록이 없으면 야간 잡이 안 돈 것이다"})
+
+
+@app.get("/admin/vacantq/decline")
+def admin_vacantq_decline(tid: str = "", q: str = "", undo: str = ""):
+    """🙅 '저희는 안 합니다' — 한 번 누르면 그 계열이 이 가게에서 다시 안 나온다.
+
+    ★ 우리가 판정하지 않는다. 같은 질문이 어떤 가게엔 최고의 글감이다.
+    """
+    from app.services.vacantq import domain as _dm, finder as _fn
+    t = db.get_tenant(tid)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    if undo:
+        return JSONResponse(_dm.undo(tid, undo))
+    if not q:
+        return JSONResponse({"ok": True, "declined": _dm.declined_detail(tid)})
+    works = _fn.work_terms(_fn.materials(tid), getattr(t, "region", "") or "")
+    r = _dm.decline(tid, q, works)
+    # 큐에 이미 있으면 함께 뺀다 — 안 한다고 했는데 남아 있으면 안 된다
+    if r.get("ok"):
+        try:
+            with db._conn() as c:
+                c.execute("DELETE FROM writing_queue WHERE tenant_id=? AND source_type='vacant_q' "
+                          "AND target_keyword=?", (tid, q))
+        except Exception:
+            pass
+    return JSONResponse(r)
 
 
 @app.get("/admin/vacantq/purge")

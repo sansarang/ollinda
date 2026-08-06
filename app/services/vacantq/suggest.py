@@ -45,22 +45,18 @@ def fetch(seed: str, timeout: int = 15) -> list:
     return out
 
 
-# ★ 2026-08-06 실물: 주안모터스 글감에 '중고차사이트추천'·'믿을만한중고차사이트'가 들어갔다.
-#   이건 엔카·KB차차차 같은 **플랫폼을 찾는 사람**이지 기장에서 차를 사려는 손님이 아니다.
-#   지역 업체가 그 글을 써도 답이 될 수 없다 — 손님으로 이어지지 않는다.
-#   업종어가 아니라 '무엇을 찾는가'를 가르는 말이라 업종 중립이다.
-PLATFORM_SEEK = ("사이트", "앱", "어플", "플랫폼", "홈페이지", "카페", "커뮤니티",
-                 "순위", "랭킹", "top", "TOP", "비교사이트", "직거래", "중개")
-# 지역 업체가 답이 될 수 있는 질문인지 — 이 말이 있으면 플랫폼 탐색으로 본다
-_SEEK = None
+# ★ 2026-08-07 폐기: 'PLATFORM_SEEK'(사이트·앱·순위…)를 코드에 박았다가 뺐다.
+#   이상한 글감이 나올 때마다 필터를 추가하면 업종이 100개일 때 100번 고쳐야 한다
+#   (표면별 수정 금지 조항 위반 — 세 번 어겼다).
+#   더 근본적으로, 내가 나쁘다고 판정한 것 중 절대적으로 나쁜 건 하나도 없었다:
+#     '중고차할부' — 할부 전문 업체엔 최고의 글감
+#     '중고차사이트추천' — 플랫폼 회사엔 핵심
+#     '오늘 부산 날씨' — 캠핑장·펜션엔 진짜 손님 질문
+#   질문을 바꿔야 한다: "이 질문이 나쁜가"가 아니라 "이 가게가 답할 수 있는가"다.
+#   그건 사장님만 안다 — declined()가 그 답을 학습한다.
 
 
-def is_platform_seek(q: str) -> bool:
-    """플랫폼·앱·순위를 찾는 질문인가 — 지역 업체는 답이 될 수 없다."""
-    return any(w in (q or "") for w in PLATFORM_SEEK)
-
-
-def relevant(rows: list, work_terms: list) -> list:
+def relevant(rows: list, work_terms: list, declined: set = None) -> list:
     """★ 자동완성이 준 말이 **우리가 하는 일과 관련 있는가**.
 
     2026-08-06 사고: 씨앗에 '부산'이 섞여 '오늘 부산 날씨'가 글감 큐까지 갔다.
@@ -70,13 +66,18 @@ def relevant(rows: list, work_terms: list) -> list:
     ws = [w for w in (work_terms or []) if w]
     if not ws:
         return []
+    dc = {d for d in (declined or set()) if d}
     out = []
     for r in (rows or []):
         q = r.get("q") or ""
         if not any(w in q for w in ws):
             continue
-        if is_platform_seek(q):
-            continue                       # 플랫폼을 찾는 사람 — 우리 가게로 안 온다
+        # 사장님이 '안 합니다'라고 한 주제 — 그 가게에서만 빠진다(다른 가게엔 영향 없음).
+        # 계열 판정은 겹침으로 한다(우리가 계열어를 뽑지 않는다).
+        if dc:
+            from app.services.vacantq.domain import is_declined as _isd
+            if _isd(q, dc):
+                continue
         out.append(r)
     return out
 

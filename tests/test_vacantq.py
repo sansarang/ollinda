@@ -133,16 +133,19 @@ def test_시뮬레이션은_진짜_그_함수를_부른다():
         assert k in inspect.getsource(s._vacantq_nightly), f"기록 항목 누락: {k}"
 
 
-def test_플랫폼을_찾는_질문은_우리_글감이_아니다():
-    """실물 사고(2026-08-06): 주안모터스 글감에 '중고차사이트추천'이 들어갔다.
-    이건 엔카·KB차차차를 찾는 사람이지 기장에서 차를 사려는 손님이 아니다 —
-    지역 업체가 그 글을 써도 답이 될 수 없다."""
+def test_플랫폼_탐색을_코드가_판정하지_않는다():
+    """★ 2026-08-07 규율 변경: 이 질문들을 코드가 막았었는데 뺐다.
+    '중고차사이트추천'은 지역 매매상엔 무의미하지만 플랫폼 회사엔 핵심이다.
+    우리가 판정하면 업종마다 틀린다 — 사장님이 '안 합니다'를 누르면 그 가게에서만 빠진다."""
+    from app.services.vacantq import domain as D
     from app.services.vacantq import suggest as SG
-    rows = [{"q": "중고차사이트추천"}, {"q": "믿을만한중고차사이트"}, {"q": "중고차 순위"},
-            {"q": "중고차 앱 추천"}, {"q": "기장 중고차 시세"}, {"q": "중고차 실매물 확인"}]
-    got = [r["q"] for r in SG.relevant(rows, ["중고차"])]
-    assert got == ["기장 중고차 시세", "중고차 실매물 확인"], got
-    assert SG.is_platform_seek("중고차 비교사이트") and not SG.is_platform_seek("기장 중고차")
+    rows = [{"q": "중고차사이트추천"}, {"q": "기장 중고차 시세"}]
+    # 거절 학습이 없으면 둘 다 통과한다(코드가 미리 판정하지 않는다)
+    assert len(SG.relevant(rows, ["중고차"])) == 2
+    # 사장님이 한 번 누르면 그것만 빠진다
+    got = [r["q"] for r in SG.relevant(rows, ["중고차"], {"중고차사이트추천"})]
+    assert got == ["기장 중고차 시세"], got
+    assert not D.is_declined("기장 중고차 시세", {"중고차사이트추천"})
 
 
 def test_수치는_질문_씨앗이_아니다():
@@ -152,3 +155,42 @@ def test_수치는_질문_씨앗이_아니다():
     seeds = SG.seeds_for(["중고차"], "부산 기장", ["216km", "토레스", "30만원", "7km"])
     assert not [s for s in seeds if "km" in s or "만원" in s], seeds
     assert "토레스 중고차" in seeds
+
+
+def test_짐작으로_박은_필터를_뺐다():
+    """이상한 글감이 나올 때마다 코드에 필터를 추가하면 업종이 100개일 때 100번 고쳐야 한다.
+    내가 나쁘다고 판정한 것 중 절대적으로 나쁜 건 하나도 없었다 —
+    '중고차할부'는 할부 전문 업체엔 최고의 글감이고, '날씨'는 펜션엔 진짜 손님 질문이다."""
+    import inspect
+    from app.services.vacantq import suggest as SG
+    src = inspect.getsource(SG)
+    assert "PLATFORM_SEEK = (" not in src, "짐작 필터가 남아 있다"
+    assert not hasattr(SG, "is_platform_seek"), "짐작 판정 함수가 남아 있다"
+    assert "이 가게가 답할 수 있는가" in src, "왜 뺐는지 근거가 없다"
+
+
+def test_안_합니다_한_번이면_계열이_막힌다():
+    """'중고차할부이자율'만 막히고 '중고차할부금리'가 또 나오면 다시 묻게 된다."""
+    from app.services.vacantq import domain as D
+    dc = {"중고차할부이자율"}
+    assert D.is_declined("중고차할부금리", dc)
+    assert D.is_declined("신용불량중고차할부", dc)
+    assert not D.is_declined("기장 중고차 시세", dc), "정상 글감까지 막는다"
+    assert not D.is_declined("토레스 중고차 실매물", dc)
+    # ★ 계열어를 우리가 뽑지 않는다 — 그것도 우리 판정이다
+    src = inspect_src = __import__("inspect").getsource(D.decline)
+    assert "그대로 저장" in src, "저장할 때 계열을 우리가 정한다"
+
+
+def test_학습은_가게별이고_되돌릴_수_있다():
+    """다른 가게엔 영향이 없어야 하고, 잘못 눌렀으면 되돌려야 한다."""
+    import inspect
+    from app.services.vacantq import domain as D
+    src = inspect.getsource(D)
+    assert "tenant_id" in src and "PRIMARY KEY(tenant_id, word)" in src, "가게별이 아니다"
+    assert hasattr(D, "undo"), "되돌리기가 없다"
+    assert "from_query" in src, "무엇 때문에 배웠는지 안 남긴다"
+    # 두 경로가 모두 학습을 탄다(존재가 아니라 사용)
+    from app import main as m, scheduler as s
+    assert "_dm.declined(" in inspect.getsource(m.admin_vacantq_feed)
+    assert "_dm.declined(" in inspect.getsource(s._vacantq_nightly)
