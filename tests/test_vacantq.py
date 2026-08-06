@@ -194,3 +194,27 @@ def test_학습은_가게별이고_되돌릴_수_있다():
     from app import main as m, scheduler as s
     assert "_dm.declined(" in inspect.getsource(m.admin_vacantq_feed)
     assert "_dm.declined(" in inspect.getsource(s._vacantq_nightly)
+
+
+def test_사장님_화면에_글감이_뜬다():
+    """관리자 주소로만 되면 사장님은 못 본다 — 화면에 붙어야 기능이다."""
+    import inspect
+    from app import main as m
+    src = inspect.getsource(m)
+    assert "먼저 쓰면 좋은 이야기" in src, "글감 카드가 화면에 없다"
+    assert "_vq_html + upload_section" in src or "_vq_html" in src, "카드가 조립에 안 들어간다"
+    # 주방 용어 금지(CLAUDE.md) — 검색량·키워드·순위를 사장님께 보이지 않는다
+    card = src[src.index("먼저 쓰면 좋은 이야기") - 1200:src.index("먼저 쓰면 좋은 이야기") + 1200]
+    for w in ("검색량", "키워드", "순위", "상위노출"):
+        assert w not in card, f"주방 용어가 화면에 보인다: {w}"
+
+
+def test_안_해요_버튼이_사장님_권한으로_동작한다():
+    """관리자 비밀번호 없이 사장님이 직접 누를 수 있어야 한다."""
+    import inspect
+    from app import main as m
+    src = inspect.getsource(m.me_topic_decline)
+    assert "auth.current_user" in src, "로그인 확인이 없다"
+    assert "_ensure_user_tenant" in src, "가게를 안 특정한다"
+    assert "_dm.decline" in src and "DELETE FROM writing_queue" in src, "큐에서 안 뺀다"
+    assert "/me/topic-decline" in inspect.getsource(m), "화면 버튼이 이 경로를 안 부른다"

@@ -1136,6 +1136,30 @@ def admin_vacantq_runs(limit: int = 10):
                          "note": "실행 기록이 없으면 야간 잡이 안 돈 것이다"})
 
 
+@app.get("/me/topic-decline")
+def me_topic_decline(request: Request, q: str = ""):
+    """🙅 사장님이 '저희는 안 해요' — 그 계열이 이 가게에서 다시 안 나온다.
+
+    ★ 우리가 판정하지 않는다. 같은 질문이 어떤 가게엔 최고의 글감이다.
+    """
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"ok": False, "error": "로그인이 필요해요"}, status_code=401)
+    t = _ensure_user_tenant(u)
+    if not (q or "").strip():
+        return JSONResponse({"ok": False, "error": "주제가 비었어요"}, status_code=400)
+    from app.services.vacantq import domain as _dm
+    r = _dm.decline(t.id, q)
+    if r.get("ok"):
+        try:
+            with db._conn() as c:
+                c.execute("DELETE FROM writing_queue WHERE tenant_id=? AND source_type='vacant_q' "
+                          "AND target_keyword=?", (t.id, q))
+        except Exception:
+            pass
+    return JSONResponse(r)
+
+
 @app.get("/admin/vacantq/decline")
 def admin_vacantq_decline(tid: str = "", q: str = "", undo: str = ""):
     """🙅 '저희는 안 합니다' — 한 번 누르면 그 계열이 이 가게에서 다시 안 나온다.
@@ -4902,6 +4926,36 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                            "발행 여부 자동 확인 + 내 블로그 순위 추적이 정확해져요. (공개 RSS만 사용)</div>"
                            "<a href='/me#blog' class='flex-shrink-0 bg-emerald-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-emerald-700 transition'>연결하기</a></div>")
         # 🔔 앱내 알림(발행 리마인더 등) — 보여주고 읽음 처리
+        # 🎯 빈자리 글감 카드(2026-08-07) — 아무도 안 쓴 질문을 사장님 화면에 올린다.
+        #   주방 용어 금지: '검색량·키워드·순위' 대신 '이 질문에 답한 글이 아직 없어요'로 말한다.
+        #   '저희는 안 해요'를 누르면 그 계열이 이 가게에서 다시 안 나온다(가게별 학습).
+        _vq_html = ""
+        try:
+            _vq = [r for r in (db.writing_queue_rows(t.id, status="pending", limit=20) or [])
+                   if (r.get("source_type") or "") == "vacant_q"][:3]
+            if _vq:
+                _items = "".join(
+                    "<div class='flex items-start gap-3 py-3 border-b border-slate-100 last:border-0'>"
+                    "<div class='flex-1 min-w-0'>"
+                    f"<div class='font-bold text-slate-800 text-sm'>{esc(r.get('target_keyword') or '')}</div>"
+                    "<div class='text-xs text-slate-400 mt-0.5'>아직 이 질문에 답한 글이 없어요</div></div>"
+                    "<button onclick=\"vqNo(this,'" + esc((r.get('target_keyword') or '').replace("'", "")) + "')\" "
+                    "class='flex-shrink-0 text-xs text-slate-400 hover:text-rose-500 px-2 py-1'>저희는 안 해요</button>"
+                    "</div>" for r in _vq)
+                _vq_html = (
+                    "<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-6 mb-6'>"
+                    "<div class='flex items-center gap-2 mb-1'>"
+                    "<span class='text-indigo-500'>" + _ic("target", "w-5 h-5") + "</span>"
+                    "<h3 class='font-extrabold text-slate-900'>먼저 쓰면 좋은 이야기</h3></div>"
+                    "<p class='text-sm text-slate-400 mb-3'>손님들이 찾는데 아직 답이 없는 것들이에요. "
+                    "사진만 올리시면 저희가 씁니다.</p>"
+                    f"<div>{_items}</div></div>"
+                    "<script>async function vqNo(btn,q){btn.disabled=true;btn.textContent='빼는 중…';"
+                    "try{await fetch('/me/topic-decline?q='+encodeURIComponent(q));"
+                    "btn.closest('div.flex.items-start').remove();}catch(e){btn.textContent='실패';}}"
+                    "</script>")
+        except Exception:
+            _vq_html = ""                      # 카드 실패가 화면을 막지 않는다
         _notices = db.unread_notices(t.id)
         _notice_html = ""
         if _notices:
@@ -4913,7 +4967,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 for n in _notices[:2])
             db.mark_notices_read(t.id)
         if _made_html:
-            main_inner = _made_html + upload_section
+            main_inner = _made_html + _vq_html + upload_section
         else:
             # '오늘 할 일'은 브리핑 카드 하나로 통합(온보딩 P3) — 기존 '오늘의 액션'(_daily_action)
             # 카드는 브리핑과 중복이라 제거. 신규 사장님은 시작 가이드가 다음 할 일을 안내.
