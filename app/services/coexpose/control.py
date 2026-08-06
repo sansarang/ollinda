@@ -21,6 +21,27 @@ import urllib.request
 _TOK = re.compile(r"[가-힣A-Za-z0-9]+")
 MIN_TOPIC_HIT = 2          # 질의 토큰이 이만큼 겹쳐야 '같은 주제'로 본다
 
+# ★ 2026-08-06 실측 결함: '같은 주제' 판정이 느슨해 **지역이 다른 글**이 대조군에 들어왔다.
+#   질의 '강남 미용실 추천'의 대조군에 '[경기] 삼송 원흥 미용실 추천'이 섞였다.
+#   지역이 다르면 애초에 뽑힐 수 없다 — 그건 '안 뽑힌 글'이 아니라 '해당 없는 글'이다.
+#   대조군에 넣으면 "적합도 0"이 당연히 나와 인자가 있는 것처럼 보인다(가짜 신호).
+#   → 질의의 지역 토큰이 제목에 살아 있는 글만 대조군에 넣는다.
+_REGION_TAIL = ("시", "군", "구", "동", "읍", "면", "역", "리")
+
+
+def region_tokens(query: str, region: str = "") -> set:
+    """대조군 판정에 쓸 지역 토큰.
+
+    ★ 질의에서 추측하지 않는다. '강남'은 접미사 규칙으로 못 잡히고,
+      추측하면 지역 없는 질의에서 업종어를 지역으로 오인한다.
+      수집할 때 이미 region을 함께 넘기고 있으니 **그 실값을 쓴다**(추측 금지).
+      region이 없을 때만 접미사 규칙으로 보조한다.
+    """
+    if region:
+        return {t for t in _TOK.findall(region) if len(t) >= 2}
+    return {t for t in _TOK.findall(query or "")
+            if len(t) >= 2 and t[-1] in _REGION_TAIL}
+
 
 def _tokens(s: str) -> set:
     return {t for t in _TOK.findall(s or "") if len(t) >= 2}
@@ -46,7 +67,8 @@ def rss_items(blog: str, timeout: int = 20) -> list:
     return out
 
 
-def build(query: str, ranked_posts: list, limit_per_channel: int = 6) -> dict:
+def build(query: str, ranked_posts: list, limit_per_channel: int = 6,
+          region: str = "") -> dict:
     """뽑힌 글 / 안 뽑힌 글을 가른다.
 
     ranked_posts: 그 질의 결과에 실제로 등장한 글 [{blog, post, title}]
@@ -65,7 +87,16 @@ def build(query: str, ranked_posts: list, limit_per_channel: int = 6) -> dict:
         if not items:
             skipped.append({"blog": ch, "why": "RSS 없음/실패"})
             continue
-        same = [i for i in items if len(qt & _tokens(i["title"])) >= MIN_TOPIC_HIT]
+        rt = region_tokens(query, region)
+        same = []
+        for i in items:
+            tt = _tokens(i["title"])
+            if len(qt & tt) < MIN_TOPIC_HIT:
+                continue
+            # 질의에 지역이 있으면 그 지역이 제목에 살아 있어야 한다(다른 지역 글 배제)
+            if rt and not (rt & tt):
+                continue
+            same.append(i)
         cand = [i for i in same if (i["blog"], i["post"]) not in ranked_key]
         control += cand[:limit_per_channel]
     return {"query": query, "picked": picked, "control": control,
@@ -91,7 +122,7 @@ def pairs_for(rows: list, per_industry: int = 1, min_control: int = 1) -> dict:
         if not picked:
             failed.append({"industry": ind, "q": r.get("q"), "why": "블로그 상위 글 없음"})
             continue
-        c = build(r["q"], picked)
+        c = build(r["q"], picked, region=r.get("region") or "")
         got = 0
         for ch in c["channels"]:
             hi = [p for p in c["picked"] if p["blog"] == ch]

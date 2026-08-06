@@ -136,3 +136,19 @@ def test_실운영_업종은_수집_자체가_막힌다():
     src = inspect.getsource(C.collect)
     assert "_sc.filter_queries" in src, "수집이 제외 규칙을 안 탄다"
     assert "영구 제외" in src, "제외 사유를 안 남긴다"
+
+
+def test_지역이_다른_글은_대조군이_아니다():
+    """실측(2026-08-06): '강남 미용실 추천' 대조군에 '[경기] 삼송 원흥 미용실 추천'이 섞였다.
+    지역이 다르면 애초에 뽑힐 수 없다 — '안 뽑힌 글'이 아니라 '해당 없는 글'이다.
+    넣으면 적합도 0이 당연히 나와 인자가 있는 것처럼 보인다(가짜 신호)."""
+    from app.services.coexpose import control as CT
+    # ★ 질의에서 추측하지 않는다 — 수집 때 넘긴 region 실값을 쓴다
+    assert CT.region_tokens("강남 미용실 추천", "강남") == {"강남"}
+    assert CT.region_tokens("대구 수성구 필라테스 가격", "대구 수성구") == {"대구", "수성구"}
+    assert CT.region_tokens("썬팅 필름 종류") == set(), "지역 없는 질의에 지역을 만든다"
+    import inspect as _i
+    assert "region" in _i.signature(CT.build).parameters, "지역 실값을 안 받는다"
+    import inspect
+    src = inspect.getsource(CT.build)
+    assert "rt & tt" in src and "다른 지역" in src, "지역 불일치 글을 거르지 않는다"
