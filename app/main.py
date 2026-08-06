@@ -1220,6 +1220,34 @@ def admin_vacantq_purge(tid: str = "", dry: int = 1):
                                   if dry else "무관한 글감만 지웠다")})
 
 
+@app.get("/admin/vacantq/retrack")
+def admin_vacantq_retrack(tid: str = "", dry: int = 1):
+    """🔀 이미 큐에 있는 빈자리 글감을 정보 글 경로(info)로 옮긴다.
+
+    ★ 라우팅 수정은 '앞으로 넣는 것'에만 걸린다. 이미 들어간 것은 그대로 트랙 A라
+      시공기가 또 나온다 — 실물 사고를 한 번 더 낼 자리다.
+    """
+    if not db.get_tenant(tid):
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    rows, changed = [], 0
+    with db._conn() as c:
+        for r in c.execute("SELECT id, target_keyword, content_type FROM writing_queue "
+                           "WHERE tenant_id=? AND source_type='vacant_q' AND status='pending'",
+                           (tid,)).fetchall():
+            if (r["content_type"] or "sell") == "info":
+                continue
+            rows.append({"id": r["id"], "keyword": r["target_keyword"],
+                         "from": r["content_type"] or "sell"})
+            if not dry:
+                try:
+                    c.execute("UPDATE writing_queue SET content_type='info' WHERE id=?", (r["id"],))
+                    changed += 1
+                except Exception:
+                    pass
+    return JSONResponse({"ok": True, "to_fix": rows, "changed": changed,
+                         "note": "dry=1은 판정만. dry=0으로 실제 변경."})
+
+
 @app.get("/admin/vacantq/seal")
 def admin_vacantq_seal(asset_id: str = "", q: str = ""):
     """🔒 빈자리 글감으로 만든 글이 그 질문에 답하는지 검사하고, 어긋나면 발행을 막는다."""
