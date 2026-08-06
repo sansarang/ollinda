@@ -66,6 +66,10 @@ def start() -> None:
         #     아침 생성을 죽이는 것이 면역계가 만드는 새 사고다.
         sch.add_job(_immune_nightscan, "cron", hour=3, minute=0,
                     id="immune_nightscan", replace_existing=True)
+        # 🎯 빈 질문 선점(2026-08-06) — 새벽 5시. 지면 정찰(4시) 뒤, 빈자리 판정(6시) 앞.
+        #   빈자리는 시간이 지나면 남이 채운다 — 주기적으로 다시 훑어야 의미가 있다.
+        sch.add_job(_vacantq_nightly, "cron", hour=5, minute=0,
+                    id="vacantq_nightly", replace_existing=True)
         # 🧹 디스크 정리(2026-08-03) — 원본은 R2에 영구 보존되고 로컬은 캐시다. 새벽에 오래된 미디어 정리.
         sch.add_job(_disk_prune, "cron", hour=4, minute=40,
                     id="disk_prune_daily", replace_existing=True)
@@ -187,6 +191,46 @@ def _immune_nightscan() -> None:
             len(r.get("diagnoses") or []), "" if ok else " (크레딧 없음 — 탐지만)")
     except Exception:
         logging.exception("[scheduler] 면역 야간 스캔 실패")
+
+
+def _vacantq_nightly() -> None:
+    """🎯 빈 질문 훑기 — 실수요 질문 중 아직 답이 없는 자리를 찾아 글감 큐로.
+
+    ★ 사장님은 사진만 올리면 된다. 목록만 만들면 제목을 옮겨 적어야 해서 노동이 는다.
+    ★ 선점 검증도 함께 — 우리가 쓴 뒤 실제로 뜨는지 봐야 '쓰면 뜬다'가 검증된다.
+    """
+    try:
+        from app import config as _cfg
+        from app import db as _db
+        from app.services.vacantq import feed as _fd, finder as _fn
+        from app.services.vacantq import scan as _sc, suggest as _sg
+        for tid in _cfg.PRODUCTION_TENANTS:
+            t = _db.get_tenant(tid)
+            if not t:
+                continue
+            mats = _fn.materials(tid)
+            works = _fn.work_terms(mats, getattr(t, "region", "") or "")
+            if not works:
+                logging.getLogger("shopcast.vacantq").info(
+                    "[vacantq] %s — 하는 일을 못 캤다(과거 글 부족). 건너뜀", tid[:8])
+                continue
+            seeds = _sg.seeds_for(works, getattr(t, "region", "") or "", mats.get("anchors"))
+            cand = [x for x in _sg.expand(seeds[:4], depth=2)["rows"] if x["depth"] == 2]
+            res = _sc.scan(cand[:12], limit=12)
+            got = _fd.feed(tid, res["vacant"])
+            logging.getLogger("shopcast.vacantq").info(
+                "[vacantq] %s — 실수요 %d · 빈자리 %d · 큐 편입 %d%s",
+                tid[:8], len(cand), res["n_vacant"], got["n_added"],
+                " (차단)" if res.get("blocked") else "")
+            try:
+                v = _fd.verify_claims(tid)
+                if v.get("checked"):
+                    logging.getLogger("shopcast.vacantq").info(
+                        "[vacantq] 선점 검증 %d건 중 %d건 떴다", v["checked"], v["won"])
+            except Exception:
+                logging.exception("[vacantq] 선점 검증 실패")
+    except Exception:
+        logging.exception("[scheduler] 빈 질문 훑기 실패")
 
 
 def _rss_autosync() -> None:

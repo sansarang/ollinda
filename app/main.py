@@ -1075,6 +1075,42 @@ def admin_coexpose_semantic(industry: str = "", q: str = "", region: str = "",
                                  "불안정 항목은 값을 쓰지 않는다."})
 
 
+@app.get("/admin/vacantq/feed")
+def admin_vacantq_feed(tid: str = "", limit: int = 12, cap: int = 3):
+    """🎯 빈자리 찾아 글감 큐로 — 사장님은 사진만 올리면 된다."""
+    from app.services.vacantq import feed as _fd, finder as _fn, scan as _sc, suggest as _sg
+    t = db.get_tenant(tid)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    mats = _fn.materials(tid)
+    region = getattr(t, "region", "") or ""
+    works = _fn.work_terms(mats, region)
+    if not works:
+        return JSONResponse({"ok": False, "error": "하는 일을 못 캤다(과거 글 부족)"})
+    seeds = _sg.seeds_for(works, region, mats.get("anchors"))
+    cand = [x for x in _sg.expand(seeds[:4], depth=2)["rows"] if x["depth"] == 2]
+    res = _sc.scan(cand[:limit], limit=limit)
+    got = _fd.feed(tid, res["vacant"], cap=cap)
+    return JSONResponse({"ok": True, "shop": getattr(t, "name", ""),
+                         "work_terms": works, "n_demand": len(cand),
+                         "n_vacant": res["n_vacant"], "n_taken": res["n_taken"],
+                         "vacant": [{"q": v["q"], "top": (v.get("top_titles") or [])[:2]}
+                                    for v in res["vacant"]],
+                         "queued": got["added"], "skipped": got["skipped"],
+                         "blocked": res.get("blocked")})
+
+
+@app.get("/admin/vacantq/claims")
+def admin_vacantq_claims(tid: str = "", verify: int = 0):
+    """🏁 선점 검증 — 우리가 쓴 뒤 그 질문에서 실제로 뜨는지."""
+    from app.services.vacantq import feed as _fd
+    if not db.get_tenant(tid):
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    if verify:
+        return JSONResponse({"ok": True, **_fd.verify_claims(tid)})
+    return JSONResponse({"ok": True, "claims": _fd.claims(tid)})
+
+
 @app.get("/admin/vacantq/candidates")
 def admin_vacantq_candidates(tid: str = "", limit: int = 24):
     """🎯 빈 질문 후보 — 그 가게 재료로 만든다(검색은 안 한다, 빠름)."""

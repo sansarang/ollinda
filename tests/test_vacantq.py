@@ -57,3 +57,45 @@ def test_차단되면_멈춘다():
     src = inspect.getsource(S.scan)
     assert "Blocked" in src and "break" in src
     assert "retry" not in src.lower()
+
+
+def test_빈자리는_글감_큐로_이어진다():
+    """목록만 나오면 사장님이 제목을 옮겨 적어야 한다 — 그럼 노동이 는다."""
+    import inspect
+    from app.services.vacantq import feed as FD
+    src = inspect.getsource(FD.feed)
+    assert "enqueue_writing" in src, "큐에 안 넣는다"
+    assert "reason" in src and "top_titles" in src, "왜 빈자리인지 근거를 안 남긴다"
+    assert "cap" in src, "주당 상한이 없다(큐가 넘치면 안 본다)"
+
+
+def test_같은_질문을_두_번_쓰지_않는다():
+    """우리 글끼리 부딪힌다."""
+    import inspect
+    from app.services.vacantq import feed as FD
+    assert "already_ours" in inspect.getsource(FD.feed)
+    src = inspect.getsource(FD.already_ours)
+    assert "blog_id" in src and "writing_queue_rows" in src
+
+
+def test_선점_검증이_가설을_자동으로_확인한다():
+    """'빈 자리에 쓰면 뜬다'가 맞는지 따로 실험할 필요가 없어야 한다."""
+    import inspect
+    from app.services.vacantq import feed as FD
+    src = inspect.getsource(FD.verify_claims)
+    assert "our_rank" in src and "선점 성공" in src
+    assert "days" in src, "며칠 지났는지를 안 본다"
+    assert "PLACE_JS" in src, "공통 파서를 안 쓴다"
+    # 시도 기록이 남아야 나중에 대조할 수 있다
+    assert "was_vacant" in inspect.getsource(FD._claim)
+
+
+def test_야간에_다시_훑는다():
+    """빈자리는 시간이 지나면 남이 채운다."""
+    import inspect
+    from app import scheduler as S
+    src = inspect.getsource(S)
+    assert 'id="vacantq_nightly"' in src, "야간 실행이 등록되지 않았다"
+    job = inspect.getsource(S._vacantq_nightly)
+    assert "feed" in job and "verify_claims" in job, "훑기만 하고 큐·검증을 안 한다"
+    assert "PRODUCTION_TENANTS" in job, "실계정 대상이 아니다"
