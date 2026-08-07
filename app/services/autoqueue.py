@@ -581,7 +581,10 @@ def consume(t, files: list | None = None, plan: str = "free", only_id: int = 0,
                 if _att >= 2:                            # 재생성 상한(2회) 도달 — 전 체인 미통과
                     break
                 try:
-                    revise_piece(p, _cf[0][1])           # 첫 실패 사유로 재생성 → 다음 루프에서 전 체인 재검사
+                    # ★ 첫 사유만 실으면 재생성이 다른 게이트 요구를 모른 채 다시 써서 그 게이트를
+                    #   깨뜨린다(2026-08-07 실측: honesty만 싣고 돌린 뒤 G1 1/7). 실패한 전 게이트의
+                    #   지시를 함께 싣는다 → 다음 루프에서 전 체인 재검사.
+                    revise_piece(p, "\n\n".join(dict.fromkeys(c[1] for c in _cf)))
                 except Exception:
                     _log.exception("[autoqueue] 체인 재생성 실패 t=%s", t.id)
             if not _chain_ok:                            # 상한 후에도 미통과 → 보류 + 사유 안내(발행 안 함)

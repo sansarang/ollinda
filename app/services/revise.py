@@ -22,10 +22,19 @@ def revise_piece(piece: ContentPiece, instruction: str) -> ContentPiece:
     p = piece.payload
 
     if piece.kind == ContentKind.BLOG:
+        # ★ 재생성도 트랙 계약을 안다(2026-08-07 실측): 트랙 B 글을 honesty 지시만으로 다시 쓰자
+        #   GEO 구조가 무너졌다(최종 G1 1/7). 한 게이트를 고치는 수정이 다른 게이트를 깨면 안 된다 —
+        #   생성(info_prompt)과 같은 자가 점검 한 덩이를 싣는다(같은 재료는 같은 소스).
+        _track_rule = ""
+        if (p.get("content_type") or "") == "info":
+            from app.services import geo_track as _geo
+            _track_rule = ("\n[트랙 B(정보 글) 구조 계약 — 수정 후에도 반드시 유지]\n"
+                           + _geo.SELF_CHECK)
         cur = f"[제목]\n{p.get('title','')}\n[본문]\n{p.get('body','')}"
         prompt = (f"[가게] {gname} ({prof.name})\n[페르소나] {prof.persona}\n"
                   f"[기존 블로그 글]\n{cur}\n\n[사용자 수정 지시] {instruction}\n\n"
-                  f"{seo.FACTS_RULE}\n{seo.BLOG_DIRECTIVES}\n\n수정 지시를 반영해 다시 써라. 형식 그대로:\n"
+                  f"{seo.FACTS_RULE}\n{seo.BLOG_DIRECTIVES}\n{_track_rule}\n"
+                  "수정 지시를 반영해 다시 써라. 형식 그대로:\n"
                   "[제목]\n..\n[메타설명]\n..\n[본문]\n..\n[키워드]\n..")
         raw = _call_llm(prompt, MODEL, 3000)
         d = _parse_sections(raw, ["제목", "메타설명", "본문", "키워드"])
