@@ -413,8 +413,11 @@ def _existing_kw_set(t) -> set:
 
 
 def photo_pool(t) -> list:
-    """재사용 가능한 최근 사진 세트 — 로컬 소실 시 R2 미러에서 복원(설계상 원본은 R2 영구).
-    로컬 캐시만 비었을 뿐 사진은 R2에 있으므로 '사진 없음' 오판 금지(regen-naver와 동일 복원 경로)."""
+    """최근 사진 세트 조회 — 로컬 소실 시 R2 미러에서 복원(설계상 원본은 R2 영구).
+    로컬 캐시만 비었을 뿐 사진은 R2에 있으므로 '사진 없음' 오판 금지(regen-naver와 동일 복원 경로).
+
+    ★ 생성 소비 경로에서 쓰지 마라(2026-08-07 사장님 지시) — 옛 사진 재사용으로 새 글을 쓰면
+      주지 않은 사진이 글의 내용을 결정한다. 허용 용도는 진단·실측(admin gen-pool 등)과 복원뿐."""
     from app.domain.models import ContentKind as _CK
     # ★ '가장 최근'이 아니라 '최근 중 가장 많은' 세트를 고른다(2026-08-02 실사고 후속).
     #   사고로 4장짜리 세트가 한 번 만들어지면 그게 최신이 되고, 그걸로 만든 다음 세트도 4장이라
@@ -476,8 +479,8 @@ def _schedule_date(t) -> str:
 
 def consume(t, files: list | None = None, plan: str = "free", only_id: int = 0,
             allow_done: bool = False) -> dict:
-    """큐 1건 소비 → 글 생성. files 없으면 photo_pool 재사용, 그것도 없으면 need_photos.
-    반환 {ok, made?, keyword?, source?, need_photos?, empty?}.
+    """큐 1건 소비 → 글 생성. 사진(files)이 명시로 오지 않으면 need_photos로 멈춘다
+    (옛 사진 재사용 금지 — 2026-08-07). 반환 {ok, made?, keyword?, source?, need_photos?, empty?}.
     only_id: 특정 글감을 지목해 뽑는다(운영 진단 전용 — 평소 소비 순서는 그대로)."""
     from app.domain.models import AssetType, ContentKind
     from app.industries import resolve_industry
@@ -491,7 +494,11 @@ def consume(t, files: list | None = None, plan: str = "free", only_id: int = 0,
     if files:
         paths = [storage.save_upload(data, name or "p.jpg", t.id) for data, name in files]
     else:
-        paths = photo_pool(t)
+        # ★ 옛 사진 재사용 금지(2026-08-07 사장님 지시): photo_pool 폴백이 과거 세트의 사진으로
+        #   글을 썼다 — 생성기는 사진 내용대로 쓰므로, 주지 않은 사진이 글의 내용을 결정했다.
+        #   사진이 명시로 오지 않으면 글을 만들지 않는다(need_photos) — 유일한 정직한 경로.
+        _log.info("[autoqueue] 사진 미제공 → 생성 보류(옛 사진 재사용 금지) t=%s", t.id)
+        return {"ok": False, "need_photos": True}
     if not paths:
         return {"ok": False, "need_photos": True}
     existing = _existing_kw_set(t)
@@ -635,8 +642,10 @@ def state(t) -> dict:
             if it.get("piece_id") and it.get("status") in ("ready", "needs_fix") \
                     and not db.get_blog_publish(it["piece_id"]):
                 ready_unpub += 1
+    # 옛 사진 재사용 금지(2026-08-07) — 과거 세트 사진은 더 이상 '재료 있음'이 아니다.
+    #   글감이 있고 준비 글이 없으면 새 사진이 필요하다고 정직하게 말한다.
     return {"pending": pending, "ready_unpub": ready_unpub,
-            "need_photos": bool(pending and not ready_unpub and not photo_pool(t))}
+            "need_photos": bool(pending and not ready_unpub)}
 
 
 def slot_fill_all() -> None:
@@ -657,8 +666,7 @@ def slot_fill_all() -> None:
             # 하루 1회 잡이라 tenant당 최대 1글/일 생성은 그대로(비용 가드).
             if st["ready_unpub"] >= 2 or not st["pending"]:
                 continue
-            if not photo_pool(t):
-                continue                              # 사진 없으면 홈 need_photos 상태로만
+            # 옛 사진 재사용 금지(2026-08-07) — 사진 판정은 consume이 한다(미제공이면 need_photos로 멈춤)
             consume(t, None, u.get("plan") or "free")   # 하루 1회 잡 — tenant당 최대 1글
         except Exception:
             _log.exception("[autoqueue] slot_fill 실패 t=%s", tid)

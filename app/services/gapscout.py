@@ -298,11 +298,9 @@ WEEKLY_CAP = 2            # 주 N건 상한 — 빈자리가 큐를 삼키면 �
 def _materials(tenant_id: str) -> dict:
     """이 글을 쓰려면 무엇이 더 필요한가 — 사장님께 그대로 보여줄 말로 만든다."""
     photos, exp = 0, 0
-    try:
-        from app.services.autoqueue import photo_pool
-        photos = len(photo_pool(db.get_tenant(tenant_id)) or [])
-    except Exception:
-        pass
+    # ★ 옛 사진 재사용 금지(2026-08-07 사장님 지시) — 과거 세트 사진(photo_pool)을 '재료 있음'으로
+    #   세면, 글감은 들어가는데 소비는 need_photos로 멈춰 사장님껜 아무 일도 안 일어난다.
+    #   새 글의 사진은 새로 받는다 — 여기서는 항상 '사진 필요'로 정직하게 안내한다.
     try:
         exp = len(db.list_owner_experience(tenant_id, limit=5) or [])
     except Exception:
