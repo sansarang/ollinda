@@ -10,7 +10,7 @@ import os
 import logging
 import sqlite3
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from app.domain.models import (Asset, AssetType, Channel, ChannelAccount,
@@ -1943,26 +1943,93 @@ def info_track_count_since(tenant_id: str, days: int = 7) -> int:
         return 0
 
 
+CLAIM_STALE_SEC = 1800   # 생성 실측 4~9분의 3배+ — 이보다 오래 심박 없는 generating은 죽은 잡
+
+
+def release_dead_claims(tenant_id: str = "", stale_sec: int = CLAIM_STALE_SEC) -> int:
+    """죽은 잡은 스스로 말하지 못한다 — 시간 기준 자동 해제(2026-08-07 실사고).
+
+    배포가 queue-gen 생성을 죽이면 행이 'generating'으로 영구 고착됐다(qid 2599).
+    심박(claimed_at)이 stale_sec 넘게 없으면 회수한다 — attempts+1, 상한이면 skipped
+    (rollback_writing과 같은 폭주 방지 규칙). 사유를 남긴다(침묵 폴백 금지)."""
+    cutoff = (datetime.utcnow() - timedelta(seconds=stale_sec)).isoformat()
+    try:
+        with _conn() as c:
+            try:
+                c.execute("ALTER TABLE writing_queue ADD COLUMN claimed_at TEXT")
+            except Exception:
+                pass                                  # 이미 존재
+            _t = "AND tenant_id=? " if tenant_id else ""
+            args = ([tenant_id] if tenant_id else []) + [cutoff]
+            rows = c.execute("SELECT id FROM writing_queue WHERE status='generating' "
+                             f"{_t}AND (claimed_at IS NULL OR claimed_at < ?)", args).fetchall()
+            for r in rows:
+                c.execute("UPDATE writing_queue SET attempts=attempts+1, claimed_at=NULL, "
+                          "status=CASE WHEN attempts+1 >= 3 THEN 'skipped' ELSE 'pending' END, "
+                          "reason=substr(COALESCE(reason,''),1,400) || ' | 자동 해제: 죽은 생성 잡(심박 없음)' "
+                          "WHERE id=?", (r["id"],))
+        if rows:
+            logging.getLogger("shopcast.db").warning(
+                "[writing_queue] 죽은 생성 잡 %d건 자동 해제 qids=%s", len(rows), [r["id"] for r in rows])
+        return len(rows)
+    except Exception:
+        logging.getLogger("shopcast.db").exception("[writing_queue] 죽은 잡 해제 실패")
+        return 0
+
+
+def stuck_generating(fresh_sec: int = CLAIM_STALE_SEC) -> dict:
+    """배포 전 점검용 — 진행 중(generating) 큐 생성 잡을 신선/유령으로 가른다.
+
+    ★ busy 사각(2026-08-07 실사고): queue-gen 생성은 gen_progress를 안 찍어
+      /admin/busy가 못 봤고, safe-push가 통과해 배포가 생성을 죽였다.
+      신선(fresh)=배포 차단 대상, 유령(stale)=다음 claim 때 자동 해제될 죽은 잡."""
+    cutoff = (datetime.utcnow() - timedelta(seconds=fresh_sec)).isoformat()
+    out = {"fresh": [], "stale": []}
+    try:
+        with _conn() as c:
+            try:
+                rows = c.execute(
+                    "SELECT w.id, w.tenant_id, w.target_keyword, w.claimed_at, t.name AS tenant "
+                    "FROM writing_queue w LEFT JOIN tenants t ON t.id=w.tenant_id "
+                    "WHERE w.status='generating'").fetchall()
+            except Exception:
+                return out                            # claimed_at 컬럼 미존재(구DB) → 판단 불가
+        for r in rows:
+            ca = r["claimed_at"]
+            try:
+                idle = (datetime.utcnow() - datetime.fromisoformat(ca)).total_seconds() if ca else None
+            except Exception:
+                idle = None
+            item = {"qid": r["id"], "tenant": r["tenant"] or r["tenant_id"],
+                    "keyword": r["target_keyword"], "idle_sec": round(idle) if idle is not None else None}
+            (out["fresh"] if (ca and ca >= cutoff) else out["stale"]).append(item)
+    except Exception:
+        logging.getLogger("shopcast.db").exception("[writing_queue] generating 점검 실패")
+    return out
+
+
 def claim_writing(tenant_id: str, only_id: int = 0, allow_done: bool = False) -> Optional[dict]:
     """pending 1건을 P1→P2→P3→P4 순으로 원자적 클레임(status→generating).
     UPDATE ... RETURNING(SQLite 3.35+) — 동시 요청에도 이중 소비 없음.
 
     only_id를 주면 그 행만 클레임한다(운영 진단 — 특정 글감을 지목해 뽑아볼 때).
     ★ 순서 규칙은 그대로다. 지목은 진단 경로에서만 쓰고, 평소 소비는 순서를 따른다."""
+    release_dead_claims(tenant_id)                    # 죽은 잡 회수가 클레임에 선행 — 고착 자가 치유
     try:
         with _conn() as c:
             if only_id:
                 # 지목 클레임은 skipped도 다시 잡는다 — 실패 원인을 고친 뒤 재시도해야 하기 때문(진단 경로).
                 _ok = "('pending','skipped','done')" if allow_done else "('pending','skipped')"
                 r = c.execute(
-                    "UPDATE writing_queue SET status='generating', attempts=0 WHERE id=? AND tenant_id=? "
-                    f"AND status IN {_ok} RETURNING *", (only_id, tenant_id)).fetchone()
+                    "UPDATE writing_queue SET status='generating', attempts=0, claimed_at=? "
+                    "WHERE id=? AND tenant_id=? "
+                    f"AND status IN {_ok} RETURNING *", (_now(), only_id, tenant_id)).fetchone()
             else:
                 r = c.execute(
-                    "UPDATE writing_queue SET status='generating' WHERE id=("
+                    "UPDATE writing_queue SET status='generating', claimed_at=? WHERE id=("
                     "  SELECT id FROM writing_queue WHERE tenant_id=? AND status='pending' "
                     "  ORDER BY source_type ASC, created_at ASC LIMIT 1) RETURNING *",
-                    (tenant_id,)).fetchone()
+                    (_now(), tenant_id)).fetchone()
         return dict(r) if r else None
     except Exception:
         return None

@@ -2155,6 +2155,15 @@ def admin_busy():
             if _age < 7200:
                 busy.append({"type": "video", "tenant": s.get("tenant"), "asset": aid[:8],
                              "stage": vj.get("stage", "")})
+    # ⑤ 큐 생성(queue-gen/autoqueue) — gen_progress를 안 찍어 busy 사각이었다(2026-08-07 실사고:
+    #   safe-push 통과 → 배포가 생성을 죽여 qid가 'generating' 고착). 심박은 writing_queue.claimed_at.
+    _qg = db.stuck_generating()
+    for g in _qg["fresh"]:
+        busy.append({"type": "queue-gen", "tenant": g["tenant"], "stage": g["keyword"],
+                     "idle_sec": g["idle_sec"]})
+    for g in _qg["stale"]:                             # 죽은 잡 — 다음 claim 때 자동 해제된다
+        ghosts.append({"type": "queue-gen", "tenant": g["tenant"], "stage": g["keyword"],
+                       "idle_sec": g["idle_sec"]})
     from app import llm as _llmb
     return JSONResponse({"ok": True, "busy": busy, "safe_to_deploy": not busy,
                          "ghosts": ghosts,          # 죽은 것으로 판정 — 배포는 막지 않되 눈에는 보인다
