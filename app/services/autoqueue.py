@@ -522,7 +522,9 @@ def consume(t, files: list | None = None, plan: str = "free", only_id: int = 0,
             analysis = vision.analyze_all(paths, t.industry) if paths else ""
             if analysis:
                 note += f"\n[사진 분석] {analysis[:1500]}"
-            _ctype = (q.get("content_type") or "sell")   # sell=트랙A / info=트랙B(GEO)
+            # 트랙 판정은 행 데이터가 아니라 단일 관문 — 옛 행이 sell로 박혀 있어도(2026-08-07
+            #   실사고 2회: enqueue 기본값·retrack의 generating 누락) 빈자리 글감은 트랙 B로 간다.
+            _ctype = db.content_track(q.get("source_type") or "", q.get("content_type") or "")
             asset = db.create_asset(t.id, AssetType.IMAGE, paths[0], note)
             asset.target_kw = kw
             asset.angle = q["angle"] if q["angle"] in ("review", "howto", "price") else "review"

@@ -1900,10 +1900,23 @@ def daily_click_series(tenant_id: str, days: int = 7) -> list[dict]:
 
 
 # ── 자동 글감 큐(auto P1~P4) — AI가 판단한 다음 글감. 유저 버튼 없이 엔진이 소비 ──
+def content_track(source_type: str, content_type: str = "") -> str:
+    """글감 트랙 판정 단일 관문 — 빈자리(vacant_q) 글감은 언제나 트랙 B(info).
+
+    ★ 같은 계열 결함 2회(2026-08-07): ①enqueue가 기본값 'sell'로 넣어 시공기가 나왔고
+      ②행 데이터 마이그레이션(retrack, pending만)이 'generating' 행을 놓쳐 또 sell로 소비됐다.
+      행에 박힌 값을 고치는 방식은 놓친 행마다 재발한다 — 적재와 소비가 이 함수 하나로 판정하면
+      옛 행·누락 행도 안전하다(canonical 원칙의 트랙판)."""
+    if source_type == "vacant_q":
+        return "info"
+    return content_type or "sell"
+
+
 def enqueue_writing(tenant_id: str, source_type: str, keyword: str, angle: str = "review",
                     reason: str = "", content_type: str = "sell") -> bool:
     """큐 적재 — dedupe_key(tenant|keyword|source) UNIQUE로 중복 차단. 적재됐으면 True.
     content_type: sell=트랙 A(매물·시공) / info=트랙 B(정보성·GEO 브리핑 인용)."""
+    content_type = content_track(source_type, content_type)
     keyword = " ".join((keyword or "").split())
     if not keyword:
         return False
