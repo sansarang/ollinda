@@ -717,14 +717,18 @@ def resolve_target_keyword(industry: str, region: str, note: str, biz: str = "lo
     #   실측: 소나타 DN8 소재에서 후보 재정렬은 '신차 썬팅'을 1위로 올렸는데
     #   최종 kw0는 '부산 동구 썬팅,광택'이었다. 결정이 끝나는 자리에서 한 번 더 본다.
     #   조건은 그대로다 — 판정 '확실' + 점수>0 + 소재가 뒷받침(낱말 2개 이상). 지어내지 않는다.
-    try:
-        _gf = _gap_first([kw0] + list(kws), tenant_id, note)
-        if _gf and _gf[0] != kw0:
-            _slog.warning("[resolve-kw] 빈자리 승격: %r → %r", kw0, _gf[0])
-            kw0 = _gf[0]
-            kws = list(dict.fromkeys([kw0] + [k for k in kws if k != kw0]))[:10]
-    except Exception:
-        pass
+    # ★ 승격은 자동 선정 경로 전용이다(2026-08-07 실측: 빈자리 큐가 지목한 '차량 썬팅 가격'을
+    #   이 블록이 '썬팅 가격'으로 갈아치웠다 — 글이 큐의 질문에 답하지 않게 된다).
+    #   지목 키워드(tkw)가 지역 게이트를 살아 넘었으면 그 지목이 곧 소재다. 세트=한 소재=한 키워드.
+    if not tkw:
+        try:
+            _gf = _gap_first([kw0] + list(kws), tenant_id, note)
+            if _gf and _gf[0] != kw0:
+                _slog.warning("[resolve-kw] 빈자리 승격: %r → %r", kw0, _gf[0])
+                kw0 = _gf[0]
+                kws = list(dict.fromkeys([kw0] + [k for k in kws if k != kw0]))[:10]
+        except Exception:
+            pass
     return kw0, kws
 
 
