@@ -401,8 +401,14 @@ def _existing_kw_set(t) -> set:
             if it.get("piece_id") and it.get("status") in ("ready", "needs_fix", "generating"):
                 out.add(it["keyword"])
     for row in db.writing_queue_rows(t.id, status="done", limit=30):
-        if row.get("target_keyword"):
-            out.add(row["target_keyword"])
+        if not row.get("target_keyword"):
+            continue
+        # ★ 대조는 존재가 아니라 사용(2026-08-07 실측): done 행의 글을 삭제(묘비)한 뒤에도
+        #   행 키워드가 선점으로 남아 재생성이 영원히 skip됐다. 글이 실재할 때만 선점이다.
+        pid = (row.get("piece_id") or "").strip()
+        if pid and not db.get_piece(pid):
+            continue                                  # 글이 삭제됨 — 없는 글이 키워드를 막으면 안 된다
+        out.add(row["target_keyword"])
     return out
 
 
