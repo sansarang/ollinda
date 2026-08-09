@@ -504,7 +504,7 @@ def _hero() -> str:
   <div class="reveal mt-10 flex flex-col sm:flex-row gap-3 justify-center items-center">
    <a href="/login/kakao" class="flex items-center justify-center px-10 py-4 rounded-2xl font-extrabold text-lg w-full sm:w-auto" style="background:#FEE500;color:#191600">카카오로 무료 시작</a>{_naver_hero_btn()}
    <a href="/login/google" class="flex items-center justify-center gap-2 px-10 py-4 rounded-2xl font-extrabold text-lg bg-white border border-slate-200 text-slate-700 w-full sm:w-auto">{_GOOGLE_G} 구글로 시작</a></div>
-  <p class="reveal mt-4 text-xs text-slate-400">이메일 <a href="/signup" class="text-slate-500 underline">회원가입</a> · 이미 회원이면 <a href="/login" class="text-slate-500 underline">로그인</a></p>
+  <p class="reveal mt-5 text-base text-slate-500">이메일 <a href="/signup" class="inline-block px-1 py-1 text-indigo-600 font-bold underline underline-offset-4">회원가입</a> <span class="mx-1 text-slate-300">·</span> 이미 회원이면 <a href="/login" class="inline-block px-1 py-1 text-indigo-600 font-bold underline underline-offset-4">로그인</a></p>
   <!-- 두 미끼를 한눈에: 순위진단(왼쪽) + 무료 만들기(오른쪽) — 모바일은 세로 스택 -->
   <!-- grid-cols-1 명시(모바일 반응형): lg 미만에서 암시적 auto 트랙이 max-content(576px)로 커져
        카드가 뷰포트를 넘고 overflow-hidden에 잘리던 버그 — minmax(0,1fr) 트랙으로 강제 -->
