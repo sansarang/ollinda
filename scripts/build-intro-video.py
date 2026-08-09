@@ -25,9 +25,9 @@ BGCOLOR = "0xEEF2FF"   # 브랜드 연보라 — 세로 폰화면 좌우 패드
 SCENES = [
     ("사장님이 하는 일은, 사진을 올리는 것뿐입니다.", {"kind": "card", "which": "title"}),
     ("방금 시공 사진 다섯 장을 올렸습니다. AI가 사진을 확인하고, 바로 만들기 시작합니다.",
-     {"kind": "clip", "file": f"{REC}/scene2b-upload.webm", "start": 29.5, "end": 36.5, "speed": 1.0}),
+     {"kind": "clip", "file": f"{REC}/scene2b-upload.webm", "start": 29.0, "end": 33.0, "speed": 0.52}),
     ("몇 분 동안 사진을 다듬고, 검색어를 고르고, 글을 씁니다.",
-     {"kind": "clip", "file": f"{REC}/scene2b-upload.webm", "start": 36.5, "end": 42.0, "speed": 1.0}),
+     {"kind": "clip", "file": f"{REC}/scene2b-upload.webm", "start": 33.2, "end": 39.0, "speed": 1.0}),
     ("완성됐습니다. 네이버 블로그 글과 인스타 캡션, 상위노출 점수까지 전부 자동입니다.",
      {"kind": "clip", "file": f"{REC}/scene4-result.webm", "start": 10.6, "end": 23.6, "speed": 1.4}),
     ("발행은 복사해서 붙여넣기만 하면 됩니다. 버튼 하나가 순서대로 안내합니다.",
