@@ -505,7 +505,7 @@ def _hero() -> str:
   <div class="reveal mt-10 flex flex-col sm:flex-row gap-3 justify-center items-center">
    <a href="/login/kakao" class="flex items-center justify-center px-10 py-4 rounded-2xl font-extrabold text-lg w-full sm:w-auto" style="background:#FEE500;color:#191600">카카오로 무료 시작</a>{_naver_hero_btn()}
    <a href="/login/google" class="flex items-center justify-center gap-2 px-10 py-4 rounded-2xl font-extrabold text-lg bg-white border border-slate-200 text-slate-700 w-full sm:w-auto">{_GOOGLE_G} 구글로 시작</a></div>
-  <p class="reveal mt-5 text-base text-slate-500">이메일 <a href="/signup" class="inline-block px-1 py-1 text-indigo-600 font-bold underline underline-offset-4">회원가입</a> <span class="mx-1 text-slate-300">·</span> 이미 회원이면 <a href="/login" class="inline-block px-1 py-1 text-indigo-600 font-bold underline underline-offset-4">로그인</a></p>
+  <p class="reveal mt-5 text-base text-slate-500">이미 회원이면 <a href="/login" class="inline-block px-1 py-1 text-indigo-600 font-bold underline underline-offset-4">회원 로그인</a></p>
   <!-- 두 미끼를 한눈에: 순위진단(왼쪽) + 무료 만들기(오른쪽) — 모바일은 세로 스택 -->
   <!-- grid-cols-1 명시(모바일 반응형): lg 미만에서 암시적 auto 트랙이 max-content(576px)로 커져
        카드가 뷰포트를 넘고 overflow-hidden에 잘리던 버그 — minmax(0,1fr) 트랙으로 강제 -->
@@ -577,7 +577,7 @@ def _video() -> str:
    <p class="text-slate-500 text-sm mt-2">사진 5장만 올리면 <b class="text-slate-800">음성 영상</b>과 <b class="text-slate-800">네이버 블로그 글</b>이 자동으로. 아래는 실제 생성 결과입니다.</p></div>
   <div class="reveal max-w-sm mx-auto card overflow-hidden">
    <video src="{_v('/demo/local_short.mp4')}" controls muted loop playsinline preload="metadata" poster="{_v('/demo/short_poster.jpg')}" class="w-full bg-black"></video>
-   <div class="text-slate-600 text-sm px-5 py-3.5">초량 루마썬팅 — 사진 5장 → AI 자동 생성 열차단 썬팅 세로 영상 <b class="text-slate-800">(음성 나레이션 + BGM)</b>
+   <div class="text-slate-600 text-sm px-5 py-3.5">초량 루마썬팅 — 사진 5장 → AI 자동 생성 시공 과정 세로 영상 <b class="text-slate-800">(음성 나레이션 + 자막 · 번호판 자동 가림)</b>
    <span class="block text-xs text-slate-400 mt-1">실제 올린다 생성물 · 탭하면 소리가 나와요</span></div></div>
   {_naver_preview()}
  </div>
