@@ -16,11 +16,12 @@ FONT = "/System/Library/Fonts/AppleSDGothicNeo.ttc"
 NAVY = (15, 23, 42)
 INDIGO = (99, 102, 241)
 
-# (길이초, 카드 or 클립)
+# (길이초, 카드 or 클립) — 관심 유도 구성(2026-08-09 사장님 지시): 결과 숫자 선공개 →
+# 증거 영상 → 비결 공개 → 낮은 문턱 CTA. 성과 주장은 실측(9일 1위)만, 면책 병기.
 SCENES = [
     (3.5, {"card": "hook"}),
     (4.5, {"clip": DEMO, "start": 0.8, "end": 5.3}),
-    (3.5, {"card": "timeline"}),
+    (3.5, {"card": "secret"}),
     (3.5, {"card": "closing"}),
 ]
 
@@ -53,35 +54,26 @@ def card(kind, path):
         w = d.textlength(txt, font=font)
         d.text(((W - w) / 2, y), txt, font=font, fill=fill)
 
+    from PIL import ImageFont as _F
+    huge = _F.truetype(FONT, 190)
     if kind == "hook":
-        _logo(d, W // 2, 430, 120)
-        center(700, "네이버에서", big, (255, 255, 255))
-        center(820, "검색하면,", big, (255, 255, 255))
-        center(980, "나오시나요?", big, (129, 140, 248))
-        center(1200, "안 보이면, 없는 가게입니다", mid, (148, 163, 184))
-    elif kind == "timeline":
-        d.rectangle([0, 0, W, H], fill=(245, 243, 255))
-        center(360, "실제 가게의 실제 기록", mid, (100, 116, 139))
-        rows = [("7/31", "글 발행", 64, (71, 85, 105)),
-                ("8/2", "블로그검색 12위", 64, (71, 85, 105)),
-                ("8/9", "1위", 160, INDIGO)]
-        y = 560
-        from PIL import ImageFont as _F
-        for i, (dt, label, size, color) in enumerate(rows):
-            f = _F.truetype(FONT, size)
-            d.ellipse([120 - 13, y + 28 - 13, 120 + 13, y + 28 + 13],
-                      fill=INDIGO if i == 2 else (199, 210, 254))
-            d.text((180, y), dt, font=_F.truetype(FONT, 52), fill=(148, 163, 184))
-            d.text((400, y - (34 if i == 2 else 0)), label, font=f, fill=color)
-            y += 170 if i < 1 else 230
-        center(1330, "발행 9일 만에 네이버 블로그검색 1위", mid, NAVY)
-        center(1430, "2026년 8월 실측 · 개별 결과는 다를 수 있어요", sml, (148, 163, 184))
+        # 결과 숫자 선공개 — 스크롤을 멈추게 하는 건 질문이 아니라 숫자다
+        center(520, "9일 만에,", big, (255, 255, 255))
+        center(680, "네이버", huge, (255, 255, 255))
+        center(880, "검색 1위", huge, (129, 140, 248))
+        center(1180, "부산 실제 가게의 기록입니다", mid, (203, 213, 225))
+        center(1270, "2026년 8월 실측 · 결과는 가게마다 달라요", sml, (100, 116, 139))
+    elif kind == "secret":
+        center(560, "비결은,", mid, (100, 116, 139))
+        center(680, "사진 한 장", huge, NAVY)
+        center(950, "글 · 영상 · 발행 준비 · 순위 관리", mid, (71, 85, 105))
+        center(1040, "나머지는 전부 AI가 합니다", mid, INDIGO)
     else:  # closing
         _logo(d, W // 2, 500, 140)
-        center(780, "오늘 사진 한 장,", big, NAVY)
-        center(900, "내일 손님으로", big, INDIGO)
-        center(1100, "올린다 · ollinda.kr", mid, (100, 116, 139))
-        center(1180, "가입 없이 무료 2회", sml, (148, 163, 184))
+        center(780, "내 가게도 되는지,", big, NAVY)
+        center(900, "무료로 확인해보세요", big, INDIGO)
+        center(1120, "ollinda.kr", _F.truetype(FONT, 76), NAVY)
+        center(1240, "가입 없이 무료 2회 · 사진만 올리면 끝", mid, (100, 116, 139))
     img.save(path)
 
 
