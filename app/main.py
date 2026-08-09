@@ -680,6 +680,20 @@ def admin_set_delete(asset_id: str, tenant_id: str = ""):
                          "tombstoned": db.is_set_deleted(asset_id)})
 
 
+@app.post("/admin/backfill-publish-kw")
+def admin_backfill_publish_kw(tenant: str = "", dry: int = 1):
+    """운영 지원 — piece 삭제로 keyword 원천을 잃은 발행 기록의 target_kw 복원(2026-08-09).
+    dry=1 기본: 무엇이 어떻게 채워질지 먼저 보여준다. 빈 target_kw만 채운다(기존 값 불변)."""
+    t = db.get_tenant(tenant)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant(ID) 필요"}, status_code=400)
+    from app import config as _cfg
+    target = _cfg.assert_target(t.id, "backfill-publish-kw")
+    from app.services import pipesync as _ps
+    res = _ps.backfill_publish_kw(t, dry=bool(dry))
+    return JSONResponse({"ok": True, "target": target, **res})
+
+
 def _tables_with(col: str) -> list:
     """그 컬럼을 가진 테이블 전부 — 테이블 목록을 손으로 적으면 반드시 빠뜨린다."""
     out = []

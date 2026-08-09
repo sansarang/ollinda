@@ -45,7 +45,10 @@ def confirm_publish(t, piece, url: str, matched_by: str, score: float = 1.0,
         meta = _rss_meta_for_url(t, url)
         published_at = published_at or meta.get("published_at", "")
         post_title = post_title or meta.get("post_title", "")
-    db.record_blog_publish(t.id, piece.id, url, published_at, matched_by, score, post_title)
+    # 키워드를 발행 기록에 박제 — piece payload는 세트 삭제와 함께 사라지므로(delete_set은
+    # blog_publishes를 남긴다) 폴백에만 의존하면 keyword가 증발해 순위 추적이 영구 스킵된다.
+    db.record_blog_publish(t.id, piece.id, url, published_at, matched_by, score, post_title,
+                           target_kw=db.piece_target_kw(piece.payload))
     try:
         db.create_publication(piece.id, Channel.NAVER_BLOG, url,
                               {"manual": matched_by == "manual", "source": matched_by, "url": url})
@@ -202,3 +205,31 @@ def _blog_pieces(tid: str, limit_sets: int = 30) -> list:
             if p.kind.value == "blog":
                 out.append(p)
     return out
+
+
+def backfill_publish_kw(t, dry: bool = True) -> dict:
+    """target_kw 빈 발행 기록 복원 — piece가 삭제돼 keyword 원천이 사라진 행이 대상.
+    원천 우선순위: ① piece payload(참조 경로와 같은 파서) ② 저장된 post_title, 없으면 RSS 실물
+    제목 → extract_kw(외부 글 자동 추적과 같은 함수). 원천이 없으면 빈칸 유지 + 사유 명시
+    (침묵 폴백 금지 — 날조로 채우지 않는다). dry=True면 계획만 반환하고 쓰지 않는다."""
+    rows = []
+    for pub in db.list_blog_publishes(t.id, limit=200):
+        if (pub.get("target_kw") or "").strip():
+            continue
+        pid, url = pub.get("piece_id") or "", pub.get("published_url") or ""
+        piece = db.get_piece(pid)
+        kw = db.piece_target_kw(piece.payload) if piece else ""
+        source = "piece_payload" if kw else ""
+        if not kw:
+            title = (pub.get("post_title") or "").strip() or _rss_meta_for_url(t, url).get("post_title", "")
+            kw = extract_kw(title, t.industry or "", t.region or "")
+            source = ("post_title" if pub.get("post_title") else "rss_title") if kw else ""
+        if not kw:
+            rows.append({"piece_id": pid, "url": url, "before": "", "after": "",
+                         "skipped": "키워드 원천 없음(piece·제목 모두 부재) — 빈칸 유지"})
+            continue
+        row = {"piece_id": pid, "url": url, "before": "", "after": kw, "source": source}
+        if not dry:
+            row["written"] = db.set_publish_target_kw(pid, kw)
+        rows.append(row)
+    return {"tenant_id": t.id, "dry": dry, "n": len(rows), "rows": rows}

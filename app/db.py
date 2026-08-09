@@ -1058,6 +1058,18 @@ def record_blog_publish(tenant_id: str, piece_id: str, url: str, published_at: s
         logging.exception("[db] record_blog_publish 실패 tenant=%s piece=%s", tenant_id, piece_id)
 
 
+def set_publish_target_kw(piece_id: str, target_kw: str) -> bool:
+    """빈 target_kw만 채우는 백필 전용 — 값이 이미 있으면 건드리지 않는다(다른 컬럼 무영향)."""
+    kw = (target_kw or "").strip()[:40]
+    if not kw:
+        return False
+    with _conn() as c:
+        n = c.execute("UPDATE blog_publishes SET target_kw=? "
+                      "WHERE piece_id=? AND (target_kw IS NULL OR target_kw='')",
+                      (kw, piece_id)).rowcount
+    return n > 0
+
+
 def get_blog_publish(piece_id: str) -> Optional[dict]:
     try:
         with _conn() as c:
@@ -1256,6 +1268,17 @@ def list_blog_publishes(tenant_id: str, limit: int = 30) -> list[dict]:
         return []
 
 
+def piece_target_kw(payload) -> str:
+    """piece payload → 대표 키워드. dict 또는 JSON 문자열을 받는다.
+    발행 박제(pipesync.confirm_publish)와 readview 폴백이 같은 값을 보도록 파서는 이 함수 하나만 쓴다 —
+    piece가 나중에 삭제되면 발행 기록의 target_kw가 유일한 원천이 된다(2026-08-09 주안모터스 2건 실사고)."""
+    try:
+        pl = json.loads(payload) if isinstance(payload, str) else (payload or {})
+        return ((pl.get("target_keywords") or [""])[0] or "").strip()
+    except Exception:
+        return ""
+
+
 def published_posts_view() -> list[dict]:
     """readview_v1: gowatch가 읽는 유일한 본체 뷰 — 발행 글 전수(전 tenant). 하드코딩 0(발행 시 자동 편입,
     삭제 시 제외). 컬럼: publish_id·tenant_id·keyword(canonical)·post_url·published_at·region·industry.
@@ -1274,12 +1297,7 @@ def published_posts_view() -> list[dict]:
                 "WHERE b.published_url IS NOT NULL AND b.published_url <> '' "
                 "ORDER BY b.published_at DESC").fetchall()
         for r in rows:
-            kw = (r["target_kw"] or "").strip()
-            if not kw and r["payload"]:
-                try:
-                    kw = ((json.loads(r["payload"]).get("target_keywords") or [""])[0] or "").strip()
-                except Exception:
-                    kw = ""
+            kw = (r["target_kw"] or "").strip() or piece_target_kw(r["payload"])
             out.append({"publish_id": r["publish_id"], "tenant_id": r["tenant_id"],
                         "keyword": kw, "post_url": r["post_url"], "published_at": r["published_at"],
                         "region": r["region"] or "", "industry": r["industry"] or ""})
