@@ -123,6 +123,7 @@ _HEAD = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <link rel=icon href="/favicon.svg" type="image/svg+xml">
 <link rel=icon href="/favicon.ico" sizes="any">
 <link rel=apple-touch-icon href="/apple-touch-icon.png">
+<link rel=manifest href="/static/manifest.webmanifest">
 <link rel=preconnect href="https://cdn.jsdelivr.net" crossorigin>
 <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.min.css" rel=stylesheet>
 <link href="/static/landing.css" rel=stylesheet>

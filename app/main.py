@@ -5466,6 +5466,58 @@ def my_blog_published(request: Request, piece_id: str = Form(""), url: str = For
     return RedirectResponse(back + "?ok=" + _q("발행 기록 완료! 이 글의 순위 추적이 시작돼요"), status_code=303)
 
 
+@app.get("/share-publish", response_class=HTMLResponse)
+def share_publish(request: Request, url: str = "", text: str = "", title: str = ""):
+    """PWA share_target 수신 — 네이버앱에서 발행 글을 '공유 → 올린다'로 보내면 발행 확인 시작
+    (모바일 발행 편의 ⑤, 2026-08-09 승인). 검증은 수동 등록(/me/blog/published)과 같은 기준."""
+    import re as _re
+    from urllib.parse import quote as _q
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    t = _ensure_user_tenant(u)
+    m = _re.search(r"https?://(?:m\.)?blog\.naver\.com/[^\s\"'<>]+", f"{url} {text} {title}")
+    if not m:
+        return RedirectResponse("/me?err=" + _q("공유된 내용에서 네이버 블로그 글 주소를 찾지 못했어요"),
+                                status_code=303)
+    purl = m.group(0).rstrip(").,]>»")
+    from app.services import blogsync, pipesync
+    if getattr(t, "blog_id", "") and not blogsync.is_my_post_url(purl, t.blog_id):
+        return RedirectResponse("/me?err=" + _q(f"등록된 블로그(blog.naver.com/{t.blog_id})의 글 주소가 아니에요"),
+                                status_code=303)
+    pending = [p for p in pipesync._blog_pieces(t.id) if not db.get_blog_publish(p.id)]
+    if not pending:
+        return RedirectResponse("/me?ok=" + _q("추적 대기 중인 글이 없어요 — 이미 등록된 글일 수 있어요"),
+                                status_code=303)
+    piece = pending[0]
+    if len(pending) > 1:      # 여러 후보면 RSS 실제 제목으로 매칭 — 실패 시 최신 글(추정 금지 아님: 사용자 확인 화면 경유)
+        meta = pipesync._rss_meta_for_url(t, purl)
+        ptitle = (meta.get("post_title") or "").strip()
+        if ptitle:
+            scored = sorted(((blogsync.match_score(p.payload or {}, ptitle), p) for p in pending),
+                            key=lambda x: -x[0])
+            if scored and scored[0][0] >= 0.5:
+                piece = scored[0][1]
+            else:
+                # 매칭 불확실 — 사용자에게 고르게 한다(잘못 귀속 방지)
+                rows = "".join(
+                    f"<label class='flex items-center gap-2.5 py-2.5 border-b border-slate-100 text-sm'>"
+                    f"<input type=radio name=piece_id value='{p.id}' {'checked' if i == 0 else ''}>"
+                    f"<span>{esc((p.payload.get('selected_title') or p.payload.get('title') or '(제목 없음)')[:60])}</span></label>"
+                    for i, p in enumerate(pending[:8]))
+                inner = ("<div class='bg-white rounded-2xl border p-5'>"
+                         "<p class='font-bold mb-1'>어느 글을 발행하셨나요?</p>"
+                         f"<p class='text-xs text-slate-400 mb-3 break-all'>{esc(purl)}</p>"
+                         "<form method=post action='/me/blog/published'>"
+                         f"<input type=hidden name=url value='{esc(purl)}'>{rows}"
+                         "<button class='mt-3 w-full py-3 rounded-xl bg-indigo-600 text-white font-bold'>이 글로 등록</button>"
+                         "</form></div>")
+                return HTMLResponse(_subscriber_page("발행 확인", inner))
+    _confirm_blog_publish(t, piece, purl, "manual")
+    return RedirectResponse(f"/kit/{piece.asset_id}/naver?ok=" + _q("발행 기록 완료! 이 글의 순위 추적이 시작돼요"),
+                            status_code=303)
+
+
 def _canonical_slug(tenant, blog) -> str:
     """★ 세트 확정 슬러그 — 발행 산출물 모든 명명(태그·에셋 파일명·폴더·zip·txt·영상)의 단일 소스.
     소스 = 세트 '제목'(사용자가 보고 선택하는 주제) — selected_title 우선, 없으면 title.
@@ -8607,7 +8659,9 @@ def _naver_publish_confirm_box(tenant, blog, sec: str, cbtn: str, ok: str = "", 
     pub = db.get_blog_publish(blog.id)
     if pub:
         how = "RSS 자동 확인" if pub.get("matched_by") == "rss" else "직접 확인"
-        return (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>✅ 발행 확인됨 <span class='text-emerald-600'>({how})</span></div>"
+        return (f"<div class='{sec}'><span id='nvPubDone' class='hidden'></span>"
+                "<div class='text-xs font-bold text-slate-400 mb-2'>✅ 발행 확인됨 <span class='text-emerald-600'>"
+                f"({how})</span></div>"
                 + banner
                 + f"<a href='{esc(pub.get('published_url') or '')}' target=_blank rel=noopener class='text-sm font-bold text-emerald-600 break-all'>"
                 f"{esc(pub.get('published_url') or '')} ↗</a>"
@@ -8632,15 +8686,36 @@ def _naver_publish_confirm_box(tenant, blog, sec: str, cbtn: str, ok: str = "", 
                     f"<input name=url placeholder='자동 매칭이 안 되면 발행한 글 주소를 붙여넣어 주세요' class='{inp}'>"
                     f"<button class='{cbtn} bg-indigo-600 hover:bg-indigo-700 whitespace-nowrap'>등록</button></form>")
         return (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>발행 완료하셨나요? <span class='text-emerald-600'>(순위 추적 자동 시작)</span></div>"
-                + banner + auto + fallback + "</div>")
+                + banner + auto + _paste_url_btn(cbtn) + fallback + "</div>")
     return (f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>발행 완료하셨나요? <span class='text-emerald-600'>(순위 추적 시작)</span></div>"
             + banner
             + "<p class='text-xs text-amber-600 mb-3'><a href='/me#blog' class='font-bold underline'>내 블로그를 연결</a>하면 "
             "발행 여부를 자동으로 확인해 드려요. 연결 전에는 아래에 발행 주소를 남겨주세요.</p>"
-            + f"<form method=post action='/me/blog/published' class='flex gap-2'>"
+            + f"<form method=post action='/me/blog/published' id='nvFb' class='flex gap-2'>"
             f"<input type=hidden name=piece_id value='{blog.id}'>"
             f"<input name=url placeholder='발행한 글 주소 붙여넣기 (https://blog.naver.com/...)' class='{inp}'>"
-            f"<button class='{cbtn} bg-indigo-600 hover:bg-indigo-700 whitespace-nowrap'>발행함 ✓</button></form></div>")
+            f"<button class='{cbtn} bg-indigo-600 hover:bg-indigo-700 whitespace-nowrap'>발행함 ✓</button></form>"
+            + _paste_url_btn(cbtn) + "</div>")
+
+
+def _paste_url_btn(cbtn: str) -> str:
+    """발행 확인 원탭(모바일 발행 편의 ④ 2026-08-09) — 클립보드의 블로그 주소를 읽어 폼에 자동 입력.
+    발행 직후 네이버앱에서 주소 복사만 해오면 탭 한 번으로 등록. 읽기 거부·주소 없음이면 수동 폼 안내."""
+    return (
+        f"<button type=button onclick='nvPasteUrl(this)' style='min-height:48px' "
+        f"class='{cbtn} bg-slate-700 hover:bg-slate-800 w-full mt-2'>📋 복사해둔 글 주소로 바로 등록</button>"
+        "<p class='text-[11px] text-slate-400 mt-1'>네이버앱에서 발행한 글의 <b>공유 → 주소 복사</b> 후 이 버튼을 누르세요.</p>"
+        "<script>async function nvPasteUrl(btn){var o=btn.textContent;"
+        "function fb(m){btn.textContent=m;var f=document.getElementById('nvFb');"
+        "if(f){f.classList.remove('hidden');var i=f.querySelector('input[name=url]');if(i)i.focus();}"
+        "setTimeout(function(){btn.textContent=o;},2600);}"
+        "try{var t=await navigator.clipboard.readText();"
+        "var m=t&&t.match(/https?:\\/\\/(?:m\\.)?blog\\.naver\\.com\\/[^\\s\"'<>]+/);"
+        "if(!m){fb('클립보드에 블로그 주소가 없어요 — 아래에 직접 붙여넣어 주세요');return;}"
+        "var f=document.getElementById('nvFb');if(!f){fb('입력란을 찾지 못했어요');return;}"
+        "f.classList.remove('hidden');var i=f.querySelector('input[name=url]');i.value=m[0];"
+        "btn.textContent='등록 중…';if(typeof wzMark==='function')wzMark(4);f.submit();}"
+        "catch(e){fb('클립보드를 읽을 수 없어요 — 아래에 직접 붙여넣어 주세요');}}</script>")
 
 
 def _md_inline(s: str) -> str:
@@ -8738,6 +8813,27 @@ def _md_to_plain(md: str) -> str:
     return "\n".join(out).strip()
 
 
+def _marker_preview_html(body_marked: str, asset_id: str, photos: list) -> str:
+    """본문 미리보기 — [📷 사진N 위치] 마커 옆에 해당 사진 썸네일 병기(모바일 발행 편의 ③).
+    화면 표시 전용: 복사 원문(nvHtml·nvPlain)은 건드리지 않는다. 사진 대응을 눈으로 끝내는 장치."""
+    import re as _re
+    out, last = [], 0
+    for m in _re.finditer(r"\[📷 사진(\d+) 위치\]", body_marked):
+        out.append(esc(body_marked[last:m.start()]))
+        n = int(m.group(1))
+        thumb = ""
+        if 1 <= n <= len(photos):
+            fn = os.path.basename(photos[n - 1])
+            thumb = (f"<img src='/web/{asset_id}/{fn}' loading='lazy' "
+                     "class='w-8 h-8 rounded object-cover inline-block'>")
+        out.append("<span class='inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 "
+                   f"rounded-lg px-2 py-1 align-middle'>{thumb}"
+                   f"<b class='text-indigo-600 text-xs whitespace-nowrap'>📷 사진{n} 위치</b></span>")
+        last = m.end()
+    out.append(esc(body_marked[last:]))
+    return "".join(out)
+
+
 @app.get("/kit/{asset_id}/naver", response_class=HTMLResponse)
 def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
     """네이버 블로그 붙여넣기 전용 화면 — 제목/본문(사진 위치 표시)/사진 순서대로 다운."""
@@ -8796,6 +8892,12 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
     # 메타가 있으면 섹션은 항상 노출 — 파일이 로컬·R2 모두 없을 때만(구버전·정리됨) '다시 만들기'로 전환.
     _nv_playable = bool(_nv.get("path") and _media_exists(_nv["path"]))
     _fn_base = _seo_photo_name(tenant, blog)               # 이미지 SEO(5-1): 지역-업종-피사체
+    # 사진 일괄 저장(모바일 발행 편의 ② 2026-08-09) — Web Share API로 갤러리에 한 번에.
+    # 파일명에 번호를 박아 [사진N] 위치 대응이 쉽다. 미지원 브라우저는 버튼 자체를 숨긴다.
+    import json as _json
+    _share_json = _json.dumps(
+        [{"u": f"/dl/{asset_id}/{os.path.basename(im)}", "n": f"{_fn_base}-{i+1:02d}.jpg"}
+         for i, im in enumerate([im for im in imgs if im])], ensure_ascii=False)
     photo_cells = "".join(
         # 화면은 웹용 파생본만(2026-08-03) — 원본은 아래 '저장'·ZIP에서만 내려간다
         f"<div class='relative'><img src='/web/{asset_id}/{os.path.basename(im)}' loading='lazy' class='w-full aspect-square object-cover rounded-xl border border-slate-200'>"
@@ -8869,12 +8971,38 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
                           "<span class='text-violet-400'>그냥 발행해도 괜찮아요.</span></div>")
     except Exception:
         pass
+    # 발행 위저드(모바일 발행 편의 ① 2026-08-09) — 순차 복사 버튼 하나 + 진행 상태 localStorage 기억.
+    # 중간에 전화가 와도 어디까지 했는지 남는다. 복사 순서: 제목 → 본문(서식) → 태그.
+    _has_tags = bool(_blog_tags(tenant, blog))
+    wizard = (
+        "<div id='nvWiz' class='bg-white rounded-2xl border-2 border-indigo-200 shadow-sm p-4 mb-5'>"
+        "<div class='flex items-center justify-between mb-1'>"
+        "<div class='text-xs font-bold text-indigo-500'>발행 4단계 — 진행 상태를 기억해드려요</div>"
+        "<button type=button onclick='wzReset()' class='text-[11px] text-slate-300 underline'>처음부터</button></div>"
+        + "".join(
+            f"<div class='flex items-center gap-2.5 py-1.5'>"
+            f"<span id='wzn{n}' class='w-6 h-6 rounded-full bg-slate-100 text-slate-400 text-xs font-bold "
+            f"flex items-center justify-center shrink-0'>{n}</span>"
+            f"<span class='flex-1 text-sm text-slate-700'>{lbl}</span>"
+            f"{extra}</div>"
+            for n, lbl, extra in (
+                (1, "제목·본문·태그 복사", ""),
+                (2, "사진 저장", ""),
+                (3, "네이버앱에서 붙여넣고 사진 배치",
+                 "<button type=button onclick='wzMark(3);wzHint()' id='wzB3' "
+                 "class='text-xs font-bold text-indigo-600 border border-indigo-200 rounded-lg px-2.5 py-1.5'>끝났어요 ✓</button>"),
+                (4, "발행 확인 (아래에서)", "")))
+        + "<button id='nvSeqBtn' onclick='nvSeq(this)' style='min-height:52px' "
+        "class='w-full mt-2.5 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold "
+        "transition active:scale-[.98]'>① 제목 복사부터 시작</button>"
+        "<div id='wzMsg' class='text-center text-xs text-slate-400 mt-1.5 hidden'></div></div>")
     body = (
         "<a href='javascript:history.back()' class='inline-block text-sm text-slate-500 font-bold mb-2'>← 결과로</a>"
         + _edit_banner + _vid_nudge
         + f"<div class='text-sm text-indigo-500 font-bold'>{esc(sname)}</div>"
         "<h1 class='text-2xl font-extrabold text-slate-900 mb-1'>네이버 블로그에 올리기</h1>"
-        "<p class='text-slate-400 text-sm mb-5'>① 제목·본문 복사해서 붙여넣기 → ② 사진을 순서대로 저장 → ③ 본문 <b>[📷 사진N 위치]</b>에 네이버 사진버튼으로 올리기</p>"
+        "<p class='text-slate-400 text-sm mb-4'>복사 → 사진 저장 → 네이버앱에 붙여넣기 → 발행. 아래 버튼 하나로 순서대로 진행돼요.</p>"
+        + wizard
         # 근거 카드(trust PHASE 3) — 본문 위쪽, 접힘 기본(복붙 흐름 무간섭·읽기 전용)
         + (f"<div class='{sec} pt-3 pb-3'>{_tc}</div>" if (_tc := _trust_card_html(blog)) else "")
         # 워크플로우 안내(블로그템플릿 PHASE 4) — PC/모바일/둘다 상황별 흐름
@@ -8886,7 +9014,7 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
         f"<button onclick=\"nvcp('nvT',this)\" class='{cbtn} bg-indigo-600 hover:bg-indigo-700'>제목 복사</button></div>"
         # 본문 — 리치텍스트 복사(PHASE D): text/html(서식 유지) + text/plain(기호 제거) dual-format
         f"<div class='{sec}'><div class='text-xs font-bold text-slate-400 mb-2'>2. 본문 <span class='text-emerald-600'>(붙여넣으면 소제목·굵기·표 서식 유지)</span></div>"
-        f"<div class='bg-slate-50 rounded-xl p-4 text-sm text-slate-700 whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto mb-3'>{esc(body_marked)}</div>"
+        f"<div class='bg-slate-50 rounded-xl p-4 text-sm text-slate-700 whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto mb-3'>{_marker_preview_html(body_marked, asset_id, photos)}</div>"
         f"<div id='nvHtml' style='position:absolute;left:-9999px' aria-hidden='true'>{_md_to_naver_html(body_marked)}</div>"
         f"<textarea id='nvPlain' class='hidden'>{esc(_md_to_plain(body_marked))}</textarea>"
         f"<button onclick=\"copyRich2('nvHtml','nvPlain',this)\" style='min-height:48px' class='{cbtn} bg-emerald-500 hover:bg-emerald-600 w-full'>전체 본문 복사 (서식 유지)</button></div>"
@@ -8902,7 +9030,10 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
         # 사진
         + (f"<div class='{sec}'><div class='flex items-center justify-between mb-3'>"
            "<div class='text-xs font-bold text-slate-400'>3. 사진 <span class='text-slate-500'>(순서대로)</span></div>"
-           f"<a href='/kit/{asset_id}/pack/{blog.id}' class='text-xs font-bold text-indigo-600'>⬇ 전체 ZIP 받기</a></div>"
+           f"<a href='/kit/{asset_id}/pack/{blog.id}' onclick='wzMark(2)' class='text-xs font-bold text-indigo-600'>⬇ 전체 ZIP 받기</a></div>"
+           f"<button id='nvShareAll' type=button onclick='nvShareAllGo(this)' style='min-height:48px' "
+           f"class='hidden {cbtn} bg-slate-800 hover:bg-slate-900 w-full mb-3'>📲 사진 {len(photos)}장 갤러리에 한 번에 저장</button>"
+           f"<script type='application/json' id='nvShareData'>{_share_json}</script>"
            f"<div class='grid grid-cols-3 sm:grid-cols-4 gap-3'>{photo_cells}</div>"
            "<p class='text-xs text-slate-400 mt-2'>사진은 이 파일명 그대로, 캡션은 사진 아래 붙여넣으면 검색에 더 잘 잡혀요.</p>"
            + ("<p class='text-[11px] text-amber-600 mt-1'>📷 일부 사진에 판매 플랫폼 로고·워터마크가 보여요 — 직접 찍은 사진이 검색에 더 유리해요.</p>"
@@ -8950,6 +9081,41 @@ def kit_naver(request: Request, asset_id: str, ok: str = "", err: str = ""):
         "{'text/html':new Blob([h.innerHTML],{type:'text/html'}),'text/plain':new Blob([p.value],{type:'text/plain'})})]);"
         "done('✅ 서식까지 복사됨! 네이버 글쓰기에 붙여넣기');return;}}catch(e){}"
         "try{await omCopy(p.value);done('✅ 글 복사됨(이 폰은 평문 — 붙여넣고 소제목만 굵게)');}catch(e2){done('길게 눌러 복사');}}"
+        # ── 발행 위저드(모바일 발행 편의 ①②) — 진행 상태 localStorage, 순차 복사, 사진 일괄 저장 ──
+        + f"var WZK='nvwiz_{asset_id[:8]}';var HAS_TAGS={'true' if _has_tags else 'false'};"
+        "function wzS(){try{return JSON.parse(localStorage.getItem(WZK)||'{}')}catch(e){return{}}}"
+        "function wzSave(s){try{localStorage.setItem(WZK,JSON.stringify(s))}catch(e){}}"
+        "function wzPaint(){var s=wzS();for(var n=1;n<=4;n++){var el=document.getElementById('wzn'+n);if(!el)continue;"
+        "if(s['w'+n]&&el.textContent!=='✓'){el.textContent='✓';"
+        "el.classList.remove('bg-slate-100','text-slate-400');el.classList.add('bg-emerald-500','text-white');}}"
+        "var b=document.getElementById('nvSeqBtn');if(!b)return;var st=s.seq||0;"
+        "var L=['① 제목 복사부터 시작','② 본문 복사 (서식 유지)','③ 태그 복사'];"
+        "if(st>=3){b.textContent='✅ 복사 끝 — 아래에서 사진을 저장하세요';"
+        "b.classList.remove('bg-indigo-600','hover:bg-indigo-700');b.classList.add('bg-emerald-500','hover:bg-emerald-600');}"
+        "else{b.textContent=L[st];}}"
+        "function wzMark(n){var s=wzS();s['w'+n]=1;wzSave(s);wzPaint();}"
+        "function wzReset(){try{localStorage.removeItem(WZK)}catch(e){}location.reload();}"
+        "function wzHint(){var m=document.getElementById('wzMsg');if(!m)return;"
+        "m.textContent='좋아요 — 발행하셨으면 맨 아래 발행 확인까지 눌러주세요!';m.classList.remove('hidden');}"
+        "async function nvSeq(btn){var s=wzS();var st=s.seq||0;"
+        "if(st===0){nvcp('nvT',btn);s.seq=1;}"
+        "else if(st===1){await copyRich2('nvHtml','nvPlain',btn);s.seq=HAS_TAGS?2:3;}"
+        "else if(st===2){nvcp('nvTags',btn);s.seq=3;}"
+        "else{return;}"
+        "if(s.seq>=3){s.w1=1;}wzSave(s);setTimeout(wzPaint,2400);}"
+        "async function nvShareAllGo(btn){var d;try{d=JSON.parse(document.getElementById('nvShareData').textContent)}catch(e){return;}"
+        "var o=btn.textContent;btn.textContent='사진 준비 중…';btn.disabled=true;"
+        "try{var fs=[];for(var i=0;i<d.length;i++){var r=await fetch(d[i].u);var b=await r.blob();"
+        "fs.push(new File([b],d[i].n,{type:b.type||'image/jpeg'}));}"
+        "if(navigator.canShare&&navigator.canShare({files:fs})){await navigator.share({files:fs});"
+        "wzMark(2);btn.textContent='✅ 공유됨 — 갤러리(파일)에 저장하세요';}"
+        "else{btn.textContent='이 폰은 미지원 — 아래에서 장별 저장 또는 ZIP';}}"
+        "catch(e){btn.textContent=(e&&e.name==='AbortError')?o:'실패 — 아래에서 장별 저장 또는 ZIP';}"
+        "btn.disabled=false;setTimeout(function(){btn.textContent=o;},3500);}"
+        "(function(){wzPaint();"
+        "if(document.getElementById('nvPubDone')){wzMark(4);}"
+        "try{if(navigator.canShare&&navigator.canShare({files:[new File([' '],'t.jpg',{type:'image/jpeg'})]})){"
+        "var sb=document.getElementById('nvShareAll');if(sb)sb.classList.remove('hidden');}}catch(e){}})();"
         "</script>")
     return HTMLResponse(_subscriber_page("네이버 블로그", body))
 
