@@ -553,7 +553,7 @@ def _video() -> str:
    <h2 class="text-2xl sm:text-3xl font-bold text-slate-900">실제 결과물, 직접 보세요</h2>
    <p class="text-slate-500 text-sm mt-2">사진 5장만 올리면 <b class="text-slate-800">음성 영상</b>과 <b class="text-slate-800">네이버 블로그 글</b>이 자동으로. 아래는 실제 생성 결과입니다.</p></div>
   <div class="reveal max-w-sm mx-auto card overflow-hidden">
-   <video src="/demo/local_short.mp4" controls muted loop playsinline preload="metadata" poster="/demo/og.png" class="w-full bg-black"></video>
+   <video src="/demo/local_short.mp4" controls muted loop playsinline preload="metadata" poster="/demo/short_poster.jpg" class="w-full bg-black"></video>
    <div class="text-slate-600 text-sm px-5 py-3.5">초량 루마썬팅 — 사진 5장 → AI 자동 생성 열차단 썬팅 세로 영상 <b class="text-slate-800">(음성 나레이션 + BGM)</b>
    <span class="block text-xs text-slate-400 mt-1">실제 올린다 생성물 · 탭하면 소리가 나와요</span></div></div>
   {_naver_preview()}

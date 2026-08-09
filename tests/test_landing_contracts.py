@@ -129,6 +129,20 @@ def test_marketing_sections_present_and_honest():
     assert "무조건 1위" not in h.replace("\"무조건 1위\" 보장은 하지 않습니다", "")
 
 
+def test_landing_media_assets():
+    """2026-08-09 자산 재제작 계약 — 실물 존재·포스터 교체(검은 첫 화면 og.png 포스터 회귀 방지)."""
+    h = _html()
+    assert "/demo/short_poster.jpg" in h, "데모 영상 실프레임 포스터 회귀"
+    root = os.path.join(os.path.dirname(landing.__file__), "..")
+    poster = os.path.join(os.path.dirname(landing.__file__), "static", "demo", "short_poster.jpg")
+    assert os.path.isfile(poster) and os.path.getsize(poster) > 10000
+    guide = os.path.join(root, "assets", "docs", "ollinda_guide.pdf")
+    intro = os.path.join(root, "assets", "docs", "ollinda_intro.mp4")
+    assert os.path.getsize(guide) > 50_000, "제품설명서 실물 이상"
+    assert os.path.getsize(guide) < 1_000_000, "제품설명서가 다시 비대해짐(구 3.4MB 회귀)"
+    assert os.path.getsize(intro) > 2_000_000, "소개 영상 실물 이상"
+
+
 def test_cancel_policy_present():
     h = _html()
     assert "언제든 해지" in h, "요금 섹션 해지 안내 누락"
