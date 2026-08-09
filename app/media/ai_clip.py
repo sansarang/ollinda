@@ -27,8 +27,59 @@ log = logging.getLogger("shopcast.aiclip")
 
 MODEL = os.environ.get("VEO_CLIP_MODEL", "veo-3.1-fast-generate-preview")
 _API = "https://generativelanguage.googleapis.com/v1beta"
-DUR_SEC = 4                      # 생성 길이(초) — 씬이 더 길면 호출부가 슬로모로 늘림
+DUR_SEC = 3                      # 생성 길이(초) — 초당 과금이라 최소로, 씬이 더 길면 호출부가 슬로모로 늘림
+                                 # (4→3초, 2026-08-09 비용 절감 승인 — 화질 손실 없음: 슬로모 확장 로직 기존)
 POLL_CAP = 180                   # 생성 대기 상한(초) — 초과 시 포기(파이프라인 보호)
+
+
+def _text_risk(img: str) -> bool:
+    """사진에 또렷한 글자·숫자가 있으면 True → Veo 생략(켄번스 직행).
+
+    실측(2026-08-09): QC 탈락 전건이 글자 계열이었다 — 레터링·엠블럼 뭉개짐, 시계 숫자 변형,
+    번호판 모자이크 침범. 실패할 사진에 시도한 비용이 그날 지출의 대부분이었다.
+    로컬 tesseract(무료·문서 PII OCR과 동일 도구)로 사전 감지한다. 판정: conf≥70이고
+    이미지 높이 1.2% 이상인 단어가 2개 이상. tesseract 없으면 False(필터 없음 — 파이프라인 불변).
+    끄기: VEO_TEXT_FILTER=0. 차단 마커는 남기지 않는다(필터 완화·모델 개선 여지)."""
+    if os.environ.get("VEO_TEXT_FILTER", "1") == "0":
+        return False
+    import shutil as _sh
+    if not _sh.which("tesseract"):
+        return False
+    try:
+        import subprocess as _sp
+        import tempfile as _tf
+
+        from PIL import Image
+        with _tf.TemporaryDirectory(prefix="veotf_") as td:
+            small = os.path.join(td, "s.png")
+            im = Image.open(img)
+            w, h = im.size
+            if w > 1600:
+                im = im.resize((1600, int(h * 1600 / w)))
+            im.convert("RGB").save(small)
+            W, H = im.size
+            out = os.path.join(td, "o")
+            _sp.run(["tesseract", small, out, "-l", "kor+eng", "--psm", "11", "tsv"],
+                    capture_output=True, timeout=30)
+            if not os.path.exists(out + ".tsv"):
+                return False
+            strong = 0
+            with open(out + ".tsv", encoding="utf-8") as f:
+                rows = [r.split("\t") for r in f.read().splitlines()[1:]]
+            for r in rows:
+                if len(r) < 12:
+                    continue
+                try:
+                    conf, wh, txt = float(r[10]), int(r[9]), (r[11] or "").strip()
+                except ValueError:
+                    continue
+                if conf >= 70 and wh >= H * 0.012 and len(txt) >= 2:
+                    strong += 1
+                    if strong >= 2:
+                        return True
+            return False
+    except Exception:
+        return False                 # 필터 실패는 조용히 무필터 — 영상 파이프라인을 막지 않는다
 
 # 보수 프롬프트 고정 — 실측 통과 조건 그대로(2026-07-30). 임의 완화 금지.
 _PROMPT = (
@@ -187,49 +238,76 @@ class ClipBudget:
         self.generated = 0     # 이번 렌더에서 새로 생성(과금)된 수
         self.qc_fail = 0
         self.qc_skip = 0                           # 검사 불가(비전 호출 실패) — 불량과 구분
+        self.skipped = 0                           # 글자 감지 사전 생략(과금 0) — 2026-08-09
 
     def stats(self) -> dict:
         return {"used": self.used, "generated": self.generated,
-                "qc_fail": self.qc_fail, "qc_skip": self.qc_skip}
+                "qc_fail": self.qc_fail, "qc_skip": self.qc_skip, "skipped": self.skipped}
 
     def get(self, img: str) -> str | None:
         """img의 AI 클립 경로 또는 None(켄번스 폴백). 캐시 → 생성+QC 순."""
         if not (enabled() and img and os.path.exists(img)):
             return None
-        try:
-            h = _content_hash(img)
-        except OSError:
-            return None
         cdir = os.path.dirname(img)
-        cache = os.path.join(cdir, f"{h}.veoclip.mp4")
-        bad = os.path.join(cdir, f"{h}.veoclip.bad")
+        # 캐시 키 = 파일명 스템(업로드별 uuid) — 재보정으로 픽셀이 바뀌어도 캐시가 산다
+        # (2026-08-09 비용 절감 승인: 내용 해시 키는 재보정 시 캐시 미스 → 같은 사진 재과금).
+        stem = os.path.splitext(os.path.basename(img))[0]
+        cache = os.path.join(cdir, f"{stem}.veoclip.mp4")
+        bad = os.path.join(cdir, f"{stem}.veoclip.bad")
+        try:                                        # 구 해시 키 캐시 이관(재과금 방지)
+            h = _content_hash(img)
+            for old, new in ((f"{h}.veoclip.mp4", cache), (f"{h}.veoclip.bad", bad)):
+                op = os.path.join(cdir, old)
+                if os.path.exists(op) and not os.path.exists(new):
+                    os.replace(op, new)
+        except OSError:
+            pass
         if os.path.exists(cache):
             self.used += 1
             return cache
         if os.path.exists(bad) or self.left <= 0:
             return None
-        self.left -= 1
-        tmp = cache + ".part"
-        if not _generate(img, tmp):
+        if _text_risk(img):                         # 글자 사진 = Veo 실패 예정 → 시도 자체를 안 한다
+            self.skipped += 1
+            log.info("[aiclip] 글자 감지 → Veo 생략(켄번스): %s", os.path.basename(img))
             return None
-        self.generated += 1
-        _verdict = _qc(tmp, img)
-        if _verdict is False:                      # 실제 불량 → 폐기 + 영구 차단(재과금 방지)
-            self.qc_fail += 1
-            try:
-                os.replace(tmp, bad + ".mp4")      # 진단용 보존
-                open(bad, "w").close()             # 재생성 금지 마커
-            except OSError:
-                pass
-            return None
-        if _verdict is None:                       # 검사 불가 → 클립은 보관, 마커 없음(다음에 재검사)
-            self.qc_skip += 1
-            try:
-                os.replace(tmp, cache + ".unverified")
-            except OSError:
-                pass
-            return None
-        os.replace(tmp, cache)
-        self.used += 1
-        log.info("[aiclip] 생성+QC 통과: %s", os.path.basename(cache))
-        return cache
+        # QC 탈락 시 1회 재추첨(2026-08-09 사장님 '클립 수준' 지시) — Veo는 비결정적이라
+        # 같은 사진도 추첨마다 결과가 다르다. 실측: 한 세트 시도 2건 전부 탈락 → 무빙 0(슬라이드쇼).
+        # 비용 통제 불변: 재추첨도 편당 예산(self.left)을 소모하며, 최종 탈락 후에만 영구 차단.
+        retries = max(0, int(os.environ.get("VEO_QC_RETRY", "1")))
+        for attempt in range(1 + retries):
+            if self.left <= 0:
+                return None
+            self.left -= 1
+            tmp = cache + ".part"
+            if not _generate(img, tmp):
+                return None                        # 생성 실패(쿼터 등) — 재추첨 무의미, 켄번스 폴백
+            self.generated += 1
+            _verdict = _qc(tmp, img)
+            if _verdict is False:                  # 실제 불량 → 폐기, 마지막 시도까지 탈락 시 영구 차단
+                self.qc_fail += 1
+                try:
+                    os.replace(tmp, bad + f".{attempt}.mp4")   # 진단용 보존
+                except OSError:
+                    pass
+                if attempt < retries:
+                    log.info("[aiclip] QC 탈락 → 재추첨 %d/%d: %s",
+                             attempt + 1, retries, os.path.basename(img))
+                    continue
+                try:
+                    open(bad, "w").close()         # 재생성 금지 마커(재과금 방지)
+                except OSError:
+                    pass
+                return None
+            if _verdict is None:                   # 검사 불가 → 클립은 보관, 마커 없음(다음에 재검사)
+                self.qc_skip += 1
+                try:
+                    os.replace(tmp, cache + ".unverified")
+                except OSError:
+                    pass
+                return None
+            os.replace(tmp, cache)
+            self.used += 1
+            log.info("[aiclip] 생성+QC 통과: %s", os.path.basename(cache))
+            return cache
+        return None
