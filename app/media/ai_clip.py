@@ -240,12 +240,13 @@ class ClipBudget:
         self.qc_skip = 0                           # 검사 불가(비전 호출 실패) — 불량과 구분
         self.skipped = 0                           # 글자 감지 사전 생략(과금 0) — 2026-08-09
         self.usd = 0.0                             # 이번 렌더 Veo 과금(2026-08-09 비용 계측 승인)
-        # 단가: 실측 역산 기본 0.12 USD/초(2026-08-09 6천원÷9회÷4초) — 공식 단가 확인 시
-        # VEO_USD_PER_SEC로 보정. QC 탈락분도 생성은 됐으므로 과금에 포함한다(정직 계측).
+        # 단가: 공식 Gemini API Veo 3.1 Fast 720p = $0.10/초(2026-08-09 웹 확인 — 본 모듈이
+        # resolution 720p 사용). 부가세·환율 별도. 해상도·모델 변경 시 VEO_USD_PER_SEC로 보정.
+        # QC 탈락분도 생성은 됐으므로 과금에 포함한다(정직 계측).
         try:
-            self.rate = float(os.environ.get("VEO_USD_PER_SEC", "0.12"))
+            self.rate = float(os.environ.get("VEO_USD_PER_SEC", "0.10"))
         except ValueError:
-            self.rate = 0.12
+            self.rate = 0.10
 
     def stats(self) -> dict:
         return {"used": self.used, "generated": self.generated,
