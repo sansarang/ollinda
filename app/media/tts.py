@@ -25,6 +25,34 @@ def configured() -> bool:
                 or (os.environ.get("ELEVENLABS_API_KEY") or "").strip())
 
 
+# ── 비용 계측(2026-08-09 승인) — ElevenLabs는 글자수 과금인데 세트 api_cost(LLM만)에
+#    안 잡히던 구멍. 렌더 스레드별 누적 → video가 render_cost로 합산. 측정만, 동작 불변.
+#    단가는 플랜별 상이 — ELEVEN_USD_PER_1K_CHARS로 보정(기본 0.30 = Creator급 보수치).
+import threading as _th
+
+_COST_TL = _th.local()
+
+
+def _cost_add(chars: int) -> None:
+    try:
+        rate = float(os.environ.get("ELEVEN_USD_PER_1K_CHARS", "0.30"))
+    except ValueError:
+        rate = 0.30
+    _COST_TL.usd = getattr(_COST_TL, "usd", 0.0) + chars / 1000.0 * rate
+    _COST_TL.chars = getattr(_COST_TL, "chars", 0) + chars
+
+
+def cost_reset() -> None:
+    _COST_TL.usd, _COST_TL.chars = 0.0, 0
+
+
+def cost_take() -> tuple:
+    """(usd, chars) 반환 후 리셋 — 렌더 1회 단위 집계용."""
+    v = (round(getattr(_COST_TL, "usd", 0.0), 4), getattr(_COST_TL, "chars", 0))
+    cost_reset()
+    return v
+
+
 def synthesize(text: str, out_dir: str) -> str | None:
     """text → mp3 경로. ElevenLabs 우선(사람 느낌·자연스러움), 실패/무키 시 Gemini, 둘 다 안 되면 None."""
     if not text.strip():
@@ -90,7 +118,10 @@ def _elevenlabs_timed(text: str, out_dir: str) -> "tuple[str, list] | None":
         words = _chars_to_words(al.get("characters") or [],
                                 al.get("character_start_times_seconds") or [],
                                 al.get("character_end_times_seconds") or [])
-        return (out, words) if os.path.exists(out) else None
+        if os.path.exists(out):
+            _cost_add(len(text))
+            return (out, words)
+        return None
     except Exception as e:
         LAST_ERR = repr(e)[:200]
         return None
@@ -158,6 +189,7 @@ def _elevenlabs(text: str, out_dir: str) -> str | None:
         r.raise_for_status()
         with open(out, "wb") as f:
             f.write(r.content)
+        _cost_add(len(text))
         return out
     except Exception:
         return None

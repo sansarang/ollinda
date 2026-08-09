@@ -1170,6 +1170,25 @@ def _make_video_bundle(tenant: Tenant, asset, paths: list[str], brief_public: di
         _set_channel_status(asset.id, {ch: {"status": "failed", "error": _err} for ch in want})
         return
     _set_video_job(asset.id, "done")
+    # 렌더 비용 병합(2026-08-09 승인) — Veo·TTS가 세트 api_cost(LLM만)에 안 잡히던 구멍.
+    # "이 영상 한 편에 실제로 얼마 들었나"가 세트에 남는다. 계측 실패는 파이프라인을 막지 않는다.
+    import logging
+    try:
+        from app.generators.video import render_cost_take as _rct
+        _rc = _rct()
+        if _rc.get("usd", 0) > 0:
+            _blog0 = next((p for p in db.get_set_pieces(asset.id) if p.kind.value == "blog"), None)
+            if _blog0:
+                _ac = dict((_blog0.payload or {}).get("api_cost") or {})
+                _ac["usd"] = round(float(_ac.get("usd") or 0) + _rc["usd"], 4)
+                _ac["video_usd"] = round(float(_ac.get("video_usd") or 0) + _rc["usd"], 4)
+                _ac["video_detail"] = {k: _rc[k] for k in ("veo_usd", "veo_new", "tts_usd", "tts_chars")}
+                db.update_piece_payload(_blog0.id, {"api_cost": _ac})
+                logging.getLogger("shopcast.cost").warning(
+                    "[cost] 영상 렌더 asset=%s usd=%.4f (veo=%.4f new=%d, tts=%.4f/%d자)",
+                    asset.id, _rc["usd"], _rc["veo_usd"], _rc["veo_new"], _rc["tts_usd"], _rc["tts_chars"])
+    except Exception:
+        logging.getLogger("shopcast.cost").exception("[cost] 렌더 비용 병합 실패 asset=%s", asset.id)
     # 🎞 렌더 결과 화면 자동 검사(업종 중립) — 잘림·자막·PII를 vision이 보고 기록(발행 전 확인 신호)
     try:
         from app.generators.video import video_qc as _vqc

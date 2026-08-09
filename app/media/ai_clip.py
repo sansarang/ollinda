@@ -239,10 +239,18 @@ class ClipBudget:
         self.qc_fail = 0
         self.qc_skip = 0                           # 검사 불가(비전 호출 실패) — 불량과 구분
         self.skipped = 0                           # 글자 감지 사전 생략(과금 0) — 2026-08-09
+        self.usd = 0.0                             # 이번 렌더 Veo 과금(2026-08-09 비용 계측 승인)
+        # 단가: 실측 역산 기본 0.12 USD/초(2026-08-09 6천원÷9회÷4초) — 공식 단가 확인 시
+        # VEO_USD_PER_SEC로 보정. QC 탈락분도 생성은 됐으므로 과금에 포함한다(정직 계측).
+        try:
+            self.rate = float(os.environ.get("VEO_USD_PER_SEC", "0.12"))
+        except ValueError:
+            self.rate = 0.12
 
     def stats(self) -> dict:
         return {"used": self.used, "generated": self.generated,
-                "qc_fail": self.qc_fail, "qc_skip": self.qc_skip, "skipped": self.skipped}
+                "qc_fail": self.qc_fail, "qc_skip": self.qc_skip, "skipped": self.skipped,
+                "usd": round(self.usd, 4)}
 
     def get(self, img: str) -> str | None:
         """img의 AI 클립 경로 또는 None(켄번스 폴백). 캐시 → 생성+QC 순."""
@@ -283,6 +291,7 @@ class ClipBudget:
             if not _generate(img, tmp):
                 return None                        # 생성 실패(쿼터 등) — 재추첨 무의미, 켄번스 폴백
             self.generated += 1
+            self.usd += DUR_SEC * self.rate        # 생성 성공 = 과금(QC 결과와 무관 — 정직 계측)
             _verdict = _qc(tmp, img)
             if _verdict is False:                  # 실제 불량 → 폐기, 마지막 시도까지 탈락 시 영구 차단
                 self.qc_fail += 1

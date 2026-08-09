@@ -95,6 +95,41 @@ def test_text_risk_skips_before_paying(photo, monkeypatch):
         "사전 생략은 영구 차단이 아니다(필터 완화 여지)"
 
 
+def test_veo_cost_metering(photo, monkeypatch):
+    """비용 계측(2026-08-09 승인) — 생성 성공=과금(QC 무관), 캐시·생략=0. 세트 api_cost 구멍 봉합."""
+    monkeypatch.setenv("VEO_USD_PER_SEC", "0.10")
+    gen, calls = _fake_generate(["ok", "ok"])
+    verdicts = iter([False, True])                 # 1차 QC 탈락(과금됨) → 2차 통과
+    monkeypatch.setattr(ai_clip, "_generate", gen)
+    monkeypatch.setattr(ai_clip, "_qc", lambda clip, img: next(verdicts))
+    b = ai_clip.ClipBudget(max_new=4)
+    assert b.get(photo)
+    expected = 2 * ai_clip.DUR_SEC * 0.10          # 두 번 생성 = 두 번 과금(탈락분 포함 — 정직)
+    assert abs(b.stats()["usd"] - expected) < 1e-9
+    assert b.get(photo) and abs(b.stats()["usd"] - expected) < 1e-9, "캐시 히트는 과금 0"
+
+
+def test_tts_cost_metering(monkeypatch):
+    from app.media import tts
+    monkeypatch.setenv("ELEVEN_USD_PER_1K_CHARS", "0.30")
+    tts.cost_reset()
+    tts._cost_add(500)
+    tts._cost_add(500)
+    usd, chars = tts.cost_take()
+    assert abs(usd - 0.30) < 1e-9 and chars == 1000
+    assert tts.cost_take() == (0.0, 0), "take 후 리셋"
+
+
+def test_render_cost_accumulator():
+    from app.generators import video
+    video.render_cost_take()                       # 초기화
+    video._render_cost_add(0.36, 1, 0.15, 500)
+    video._render_cost_add(0.36, 1, 0.0, 0)
+    rc = video.render_cost_take()
+    assert abs(rc["usd"] - 0.87) < 1e-9 and rc["veo_new"] == 2 and rc["tts_chars"] == 500
+    assert video.render_cost_take()["usd"] == 0.0, "번들 단위 리셋"
+
+
 def test_cache_survives_reedit_and_migrates_legacy(photo, monkeypatch):
     """캐시 키 = 파일명 스템 — 재보정으로 픽셀이 바뀌어도 캐시 히트(재과금 0). 구 해시 키는 이관."""
     monkeypatch.setattr(ai_clip, "_text_risk", lambda img: False)

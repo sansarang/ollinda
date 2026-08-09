@@ -38,6 +38,30 @@ except Exception:
     pass
 
 import threading as _threading
+
+# ── 렌더 비용 계측(2026-08-09 승인) — Veo·TTS는 LLM 계측(api_cost) 밖이던 구멍.
+#    렌더 스레드별 누적 → ingest가 완료 시점에 블로그 api_cost로 병합. 측정만, 동작 불변.
+_RCOST = _threading.local()
+
+
+def _render_cost_add(veo_usd: float, veo_new: int, tts_usd: float, tts_chars: int) -> None:
+    _RCOST.usd = getattr(_RCOST, "usd", 0.0) + veo_usd + tts_usd
+    _RCOST.veo_usd = getattr(_RCOST, "veo_usd", 0.0) + veo_usd
+    _RCOST.veo_new = getattr(_RCOST, "veo_new", 0) + veo_new
+    _RCOST.tts_usd = getattr(_RCOST, "tts_usd", 0.0) + tts_usd
+    _RCOST.tts_chars = getattr(_RCOST, "tts_chars", 0) + tts_chars
+
+
+def render_cost_take() -> dict:
+    """이 스레드에서 누적된 렌더 비용을 반환하고 리셋 — 영상 번들 1회 단위."""
+    out = {"usd": round(getattr(_RCOST, "usd", 0.0), 4),
+           "veo_usd": round(getattr(_RCOST, "veo_usd", 0.0), 4),
+           "veo_new": getattr(_RCOST, "veo_new", 0),
+           "tts_usd": round(getattr(_RCOST, "tts_usd", 0.0), 4),
+           "tts_chars": getattr(_RCOST, "tts_chars", 0)}
+    _RCOST.usd = _RCOST.veo_usd = _RCOST.tts_usd = 0.0
+    _RCOST.veo_new = _RCOST.tts_chars = 0
+    return out
 # 동시 렌더 상한 — ffmpeg 폭주(업로드 N건=프로세스 N개) 방지. PHASE 1: 기본 1건 직렬화(디스크·CPU 안전).
 RENDER_SEM = _threading.BoundedSemaphore(int(os.environ.get("SHOPCAST_RENDER_CONCURRENCY", "1")))
 _RENDER_FLOOR_MB = int(os.environ.get("SHOPCAST_RENDER_FLOOR_MB", "120"))   # 이하면 렌더 보류(만차 502 차단). 출력 mp4 ~10MB라 120MB=충분한 안전마진(볼륨 445MB)
@@ -2328,6 +2352,7 @@ class ShortVideoGenerator(Generator):
         hook, sentences, outro_cta = script.hook, list(script.sentences), script.outro
         if not shutil.which("ffmpeg"):
             return None, "ffmpeg 미설치", 0, None
+        tts_lib.cost_reset()                       # 비용 계측 창 시작(실패 렌더 잔량 누수 방지)
         try:
             from PIL import Image  # noqa: F401
         except Exception:
@@ -2501,6 +2526,8 @@ class ShortVideoGenerator(Generator):
                     f"{' · AI이미지' if len(visuals) > len(imgs) else ''}"
                     f"{f' · 씬탈락 {dropped}' if dropped else ''}"
                     f"{(' · AI무빙 ' + str(_clip_budget.stats())) if _clip_budget.used or _clip_budget.generated else ''}")
+            _tu, _tc = tts_lib.cost_take()
+            _render_cost_add(_clip_budget.usd, _clip_budget.generated, _tu, _tc)
             return final, note, round(total), cover
         except Exception as e:
             try:
@@ -2521,6 +2548,7 @@ class ShortVideoGenerator(Generator):
             return None, "콘티 없음 — 기존 경로", 0, None, []
         if not shutil.which("ffmpeg"):
             return None, "ffmpeg 미설치", 0, None, []
+        tts_lib.cost_reset()                       # 비용 계측 창 시작(실패 렌더 잔량 누수 방지)
         # ★ 디스크 하한 게이트(_build_scene_video와 동일) — 만차 렌더 보류
         _free = _disk_free_mb(os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage")))
         if _free is not None and _free < _RENDER_FLOOR_MB:
@@ -2671,6 +2699,8 @@ class ShortVideoGenerator(Generator):
                     f"단어자막(ASS) · {'TTS싱크' if tts_lib.configured() else '무음'}"
                     f"{f' · 씬탈락 {dropped}' if dropped else ''}"
                     f"{(' · AI무빙 ' + str(_clip_budget.stats())) if _clip_budget.used or _clip_budget.generated else ''}")
+            _tu, _tc = tts_lib.cost_take()
+            _render_cost_add(_clip_budget.usd, _clip_budget.generated, _tu, _tc)
             return final, note, round(total), cover, compare
         except Exception as e:
             try:
