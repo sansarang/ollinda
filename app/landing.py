@@ -440,6 +440,10 @@ def _nav() -> str:
  </div></header>"""
 
 
+# 구글 G 로고(공식 4색) — 히어로·CTA 버튼 공용
+_GOOGLE_G = ('<svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>')
+
+
 def _naver_login_available() -> bool:
     from app import naver_auth
     return naver_auth.configured()
@@ -476,8 +480,9 @@ def _hero() -> str:
   <p class="reveal mt-4 text-sm text-slate-400 max-w-xl mx-auto">C-Rank·D.I.A.+ 신호 반영 · 없는 가격·스펙 안 지어내는 정직한 글 · 실검색량 키워드</p>
   <p class="reveal mt-1.5 text-sm text-slate-400 max-w-xl mx-auto">네이버만? <b class="text-slate-600">ChatGPT·AI 검색에도 내 가게가</b> — 인용되기 유리한 구조로 씁니다</p>
   <div class="reveal mt-10 flex flex-col sm:flex-row gap-3 justify-center items-center">
-   <a href="/login/kakao" class="flex items-center justify-center px-10 py-4 rounded-2xl font-extrabold text-lg w-full sm:w-auto" style="background:#FEE500;color:#191600">카카오로 무료 시작</a>{_naver_hero_btn()}</div>
-  <p class="reveal mt-4 text-xs text-slate-400">구글 <a href="/login/google" class="text-slate-500 underline">간편가입</a> · 이메일 <a href="/signup" class="text-slate-500 underline">회원가입</a> · 이미 회원이면 <a href="/login" class="text-slate-500 underline">로그인</a></p>
+   <a href="/login/kakao" class="flex items-center justify-center px-10 py-4 rounded-2xl font-extrabold text-lg w-full sm:w-auto" style="background:#FEE500;color:#191600">카카오로 무료 시작</a>{_naver_hero_btn()}
+   <a href="/login/google" class="flex items-center justify-center gap-2 px-10 py-4 rounded-2xl font-extrabold text-lg bg-white border border-slate-200 text-slate-700 w-full sm:w-auto">{_GOOGLE_G} 구글로 시작</a></div>
+  <p class="reveal mt-4 text-xs text-slate-400">이메일 <a href="/signup" class="text-slate-500 underline">회원가입</a> · 이미 회원이면 <a href="/login" class="text-slate-500 underline">로그인</a></p>
   <!-- 두 미끼를 한눈에: 순위진단(왼쪽) + 무료 만들기(오른쪽) — 모바일은 세로 스택 -->
   <!-- grid-cols-1 명시(모바일 반응형): lg 미만에서 암시적 auto 트랙이 max-content(576px)로 커져
        카드가 뷰포트를 넘고 overflow-hidden에 잘리던 버그 — minmax(0,1fr) 트랙으로 강제 -->
