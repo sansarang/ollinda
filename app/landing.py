@@ -615,11 +615,25 @@ def _hero_demo_card() -> str:
 
 
 def _stats() -> str:
-    items = [("5", "개 채널 동시"), ("1", "장 사진이면 끝"), ("100", "점 상위노출 점검"), ("2", "개 모드 자동분기")]
-    cells = "".join(f"<div class='reveal text-center'><div class='text-5xl font-bold text-indigo-600' data-count='{n}'>{n}</div>"
-                    f"<div class='text-sm text-slate-500 mt-2 font-medium'>{l}</div></div>" for n, l in items)
-    return (f"<section class='bg-white pt-20 pb-2'><div class='max-w-5xl mx-auto px-5'>"
-            f"<div class='grid grid-cols-2 sm:grid-cols-4 gap-8'>{cells}</div></div></section>")
+    """(제거 2026-08-09) 기능 개수 나열은 증거가 아니다 — 실사용 가게 수·누적 발행 수 같은
+    실측 숫자가 의미 있어지면 그때 실숫자로 부활시킨다(정직 원칙)."""
+    return ""
+
+
+def _experience_strip() -> str:
+    """경험 자산화 — 대행사와의 결정적 차이: 매번 묻지 않는다. 한 번 답하면 계속 쓴다."""
+    return f"""
+<section class="bg-white py-20">
+ <div class="max-w-4xl mx-auto px-5">
+  <div class="reveal card-hi p-8 sm:p-10 text-center">
+   <div class="mx-auto w-12 h-12 rounded-full bg-white text-indigo-600 flex items-center justify-center mb-4">{_icon('message', 'w-6 h-6')}</div>
+   <h2 class="text-2xl sm:text-3xl font-bold text-slate-900 mb-3">한 번 답하면, <span class="text-indigo-600">계속 씁니다</span></h2>
+   <p class="text-slate-600 text-sm sm:text-base max-w-2xl mx-auto">글을 만들 때 그 주제로 <b class="text-slate-800">딱 한 가지</b>만 여쭤봐요.
+    답하신 경험은 저장돼서 다음 글에 자동으로 들어가고 — <b class="text-slate-800">쌓일수록 질문이 줄어듭니다.</b>
+    나중엔 사진만 던지셔도 돼요.</p>
+   <p class="text-xs text-slate-400 mt-4">답이 없는 주제는 지어내지 않습니다 — 경험 없이도 쓸 수 있는 사실 기반 글로 먼저 나가요.</p>
+  </div>
+ </div></section>"""
 
 
 def _problem() -> str:
@@ -645,19 +659,25 @@ def _results() -> str:
           "<g fill='#4338ca'><rect x='40' y='12' width='6' height='6'/><rect x='50' y='20' width='6' height='6'/><rect x='40' y='40' width='6' height='6'/>"
           "<rect x='52' y='46' width='6' height='6'/><rect x='62' y='44' width='6' height='6'/><rect x='44' y='60' width='6' height='6'/>"
           "<rect x='60' y='64' width='6' height='6'/><rect x='70' y='54' width='6' height='6'/><rect x='40' y='72' width='6' height='6'/></g></svg>")
-    # 순위 성장 미니 바차트 — 상승 표시만 초록
-    bars = ("<div class='flex items-end gap-2 h-24 mb-4'>"
-            "<div class='w-5 rounded-t bg-indigo-100 rise'></div>"
-            "<div class='w-5 rounded-t bg-indigo-300 rise2'></div>"
-            "<div class='w-5 rounded-t bg-indigo-600 rise3'></div>"
-            "<div class='flex-1'></div><span class='text-emerald-600'>" + _icon("arrowup", "w-8 h-8") + "</span></div>")
-    # 실측 사례(2026-08 네이버 블로그검색 실측 — 예시·목업 아님). 가게 실명은 동의 전 비공개(지역·업종만).
+    # 실측 사례(예시·목업 아님) — 같은 글 하나의 발행→순위 여정, 전부 실측 날짜(2026-08 gowatch·본체 기록).
+    # 가게 실명은 동의 전 비공개(지역·업종만). 날짜·순위를 지어내지 않는다.
+    def _tl(date, label, hot=False):
+        dot = "bg-indigo-600" if hot else "bg-indigo-200"
+        txt = "text-slate-900 font-extrabold" if hot else "text-slate-600"
+        return (f"<div class='flex items-center gap-3 py-1.5'>"
+                f"<span class='w-2.5 h-2.5 rounded-full {dot} shrink-0'></span>"
+                f"<span class='text-xs text-slate-400 w-12 shrink-0'>{date}</span>"
+                f"<span class='text-sm {txt}'>{label}</span></div>")
     c1 = ("<div class='reveal card-hi p-6'>"
-          "<div class='text-xs font-bold text-indigo-500 mb-3'>실측 사례 — 실제 이용 가게</div>" + bars +
-          "<div class='flex items-center justify-between gap-2'><span class='font-semibold text-slate-800'>‘부산 동구 썬팅업체’ 검색</span>"
-          "<span class='text-sm shrink-0'><b class='text-indigo-600 text-2xl font-bold align-middle'>1위</b></span></div>"
-          "<p class='text-slate-500 text-sm mt-2'>부산 동구의 썬팅 전문점 — 올린다로 발행한 글이 "
-          "<b class='text-slate-800'>네이버 블로그검색 1위</b>에 올라 있어요.</p>"
+          "<div class='text-xs font-bold text-indigo-500 mb-3'>실측 사례 — 실제 이용 가게의 한 글</div>"
+          "<div class='font-semibold text-slate-800 mb-2'>‘부산 동구 썬팅업체’ 검색</div>"
+          "<div class='border-l-2 border-indigo-100 ml-1 pl-3'>"
+          + _tl("7/31", "글 발행 (올린다 생성)")
+          + _tl("8/2", "네이버 블로그검색 <b>12위</b> 첫 실측")
+          + _tl("8/9", "<span class='text-indigo-600 text-xl'>1위</span>", hot=True)
+          + "</div>"
+          "<p class='text-slate-500 text-sm mt-3'>부산 동구의 썬팅 전문점 — 발행 9일 만에 "
+          "<b class='text-slate-800'>네이버 블로그검색 1위</b>. 올린다는 이 여정을 매일 실측으로 지켜봅니다.</p>"
           "<p class='text-[11px] text-slate-400 mt-2'>2026년 8월 실측 · 개별 결과는 가게·키워드에 따라 달라요</p></div>")
     c2 = ("<div class='reveal card p-6'>"
           "<div class='text-xs font-bold text-slate-400 mb-3'>경쟁 추월</div>"
@@ -1051,25 +1071,59 @@ def _why_rank() -> str:
  </div></section>"""
 
 
+def _vacantq() -> str:
+    """빈자리 글감 — '뭘 올릴지 모른다'(문제 섹션)의 직접 해답. 실제 대시보드 카드 UI 재현."""
+    mock = ("<div class='reveal card p-5 text-left'>"
+            "<div class='text-sm font-bold text-slate-800 mb-0.5'>먼저 쓰면 좋은 이야기</div>"
+            "<div class='text-xs text-slate-400 mb-3'>손님들이 찾는데 아직 답이 없는 것들이에요</div>"
+            "<div class='space-y-2'>"
+            "<div class='bg-[#EEF2FF] border border-indigo-100 rounded-xl px-3.5 py-3'>"
+            "<div class='text-sm text-slate-800 font-medium'>겨울에 시공해도 괜찮은지 궁금해하는 분들이 많아요</div>"
+            "<div class='text-xs text-indigo-500 mt-1'>아직 이 질문에 답한 글이 없어요 — 사진만 올리시면 저희가 써요</div></div>"
+            "<div class='bg-[#EEF2FF] border border-indigo-100 rounded-xl px-3.5 py-3'>"
+            "<div class='text-sm text-slate-800 font-medium'>시공 후 관리법을 찾는 검색이 늘고 있어요</div>"
+            "<div class='flex gap-2 mt-1.5'><span class='text-xs font-bold text-indigo-600'>이걸로 쓸래요</span>"
+            "<span class='text-xs text-slate-400'>저희는 안 해요</span></div></div></div>"
+            "<div class='text-[11px] text-slate-400 mt-3'>실제 화면 구성 — 글감 내용은 가게마다 달라요</div></div>")
+    return f"""
+<section class="bg-white py-24">
+ <div class="max-w-5xl mx-auto px-5">
+  <h2 class="reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900">뭘 쓸지도, <span class="text-indigo-600">저희가 찾아옵니다</span></h2>
+  <p class="reveal text-center text-slate-500 mb-12 max-w-2xl mx-auto">네이버 검색을 정찰해서 <b class="text-slate-800">자리는 있는데 아직 아무도 답하지 않은 질문</b>을 찾아 글감으로 올려드려요. 사장님은 고르기만 하면 됩니다 — "저희는 안 해요" 한 번이면 그 얘긴 다시 안 꺼내요.</p>
+  <div class="grid sm:grid-cols-2 gap-8 items-center">
+   {mock}
+   <div class="reveal space-y-4">
+    <div class="flex gap-3"><span class="text-indigo-600 shrink-0 mt-0.5">{_icon('search', 'w-5 h-5')}</span>
+     <p class="text-sm text-slate-600"><b class="text-slate-800">검색 지면 정찰</b> — 손님들이 실제로 치는 검색어 중, 첫 화면에 블로그 자리가 있는 판만 골라요.</p></div>
+    <div class="flex gap-3"><span class="text-indigo-600 shrink-0 mt-0.5">{_icon('target', 'w-5 h-5')}</span>
+     <p class="text-sm text-slate-600"><b class="text-slate-800">빈자리 판별</b> — 그 질문에 답한 글이 없으면, 먼저 쓰는 가게가 그 자리를 가져갑니다.</p></div>
+    <div class="flex gap-3"><span class="text-indigo-600 shrink-0 mt-0.5">{_icon('camera', 'w-5 h-5')}</span>
+     <p class="text-sm text-slate-600"><b class="text-slate-800">사장님은 사진만</b> — 글감을 고르고 사진을 올리면, 글·영상·발행 준비는 올린다가 해요.</p></div>
+   </div>
+  </div>
+ </div></section>"""
+
+
 def _rank_loop() -> str:
-    """상위노출 실행 루프(상위노출 PHASE 6) — '진단만 하고 끝? 실제로 올려드립니다' 셀링포인트."""
+    """관측-적응 루프 전면 — '글 쓰고 끝'과의 결정적 차이. 발행 후가 본편이다."""
     steps = [
-        ("search", "1. 진단", "네이버 실측으로 <b class='text-slate-800'>놓치는 키워드</b>(월 검색량 포함)를 찾아요", "무료"),
-        ("pen", "2. 타겟 생성", "그 키워드를 겨냥한 글을 바로 만들어요 — 후기·방법·가격 <b class='text-slate-800'>앵글 3종</b>으로 여러 검색블록 진입", "무료체험 → 플랜"),
-        ("calendar", "3. 발행 일관성", "발행 캘린더가 <b class='text-slate-800'>주 N회 페이스</b>를 잡아줘요(C-Rank 지속성 신호) + 블로그 연결 시 실제 발행 자동 확인", "베이직·프로"),
-        ("refresh", "4. 추적·학습", "발행 전후 순위를 자동 추적 — <b class='text-slate-800'>오른 키워드는 더 밀고, 정체는 앵글 재도전</b>을 앱이 먼저 제안", "프로"),
+        ("chart", "1. 매일 실측", "발행된 <b class='text-slate-800'>모든 글의 네이버 순위</b>를 매일 자동으로 확인해요 — 사장님이 발행한 글도, 예전 글도 전부."),
+        ("scan", "2. 변화 감지", "순위가 떨어지거나 검색에서 사라지면 <b class='text-slate-800'>사장님보다 먼저</b> 알아챕니다."),
+        ("pen", "3. 고쳐서 제안", "떨어진 글의 <b class='text-slate-800'>개선판을 실제로 만들어</b> 카드로 가져와요. 자동 발행은 하지 않아요 — 발행 버튼은 언제나 사장님 몫."),
+        ("refresh", "4. 회복 확인", "개선판을 발행하면 <b class='text-slate-800'>회복되는지 다시 실측</b>으로 지켜봐요. 효과 있던 방법은 다음 글에 학습됩니다."),
     ]
     cards = "".join(
-        f"<div class='reveal {'card-hi' if i == 0 else 'card'} p-5'>{_icon_chip(ic)}"
-        f"<div class='font-bold mb-1 text-slate-900'>{t} <span class='text-[10px] text-indigo-500 font-normal'>{plan}</span></div>"
-        f"<p class='text-sm text-slate-500 leading-relaxed'>{d}</p></div>" for i, (ic, t, d, plan) in enumerate(steps))
+        f"<div class='reveal {'card-hi' if i == 2 else 'card'} p-5'>{_icon_chip(ic)}"
+        f"<div class='font-bold mb-1 text-slate-900'>{t}</div>"
+        f"<p class='text-sm text-slate-500 leading-relaxed'>{d}</p></div>" for i, (ic, t, d) in enumerate(steps))
     return f"""
 <section class="bg-[#F9FAFB] py-24">
  <div class="max-w-6xl mx-auto px-5">
-  <h2 class="reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900">진단만 하고 끝? <span class="text-indigo-600">올린다는 실제로 올려드립니다</span></h2>
-  <p class="reveal text-center text-slate-500 mb-12 max-w-2xl mx-auto">순위 보여주기로 끝나는 서비스가 아니에요. <b class="text-slate-800">진단 → 타겟 글 → 꾸준한 발행 → 추적·학습</b> 루프를 앱이 돌립니다.</p>
+  <div class="text-center mb-4"><span class="reveal inline-block px-3 py-1 rounded-full bg-white border border-indigo-100 text-xs font-bold text-indigo-600">글 뽑는 도구가 아니라, 지켜보는 직원</span></div>
+  <h2 class="reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900">글은 쓰는 날이 아니라 <span class="text-indigo-600">떨어지는 날</span>이 문제입니다</h2>
+  <p class="reveal text-center text-slate-500 mb-12 max-w-2xl mx-auto">대부분의 AI 툴은 글을 뱉고 끝나요. 올린다는 <b class="text-slate-800">발행한 뒤부터가 본편</b>입니다 — 매일 지켜보다가, 떨어지면 고친 글을 먼저 내밉니다.</p>
   <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">{cards}</div>
-  <p class="reveal text-center text-xs text-slate-400 mt-8">※ 정직 원칙: 가짜 순위·"무조건 1위" 보장은 하지 않습니다. 실측 순위와 사실 기반 코칭만 제공해요.</p>
+  <p class="reveal text-center text-xs text-slate-400 mt-8">※ 정직 원칙: 가짜 순위·"무조건 1위" 보장은 하지 않습니다. 실측 순위와 사실 기반 제안만 드려요.</p>
  </div></section>"""
 
 
@@ -1132,19 +1186,27 @@ def _honesty() -> str:
   <h2 class="reveal text-3xl sm:text-4xl font-bold mb-3 text-slate-900">없는 건 <span class="text-indigo-600">지어내지 않습니다</span></h2>
   <p class="reveal text-slate-500 mb-14 max-w-xl mx-auto">허위 콘텐츠는 차라리 안 만드는 게 낫습니다. 손님을 속이면 신뢰를 잃으니까요. <b class="text-slate-700">올린다는 사진과 사장님이 준 정보로만</b> 정직하게 씁니다.</p>
   <div class="grid grid-cols-2 sm:grid-cols-4 gap-6">{cells}</div>
+  <div class="reveal card p-5 mt-12 flex items-center gap-4 text-left max-w-2xl mx-auto">
+   <span class="shrink-0 w-11 h-11 rounded-xl bg-[#EEF2FF] text-indigo-600 flex items-center justify-center">{_icon('shield', 'w-5 h-5')}</span>
+   <div><div class="font-bold text-sm text-slate-800">SNS 비밀번호는 받지 않습니다</div>
+   <div class="text-xs text-slate-500 mt-0.5">채널 연결은 공식 인증(OAuth)으로만 해요. 비밀번호를 달라는 마케팅 업체는 사장님 계정을 통째로 위험에 빠뜨립니다.</div></div>
+  </div>
  </div></section>"""
 
 
 def render() -> str:
-    # 전환 논리 순서(랜딩 개선): ① 히어로(가치+CTA+진단) → ② 문제 공감(먼저 아프게) →
-    # ③ 해결·증명(영상·블로그) + 체험 위젯(증명 직후) → ④ 작동 원리(채널 알고리즘+루프+글 비교) →
-    # ⑤ 차별점(성과 가시화+정직) → ⑥ 전체 기능(숫자+핵심4) → ⑦ 신규 기능 → ⑧ 요금 → ⑨ 마지막 CTA
+    # 전환 논리 순서(2026-08-09 재배치 — 코드가 실제로 하는 일 순서로 판다):
+    # ① 히어로(가치+CTA+진단·체험) → ② 문제 공감 → ③ 빈자리 글감(문제의 직접 해답: 뭘 쓸지 찾아옴)
+    # → ④ 실물 증명(영상·블로그)+글 비교 → ⑤ 성과·실측 타임라인(증거를 앞으로)
+    # → ⑥ 관측-적응 루프(지켜보는 직원 — 핵심 차별) → ⑦ 채널 알고리즘 → ⑧ 브리핑
+    # → ⑨ 경험 자산(질문이 줄어듦) → ⑩ 정직+비밀번호 신뢰 → ⑪ 기능·모드 → ⑫ 요금 → ⑬ 마지막 CTA
     return (_HEAD + _ga() + _seo_jsonld() + _nav()
-            + _hero() + _problem()
+            + _hero() + _problem() + _vacantq()
             + _video() + _copy_compare()
-            + _why_rank() + _rank_loop() + _briefing_sell()
-            + _results() + _honesty()
-            + _stats() + _features() + _modes()
+            + _results() + _rank_loop()
+            + _why_rank() + _briefing_sell()
+            + _experience_strip() + _honesty()
+            + _features() + _modes()
             + _pricing() + _docs_download() + _faq() + _contact() + _cta() + _footer()
             + _sticky_cta() + _kakao_float() + _FOOT)
 

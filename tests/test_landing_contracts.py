@@ -103,11 +103,30 @@ def test_ga_only_with_measurement_id(monkeypatch):
 
 
 def test_measured_case_is_honest():
-    """실측 사례 카드 — 실측 문구·면책 병기, 과거 목업 문구('3계단 상승' 등) 금지."""
+    """실측 사례 타임라인 — 실측 날짜·순위(7/31 발행→8/2 12위→8/9 1위)만, 면책 병기,
+    과거 목업 문구('3계단 상승' 등) 금지."""
     h = _html()
     assert "실측" in h and "부산 동구 썬팅업체" in h
+    assert "7/31" in h and "12위" in h and "1위" in h, "실측 타임라인 누락"
     assert "3계단 상승" not in h, "미검증 상승 폭 주장 회귀"
     assert "개별 결과는" in h, "성과 사례 면책 문구 누락"
+
+
+def test_marketing_sections_present_and_honest():
+    """2026-08-09 재구성 계약 — 코드가 실제로 하는 일만 판다."""
+    h = _html()
+    # 빈자리 글감 — 실제 기능(gapscout) 소개 + UI 재현임을 명시
+    assert "아직 이 질문에 답한 글이 없어요" in h and "실제 화면 구성" in h
+    # 관측-적응 루프 — 자동 발행 부인(발행은 사장님) 문구 필수
+    assert "떨어지는 날" in h and "자동 발행은 하지 않아요" in h
+    # 경험 자산 — 지어내지 않음 병기
+    assert "한 번 답하면" in h and "지어내지 않습니다" in h
+    # 비밀번호 신뢰
+    assert "비밀번호는 받지 않습니다" in h
+    # 약한 기능-개수 스탯 제거 상태 유지(실측 숫자 생기기 전까지)
+    assert "개 채널 동시" not in h, "기능 개수 스탯 회귀 — 실측 숫자로만 부활"
+    # 순위 보장 문구 금지(금지선)
+    assert "무조건 1위" not in h.replace("\"무조건 1위\" 보장은 하지 않습니다", "")
 
 
 def test_cancel_policy_present():
