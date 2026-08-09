@@ -141,6 +141,10 @@ def test_landing_media_assets():
     assert os.path.getsize(guide) > 50_000, "제품설명서 실물 이상"
     assert os.path.getsize(guide) < 1_000_000, "제품설명서가 다시 비대해짐(구 3.4MB 회귀)"
     assert os.path.getsize(intro) > 2_000_000, "소개 영상 실물 이상"
+    # 캐시 무효화 — 파일 교체 후 브라우저가 옛 파일을 재생한 실사고(2026-08-09)
+    for u in ("/docs/guide.pdf?v=", "/docs/intro.mp4?v=", "/demo/local_short.mp4?v=",
+              "/demo/short_poster.jpg?v="):
+        assert u in h, f"미디어 버전 파라미터 누락: {u} — 교체해도 방문자가 옛 파일을 본다"
 
 
 def test_cancel_policy_present():

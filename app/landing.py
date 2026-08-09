@@ -444,6 +444,28 @@ def _nav() -> str:
 _GOOGLE_G = ('<svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>')
 
 
+# URL 경로 → 저장소 실파일 (버전 파라미터 산출용)
+_ASSET_FILES = {
+    "/docs/guide.pdf": ("assets", "docs", "ollinda_guide.pdf"),
+    "/docs/intro.mp4": ("assets", "docs", "ollinda_intro.mp4"),
+    "/demo/local_short.mp4": ("app", "static", "demo", "local_short.mp4"),
+    "/demo/short_poster.jpg": ("app", "static", "demo", "short_poster.jpg"),
+}
+
+
+def _v(url_path: str) -> str:
+    """미디어 자산 캐시 무효화 — 파일이 바뀌면 주소도 바뀐다(?v=수정시각).
+    2026-08-09 실사고: 소개 영상을 교체했는데 브라우저가 같은 주소의 옛 파일을 캐시로 재생."""
+    parts = _ASSET_FILES.get(url_path)
+    if not parts:
+        return url_path
+    p = os.path.join(os.path.dirname(__file__), "..", *parts)
+    try:
+        return f"{url_path}?v={int(os.path.getmtime(p))}"
+    except OSError:
+        return url_path
+
+
 def _naver_login_available() -> bool:
     from app import naver_auth
     return naver_auth.configured()
@@ -553,7 +575,7 @@ def _video() -> str:
    <h2 class="text-2xl sm:text-3xl font-bold text-slate-900">실제 결과물, 직접 보세요</h2>
    <p class="text-slate-500 text-sm mt-2">사진 5장만 올리면 <b class="text-slate-800">음성 영상</b>과 <b class="text-slate-800">네이버 블로그 글</b>이 자동으로. 아래는 실제 생성 결과입니다.</p></div>
   <div class="reveal max-w-sm mx-auto card overflow-hidden">
-   <video src="/demo/local_short.mp4" controls muted loop playsinline preload="metadata" poster="/demo/short_poster.jpg" class="w-full bg-black"></video>
+   <video src="{_v('/demo/local_short.mp4')}" controls muted loop playsinline preload="metadata" poster="{_v('/demo/short_poster.jpg')}" class="w-full bg-black"></video>
    <div class="text-slate-600 text-sm px-5 py-3.5">초량 루마썬팅 — 사진 5장 → AI 자동 생성 열차단 썬팅 세로 영상 <b class="text-slate-800">(음성 나레이션 + BGM)</b>
    <span class="block text-xs text-slate-400 mt-1">실제 올린다 생성물 · 탭하면 소리가 나와요</span></div></div>
   {_naver_preview()}
@@ -857,9 +879,9 @@ def _docs_download() -> str:
         "<h3 class='text-xl font-bold text-slate-900 mb-2'>천천히 검토하고 싶으세요?</h3>"
         "<p class='text-sm text-slate-500 mb-6'>제품설명서와 1분 소개 영상을 받아서 보시고, 팀·가족과 상의 후 시작하셔도 됩니다.</p>"
         "<div class='flex flex-wrap justify-center gap-3'>"
-        "<a href='/docs/guide.pdf' class='px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold transition'>"
+        f"<a href='{_v('/docs/guide.pdf')}' class='px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold transition'>"
         "📄 제품설명서 PDF 받기</a>"
-        "<a href='/docs/intro.mp4' class='px-5 py-3 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-sm font-bold transition'>"
+        f"<a href='{_v('/docs/intro.mp4')}' class='px-5 py-3 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-sm font-bold transition'>"
         "🎬 1분 소개 영상 받기</a>"
         "</div></div></div></section>")
 
