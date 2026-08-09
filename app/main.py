@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from app import auth, storage
 from app.kakao import make_router as kakao_router
 from app.google_auth import make_router as google_router
+from app.naver_auth import make_router as naver_router
 
 from app import db, oauth, seo
 from app.domain.models import Channel, ContentStatus
@@ -59,6 +60,15 @@ def _google_btn(label: str = "구글로 가입하기") -> str:
     return (f"<a href='/login/google' class='flex items-center justify-center gap-2 w-full py-3 rounded-xl "
             f"font-bold border border-slate-200 bg-white text-slate-700 mb-3 hover:bg-slate-50 shadow-sm'>"
             f"{GOOGLE_SVG} {label}</a>")
+
+
+def _naver_login_btn(label: str = "네이버로 시작하기") -> str:
+    """네이버 로그인 버튼 — 개발자센터 키가 설정된 경우에만 렌더(미설정=버튼 자체 미노출, fail-closed)."""
+    from app import naver_auth
+    if not naver_auth.configured():
+        return ""
+    return (f"<a href='/login/naver' class='block text-center py-3.5 rounded-xl font-extrabold mb-2.5 "
+            f"text-white' style='background:#03C75A'><span class='font-black mr-1'>N</span>{label}</a>")
 
 
 def _quota_block(owner: dict | None):
@@ -3167,6 +3177,7 @@ def apple_touch_icon():
 
 app.include_router(kakao_router())
 app.include_router(google_router())
+app.include_router(naver_router())
 
 _DEMO_HITS: dict = {}   # ip -> [timestamps] (무료 체험 rate limit)
 
@@ -4233,10 +4244,12 @@ def signup_get(from_: str = "", err: str = ""):
         msg = "<p class='text-rose-500 text-sm mb-3 text-center'>이미 가입된 이메일이거나 입력이 비었어요.</p>"
     elif err == "2":
         msg = "<p class='text-rose-500 text-sm mb-3 text-center'>잠시 후 다시 시도해주세요.</p>"
-    social = (_google_btn("구글로 가입하기")
-              + "<a href='/login/kakao' class='block text-center mb-4 py-3 rounded-xl font-bold' "
+    # 소셜 순서 = 고객층 사용률: 카카오 → 네이버 → 구글 (2026-08-09 가입 흐름 정비)
+    social = ("<a href='/login/kakao' class='block text-center mb-2.5 py-3 rounded-xl font-bold' "
               "style='background:#FEE500;color:#191600'>카카오로 3초 가입</a>"
-              "<div class='flex items-center gap-2 my-4'><div class='flex-1 h-px bg-slate-200'></div>"
+              + _naver_login_btn("네이버로 가입하기")
+              + _google_btn("구글로 가입하기")
+              + "<div class='flex items-center gap-2 my-4'><div class='flex-1 h-px bg-slate-200'></div>"
               "<span class='text-xs text-slate-400'>또는 이메일로 (인증 없이 바로)</span>"
               "<div class='flex-1 h-px bg-slate-200'></div></div>")
     form = (f"{msg}<form method=post action='/signup' class='space-y-3'>"
@@ -4281,6 +4294,7 @@ def login_get(request: Request):
         f"<a href='/' class='inline-flex items-center gap-2 font-extrabold text-2xl mb-2'>{landing.LOGO}<span>올린다</span></a>"
         "<p class='text-slate-500 text-sm mb-6'>로그인하고 내 작업실로 이동하세요</p>"
         "<a href='/login/kakao' class='block text-center py-3.5 rounded-xl font-extrabold mb-2.5' style='background:#FEE500;color:#191600'>카카오로 시작하기</a>"
+        + _naver_login_btn("네이버로 시작하기") +
         "<a href='/login/google' class='block text-center py-3.5 rounded-xl font-bold border border-slate-200 hover:bg-slate-50 transition'>구글로 시작하기</a>"
         "<div class='flex items-center gap-2 my-4'><div class='flex-1 h-px bg-slate-100'></div>"
         "<span class='text-xs text-slate-400'>또는 아이디로</span><div class='flex-1 h-px bg-slate-100'></div></div>"
