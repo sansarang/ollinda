@@ -120,9 +120,12 @@ _HEAD = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <meta name=twitter:card content=summary_large_image>
 <meta name=twitter:image content="__BASE__/demo/og.png">
 <link rel=canonical href="__BASE__/">
-<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css" rel=stylesheet>
-<script src="https://cdn.tailwindcss.com"></script>
-<script type=application/ld+json>{"@context":"https://schema.org","@type":"SoftwareApplication","name":"올린다","applicationCategory":"BusinessApplication","offers":{"@type":"Offer","price":"29000","priceCurrency":"KRW"}}</script>
+<link rel=icon href="/favicon.svg" type="image/svg+xml">
+<link rel=icon href="/favicon.ico" sizes="any">
+<link rel=apple-touch-icon href="/apple-touch-icon.png">
+<link rel=preconnect href="https://cdn.jsdelivr.net" crossorigin>
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.min.css" rel=stylesheet>
+<link href="/static/landing.css" rel=stylesheet>
 """.replace("__BASE__", BASE) + _STYLE + """</head><body class="bg-white text-slate-800 overflow-x-hidden pb-20 sm:pb-0">"""
 
 _FOOT = """
@@ -523,15 +526,18 @@ def _video() -> str:
    <h2 class="text-2xl sm:text-3xl font-bold text-slate-900">실제 결과물, 직접 보세요</h2>
    <p class="text-slate-500 text-sm mt-2">사진 5장만 올리면 <b class="text-slate-800">음성 영상</b>과 <b class="text-slate-800">네이버 블로그 글</b>이 자동으로. 아래는 실제 생성 결과입니다.</p></div>
   <div class="reveal max-w-sm mx-auto card overflow-hidden">
-   <video src="/demo/local_short.mp4" controls autoplay muted loop playsinline preload="metadata" poster="/demo/og.png" class="w-full bg-black"></video>
+   <video src="/demo/local_short.mp4" controls muted loop playsinline preload="metadata" poster="/demo/og.png" class="w-full bg-black"></video>
    <div class="text-slate-600 text-sm px-5 py-3.5">초량 루마썬팅 — 사진 5장 → AI 자동 생성 열차단 썬팅 세로 영상 <b class="text-slate-800">(음성 나레이션 + BGM)</b>
    <span class="block text-xs text-slate-400 mt-1">실제 올린다 생성물 · 탭하면 소리가 나와요</span></div></div>
   {_naver_preview()}
  </div>
  <script>
- window.addEventListener('load',function(){{
-   document.querySelectorAll('#video video').forEach(function(v){{v.muted=true;var p=v.play();if(p&&p.catch)p.catch(function(){{}});}});
- }});
+ // 화면에 들어왔을 때만 재생 시작(모바일 데이터·초기 로딩 절약) — 진입 즉시 1.2MB 자동 다운로드 방지
+ (function(){{var vs=document.querySelectorAll('#video video');if(!vs.length)return;
+  var vio=new IntersectionObserver(function(es){{es.forEach(function(e){{var v=e.target;
+    if(e.isIntersecting){{v.muted=true;var p=v.play();if(p&&p.catch)p.catch(function(){{}});}}
+    else{{v.pause();}}}});}},{{threshold:.35}});
+  vs.forEach(function(v){{vio.observe(v);}});}})();
  </script></section>"""
 
 
@@ -618,12 +624,14 @@ def _results() -> str:
             "<div class='w-5 rounded-t bg-indigo-300 rise2'></div>"
             "<div class='w-5 rounded-t bg-indigo-600 rise3'></div>"
             "<div class='flex-1'></div><span class='text-emerald-600'>" + _icon("arrowup", "w-8 h-8") + "</span></div>")
+    # 실측 사례(2026-08 네이버 블로그검색 실측 — 예시·목업 아님). 가게 실명은 동의 전 비공개(지역·업종만).
     c1 = ("<div class='reveal card-hi p-6'>"
-          "<div class='text-xs font-bold text-indigo-500 mb-3'>순위 성장 추적</div>" + bars +
-          "<div class='flex items-center justify-between'><span class='font-semibold text-slate-800'>부산 동구 썬팅</span>"
-          "<span class='text-sm'><b class='text-indigo-600 text-2xl font-bold align-middle'>2위</b> "
-          "<span class='text-emerald-600 font-extrabold'>· 3계단 상승</span></span></div>"
-          "<p class='text-slate-500 text-sm mt-2'>내 순위가 <b class='text-slate-800'>오르는 게 매주 숫자로</b> 보여요.</p></div>")
+          "<div class='text-xs font-bold text-indigo-500 mb-3'>실측 사례 — 실제 이용 가게</div>" + bars +
+          "<div class='flex items-center justify-between gap-2'><span class='font-semibold text-slate-800'>‘부산 동구 썬팅업체’ 검색</span>"
+          "<span class='text-sm shrink-0'><b class='text-indigo-600 text-2xl font-bold align-middle'>1위</b></span></div>"
+          "<p class='text-slate-500 text-sm mt-2'>부산 동구의 썬팅 전문점 — 올린다로 발행한 글이 "
+          "<b class='text-slate-800'>네이버 블로그검색 1위</b>에 올라 있어요.</p>"
+          "<p class='text-[11px] text-slate-400 mt-2'>2026년 8월 실측 · 개별 결과는 가게·키워드에 따라 달라요</p></div>")
     c2 = ("<div class='reveal card p-6'>"
           "<div class='text-xs font-bold text-slate-400 mb-3'>경쟁 추월</div>"
           "<div class='space-y-2'>"
@@ -640,8 +648,8 @@ def _results() -> str:
     c4 = ("<div class='reveal card p-6 flex flex-col'>"
           "<div class='text-xs font-bold text-slate-400 mb-3'>사진 자동 보정 · 실제 전/후</div>"
           "<div class='relative rounded-2xl overflow-hidden select-none mx-auto w-full' style='aspect-ratio:16/10;max-height:230px'>"
-          "<img src='/demo/food-after.jpg' class='absolute inset-0 w-full h-full object-cover' alt='보정 후'>"
-          "<img src='/demo/food-before.jpg' class='baclip absolute inset-0 w-full h-full object-cover' alt='보정 전'>"
+          "<img src='/demo/food-after.jpg' loading='lazy' decoding='async' class='absolute inset-0 w-full h-full object-cover' alt='보정 후'>"
+          "<img src='/demo/food-before.jpg' loading='lazy' decoding='async' class='baclip absolute inset-0 w-full h-full object-cover' alt='보정 전'>"
           "<div class='badiv absolute top-0 bottom-0 w-0.5 bg-white/90 shadow'></div>"
           "<span class='absolute bottom-2 left-2 bg-black/55 text-white text-[10px] font-bold px-2 py-0.5 rounded'>폰 사진</span>"
           "<span class='absolute bottom-2 right-2 bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded'>올린다 보정</span></div>"
@@ -781,14 +789,17 @@ def _pricing() -> str:
             f"<h2 class='reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900'>합리적인 요금 <span class='text-indigo-600 text-xl align-middle'>런칭 특가</span></h2>"
             f"<p class='reveal text-center text-slate-500 mb-14'>홍보 영상 외주는 편당 5~15만원, 블로그 대행은 월 30~50만원 — "
             f"올린다는 실사 무빙 영상까지 통째로, 지금 가격은 런칭 기간 한정입니다.</p>"
-            f"<div class='grid sm:grid-cols-3 gap-6 items-stretch pt-3'>{cards}</div></div></section>")
+            f"<div class='grid sm:grid-cols-3 gap-6 items-stretch pt-3'>{cards}</div>"
+            f"<p class='reveal text-center text-xs text-slate-400 mt-8'>언제든 해지 가능 — 해지 후 다음 결제일부터 청구되지 않아요 · 남은 기간은 그대로 이용</p>"
+            f"</div></section>")
 
 
 _QA = [("정말 사진만 올리면 되나요?", "네. 사진과 한 줄 설명만 주시면 AI가 5채널 콘텐츠를 만듭니다. 사진 1장만 있어도 자막·음성이 들어간 세로 숏폼까지 자동 생성됩니다."),
        ("쿠팡·11번가 셀러도 되나요?", "네. '온라인 셀러'로 설정하면 글 마무리가 지도 대신 구매 링크/검색어로, 키워드가 지역명 대신 상품·후기 키워드로 자동 전환됩니다. (쿠팡은 직링크 정책상 '검색어 유도'를 권장)"),
        ("제 SNS 비밀번호를 줘야 하나요?", "아니요. 공식 OAuth로 한 번만 권한을 허용하면 됩니다. 비밀번호는 저장하지 않습니다."),
        ("네이버 블로그도 되나요?", "글·사진을 완성해 드리고, 임시저장된 글을 네이버에서 발행만 누르시면 됩니다. (네이버는 공식 발행 API가 없어 반자동)"),
-       ("업종이 특이해도 되나요?", "어떤 업종이든 AI가 맞춤 프로필을 자동 생성합니다.")]
+       ("업종이 특이해도 되나요?", "어떤 업종이든 AI가 맞춤 프로필을 자동 생성합니다."),
+       ("해지는 어떻게 하나요?", "언제든 해지할 수 있습니다. 문의하기(이메일 포함)로 요청하시면 바로 처리해 드리고, 해지 후 다음 결제일부터는 청구되지 않습니다. 이미 결제한 기간은 그대로 이용 가능합니다.")]
 
 
 def _docs_download() -> str:
@@ -812,8 +823,10 @@ def _faq() -> str:
 
 
 def _seo_jsonld() -> str:
-    """검색 리치결과용 구조화 데이터 — Organization + WebSite + FAQPage(구글 FAQ 노출)."""
+    """검색 리치결과용 구조화 데이터 — Organization + WebSite + FAQPage(구글 FAQ 노출)
+    + SoftwareApplication(가격은 config 단일 소스 — 하드코딩 가격이 실판매가와 어긋났던 결함 봉합)."""
     import json
+    from app import config as _cfg
     faq = {"@context": "https://schema.org", "@type": "FAQPage",
            "mainEntity": [{"@type": "Question", "name": q,
                            "acceptedAnswer": {"@type": "Answer", "text": a}} for q, a in _QA]}
@@ -822,8 +835,13 @@ def _seo_jsonld() -> str:
            "description": "소상공인·온라인 셀러를 위한 네이버 상위노출 최적화 AI 마케팅 콘텐츠 생성 서비스"}
     site = {"@context": "https://schema.org", "@type": "WebSite", "name": "올린다",
             "url": BASE + "/", "inLanguage": "ko-KR"}
+    app_ = {"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "올린다",
+            "applicationCategory": "BusinessApplication", "operatingSystem": "Web",
+            "offers": {"@type": "AggregateOffer", "priceCurrency": "KRW",
+                       "lowPrice": str(_cfg.PRICE_BASIC), "highPrice": str(_cfg.AGENCY_FROM),
+                       "offerCount": "3"}}
     return "".join(f'<script type="application/ld+json">{json.dumps(x, ensure_ascii=False)}</script>'
-                   for x in (org, site, faq))
+                   for x in (org, site, faq, app_))
 
 
 def _contact() -> str:
@@ -841,8 +859,32 @@ def _contact() -> str:
   <button class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-xl sm:col-span-2 transition">문의하기</button>
   <p id="contactMsg" class="text-center text-sm text-slate-600 sm:col-span-2"></p>
  </form>
- <p class="text-center text-slate-400 text-xs mt-3">또는 카카오톡 상담 버튼(우측 하단) · 이메일 {CONTACT_EMAIL}</p>
+ <p class="text-center text-slate-400 text-xs mt-3">{_kakao_contact_line()}이메일 {CONTACT_EMAIL}</p>
 </div></section>"""
+
+
+def _kakao_channel_url() -> str:
+    """카카오톡 채널(상담) URL — 환경변수로만 켠다. 없으면 관련 UI·문구를 일절 내지 않는다
+    (존재하지 않는 '우측 하단 상담 버튼'을 안내하던 허위 카피 봉합, 2026-08-09)."""
+    return os.environ.get("KAKAO_CHANNEL_URL", "").strip()
+
+
+def _kakao_contact_line() -> str:
+    return "카카오톡 상담 버튼(우측 하단) · " if _kakao_channel_url() else ""
+
+
+def _kakao_float() -> str:
+    """우측 하단 카카오톡 상담 플로팅 버튼 — KAKAO_CHANNEL_URL 설정 시에만 렌더.
+    모바일은 하단 스티키 CTA 위로 띄운다(safe-area 포함)."""
+    url = _kakao_channel_url()
+    if not url:
+        return ""
+    return (f'<a href="{url}" target="_blank" rel="noopener" aria-label="카카오톡 상담" '
+            'onclick="trackEv(\'kakao_chat\',{})" '
+            'class="fixed right-4 z-50 w-14 h-14 rounded-full shadow-lg flex items-center justify-center '
+            'bottom-24 sm:bottom-6" style="background:#FEE500">'
+            '<svg viewBox="0 0 24 24" class="w-7 h-7" fill="#191600">'
+            '<path d="M12 3C6.48 3 2 6.54 2 10.9c0 2.8 1.86 5.26 4.66 6.65-.15.52-.97 3.36-1 3.58 0 0-.02.17.09.24.11.07.24.02.24.02.32-.04 3.66-2.4 4.24-2.81.57.08 1.16.12 1.77.12 5.52 0 10-3.54 10-7.9S17.52 3 12 3z"/></svg></a>')
 
 
 def _cta() -> str:
@@ -857,7 +899,17 @@ def _cta() -> str:
  </div></section>"""
 
 
+def _mail_order_no() -> str:
+    """통신판매업 신고번호 — 발급 전엔 표기하지 않는다(없는 번호를 지어내지 않는다).
+    발급되면 SHOPCAST_MAIL_ORDER_NO 환경변수로 즉시 표기."""
+    return os.environ.get("SHOPCAST_MAIL_ORDER_NO", "").strip()
+
+
 def _footer() -> str:
+    mo = _mail_order_no()
+    mo_row = (f'<div class="text-slate-400 text-xs">통신판매업 신고번호</div><div class="mb-2">{mo}</div>'
+              if mo else "")
+    mo_line = f" · 통신판매업 {mo}" if mo else ""
     return f"""
 <footer class="bg-[#F9FAFB] border-t border-slate-200 text-slate-500 pt-14 pb-10">
  <div class="max-w-6xl mx-auto px-5">
@@ -866,6 +918,7 @@ def _footer() -> str:
    <div>
     <div class="text-slate-400 text-xs mb-1">CEO</div><div class="font-bold text-slate-800 mb-2">Jung Young Jin</div>
     <div class="text-slate-400 text-xs">사업자등록번호</div><div class="mb-2">106-48-91586</div>
+    {mo_row}
     <div class="text-slate-400 text-xs">Location</div><div>(우)50510 경남 양산시 주남로 288<br>영산대학교 양산캠퍼스 산학협력관 309호</div>
    </div>
    <div>
@@ -873,15 +926,16 @@ def _footer() -> str:
       <p class="font-semibold text-slate-800 mb-1">올린다는 이렇게 만들었습니다</p>
       <p class="text-slate-500 text-xs">실제 소상공인·중고차 매장 현장 요구에서 출발해, AI(글·비전·TTS·영상)와 네이버 상위노출 노하우를 결합해 개발했습니다.</p>
      </div>
-    <div class="mt-4 flex gap-3 text-sm">
+    <div class="mt-4 flex flex-wrap gap-3 text-sm">
      <a href="#contact" class="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:border-slate-300">문의하기</a>
      <a href="mailto:{CONTACT_EMAIL}" class="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:border-slate-300">이메일</a>
+     <a href="/terms" class="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:border-slate-300">이용약관</a>
      <a href="/privacy" class="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:border-slate-300">개인정보처리방침</a></div>
    </div>
   </div>
   <div class="mt-8 pt-6 border-t border-slate-200 text-center text-xs text-slate-400 leading-relaxed">
-    © 2026 올린다 (Ollinda) · 가피디자인 · 사업자등록번호 106-48-91586<br>
-    문의 {CONTACT_EMAIL} · <a href="/privacy" class="underline hover:text-slate-600">개인정보처리방침</a> · SSL 보안 연결
+    © 2026 올린다 (Ollinda) · 가피디자인 · 사업자등록번호 106-48-91586{mo_line}<br>
+    문의 {CONTACT_EMAIL} · <a href="/terms" class="underline hover:text-slate-600">이용약관</a> · <a href="/privacy" class="underline hover:text-slate-600">개인정보처리방침</a> · SSL 보안 연결
   </div>
  </div></footer>"""
 
@@ -1065,7 +1119,34 @@ def render() -> str:
             + _results() + _honesty()
             + _stats() + _features() + _modes()
             + _pricing() + _docs_download() + _faq() + _contact() + _cta() + _footer()
-            + _sticky_cta() + _FOOT)
+            + _sticky_cta() + _kakao_float() + _FOOT)
+
+
+def terms() -> str:
+    """이용약관 — 유료 구독 판매 사이트의 기본 고지(전자상거래법). 문구는 운영자 법률 검토 대상."""
+    body = f"""
+<div class="max-w-3xl mx-auto px-5 py-16">
+ <a href="/" class="text-indigo-600 text-sm">← 홈</a>
+ <h1 class="text-3xl font-bold mt-4 mb-8 text-slate-900">이용약관</h1>
+ <div class="space-y-4 text-sm text-slate-600 leading-relaxed">
+  <p><b>제1조 (목적)</b> — 본 약관은 올린다(이하 "서비스")의 이용 조건과 회사·이용자의 권리·의무를 정합니다.</p>
+  <p><b>제2조 (서비스 내용)</b> — 서비스는 이용자가 업로드한 사진·정보를 바탕으로 AI 마케팅 콘텐츠(글·이미지·영상)를
+   생성하고, 이용자가 연결한 채널에 발행을 지원하며, 검색 노출 현황을 제공합니다.
+   네이버 블로그는 공식 발행 API가 없어 반자동(복사·붙여넣기) 방식으로 지원합니다.</p>
+  <p><b>제3조 (요금·결제)</b> — 유료 플랜은 월 단위 자동 결제이며, 가격은 사이트 요금 안내에 따릅니다.
+   가격 변경 시 기존 구독자에게는 사전 고지합니다.</p>
+  <p><b>제4조 (해지·환불)</b> — 이용자는 언제든 해지를 요청할 수 있습니다(문의하기·이메일).
+   해지 시 다음 결제일부터 청구되지 않으며, 이미 결제한 이용 기간은 그대로 이용할 수 있습니다.
+   결제 후 7일 이내·서비스 미사용 시 전액 환불을 요청할 수 있습니다.</p>
+  <p><b>제5조 (콘텐츠 책임)</b> — 생성 콘텐츠의 최종 발행 여부는 이용자가 결정하며, 발행된 콘텐츠에 대한
+   법적 책임은 발행 주체인 이용자에게 있습니다. 서비스는 사실 기반 생성(없는 가격·스펙·후기를 지어내지 않음)을
+   원칙으로 하나, 발행 전 확인을 권장합니다.</p>
+  <p><b>제6조 (검색 노출)</b> — 서비스는 검색 노출에 유리한 구조의 콘텐츠와 실측 데이터를 제공할 뿐,
+   특정 순위·노출을 보장하지 않습니다.</p>
+  <p><b>제7조 (사업자 정보)</b> — Jung Young Jin · 사업자등록번호 106-48-91586 ·
+   경남 양산시 주남로 288 영산대 산학협력관 309호 · 문의 {CONTACT_EMAIL}</p>
+ </div></div>"""
+    return _HEAD + _nav() + body + _footer() + _FOOT
 
 
 def privacy() -> str:

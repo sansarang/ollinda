@@ -3109,7 +3109,7 @@ def robots():
 @app.get("/sitemap.xml")
 def sitemap():
     base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
-    urls = ["/", "/privacy"]
+    urls = ["/", "/privacy", "/terms"]
     items = "".join(f"<url><loc>{base}{u}</loc><changefreq>weekly</changefreq>"
                     f"<priority>{'1.0' if u == '/' else '0.5'}</priority></url>" for u in urls)
     xml = ('<?xml version="1.0" encoding="UTF-8"?>'
@@ -3121,6 +3121,48 @@ def sitemap():
 def privacy():
     from app import landing
     return landing.privacy()
+
+
+@app.get("/terms", response_class=HTMLResponse)
+def terms():
+    from app import landing
+    return landing.terms()
+
+
+_STATIC_MEDIA = {"css": "text/css", "svg": "image/svg+xml", "png": "image/png",
+                 "ico": "image/x-icon", "webmanifest": "application/manifest+json"}
+
+
+def _static_file(name: str):
+    """app/static/ 루트 파일 서빙(파비콘·랜딩 CSS) — demo_asset과 동일한 경로 검증."""
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name) or name.startswith("."):
+        return HTMLResponse(status_code=404)
+    path = os.path.join(os.path.dirname(__file__), "static", name)
+    if not os.path.isfile(path):
+        return HTMLResponse(status_code=404)
+    ext = name.rsplit(".", 1)[-1].lower()
+    return FileResponse(path, media_type=_STATIC_MEDIA.get(ext, "application/octet-stream"))
+
+
+@app.get("/static/{name}")
+def static_root(name: str):
+    return _static_file(name)
+
+
+@app.get("/favicon.ico")
+def favicon_ico():
+    return _static_file("favicon.ico")
+
+
+@app.get("/favicon.svg")
+def favicon_svg():
+    return _static_file("favicon.svg")
+
+
+@app.get("/apple-touch-icon.png")
+def apple_touch_icon():
+    return _static_file("apple-touch-icon.png")
 
 
 app.include_router(kakao_router())
