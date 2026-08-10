@@ -5348,9 +5348,12 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                + "<nav class='space-y-1'>" + "".join(_navlink(*n) for n in _navitems)
                + f"</nav><div class='mt-auto px-3 pt-4 border-t border-slate-100'><div class='text-xs text-slate-400 mb-1'>{_pn}</div>"
                "<a href='/logout' class='text-sm font-semibold text-slate-400 hover:text-slate-700'>로그아웃</a></div></aside>")
-    _mobnav = ("<div class='flex lg:hidden items-center gap-2 mb-4 overflow-x-auto'>"
-               + "".join(_navlink(*n) for n in _navitems)
-               + "<a href='/logout' class='ml-auto text-sm text-slate-400 whitespace-nowrap'>로그아웃</a></div>")
+    # 로그아웃은 스크롤 스트립 '밖'에 고정 — 스트립 끝에 두면 메뉴가 넘칠 때 화면 밖으로
+    # 밀려나 모바일에서 로그아웃이 안 보였다(2026-08-11 사장님 발견).
+    _mobnav = ("<div class='flex lg:hidden items-center gap-2 mb-4'>"
+               "<div class='flex items-center gap-2 overflow-x-auto flex-1 min-w-0'>"
+               + "".join(_navlink(*n) for n in _navitems) + "</div>"
+               "<a href='/logout' class='mob-logout flex-shrink-0 text-sm text-slate-400 whitespace-nowrap pl-1'>로그아웃</a></div>")
     page = (landing._HEAD
             + "<div class='flex min-h-screen bg-[#F9FAFB]'>" + sidebar
             + "<main class='flex-1 min-w-0 px-5 sm:px-8 py-8'>"
