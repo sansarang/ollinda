@@ -1,0 +1,16 @@
+# 섀도 정찰 워커 — 데이터센터 IP에서의 네이버 지면 스캔 검증 전용(2026-08-10).
+# 본체 이미지와 분리: playwright+chromium만 필요, 본체 의존성(ffmpeg 등) 불필요.
+# Railway 서비스에서 RAILWAY_DOCKERFILE_PATH=Dockerfile.scout 로 지정해 사용.
+FROM mcr.microsoft.com/playwright/python:v1.58.0-jammy
+
+WORKDIR /app
+COPY app/services/scout/ app/services/scout/
+COPY app/services/immune/ app/services/immune/
+COPY app/__init__.py app/__init__.py
+COPY app/services/__init__.py app/services/__init__.py
+COPY scripts/scout-shadow.py scripts/scout-shadow.py
+
+# 이미지에 v1.58 브라우저 사전 설치돼 있음 — 라이브러리 버전만 일치시키면 된다
+RUN pip install --no-cache-dir playwright==1.58.0
+
+CMD ["python3", "scripts/scout-shadow.py"]
