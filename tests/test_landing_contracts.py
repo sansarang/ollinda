@@ -98,6 +98,14 @@ def test_refund_page_consistent_with_terms():
     assert "결제 후 7일 이내" in landing.terms(), "약관 환불 조항이 사라짐 — 환불정책과 불일치 위험"
 
 
+def test_intro_promo_page():
+    """홍보 유입 페이지(/intro) — 영상(캐시버전 포함)·CTA·계측이 전부 있어야 쪽지 홍보가 산다."""
+    h = landing.intro()
+    assert "/docs/intro.mp4?v=" in h, "소개 영상(버전 파라미터) 누락"
+    assert 'href="/login"' in h, "가입 CTA 누락"
+    assert "trackEv" in h, "계측 스크립트 누락 — 클릭 추적 없이는 홍보 효과를 잴 수 없다"
+
+
 def test_biz_info_single_source():
     """사업자 표기(대표·번호·주소)는 BIZ_* 단일 소스 — 표면별 하드코딩이 한 곳만 고쳐지는
     사고를 냈다(2026-08-10: 푸터만 옛 주소 잔존). 옛 주소는 어느 표면에도 남으면 안 된다."""

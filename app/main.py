@@ -3173,6 +3173,12 @@ def refund():
     return landing.refund()
 
 
+@app.get("/intro", response_class=HTMLResponse)
+def intro():
+    from app import landing
+    return landing.intro()
+
+
 _STATIC_MEDIA = {"css": "text/css", "svg": "image/svg+xml", "png": "image/png",
                  "ico": "image/x-icon", "webmanifest": "application/manifest+json"}
 

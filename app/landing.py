@@ -1291,6 +1291,24 @@ def privacy() -> str:
     return _HEAD + _nav() + body + _footer() + _FOOT
 
 
+def intro() -> str:
+    """홍보 전용 초경량 페이지(/intro) — 쪽지·서이추 등 외부 링크로 유입되는 첫 화면.
+    영상 하나 + CTA 하나만. 조회·재생·가입클릭은 GA로 계측(_ga의 signup_click 리스너 재사용)."""
+    body = f"""
+<div class="min-h-screen flex flex-col items-center justify-center px-5 py-10">
+ <div class="w-full max-w-xl text-center">
+  <div class="flex items-center justify-center gap-2 font-extrabold text-2xl mb-3">{LOGO}<span class="text-slate-900">올린다</span></div>
+  <h1 class="text-xl sm:text-2xl font-bold text-slate-900 mb-2">사진만 올리면, 네이버에 올라갈 글이 됩니다</h1>
+  <p class="text-sm text-slate-500 mb-6">소상공인 사장님을 위한 AI 마케팅 직원 — 1분 영상으로 확인하세요.</p>
+  <video controls preload="metadata" playsinline class="w-full rounded-2xl border border-slate-200 shadow-lg mb-6"
+   src="{_v('/docs/intro.mp4')}" onplay="trackEv('intro_video_play',{{}})"></video>
+  <a href="/login" class="block w-full text-center py-4 rounded-xl font-extrabold text-white bg-indigo-600 hover:bg-indigo-700 transition">무료로 시작하기</a>
+  <p class="text-xs text-slate-400 mt-3"><a href="/" class="underline">ollinda.kr 자세히 보기</a></p>
+ </div>
+</div>"""
+    return _HEAD_META + _ga() + _BODY_OPEN + body + _FOOT
+
+
 def refund() -> str:
     """환불정책 전용 페이지 — 결제사(PG/패들) 도메인 심사 요건. 문안은 이용약관 제4조와
     동일 정책이어야 한다(두 페이지가 다른 말을 하면 그 자체가 심사 탈락 사유)."""
