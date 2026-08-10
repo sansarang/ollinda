@@ -98,6 +98,18 @@ def test_refund_page_consistent_with_terms():
     assert "결제 후 7일 이내" in landing.terms(), "약관 환불 조항이 사라짐 — 환불정책과 불일치 위험"
 
 
+def test_biz_info_single_source():
+    """사업자 표기(대표·번호·주소)는 BIZ_* 단일 소스 — 표면별 하드코딩이 한 곳만 고쳐지는
+    사고를 냈다(2026-08-10: 푸터만 옛 주소 잔존). 옛 주소는 어느 표면에도 남으면 안 된다."""
+    pages = {"landing": _html(), "terms": landing.terms(),
+             "privacy": landing.privacy(), "refund": landing.refund()}
+    for name, h in pages.items():
+        assert "주남로" not in h and "영산대" not in h, f"{name}: 옛 사업자 주소 잔존"
+    for name in ("landing", "terms", "privacy", "refund"):
+        assert landing.BIZ_ADDR in pages[name], f"{name}: 사업자 주소 누락"
+        assert landing.BIZ_REG_NO in pages[name], f"{name}: 사업자등록번호 누락"
+
+
 def test_mail_order_no_only_when_issued(monkeypatch):
     monkeypatch.delenv("SHOPCAST_MAIL_ORDER_NO", raising=False)
     assert "통신판매업" not in _html(), "미발급 통신판매업 번호 표기(날조) 금지"

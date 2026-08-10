@@ -11,6 +11,11 @@ import os
 
 BRAND = "올린다"
 CONTACT_EMAIL = "etetetetet5ea@kakao.com"
+# 사업자 표기 단일 소스 — 푸터·약관·개인정보·환불정책이 전부 이 값만 쓴다.
+# 표면마다 따로 박으면 한 곳만 고쳐지는 사고가 난다(2026-08-10 실제 재발).
+BIZ_CEO = "Jung Young Jin"
+BIZ_REG_NO = "106-48-91586"
+BIZ_ADDR = "경상남도 양산시 평산중앙3길 18"
 # 공개 베이스 URL(카카오톡 미리보기 og:image는 반드시 절대 https URL이어야 함)
 BASE = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
 
@@ -993,10 +998,10 @@ def _footer() -> str:
   <div class="flex items-center gap-2 font-extrabold text-xl mb-6">{LOGO}<span class="text-slate-900">올린다</span></div>
   <div class="grid sm:grid-cols-2 gap-6 text-sm">
    <div>
-    <div class="text-slate-400 text-xs mb-1">CEO</div><div class="font-bold text-slate-800 mb-2">Jung Young Jin</div>
-    <div class="text-slate-400 text-xs">사업자등록번호</div><div class="mb-2">106-48-91586</div>
+    <div class="text-slate-400 text-xs mb-1">CEO</div><div class="font-bold text-slate-800 mb-2">{BIZ_CEO}</div>
+    <div class="text-slate-400 text-xs">사업자등록번호</div><div class="mb-2">{BIZ_REG_NO}</div>
     {mo_row}
-    <div class="text-slate-400 text-xs">Location</div><div>(우)50510 경남 양산시 주남로 288<br>영산대학교 양산캠퍼스 산학협력관 309호</div>
+    <div class="text-slate-400 text-xs">Location</div><div>{BIZ_ADDR}</div>
    </div>
    <div>
     <div class="card p-4 text-sm">
@@ -1011,7 +1016,7 @@ def _footer() -> str:
    </div>
   </div>
   <div class="mt-8 pt-6 border-t border-slate-200 text-center text-xs text-slate-400 leading-relaxed">
-    © 2026 올린다 (Ollinda) · 가피디자인 · 사업자등록번호 106-48-91586{mo_line}<br>
+    © 2026 올린다 (Ollinda) · 가피디자인 · 사업자등록번호 {BIZ_REG_NO}{mo_line}<br>
     문의 {CONTACT_EMAIL} · <a href="/terms" class="underline hover:text-slate-600">이용약관</a> · <a href="/privacy" class="underline hover:text-slate-600">개인정보처리방침</a> · <a href="/refund" class="underline hover:text-slate-600">환불정책</a> · SSL 보안 연결
   </div>
  </div></footer>"""
@@ -1263,8 +1268,8 @@ def terms() -> str:
    원칙으로 하나, 발행 전 확인을 권장합니다.</p>
   <p><b>제6조 (검색 노출)</b> — 서비스는 검색 노출에 유리한 구조의 콘텐츠와 실측 데이터를 제공할 뿐,
    특정 순위·노출을 보장하지 않습니다.</p>
-  <p><b>제7조 (사업자 정보)</b> — Jung Young Jin · 사업자등록번호 106-48-91586 ·
-   경상남도 양산시 평산중앙3길 18 · 문의 {CONTACT_EMAIL}</p>
+  <p><b>제7조 (사업자 정보)</b> — {BIZ_CEO} · 사업자등록번호 {BIZ_REG_NO} ·
+   {BIZ_ADDR} · 문의 {CONTACT_EMAIL}</p>
  </div></div>"""
     return _HEAD + _nav() + body + _footer() + _FOOT
 
@@ -1280,7 +1285,7 @@ def privacy() -> str:
   <p><b>2. 이용 목적</b> — 콘텐츠 생성 및 이용자가 연결한 채널 게시(발행) 대행.</p>
   <p><b>3. SNS 연동</b> — 공식 OAuth 사용, 게시 권한 토큰만 보관. 언제든 연결 해제 가능.</p>
   <p><b>4. 보관·파기</b> — 해지/요청 시 지체 없이 파기.</p>
-  <p><b>5. 사업자</b> — Jung Young Jin · 106-48-91586 · 경상남도 양산시 평산중앙3길 18</p>
+  <p><b>5. 사업자</b> — {BIZ_CEO} · {BIZ_REG_NO} · {BIZ_ADDR}</p>
   <p><b>6. 문의</b> — {CONTACT_EMAIL}</p>
  </div></div>"""
     return _HEAD + _nav() + body + _footer() + _FOOT
@@ -1304,7 +1309,7 @@ def refund() -> str:
   <p><b>제4조 (신청 방법·처리)</b> — 환불은 문의하기 또는 이메일({CONTACT_EMAIL})로
    요청할 수 있습니다. 확인 후 원 결제 수단으로 환급하며, 전자상거래법 등 관련 법령이
    정한 기한 내에 지체 없이 처리합니다.</p>
-  <p><b>제5조 (사업자 정보)</b> — Jung Young Jin · 사업자등록번호 106-48-91586 ·
-   경상남도 양산시 평산중앙3길 18 · 문의 {CONTACT_EMAIL}</p>
+  <p><b>제5조 (사업자 정보)</b> — {BIZ_CEO} · 사업자등록번호 {BIZ_REG_NO} ·
+   {BIZ_ADDR} · 문의 {CONTACT_EMAIL}</p>
  </div></div>"""
     return _HEAD + _nav() + body + _footer() + _FOOT
