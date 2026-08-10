@@ -100,6 +100,8 @@ def test_ga_only_with_measurement_id(monkeypatch):
     monkeypatch.setenv("GA_MEASUREMENT_ID", "G-TEST123")
     h = _html()
     assert "googletagmanager" in h and "G-TEST123" in h
+    # gtag는 <head> 안 — body로 내려가면 서치콘솔 GA 소유확인이 깨진다(2026-08-10 실측)
+    assert h.index("googletagmanager") < h.index("</head>"), "gtag가 head 밖으로 회귀"
 
 
 def test_measured_case_is_honest():

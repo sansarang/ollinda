@@ -129,7 +129,12 @@ _HEAD = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <link rel=preconnect href="https://cdn.jsdelivr.net" crossorigin>
 <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.min.css" rel=stylesheet>
 <link href="/static/landing.css" rel=stylesheet>
-""".replace("__BASE__", BASE) + _STYLE + """</head><body class="bg-white text-slate-800 overflow-x-hidden pb-20 sm:pb-0">"""
+""".replace("__BASE__", BASE) + _STYLE
+
+# head 마감 + body 시작 — GA처럼 <head> 안에 있어야 하는 스크립트는 _HEAD_META와 이 사이에 끼운다
+_BODY_OPEN = """</head><body class="bg-white text-slate-800 overflow-x-hidden pb-20 sm:pb-0">"""
+_HEAD_META = _HEAD
+_HEAD = _HEAD_META + _BODY_OPEN
 
 _FOOT = """
 <script>
@@ -1225,7 +1230,8 @@ def render() -> str:
     # → ④ 실물 증명(영상·블로그)+글 비교 → ⑤ 성과·실측 타임라인(증거를 앞으로)
     # → ⑥ 관측-적응 루프(지켜보는 직원 — 핵심 차별) → ⑦ 채널 알고리즘 → ⑧ 브리핑
     # → ⑨ 경험 자산(질문이 줄어듦) → ⑩ 정직+비밀번호 신뢰 → ⑪ 기능·모드 → ⑫ 요금 → ⑬ 마지막 CTA
-    return (_HEAD + _ga() + _seo_jsonld() + _nav()
+    # gtag는 <head> 안이 구글 권장 위치(서치콘솔 GA 소유확인도 head 기준) — body로 내리지 말 것
+    return (_HEAD_META + _ga() + _BODY_OPEN + _seo_jsonld() + _nav()
             + _hero() + _problem() + _vacantq()
             + _video() + _copy_compare()
             + _results() + _rank_loop()
