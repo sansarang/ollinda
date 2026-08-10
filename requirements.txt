@@ -21,3 +21,4 @@ playwright                     # 인쇄물 HTML→이미지/PDF 렌더(신규기
 jinja2                         # 인쇄물 HTML 템플릿
 opencv-python-headless         # 워터마크 오버레이 제거(cv2.inpaint) — 사용자 요청으로 자동제거 ON. 헤드리스.
 numpy                          # cv2 배열 변환
+sentry-sdk

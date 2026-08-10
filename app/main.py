@@ -156,6 +156,34 @@ async def _read_image_uploads(photos, limit: int = 30) -> list[tuple[bytes, str]
 CONNECTABLE = [Channel.INSTAGRAM, Channel.YOUTUBE, Channel.X]
 CHANNEL_LABEL = {Channel.INSTAGRAM: "📷 인스타그램", Channel.YOUTUBE: "▶️ 유튜브", Channel.X: "𝕏 (트위터)"}
 
+def _init_sentry() -> bool:
+    """런타임 에러 트래킹(2026-08-10 사장님 승인) — SENTRY_DSN 없으면 no-op(graceful).
+
+    핵심 커버리지 두 가지: ① 데몬 스레드의 미처리 예외(ThreadingIntegration 기본 활성 —
+    생성·렌더·게이트 스레드가 조용히 죽던 급소) ② 기존 `logging.exception(...)` 전부
+    (LoggingIntegration 기본: ERROR 이상 로그가 스택트레이스와 함께 이슈로 승격 —
+    침묵 폴백 사이트들이 자동으로 가시화된다). traces 0 = 에러만(무료 티어 절약).
+    send_default_pii=False — 고객 사진·연락처를 다루는 앱이라 보수적으로."""
+    dsn = os.environ.get("SENTRY_DSN", "").strip()
+    if not dsn:
+        return False
+    try:
+        import sentry_sdk
+        sentry_sdk.init(
+            dsn=dsn,
+            environment=os.environ.get("RAILWAY_ENVIRONMENT_NAME", "local"),
+            release=(os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:12] or None,
+            traces_sample_rate=0,
+            send_default_pii=False,
+        )
+        return True
+    except Exception:
+        logging.getLogger("shopcast").exception("[sentry] init 실패 — 트래킹 없이 계속")
+        return False
+
+
+_SENTRY_ON = _init_sentry()
+
 app = FastAPI(title="shopcast", version="0.3.0")
 
 
@@ -3173,6 +3201,12 @@ def favicon_svg():
 @app.get("/apple-touch-icon.png")
 def apple_touch_icon():
     return _static_file("apple-touch-icon.png")
+
+
+@app.get("/admin/sentry-test")
+def admin_sentry_test():
+    """Sentry 배선 실발화 진단(운영자 전용) — 의도된 예외 1건을 던져 이슈로 잡히는지 확인."""
+    raise RuntimeError("sentry-wiring-test: Sentry 대시보드에 이 이슈가 보이면 배선 정상")
 
 
 app.include_router(kakao_router())
