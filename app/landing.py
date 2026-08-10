@@ -106,6 +106,7 @@ _HEAD = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <meta name=description content="사진만 올리면 AI가 네이버 블로그·플레이스 상위노출에 유리한 글을 씁니다. 인스타·유튜브·릴스·X까지 자동 생성(네이버는 초안 반자동 발행). 소상공인 AI 마케팅 올린다.">
 <meta name=keywords content="AI 마케팅,소상공인 마케팅,셀러 마케팅,인스타 자동 업로드,네이버 블로그 자동,유튜브 쇼츠 자동,콘텐츠 자동화,SNS 대행,쿠팡 마케팅,올린다,Ollinda">
 <meta name=robots content="index,follow,max-image-preview:large,max-snippet:-1">
+<meta name=naver-site-verification content="f47963c25c7d743ec0c7d363d552b5ba7440475a">
 <meta name=author content="올린다 (Ollinda)">
 <meta name=theme-color content="#6366F1">
 <meta property=og:site_name content="올린다">
