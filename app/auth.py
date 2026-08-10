@@ -40,6 +40,29 @@ def verify_pw(pw: str, salt: str, h: str) -> bool:
     return hmac.compare_digest(calc, h)
 
 
+# ── 미디어 서명 URL(시한부) ──
+# 피스 미디어(/asset·/video)는 소유자 세션이 원칙이지만, 인스타그램 발행처럼 외부 서버가
+# 무인증으로 가져가야 하는 경로가 있다 — 그쪽엔 이 서명을 붙인 시한부 URL만 내준다.
+def media_sig(pid: str, exp: int) -> str:
+    return hmac.new(SECRET, f"media:{pid}:{exp}".encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def media_sig_ok(pid: str, exp: str | int, sig: str) -> bool:
+    try:
+        exp_i = int(exp)
+    except (TypeError, ValueError):
+        return False
+    if exp_i < int(time.time()):
+        return False
+    return hmac.compare_digest(media_sig(pid, exp_i), sig or "")
+
+
+def signed_media_url(base: str, kind: str, pid: str, ttl_sec: int = 3600) -> str:
+    """kind: 'asset' | 'video' — 외부 발행용 공개 URL(만료 기본 1시간)."""
+    exp = int(time.time()) + ttl_sec
+    return f"{base}/{kind}/{pid}?exp={exp}&sig={media_sig(pid, exp)}"
+
+
 # ── 세션 쿠키 ──
 def make_session(uid: str) -> str:
     raw = f"{uid}.{int(time.time())}"

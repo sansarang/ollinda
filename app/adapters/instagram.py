@@ -48,12 +48,14 @@ class InstagramPublisher(Publisher):
         base = os.environ.get("SHOPCAST_BASE", "http://127.0.0.1:8000")
         caption = content.payload.get("text") or content.payload.get("title", "")
         # 영상이 있으면 릴스, 없으면 이미지
+        from app import auth as _auth
         if content.payload.get("video_path") or content.payload.get("video_url"):
-            video_url = content.payload.get("video_url") or f"{base}/video/{content.id}"
+            # /video·/asset은 소유자 검증이 걸려 있어(2026-08-11) 외부 fetch엔 서명 URL만 통한다
+            video_url = content.payload.get("video_url") or _auth.signed_media_url(base, "video", str(content.id))
             create = {"media_type": "REELS", "video_url": video_url,
                       "caption": caption, "access_token": token}
         else:
-            image_url = content.payload.get("image_url") or f"{base}/asset/{content.id}"
+            image_url = content.payload.get("image_url") or _auth.signed_media_url(base, "asset", str(content.id))
             create = {"image_url": image_url, "caption": caption, "access_token": token}
         try:
             r1 = requests.post(f"https://graph.instagram.com/v21.0/{ig_id}/media",

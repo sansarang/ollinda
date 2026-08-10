@@ -8273,7 +8273,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
             # → 세로 소스를 세로 프레임으로 표시(좌우 레터박스 제거). 영상 없으면 사진 폴백(비율 유지).
             if vurl:
                 xvid = (f"<div class='relative mx-auto mt-2 bg-black rounded-xl overflow-hidden' style='max-width:300px;aspect-ratio:9/16'>"
-                        f"<video src='{vurl}' controls autoplay muted loop playsinline preload='metadata' poster='{first_img}' "
+                        f"<video src='{vurl}' controls muted loop playsinline preload='none' data-autoplay poster='{first_img}' "
                         "class='w-full h-full' style='object-fit:cover'></video>"
                         "<button type=button onclick='omUnmute(this)' class='om-unmute absolute top-3 left-1/2 -translate-x-1/2 z-10 bg-black/80 text-white text-xs font-extrabold px-3.5 py-2 rounded-full shadow-lg'>🔇 탭하여 소리 켜기</button></div>")
             elif first_img:
@@ -8304,7 +8304,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                      + ("쇼츠" if p.channel.value == "youtube" else "릴스") + "</div>")
             if vurl:
                 player = (f"<div class='relative mx-auto bg-black rounded-xl overflow-hidden' style='max-width:340px;aspect-ratio:9/16'>"
-                          f"<video src='{vurl}' controls autoplay muted loop playsinline preload='metadata' poster='{first_img}' "
+                          f"<video src='{vurl}' controls muted loop playsinline preload='none' data-autoplay poster='{first_img}' "
                           f"class='w-full h-full' style='object-fit:cover'></video>{durb}"
                           "<button type=button onclick='omUnmute(this)' class='om-unmute absolute top-3 left-1/2 -translate-x-1/2 z-10 bg-black/80 text-white text-xs font-extrabold px-3.5 py-2 rounded-full shadow-lg'>🔇 탭하여 소리 켜기</button></div>")
             elif first_img:
@@ -8428,7 +8428,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
           "function omFilter(g,btn){document.querySelectorAll('.om-card').forEach(function(c){c.style.display=(g==='all'||c.getAttribute('data-ch')===g)?'':'none';});"
           "document.querySelectorAll('#chFilter .om-fbtn').forEach(function(b){b.classList.remove('bg-indigo-600','text-white');b.classList.add('bg-slate-100','text-slate-600');});"
           "btn.classList.remove('bg-slate-100','text-slate-600');btn.classList.add('bg-indigo-600','text-white');}"
-          "(function(){var vs=document.querySelectorAll('video[autoplay]');if(!vs.length)return;"
+          "(function(){var vs=document.querySelectorAll('video[data-autoplay]');if(!vs.length)return;"
           "vs.forEach(function(v){v.muted=true;v.setAttribute('muted','');v.playsInline=true;});"       # 무음이어야 자동재생 허용
           "function tryplay(v){if(window.omSound){v.muted=false;}var p=v.play();if(p&&p.catch)p.catch(function(){});}"   # ⚠️ load() 호출 금지 — 리로드 루프(깜빡임) 원인
           "if('IntersectionObserver' in window){var io=new IntersectionObserver(function(es){es.forEach(function(e){"
@@ -13024,19 +13024,50 @@ def _serve_media(path: str, url_key: str = "", payload: dict | None = None):
     return HTMLResponse(status_code=404)
 
 
-@app.get("/asset/{pid}")
-def asset_image(pid: str):
+def _piece_media_guard(request: Request, pid: str):
+    """피스 미디어(/asset/*·/video/*) 공통 소유 검증 — pid만 알면 남의 사진·영상을 볼 수 있던
+    구멍(2026-08-11 모바일 전수검사에서 발견). 허용: 소유자 세션 또는 운영자 Basic(검수 화면).
+    비소유 로그인 사용자는 404(존재 비노출), 무인증은 401 챌린지(운영자 브라우저가 캐시된
+    크레덴셜로 자동 재시도 — /admin/review의 미디어가 끊기지 않는 조건)."""
     p = db.get_piece(pid)
     if not p:
-        return HTMLResponse(status_code=404)
+        return None, HTMLResponse(status_code=404)
+    # 외부 발행 fetch(인스타 등) — auth.signed_media_url 로 발급된 시한부 서명만 통과
+    q = request.query_params
+    if q.get("sig") and auth.media_sig_ok(pid, q.get("exp"), q.get("sig")):
+        return p, None
+    u = auth.current_user(request)
+    if u:
+        if u.get("tenant_id") == p.tenant_id:
+            return p, None
+        return None, HTMLResponse(status_code=404)
+    pw = os.environ.get("SHOPCAST_ADMIN_PASS")
+    hdr = request.headers.get("authorization", "")
+    if pw and hdr.startswith("Basic "):
+        try:
+            bu, _, bp = base64.b64decode(hdr[6:]).decode().partition(":")
+            if (secrets.compare_digest(bu, os.environ.get("SHOPCAST_ADMIN_USER", "admin"))
+                    and secrets.compare_digest(bp, pw)):
+                return p, None
+        except Exception:
+            pass
+    return None, Response(status_code=401,
+                          headers={"WWW-Authenticate": 'Basic realm="shopcast admin"'})
+
+
+@app.get("/asset/{pid}")
+def asset_image(request: Request, pid: str):
+    p, deny = _piece_media_guard(request, pid)
+    if deny:
+        return deny
     return _serve_media(p.payload.get("image_path"), "image_url", p.payload)
 
 
 @app.get("/asset/{pid}/{idx}")
-def asset_image_idx(pid: str, idx: int):
-    p = db.get_piece(pid)
-    if not p:
-        return HTMLResponse(status_code=404)
+def asset_image_idx(request: Request, pid: str, idx: int):
+    p, deny = _piece_media_guard(request, pid)
+    if deny:
+        return deny
     paths = p.payload.get("image_paths") or [p.payload.get("image_path")]
     if idx < 0 or idx >= len(paths) or not paths[idx]:
         return HTMLResponse(status_code=404)
@@ -13044,10 +13075,10 @@ def asset_image_idx(pid: str, idx: int):
 
 
 @app.get("/video/{pid}")
-def asset_video(pid: str):
-    p = db.get_piece(pid)
-    if not p:
-        return HTMLResponse(status_code=404)
+def asset_video(request: Request, pid: str):
+    p, deny = _piece_media_guard(request, pid)
+    if deny:
+        return deny
     path = p.payload.get("video_path")
     if path and os.path.exists(path):
         return FileResponse(path, media_type="video/mp4")
