@@ -87,6 +87,17 @@ def test_terms_page_and_footer_links():
     assert "이용약관" in t and "해지" in t and "환불" in t
 
 
+def test_refund_page_consistent_with_terms():
+    """환불정책 전용 페이지(결제사 도메인 심사 요건) — 약관 제4조와 같은 정책이어야 한다."""
+    h = _html()
+    assert 'href="/refund"' in h, "푸터 환불정책 링크 누락"
+    r = landing.refund()
+    # 약관 제4조와 동일 정책 핵심 문구 — 두 페이지가 다른 말을 하면 심사 탈락 사유
+    for key in ("7일 이내", "전액 환불", "다음 결제일부터 청구되지 않으며", "106-48-91586"):
+        assert key in r, f"환불정책 핵심 문구 누락: {key}"
+    assert "결제 후 7일 이내" in landing.terms(), "약관 환불 조항이 사라짐 — 환불정책과 불일치 위험"
+
+
 def test_mail_order_no_only_when_issued(monkeypatch):
     monkeypatch.delenv("SHOPCAST_MAIL_ORDER_NO", raising=False)
     assert "통신판매업" not in _html(), "미발급 통신판매업 번호 표기(날조) 금지"

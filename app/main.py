@@ -3147,7 +3147,7 @@ def robots():
 @app.get("/sitemap.xml")
 def sitemap():
     base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
-    urls = ["/", "/privacy", "/terms"]
+    urls = ["/", "/privacy", "/terms", "/refund"]
     items = "".join(f"<url><loc>{base}{u}</loc><changefreq>weekly</changefreq>"
                     f"<priority>{'1.0' if u == '/' else '0.5'}</priority></url>" for u in urls)
     xml = ('<?xml version="1.0" encoding="UTF-8"?>'
@@ -3165,6 +3165,12 @@ def privacy():
 def terms():
     from app import landing
     return landing.terms()
+
+
+@app.get("/refund", response_class=HTMLResponse)
+def refund():
+    from app import landing
+    return landing.refund()
 
 
 _STATIC_MEDIA = {"css": "text/css", "svg": "image/svg+xml", "png": "image/png",

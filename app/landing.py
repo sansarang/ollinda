@@ -1012,7 +1012,7 @@ def _footer() -> str:
   </div>
   <div class="mt-8 pt-6 border-t border-slate-200 text-center text-xs text-slate-400 leading-relaxed">
     © 2026 올린다 (Ollinda) · 가피디자인 · 사업자등록번호 106-48-91586{mo_line}<br>
-    문의 {CONTACT_EMAIL} · <a href="/terms" class="underline hover:text-slate-600">이용약관</a> · <a href="/privacy" class="underline hover:text-slate-600">개인정보처리방침</a> · SSL 보안 연결
+    문의 {CONTACT_EMAIL} · <a href="/terms" class="underline hover:text-slate-600">이용약관</a> · <a href="/privacy" class="underline hover:text-slate-600">개인정보처리방침</a> · <a href="/refund" class="underline hover:text-slate-600">환불정책</a> · SSL 보안 연결
   </div>
  </div></footer>"""
 
@@ -1282,5 +1282,29 @@ def privacy() -> str:
   <p><b>4. 보관·파기</b> — 해지/요청 시 지체 없이 파기.</p>
   <p><b>5. 사업자</b> — Jung Young Jin · 106-48-91586 · 경남 양산시 주남로 288 영산대 산학협력관 309호</p>
   <p><b>6. 문의</b> — {CONTACT_EMAIL}</p>
+ </div></div>"""
+    return _HEAD + _nav() + body + _footer() + _FOOT
+
+
+def refund() -> str:
+    """환불정책 전용 페이지 — 결제사(PG/패들) 도메인 심사 요건. 문안은 이용약관 제4조와
+    동일 정책이어야 한다(두 페이지가 다른 말을 하면 그 자체가 심사 탈락 사유)."""
+    body = f"""
+<div class="max-w-3xl mx-auto px-5 py-16">
+ <a href="/" class="text-indigo-600 text-sm">← 홈</a>
+ <h1 class="text-3xl font-bold mt-4 mb-8 text-slate-900">환불정책</h1>
+ <div class="space-y-4 text-sm text-slate-600 leading-relaxed">
+  <p><b>제1조 (전액 환불·청약철회)</b> — 결제 후 7일 이내이고 서비스를 사용하지 않은 경우,
+   전액 환불을 요청할 수 있습니다.</p>
+  <p><b>제2조 (구독 해지)</b> — 이용자는 언제든 해지를 요청할 수 있습니다(문의하기·이메일).
+   해지 시 다음 결제일부터 청구되지 않으며, 이미 결제한 이용 기간은 그대로 이용할 수 있습니다.
+   이미 결제한 월 요금은 일할 환불 대신 남은 기간의 서비스 이용으로 제공됩니다.</p>
+  <p><b>제3조 (회사 귀책)</b> — 회사의 귀책 사유로 서비스를 정상 제공하지 못한 경우,
+   관련 법령에 따라 환불 또는 이용 기간 연장으로 보상합니다.</p>
+  <p><b>제4조 (신청 방법·처리)</b> — 환불은 문의하기 또는 이메일({CONTACT_EMAIL})로
+   요청할 수 있습니다. 확인 후 원 결제 수단으로 환급하며, 전자상거래법 등 관련 법령이
+   정한 기한 내에 지체 없이 처리합니다.</p>
+  <p><b>제5조 (사업자 정보)</b> — Jung Young Jin · 사업자등록번호 106-48-91586 ·
+   경남 양산시 주남로 288 영산대 산학협력관 309호 · 문의 {CONTACT_EMAIL}</p>
  </div></div>"""
     return _HEAD + _nav() + body + _footer() + _FOOT
