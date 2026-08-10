@@ -21,6 +21,8 @@
       "type": "stdio",
       "command": "uvx",
       "args": [
+        "--with",
+        "mcp==1.9.4",
         "mcp-server-sqlite",
         "--db-path",
         "/Users/youngjinjung/shopcast/.prod-snapshot.sqlite"
