@@ -154,4 +154,26 @@ def save_upload(data: bytes, filename: str, tenant_id: str) -> str:
     with open(path, "wb") as f:
         f.write(data)
     mirror_to_r2(path)                 # R2에도 사본(설정 시)
+    spawn_derived(tenant_id, path)     # 파생본은 업로드 시점에 미리 — 첫 조회 즉석 변환 지연 제거
     return path
+
+
+def spawn_derived(tenant_id: str, path: str) -> None:
+    """업로드 직후 썸네일·웹본 선생성(데몬 스레드 — 업로드 응답을 막지 않는다).
+    2026-08-11 모바일 검사: 파생본이 없으면 첫 조회 때 즉석 변환(장당 ~105ms 실측)이
+    쌓여 세트 첫 열람이 느렸다. 실패해도 치명 아님 — 화면 요청 시 온디맨드 생성이 받친다."""
+    import threading
+    fname = os.path.basename(path)
+    if os.path.splitext(fname)[1].lower() not in (".jpg", ".jpeg", ".png"):
+        return
+
+    def _run():
+        try:
+            from app.services import derived
+            derived.make_thumb(tenant_id, fname)
+            derived.make_web(tenant_id, fname)
+        except Exception:
+            import logging
+            logging.getLogger("shopcast.storage").warning("[storage] 파생본 선생성 실패 %s", fname)
+
+    threading.Thread(target=_run, daemon=True).start()
