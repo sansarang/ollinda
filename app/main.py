@@ -3134,20 +3134,23 @@ def root(request: Request):
         return RedirectResponse("/me", status_code=303)
     from app import landing
     # 실제 방문자 집계(2026-08-11) — 봇 제외, IP당 하루 1회만(순방문). 날조 없이 서버 실값.
+    from datetime import date as _date
+    _today = _date.today().isoformat()
     visits = db.get_counter("landing_visits")
+    today = db.get_counter(f"visits_day:{_today}")
     try:
         ua = (request.headers.get("user-agent") or "").lower()
         is_bot = any(b in ua for b in ("bot", "crawl", "spider", "slurp", "yeti", "preview",
                                        "facebookexternalhit", "curl", "wget", "python", "headless", "monitor"))
         if not is_bot:
-            from datetime import date as _date
             ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \
                 or (request.client.host if request.client else "?")
-            if db.claim_once(f"visit:{_date.today().isoformat()}:{ip}"):
+            if db.claim_once(f"visit:{_today}:{ip}"):      # IP당 하루 1회(순방문)
                 visits = db.bump_counter("landing_visits")
+                today = db.bump_counter(f"visits_day:{_today}")
     except Exception:
         pass
-    return landing.render(visits=visits)
+    return landing.render(visits=visits, today=today)
 
 
 @app.get("/robots.txt")

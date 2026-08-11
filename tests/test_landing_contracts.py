@@ -99,10 +99,11 @@ def test_refund_page_consistent_with_terms():
 
 
 def test_visit_bar_honest():
-    """방문자 표시 — 서버 실값만(날조 없음). 1명부터 실제 숫자 노출, 0이면 숨김(2026-08-11)."""
-    assert "둘러봤" not in landing.render(0), "방문 0인데 표시"
-    assert "1명" in landing.render(1), "실제 방문 1명 미표시"
-    assert "1,234명" in landing.render(1234), "실제 방문수 미표시"
+    """방문자 표시 — 일 방문 100명 넘을 때까지 숨김(사장님 지시), 노출 시 누적 실값(2026-08-11)."""
+    assert "둘러봤" not in landing.render(5000, today=0), "일 방문 0인데 표시"
+    assert "둘러봤" not in landing.render(5000, today=99), "일 방문 100 미만인데 표시"
+    h = landing.render(5000, today=100)
+    assert "5,000명" in h, "일 100 넘었는데 누적 미표시"
 
 
 def test_intro_promo_page():
