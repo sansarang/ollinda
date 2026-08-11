@@ -574,9 +574,24 @@ def _hero() -> str:
    o.innerHTML='<b class="text-slate-900">'+d.headline+'</b>'+rows
      +'<div class="text-slate-400 mt-2">'+d.subline+'</div>'+mk
      +'<button type="button" onclick="fillDemo()" class="block w-full text-left bg-white border border-indigo-200 hover:border-indigo-400 rounded-xl px-3.5 py-2.5 mt-2 text-indigo-700 font-bold text-sm transition">이 업종으로 바로 만들어보기 (가입 없이) →</button>'
-     +'<a href="/login/kakao" class="inline-block text-indigo-600 underline font-bold mt-2">'+d.cta+' →</a>'
+     +'<div id="rc_lead" class="mt-3 pt-3 border-t border-slate-100"><div class="text-xs text-slate-500 mb-1.5">📩 이 진단 리포트를 이메일로 받아보시겠어요?</div>'
+     +'<div class="flex gap-1.5"><input id="rc_email" type="email" inputmode="email" placeholder="이메일 주소" class="flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2 text-sm outline-none focus:border-indigo-400">'
+     +'<button onclick="sendReport()" class="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm whitespace-nowrap">받기</button></div>'
+     +'<div id="rc_leadmsg" class="text-xs text-emerald-600 mt-1.5"></div></div>'
+     +'<a href="/login/kakao" class="inline-block text-indigo-600 underline font-bold mt-3">'+d.cta+' →</a>'
      +(d.estimated?' <span class="text-slate-400 text-xs">(추정)</span>':'');
    }}catch(e){{o.textContent='조회 실패 — 잠시 후 다시';}}}}
+  async function sendReport(){{var em=document.getElementById('rc_email').value.trim();
+   var m=document.getElementById('rc_leadmsg');if(!em||em.indexOf('@')<0){{m.style.color='#e11';m.textContent='이메일을 확인해주세요';return;}}
+   m.style.color='#059669';m.textContent='보내는 중…';
+   var fd=new FormData();fd.append('email',em);
+   fd.append('region',document.getElementById('rc_region').value);fd.append('industry',document.getElementById('rc_ind').value);
+   fd.append('name',document.getElementById('rc_name').value);if(window.__rcMode==='seller')fd.append('mode','seller');
+   try{{var r=await fetch('/api/rank-report',{{method:'POST',body:fd}});var d=await r.json();
+     if(d.error){{m.style.color='#e11';m.textContent=d.error;return;}}
+     if(window.trackEv)trackEv('lead_capture',{{}});
+     document.getElementById('rc_lead').innerHTML='<div class="text-sm text-emerald-600 font-bold">✅ 접수됐어요! '+(d.sent?'리포트를 이메일로 보냈습니다.':'곧 연락드릴게요.')+'</div>';
+   }}catch(e){{m.style.color='#e11';m.textContent='잠시 후 다시 시도해주세요';}}}}
   </script>
  </div></section>"""
 

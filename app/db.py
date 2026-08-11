@@ -997,6 +997,35 @@ def claim_once(key: str) -> bool:
         return True   # 스토리지 오류 시 결제 흐름을 막지 않음(관대 처리)
 
 
+def save_landing_lead(email: str, context: str = "") -> bool:
+    """랜딩 진단 리드 캡처(2026-08-11) — 비가입 방문자 이메일 확보. 같은 이메일은 최신 컨텍스트로 갱신."""
+    email = (email or "").strip().lower()
+    if "@" not in email or len(email) > 200:
+        return False
+    try:
+        with _conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS landing_leads("
+                      "email TEXT PRIMARY KEY, context TEXT, created_at TEXT, seen INTEGER DEFAULT 1)")
+            c.execute("INSERT INTO landing_leads(email, context, created_at) VALUES(?,?,?) "
+                      "ON CONFLICT(email) DO UPDATE SET context=excluded.context, seen=seen+1",
+                      (email, context[:500], datetime.utcnow().isoformat()))
+        return True
+    except Exception:
+        return False
+
+
+def landing_leads(limit: int = 200) -> list[dict]:
+    try:
+        with _conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS landing_leads("
+                      "email TEXT PRIMARY KEY, context TEXT, created_at TEXT, seen INTEGER DEFAULT 1)")
+            rows = c.execute("SELECT email, context, created_at, seen FROM landing_leads "
+                             "ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
 def bump_counter(key: str, n: int = 1) -> int:
     """단순 누적 카운터(랜딩 방문수 등) +n 후 현재값 반환. 원자적 UPSERT."""
     try:

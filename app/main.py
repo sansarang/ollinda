@@ -3963,6 +3963,47 @@ async def api_rank_check(request: Request):
     return JSONResponse(result)
 
 
+@app.post("/api/rank-report")
+async def api_rank_report(request: Request):
+    """진단 결과 리드 캡처(2026-08-11 마케팅 A) — 이메일 받아 리포트 발송 + 리드 저장.
+    진단 자체는 무료·무입력 유지하고, 결과 본 사람에게만 선택적으로 이메일을 받는다."""
+    from app.services import mailer
+    try:
+        form = await request.form()
+        email = (form.get("email") or "").strip()
+        region = (form.get("region") or "").strip()
+        industry = (form.get("industry") or "").strip()
+        name = (form.get("name") or "").strip()
+        mode = (form.get("mode") or "").strip()
+    except Exception:
+        return JSONResponse({"error": "잘못된 요청"}, status_code=400)
+    if "@" not in email or len(email) < 5:
+        return JSONResponse({"error": "이메일을 확인해주세요"}, status_code=400)
+    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or "?"
+    if not _signup_rate_ok("report:" + ip, limit=5, window=3600):
+        return JSONResponse({"error": "잠시 후 다시 시도해주세요"}, status_code=429)
+    ctx = f"{mode or 'local'}|{region}|{industry}|{name}"
+    db.save_landing_lead(email, ctx)                     # 리드는 발송 성공 여부와 무관하게 확보
+    # 리포트 메일 — 진단 캐시가 있으면 요약 포함(없으면 안내만). 발송 불가(SMTP 미설정)면 저장만.
+    sent = False
+    if mailer.configured():
+        from app import ratelimit
+        from app.config import RANK_CACHE_TTL
+        cache = ratelimit.cache_get(f"{mode}|{industry}|{region}|{name}".lower(), RANK_CACHE_TTL) or {}
+        lines = []
+        for s in (cache.get("caught") or [])[:5]:
+            lines.append(f"  · {s.get('keyword','')} — 현재 {s.get('rank','')}위")
+        for s in (cache.get("missing") or [])[:5]:
+            v = f" (월 {s.get('volume'):,}회 검색)" if s.get("volume") else ""
+            lines.append(f"  · {s.get('keyword','')}{v} — 아직 미노출")
+        summary = ("\n".join(lines) or "  (진단 결과는 사이트에서 확인해 주세요)")
+        body = (f"올린다 순위 진단 리포트\n\n[{name or industry}] 현재 네이버 노출 상태\n{summary}\n\n"
+                "사진만 올리면 이 키워드들을 잡는 글·영상을 올린다가 만들어 드립니다.\n"
+                "무료로 시작: https://ollinda.kr\n문의 ollinda.2026@gmail.com · 010-9796-9009\n")
+        sent = mailer.send(email, "[올린다] 내 가게 네이버 순위 진단 리포트", body)
+    return JSONResponse({"ok": True, "sent": sent})
+
+
 # ══ 신규기능①: 경쟁사 추적기 ══
 @app.post("/api/competitor/scan")
 def competitor_scan_now(request: Request):

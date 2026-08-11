@@ -98,6 +98,17 @@ def test_refund_page_consistent_with_terms():
     assert "결제 후 7일 이내" in landing.terms(), "약관 환불 조항이 사라짐 — 환불정책과 불일치 위험"
 
 
+def test_diagnostic_lead_capture():
+    """진단 결과 이메일 캡처(마케팅 A, 2026-08-11) — 비가입 방문자 리드를 잡는 마개."""
+    h = landing.render()
+    assert "리포트를 이메일로" in h, "리드 캡처 안내 누락"
+    assert "rc_email" in h and "sendReport" in h, "이메일 입력·전송 누락"
+    assert "/api/rank-report" in h, "리드 캡처 엔드포인트 연결 누락"
+    from app import db
+    assert db.save_landing_lead("lead@test.kr", "local|부산|카페|가게"), "리드 저장 실패"
+    assert not db.save_landing_lead("bad-email"), "이메일 아닌 값이 저장됨"
+
+
 def test_visit_bar_honest():
     """방문자 표시 — 일 방문 100명 넘을 때까지 숨김(사장님 지시), 노출 시 누적 실값(2026-08-11)."""
     assert "둘러봤" not in landing.render(5000, today=0), "일 방문 0인데 표시"
