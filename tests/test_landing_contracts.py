@@ -102,7 +102,10 @@ def test_intro_promo_page():
     """홍보 유입 페이지(/intro) — 영상(캐시버전 포함)·CTA·계측이 전부 있어야 쪽지 홍보가 산다."""
     h = landing.intro()
     assert "/docs/intro.mp4?v=" in h, "소개 영상(버전 파라미터) 누락"
-    assert 'href="/login"' in h, "가입 CTA 누락"
+    # 주 CTA(무료로 시작하기)는 랜딩(/)으로 — 영상 본 사람을 제품 소개로 데려간다(2026-08-11)
+    import re as _re
+    assert _re.search(r'href="/"[^>]*>[^<]*무료로 시작하기', h), "주 CTA가 랜딩(/)으로 안 감"
+    assert "trackEv" in h, "가입 계측 누락"
     assert "trackEv" in h, "계측 스크립트 누락 — 클릭 추적 없이는 홍보 효과를 잴 수 없다"
 
 

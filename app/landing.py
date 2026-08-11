@@ -1302,8 +1302,8 @@ def intro() -> str:
   <p class="text-sm text-slate-500 mb-6">소상공인 사장님을 위한 AI 마케팅 직원 — 1분 영상으로 확인하세요.</p>
   <video controls preload="metadata" playsinline class="w-full rounded-2xl border border-slate-200 shadow-lg mb-6"
    src="{_v('/docs/intro.mp4')}" onplay="trackEv('intro_video_play',{{}})"></video>
-  <a href="/login" class="block w-full text-center py-4 rounded-xl font-extrabold text-white bg-indigo-600 hover:bg-indigo-700 transition">무료로 시작하기</a>
-  <p class="text-xs text-slate-400 mt-3"><a href="/" class="underline">ollinda.kr 자세히 보기</a></p>
+  <a href="/" class="block w-full text-center py-4 rounded-xl font-extrabold text-white bg-indigo-600 hover:bg-indigo-700 transition">무료로 시작하기</a>
+  <p class="text-xs text-slate-400 mt-3"><a href="/login" class="underline">이미 회원이신가요? 로그인</a></p>
  </div>
 </div>"""
     return _HEAD_META + _ga() + _BODY_OPEN + body + _FOOT
