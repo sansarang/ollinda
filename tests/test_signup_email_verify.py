@@ -83,6 +83,22 @@ def test_forged_sig_rejected(monkeypatch):
     assert db.get_user_by_email(email) is None, "위조 서명이 통과됨"
 
 
+def test_resend_path_used_when_key_set(monkeypatch):
+    """Railway가 SMTP를 막아도(Pro 미만 실측) Resend HTTPS 경로로 발송돼야 한다."""
+    sent = []
+
+    class _R:
+        status_code = 200
+        text = "ok"
+
+    import app.services.mailer as m
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+    monkeypatch.setattr("requests.post", lambda url, **kw: sent.append((url, kw)) or _R())
+    assert m.configured()
+    assert m.send("a@b.kr", "제목", "본문") is True
+    assert sent and "api.resend.com" in sent[0][0], "Resend API 경로를 안 탔다"
+
+
 def test_send_failure_blocks_signup(monkeypatch):
     monkeypatch.setattr(mailer, "configured", lambda: True)
     monkeypatch.setattr(mailer, "send", lambda *a: False)
