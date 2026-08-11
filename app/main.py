@@ -11877,6 +11877,48 @@ def admin_testaccount(email: str = "", pw: str = "", uses: int = 8):
             "아이디": email, "비밀번호": pw, "부여횟수": int(uses), "신규": not existing}
 
 
+@app.api_route("/admin/testaccount/delete", methods=["GET", "POST"])
+def admin_testaccount_delete(email: str = ""):
+    """테스트 계정 표적 삭제(2026-08-11) — 전체 초기화(/admin/cleanup)는 오폭 반경이 커서 별도.
+    가드: 운영자(OWNER_EMAILS)·실계정 tenant(PRODUCTION_TENANTS) 거부, 타 사용자 공유 tenant 보존."""
+    import shutil
+    from app import config as _cfg
+    from app.storage import STORAGE_DIR
+    if not email:
+        return {"err": "email 필요"}
+    u = db.get_user_by_email(email)
+    if not u:
+        return {"err": "없는 계정"}
+    if (u.get("email") or "").lower() in OWNER_EMAILS:
+        return {"err": "운영자 계정은 삭제 불가"}
+    removed = {"tenants": 0, "pieces": 0, "assets": 0, "dirs": 0}
+    with db._conn() as c:
+        tids = {u.get("tenant_id")} - {None, ""}
+        try:
+            for r in c.execute("SELECT tenant_id FROM user_stores WHERE user_id=?", (u["id"],)).fetchall():
+                tids.add(r["tenant_id"])
+        except Exception:
+            pass
+        if any(t in _cfg.PRODUCTION_TENANTS for t in tids):
+            return {"err": "실계정 tenant 연결 — 삭제 거부"}
+        sole = [t for t in tids
+                if c.execute("SELECT COUNT(*) n FROM users WHERE tenant_id=? AND id<>?",
+                             (t, u["id"])).fetchone()["n"] == 0]
+        for t in sole:
+            removed["pieces"] += c.execute("DELETE FROM content_pieces WHERE tenant_id=?", (t,)).rowcount
+            removed["assets"] += c.execute("DELETE FROM assets WHERE tenant_id=?", (t,)).rowcount
+            removed["tenants"] += c.execute("DELETE FROM tenants WHERE id=?", (t,)).rowcount
+        c.execute("DELETE FROM user_stores WHERE user_id=?", (u["id"],))
+        c.execute("DELETE FROM subscriptions WHERE user_id=?", (u["id"],))
+        c.execute("DELETE FROM users WHERE id=?", (u["id"],))
+    for t in sole:
+        d = os.path.join(STORAGE_DIR, t)
+        if os.path.isdir(d):
+            shutil.rmtree(d, ignore_errors=True)
+            removed["dirs"] += 1
+    return {"ok": True, "email": email, **removed}
+
+
 @app.get("/admin/audiocheck")
 def admin_audiocheck():
     """진단 — 프로덕션 오디오 체인(TTS 생성 + BGM 찾기 + mux) 어디서 무음이 되는지."""
