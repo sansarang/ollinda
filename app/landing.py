@@ -1230,7 +1230,16 @@ def _honesty() -> str:
  </div></section>"""
 
 
-def render() -> str:
+def _visit_bar(visits: int) -> str:
+    """실제 방문자 수 표시(2026-08-11 사장님 지시) — 날조 없이 서버 실집계값만.
+    수가 작을 땐(초기) 숨겨서 역효과 방지 — 30명 넘어야 노출(정직 + 마케팅 균형)."""
+    if not visits or visits < 30:
+        return ""
+    return (f"<div class='text-center text-xs text-slate-400 py-2 bg-slate-50 border-b border-slate-100'>"
+            f"지금까지 <b class='text-indigo-600'>{visits:,}명</b>이 올린다를 둘러봤어요</div>")
+
+
+def render(visits: int = 0) -> str:
     # 전환 논리 순서(2026-08-09 재배치 — 코드가 실제로 하는 일 순서로 판다):
     # ① 히어로(가치+CTA+진단·체험) → ② 문제 공감 → ③ 빈자리 글감(문제의 직접 해답: 뭘 쓸지 찾아옴)
     # → ④ 실물 증명(영상·블로그)+글 비교 → ⑤ 성과·실측 타임라인(증거를 앞으로)
@@ -1238,6 +1247,7 @@ def render() -> str:
     # → ⑨ 경험 자산(질문이 줄어듦) → ⑩ 정직+비밀번호 신뢰 → ⑪ 기능·모드 → ⑫ 요금 → ⑬ 마지막 CTA
     # gtag는 <head> 안이 구글 권장 위치(서치콘솔 GA 소유확인도 head 기준) — body로 내리지 말 것
     return (_HEAD_META + _ga() + _BODY_OPEN + _seo_jsonld() + _nav()
+            + _visit_bar(visits)
             + _hero() + _problem() + _vacantq()
             + _video() + _copy_compare()
             + _results() + _rank_loop()

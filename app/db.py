@@ -997,6 +997,29 @@ def claim_once(key: str) -> bool:
         return True   # 스토리지 오류 시 결제 흐름을 막지 않음(관대 처리)
 
 
+def bump_counter(key: str, n: int = 1) -> int:
+    """단순 누적 카운터(랜딩 방문수 등) +n 후 현재값 반환. 원자적 UPSERT."""
+    try:
+        with _conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS counters(key TEXT PRIMARY KEY, val INTEGER DEFAULT 0)")
+            c.execute("INSERT INTO counters(key,val) VALUES(?,?) "
+                      "ON CONFLICT(key) DO UPDATE SET val=val+?", (key, n, n))
+            r = c.execute("SELECT val FROM counters WHERE key=?", (key,)).fetchone()
+        return int(r["val"]) if r else 0
+    except Exception:
+        return 0
+
+
+def get_counter(key: str) -> int:
+    try:
+        with _conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS counters(key TEXT PRIMARY KEY, val INTEGER DEFAULT 0)")
+            r = c.execute("SELECT val FROM counters WHERE key=?", (key,)).fetchone()
+        return int(r["val"]) if r else 0
+    except Exception:
+        return 0
+
+
 def month_usage(uid: str) -> int:
     """이번 달 사용량(월이 바뀌면 0)."""
     with _conn() as c:

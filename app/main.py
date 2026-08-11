@@ -3133,7 +3133,21 @@ def root(request: Request):
     if auth.current_user(request):
         return RedirectResponse("/me", status_code=303)
     from app import landing
-    return landing.render()
+    # 실제 방문자 집계(2026-08-11) — 봇 제외, IP당 하루 1회만(순방문). 날조 없이 서버 실값.
+    visits = db.get_counter("landing_visits")
+    try:
+        ua = (request.headers.get("user-agent") or "").lower()
+        is_bot = any(b in ua for b in ("bot", "crawl", "spider", "slurp", "yeti", "preview",
+                                       "facebookexternalhit", "curl", "wget", "python", "headless", "monitor"))
+        if not is_bot:
+            from datetime import date as _date
+            ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \
+                or (request.client.host if request.client else "?")
+            if db.claim_once(f"visit:{_date.today().isoformat()}:{ip}"):
+                visits = db.bump_counter("landing_visits")
+    except Exception:
+        pass
+    return landing.render(visits=visits)
 
 
 @app.get("/robots.txt")
@@ -4237,7 +4251,7 @@ def api_lookup(q: str = "", biz: str = ""):
 async def api_contact(company: str = Form(""), manager: str = Form(""), phone: str = Form(""),
                       email: str = Form(""), message: str = Form("")):
     """랜딩 문의 — SMTP 설정 시 메일 발송, 항상 로그로 백업(리드 보존)."""
-    to = "etetetetet5ea@kakao.com"
+    to = os.environ.get("OLLINDA_INQUIRY_TO", "ollinda.2026@gmail.com")   # 문의 수신함(2026-08-11 지정)
     body = f"[올린다 문의]\n상호:{company}\n담당:{manager}\n연락처:{phone}\n이메일:{email}\n내용:{message}"
     sent = False
     host, user, pw = (os.environ.get("SMTP_HOST"), os.environ.get("SMTP_USER"), os.environ.get("SMTP_PASS"))

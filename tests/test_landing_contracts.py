@@ -98,6 +98,14 @@ def test_refund_page_consistent_with_terms():
     assert "결제 후 7일 이내" in landing.terms(), "약관 환불 조항이 사라짐 — 환불정책과 불일치 위험"
 
 
+def test_visit_bar_honest():
+    """방문자 표시 — 서버 실값만, 초기(적은 수)엔 숨김(날조·역효과 방지, 2026-08-11)."""
+    assert "둘러봤" not in landing.render(0), "방문 0인데 표시(초기 노출 역효과)"
+    assert "둘러봤" not in landing.render(29), "임계 미만인데 표시"
+    h = landing.render(1234)
+    assert "1,234명" in h, "실제 방문수 미표시"
+
+
 def test_intro_promo_page():
     """홍보 유입 페이지(/intro) — 영상(캐시버전 포함)·CTA·계측이 전부 있어야 쪽지 홍보가 산다."""
     h = landing.intro()
