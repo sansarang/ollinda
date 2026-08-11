@@ -1231,12 +1231,15 @@ def _honesty() -> str:
 
 
 def _visit_bar(visits: int) -> str:
-    """실제 방문자 수 표시(2026-08-11 사장님 지시) — 날조 없이 서버 실집계값만.
-    수가 작을 땐(초기) 숨겨서 역효과 방지 — 30명 넘어야 노출(정직 + 마케팅 균형)."""
-    if not visits or visits < 30:
+    """실제 방문자 수 표시(2026-08-11 사장님 지시) — 날조 없이 서버 실집계값만 노출.
+    OLLINDA_VISITS_BASE(env)로 과거 GA 실적을 기준선으로 더할 수 있다(실값만)."""
+    import os as _os
+    base = int(_os.environ.get("OLLINDA_VISITS_BASE", "0") or 0)
+    total = (visits or 0) + base
+    if total < 1:
         return ""
     return (f"<div class='text-center text-xs text-slate-400 py-2 bg-slate-50 border-b border-slate-100'>"
-            f"지금까지 <b class='text-indigo-600'>{visits:,}명</b>이 올린다를 둘러봤어요</div>")
+            f"지금까지 <b class='text-indigo-600'>{total:,}명</b>이 올린다를 둘러봤어요</div>")
 
 
 def render(visits: int = 0) -> str:

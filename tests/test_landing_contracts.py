@@ -99,11 +99,10 @@ def test_refund_page_consistent_with_terms():
 
 
 def test_visit_bar_honest():
-    """방문자 표시 — 서버 실값만, 초기(적은 수)엔 숨김(날조·역효과 방지, 2026-08-11)."""
-    assert "둘러봤" not in landing.render(0), "방문 0인데 표시(초기 노출 역효과)"
-    assert "둘러봤" not in landing.render(29), "임계 미만인데 표시"
-    h = landing.render(1234)
-    assert "1,234명" in h, "실제 방문수 미표시"
+    """방문자 표시 — 서버 실값만(날조 없음). 1명부터 실제 숫자 노출, 0이면 숨김(2026-08-11)."""
+    assert "둘러봤" not in landing.render(0), "방문 0인데 표시"
+    assert "1명" in landing.render(1), "실제 방문 1명 미표시"
+    assert "1,234명" in landing.render(1234), "실제 방문수 미표시"
 
 
 def test_intro_promo_page():
