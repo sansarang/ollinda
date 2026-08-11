@@ -10,12 +10,13 @@ from __future__ import annotations
 import os
 
 BRAND = "올린다"
-CONTACT_EMAIL = "etetetetet5ea@kakao.com"
+CONTACT_EMAIL = "ollinda.2026@gmail.com"           # 공개 문의 메일(2026-08-11 사장님 지정)
 # 사업자 표기 단일 소스 — 푸터·약관·개인정보·환불정책이 전부 이 값만 쓴다.
 # 표면마다 따로 박으면 한 곳만 고쳐지는 사고가 난다(2026-08-10 실제 재발).
 BIZ_CEO = "Jung Young Jin"
 BIZ_REG_NO = "106-48-91586"
 BIZ_ADDR = "경상남도 양산시 평산중앙3길 18"
+BIZ_PHONE = "010-9796-9009"                        # 사장님 연락처(2026-08-11 지정)
 # 공개 베이스 URL(카카오톡 미리보기 og:image는 반드시 절대 https URL이어야 함)
 BASE = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
 
@@ -1017,7 +1018,7 @@ def _footer() -> str:
   </div>
   <div class="mt-8 pt-6 border-t border-slate-200 text-center text-xs text-slate-400 leading-relaxed">
     © 2026 올린다 (Ollinda) · 가피디자인 · 사업자등록번호 {BIZ_REG_NO}{mo_line}<br>
-    문의 {CONTACT_EMAIL} · <a href="/terms" class="underline hover:text-slate-600">이용약관</a> · <a href="/privacy" class="underline hover:text-slate-600">개인정보처리방침</a> · <a href="/refund" class="underline hover:text-slate-600">환불정책</a> · SSL 보안 연결
+    문의 {CONTACT_EMAIL} · {BIZ_PHONE} · <a href="/terms" class="underline hover:text-slate-600">이용약관</a> · <a href="/privacy" class="underline hover:text-slate-600">개인정보처리방침</a> · <a href="/refund" class="underline hover:text-slate-600">환불정책</a> · SSL 보안 연결
   </div>
  </div></footer>"""
 
@@ -1303,6 +1304,10 @@ def intro() -> str:
   <video controls preload="metadata" playsinline class="w-full rounded-2xl border border-slate-200 shadow-lg mb-6"
    src="{_v('/docs/intro.mp4')}" onplay="trackEv('intro_video_play',{{}})"></video>
   <a href="/" class="block w-full text-center py-4 rounded-xl font-extrabold text-white bg-indigo-600 hover:bg-indigo-700 transition">무료로 시작하기</a>
+  <div class="mt-4 text-sm text-slate-500">궁금하신 점은 편하게 연락 주세요<br>
+   <a href="mailto:{CONTACT_EMAIL}" class="text-indigo-600 font-semibold">{CONTACT_EMAIL}</a>
+   <span class="text-slate-300 mx-1">·</span>
+   <a href="tel:{BIZ_PHONE.replace('-','')}" class="text-indigo-600 font-semibold">{BIZ_PHONE}</a></div>
   <p class="text-xs text-slate-400 mt-3"><a href="/login" class="underline">이미 회원이신가요? 로그인</a></p>
  </div>
 </div>"""

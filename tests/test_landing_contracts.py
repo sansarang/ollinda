@@ -105,8 +105,10 @@ def test_intro_promo_page():
     # 주 CTA(무료로 시작하기)는 랜딩(/)으로 — 영상 본 사람을 제품 소개로 데려간다(2026-08-11)
     import re as _re
     assert _re.search(r'href="/"[^>]*>[^<]*무료로 시작하기', h), "주 CTA가 랜딩(/)으로 안 감"
-    assert "trackEv" in h, "가입 계측 누락"
     assert "trackEv" in h, "계측 스크립트 누락 — 클릭 추적 없이는 홍보 효과를 잴 수 없다"
+    # 서이추 영상 링크가 도착하는 곳 — 문의 연락처(메일·전화)가 보여야 전환된다(2026-08-11)
+    assert landing.CONTACT_EMAIL in h, "인트로에 문의 메일 누락"
+    assert landing.BIZ_PHONE in h, "인트로에 연락처 누락"
 
 
 def test_biz_info_single_source():
