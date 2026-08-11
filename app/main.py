@@ -4299,6 +4299,10 @@ def signup_get(from_: str = "", err: str = ""):
               "<span class='text-xs text-slate-400'>또는 이메일로 (인증 없이 바로)</span>"
               "<div class='flex-1 h-px bg-slate-200'></div></div>")
     form = (f"{msg}<form method=post action='/signup' class='space-y-3'>"
+            # 봇 차단: 숨김 허니팟(사람은 못 보고 안 채움) + 렌더 시각 서명 토큰(즉시 제출 차단)
+            "<input name=website tabindex='-1' autocomplete='off' aria-hidden='true' "
+            "style='position:absolute;left:-9999px;height:0;width:0;opacity:0'>"
+            f"<input type=hidden name=st value='{auth.signup_token()}'>"
             "<input name=email type=email placeholder='이메일 (아이디로 사용)' required "
             "class='w-full border border-slate-200 rounded-xl p-3 outline-none focus:border-indigo-400'>"
             "<input name=pw type=password placeholder='비밀번호 (6자 이상)' minlength='6' required "
@@ -4308,9 +4312,44 @@ def signup_get(from_: str = "", err: str = ""):
     return _auth_page("가입하고 시작하기", social + form)
 
 
+import threading as _sg_th
+
+_SIGNUP_HITS: dict[str, list] = {}          # IP → 최근 가입 시각들(단일 인스턴스 인메모리면 충분)
+_SIGNUP_LOCK = _sg_th.Lock()
+
+
+def _signup_ip(request: Request) -> str:
+    """Railway 프록시 뒤라 client.host는 프록시 IP — 실 IP는 X-Forwarded-For 첫 값."""
+    fwd = request.headers.get("x-forwarded-for", "")
+    return (fwd.split(",")[0].strip() or (request.client.host if request.client else "?"))
+
+
+def _signup_rate_ok(ip: str, limit: int = 3, window: int = 3600) -> bool:
+    import time as _t
+    now = _t.time()
+    with _SIGNUP_LOCK:
+        hits = [t for t in _SIGNUP_HITS.get(ip, []) if now - t < window]
+        if len(hits) >= limit:
+            _SIGNUP_HITS[ip] = hits
+            return False
+        hits.append(now)
+        _SIGNUP_HITS[ip] = hits
+        return True
+
+
 @app.post("/signup")
-def signup_post(request: Request, email: str = Form(""), pw: str = Form("")):
+def signup_post(request: Request, email: str = Form(""), pw: str = Form(""),
+                website: str = Form(""), st: str = Form("")):
     try:
+        # 봇 차단(2026-08-11): 사유는 로그에만 — 응답은 일반 오류로 통일해 봇에게 힌트를 안 준다
+        import logging as _lg
+        ip = _signup_ip(request)
+        block = ("honeypot" if website else
+                 "token" if not auth.signup_token_ok(st) else
+                 "rate" if not _signup_rate_ok(ip) else "")
+        if block:
+            _lg.getLogger("shopcast.signup").warning("[signup] 봇 차단 사유=%s ip=%s email=%s", block, ip, email[:60])
+            return RedirectResponse("/signup?err=2", status_code=303)
         if not (email and pw) or db.get_user_by_email(email):
             return RedirectResponse("/signup?err=1", status_code=303)
         h, salt = auth.hash_pw(pw)

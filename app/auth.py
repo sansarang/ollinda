@@ -63,6 +63,25 @@ def signed_media_url(base: str, kind: str, pid: str, ttl_sec: int = 3600) -> str
     return f"{base}/{kind}/{pid}?exp={exp}&sig={media_sig(pid, exp)}"
 
 
+# ── 가입 봇 차단 토큰(2026-08-11 자동 가입 봇 2건 실측 후) ──
+# 폼 렌더 시각을 서명해 숨겨두고, 제출 때 [서명 유효 + 사람 속도(최소 경과시간)]를 검사한다.
+def signup_token(ts: int | None = None) -> str:
+    ts = int(ts if ts is not None else time.time())
+    return f"{ts}." + hmac.new(SECRET, f"signup:{ts}".encode(), hashlib.sha256).hexdigest()[:24]
+
+
+def signup_token_ok(token: str, min_sec: int = 2, max_sec: int = 86400) -> bool:
+    try:
+        ts_s, sig = (token or "").split(".", 1)
+        good = hmac.new(SECRET, f"signup:{ts_s}".encode(), hashlib.sha256).hexdigest()[:24]
+        if not hmac.compare_digest(good, sig):
+            return False
+        age = int(time.time()) - int(ts_s)
+        return min_sec <= age <= max_sec
+    except Exception:
+        return False
+
+
 # ── 세션 쿠키 ──
 def make_session(uid: str) -> str:
     raw = f"{uid}.{int(time.time())}"
