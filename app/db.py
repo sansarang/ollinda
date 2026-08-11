@@ -997,6 +997,70 @@ def claim_once(key: str) -> bool:
         return True   # 스토리지 오류 시 결제 흐름을 막지 않음(관대 처리)
 
 
+def _drip_init(c):
+    c.execute("CREATE TABLE IF NOT EXISTS drip_state("
+              "email TEXT PRIMARY KEY, step INTEGER DEFAULT 0, last_sent TEXT, unsub INTEGER DEFAULT 0)")
+
+
+def drip_due(min_hours: float, max_step: int, limit: int = 50) -> list[dict]:
+    """드립 대상 — 랜딩 리드 + 무료 미전환 가입자 중, 다음 단계 발송이 도래한 이메일.
+    같은 사람에게 min_hours 안엔 재발송 안 함, max_step 넘으면 시퀀스 종료."""
+    from datetime import datetime, timedelta
+    cutoff = (datetime.utcnow() - timedelta(hours=min_hours)).isoformat()
+    out = []
+    try:
+        with _conn() as c:
+            _drip_init(c)
+            emails = set()
+            try:
+                for r in c.execute("SELECT email FROM landing_leads").fetchall():
+                    if r["email"]:
+                        emails.add(r["email"].lower())
+            except Exception:
+                pass
+            for r in c.execute("SELECT email FROM users WHERE (plan='free' OR plan IS NULL) AND email LIKE '%@%'").fetchall():
+                if r["email"]:
+                    emails.add(r["email"].lower())
+            for em in emails:
+                st = c.execute("SELECT step, last_sent, unsub FROM drip_state WHERE email=?", (em,)).fetchone()
+                step = st["step"] if st else 0
+                if st and st["unsub"]:
+                    continue
+                if step >= max_step:
+                    continue
+                if st and st["last_sent"] and st["last_sent"] > cutoff:
+                    continue                    # 아직 간격 안 됨
+                out.append({"email": em, "step": step})
+                if len(out) >= limit:
+                    break
+    except Exception:
+        pass
+    return out
+
+
+def drip_mark(email: str, step: int) -> None:
+    from datetime import datetime
+    try:
+        with _conn() as c:
+            _drip_init(c)
+            c.execute("INSERT INTO drip_state(email, step, last_sent) VALUES(?,?,?) "
+                      "ON CONFLICT(email) DO UPDATE SET step=?, last_sent=?",
+                      (email.lower(), step + 1, datetime.utcnow().isoformat(), step + 1, datetime.utcnow().isoformat()))
+    except Exception:
+        pass
+
+
+def drip_unsub(email: str) -> bool:
+    try:
+        with _conn() as c:
+            _drip_init(c)
+            c.execute("INSERT INTO drip_state(email, unsub) VALUES(?,1) "
+                      "ON CONFLICT(email) DO UPDATE SET unsub=1", (email.lower(),))
+        return True
+    except Exception:
+        return False
+
+
 def save_landing_lead(email: str, context: str = "") -> bool:
     """랜딩 진단 리드 캡처(2026-08-11) — 비가입 방문자 이메일 확보. 같은 이메일은 최신 컨텍스트로 갱신."""
     email = (email or "").strip().lower()

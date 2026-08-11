@@ -3963,6 +3963,26 @@ async def api_rank_check(request: Request):
     return JSONResponse(result)
 
 
+@app.api_route("/admin/drip/run", methods=["GET", "POST"])
+def admin_drip_run(dry: int = 0):
+    """리드·미전환 드립 수동 실행(마케팅 F). dry=1이면 발송 없이 대상만 집계."""
+    from app.services import drip
+    return JSONResponse(drip.run(limit=100, dry=bool(dry)))
+
+
+@app.get("/u/unsub", response_class=HTMLResponse)
+def unsub(e: str = "", t: str = ""):
+    """이메일 드립 수신거부(정보통신망법 — 광고 메일 필수). 서명 토큰 검증."""
+    from app.services import drip
+    ok = bool(e) and drip.unsub_ok(e, t) and db.drip_unsub(e)
+    msg = ("수신거부가 완료되었습니다. 더 이상 마케팅 메일을 보내지 않습니다."
+           if ok else "잘못된 요청이거나 만료된 링크입니다.")
+    return HTMLResponse(
+        "<div style='font-family:sans-serif;max-width:480px;margin:80px auto;text-align:center;color:#334'>"
+        f"<h2 style='color:#6366F1'>올린다</h2><p>{esc(msg)}</p>"
+        "<a href='/' style='color:#6366F1'>← 홈으로</a></div>")
+
+
 @app.post("/api/rank-report")
 async def api_rank_report(request: Request):
     """진단 결과 리드 캡처(2026-08-11 마케팅 A) — 이메일 받아 리포트 발송 + 리드 저장.

@@ -42,6 +42,9 @@ def start() -> None:
         # 발행 리마인더(상위노출 PHASE 2) — 공백 N일이면 앱내+이메일(카톡 스텁), 매일 저녁
         sch.add_job(_publish_reminder, "cron", hour=18, minute=0,
                     id="publish_reminder", replace_existing=True)
+        # 리드·미전환 자동 이메일 드립(마케팅 F, 2026-08-11) — 매일 14시, Resend/SMTP 설정 시만
+        sch.add_job(_drip_run, "cron", hour=14, minute=0,
+                    id="drip_daily", replace_existing=True)
         # 순위 자동추적(상위노출 PHASE 3) — tenant×타겟키워드 일일 스냅샷(아침, 스캔과 시차)
         sch.add_job(_rank_track, "cron", hour=7, minute=30,
                     id="rank_track_daily", replace_existing=True)
@@ -404,6 +407,17 @@ def _publish_reminder() -> None:
         pubcal.remind_stale_tenants()
     except Exception:
         logging.exception("[scheduler] 발행 리마인더 실패")
+
+
+def _drip_run() -> None:
+    """리드·미전환 자동 이메일 드립(마케팅 F)."""
+    _mark("drip_daily")
+    try:
+        from app.services import drip
+        r = drip.run(limit=100)
+        logging.info("[scheduler] 드립 발송: %s", r)
+    except Exception:
+        logging.exception("[scheduler] 드립 실패")
 
 
 def _weekly_blog_report() -> None:
