@@ -82,6 +82,29 @@ def signup_token_ok(token: str, min_sec: int = 2, max_sec: int = 86400) -> bool:
         return False
 
 
+# ── 이메일 가입 인증 코드(2026-08-11) — 무상태 서명 토큰(가입 대기 DB 불요) ──
+# 폼 hidden에 [해시·salt·만료]를 서명해 내려보내고, 사용자가 메일의 6자리 코드를 입력하면
+# 서명 검증 후에야 계정을 만든다. 서버는 대기 상태를 저장하지 않는다.
+def signup_verify_token(email: str, pw_hash: str, salt: str, code: str,
+                        exp: int | None = None) -> tuple[str, str]:
+    """(exp, sig) 반환 — sig는 email·해시·salt·code·exp 전체에 대한 서명."""
+    exp = int(exp if exp is not None else time.time() + 900)      # 15분
+    raw = f"verify:{email.lower().strip()}:{pw_hash}:{salt}:{code}:{exp}"
+    return str(exp), hmac.new(SECRET, raw.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def signup_verify_ok(email: str, pw_hash: str, salt: str, code: str,
+                     exp: str, sig: str) -> bool:
+    try:
+        if int(exp) < time.time():
+            return False
+    except (TypeError, ValueError):
+        return False
+    raw = f"verify:{email.lower().strip()}:{pw_hash}:{salt}:{code}:{int(exp)}"
+    good = hmac.new(SECRET, raw.encode(), hashlib.sha256).hexdigest()[:32]
+    return hmac.compare_digest(good, sig or "")
+
+
 # ── 세션 쿠키 ──
 def make_session(uid: str) -> str:
     raw = f"{uid}.{int(time.time())}"

@@ -4290,14 +4290,18 @@ def signup_get(from_: str = "", err: str = ""):
         msg = "<p class='text-rose-500 text-sm mb-3 text-center'>이미 가입된 이메일이거나 입력이 비었어요.</p>"
     elif err == "2":
         msg = "<p class='text-rose-500 text-sm mb-3 text-center'>잠시 후 다시 시도해주세요.</p>"
+    elif err == "3":
+        msg = "<p class='text-rose-500 text-sm mb-3 text-center'>인증 메일 발송에 실패했어요. 잠시 후 다시 시도해주세요.</p>"
     # 소셜 순서 = 고객층 사용률: 카카오 → 네이버 → 구글 (2026-08-09 가입 흐름 정비)
     social = ("<a href='/login/kakao' class='block text-center mb-2.5 py-3 rounded-xl font-bold' "
               "style='background:#FEE500;color:#191600'>카카오로 3초 가입</a>"
               + _naver_login_btn("네이버로 가입하기")
               + _google_btn("구글로 가입하기")
               + "<div class='flex items-center gap-2 my-4'><div class='flex-1 h-px bg-slate-200'></div>"
-              "<span class='text-xs text-slate-400'>또는 이메일로 (인증 없이 바로)</span>"
-              "<div class='flex-1 h-px bg-slate-200'></div></div>")
+              + ("<span class='text-xs text-slate-400'>또는 이메일로 가입</span>"
+                 if __import__("app.services.mailer", fromlist=["x"]).configured()
+                 else "<span class='text-xs text-slate-400'>또는 이메일로 (인증 없이 바로)</span>")
+              + "<div class='flex-1 h-px bg-slate-200'></div></div>")
     form = (f"{msg}<form method=post action='/signup' class='space-y-3'>"
             # 봇 차단: 숨김 허니팟(사람은 못 보고 안 채움) + 렌더 시각 서명 토큰(즉시 제출 차단)
             "<input name=website tabindex='-1' autocomplete='off' aria-hidden='true' "
@@ -4353,6 +4357,17 @@ def signup_post(request: Request, email: str = Form(""), pw: str = Form(""),
         if not (email and pw) or db.get_user_by_email(email):
             return RedirectResponse("/signup?err=1", status_code=303)
         h, salt = auth.hash_pw(pw)
+        # 이메일 인증(2026-08-11 사장님 지시) — SMTP 설정 시에만 활성(env 게이트).
+        # 발송 실패는 가입 통과가 아니라 명시 오류(err=3) — 침묵 폴백 금지.
+        from app.services import mailer
+        if mailer.configured():
+            code = f"{secrets.randbelow(1_000_000):06d}"
+            exp, sig = auth.signup_verify_token(email, h, salt, code)
+            if not mailer.send(email, "[올린다] 가입 인증 코드",
+                               f"올린다 가입 인증 코드: {code}\n15분 안에 입력해 주세요.\n"
+                               "본인이 요청하지 않았다면 이 메일은 무시하셔도 됩니다."):
+                return RedirectResponse("/signup?err=3", status_code=303)
+            return HTMLResponse(_verify_page(email, h, salt, exp, sig))
         u = db.create_user(email=email, pw_hash=h, salt=salt)
         resp = RedirectResponse("/me", status_code=303)
         resp.set_cookie(auth.COOKIE, auth.make_session(u["id"]), max_age=5184000, httponly=True, samesite="lax", secure=auth.cookie_secure())
@@ -4363,6 +4378,42 @@ def signup_post(request: Request, email: str = Form(""), pw: str = Form(""),
         if request.query_params.get("dbg") == os.environ.get("SHOPCAST_ADMIN_PASS", "_"):
             return HTMLResponse("SIGNUP_ERR " + repr(e) + "\n" + traceback.format_exc(), status_code=500)
         return RedirectResponse("/signup?err=2", status_code=303)
+
+
+def _verify_page(email: str, h: str, salt: str, exp: str, sig: str, err: str = "") -> str:
+    """가입 인증 코드 입력 화면 — 서버는 대기 상태를 저장하지 않는다(서명 hidden으로 왕복)."""
+    msg = f"<p class='text-rose-500 text-sm mb-3 text-center'>{esc(err)}</p>" if err else ""
+    return _auth_page("메일로 보낸 코드를 입력하세요", (
+        f"<p class='text-slate-500 text-sm mb-4 text-center'><b>{esc(email)}</b> 으로<br>"
+        "6자리 인증 코드를 보냈어요. (15분 유효 · 스팸함도 확인해 주세요)</p>"
+        f"{msg}<form method=post action='/signup/verify' class='space-y-3'>"
+        f"<input type=hidden name=email value='{esc(email)}'>"
+        f"<input type=hidden name=h value='{esc(h)}'>"
+        f"<input type=hidden name=salt value='{esc(salt)}'>"
+        f"<input type=hidden name=exp value='{esc(exp)}'>"
+        f"<input type=hidden name=sig value='{esc(sig)}'>"
+        "<input name=code inputmode=numeric pattern='[0-9]*' maxlength='6' placeholder='인증 코드 6자리' required autofocus "
+        "class='w-full border border-slate-200 rounded-xl p-3 text-center text-xl tracking-[0.4em] outline-none focus:border-indigo-400'>"
+        "<button class='w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-3 rounded-xl transition'>인증하고 시작하기</button></form>"
+        "<p class='text-sm text-slate-400 mt-4 text-center'>메일이 안 왔나요? <a href='/signup' class='text-indigo-600 font-semibold'>다시 가입하기</a></p>"))
+
+
+@app.post("/signup/verify")
+def signup_verify(request: Request, email: str = Form(""), h: str = Form(""), salt: str = Form(""),
+                  exp: str = Form(""), sig: str = Form(""), code: str = Form("")):
+    """이메일 인증 확정 — 서명·만료·코드가 모두 맞아야 계정을 만든다. 코드 무차별 대입은 IP 제한."""
+    if not _signup_rate_ok("verify:" + _signup_ip(request), limit=10, window=3600):
+        return RedirectResponse("/signup?err=2", status_code=303)
+    if not auth.signup_verify_ok(email, h, salt, (code or "").strip(), exp, sig):
+        return HTMLResponse(_verify_page(email, h, salt, exp, sig,
+                                         err="코드가 맞지 않아요. 메일의 6자리를 다시 확인해 주세요."))
+    if db.get_user_by_email(email):
+        return RedirectResponse("/signup?err=1", status_code=303)
+    u = db.create_user(email=email, pw_hash=h, salt=salt)
+    resp = RedirectResponse("/me", status_code=303)
+    resp.set_cookie(auth.COOKIE, auth.make_session(u["id"]), max_age=5184000, httponly=True,
+                    samesite="lax", secure=auth.cookie_secure())
+    return resp
 
 
 @app.get("/login")
