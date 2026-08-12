@@ -11908,22 +11908,31 @@ def admin_cleanup():
     # 사장님(보존) tenant의 오래된 영상도 정리 (keep_recent=2로 강하게)
     for tid in keep:
         freed += _prune_old_media(tid, keep_recent=2)
-    # ★ 저장소 전체 — 모든 확장자(사진·영상·캐러셀·ffmpeg 임시) 오래된 파일 삭제, 최근 40개만 유지
+    # ★ 저장소 전체 정리 — 무거운 재생성 가능 파일(영상 등)만 대상.
+    #   2026-08-12 실사고: '최근 40개만 유지'가 파일 종류·나이를 안 봐서, 방금 올린 사진이
+    #   영상 몇 개에 밀려 즉시 삭제됨 → 화면이 매번 R2에서 원본을 받아와 미리보기가 느려지고
+    #   파생본(썸·웹)도 못 만들었다. 사진은 파생본의 원재료이자 재생성 불가 → 보존한다.
     from collections import defaultdict
+    import time as _tcl
+    HEAVY = (".mp4", ".mov", ".webm", ".m4v", ".wav", ".mp3")   # 재생성 가능한 무거운 산출물
+    KEEP_HOURS = 24                                             # 최근 24h 파일은 종류 불문 보존
+    now = _tcl.time()
     allf, by_ext = [], defaultdict(lambda: [0, 0])
     for root, _d, fs in os.walk(STORAGE_DIR):
         for fn in fs:
             fp = os.path.join(root, fn)
             try:
                 sz = os.path.getsize(fp)
-                allf.append((os.path.getmtime(fp), sz, fp))
+                mt = os.path.getmtime(fp)
                 e = fp.rsplit(".", 1)[-1].lower()[:6]
                 by_ext[e][0] += 1
                 by_ext[e][1] += sz
+                if fn.lower().endswith(HEAVY) and (now - mt) > KEEP_HOURS * 3600:
+                    allf.append((mt, sz, fp))    # 삭제 후보 = 오래된 무거운 파일만
             except Exception:
                 pass
     allf.sort(reverse=True)                    # 최신 먼저
-    for _mt, sz, fp in allf[40:]:              # 최근 40개만 남기고 전부 삭제(R2에 사본 있음)
+    for _mt, sz, fp in allf[10:]:              # 무거운 파일은 최근 10개만 남김(R2에 사본 있음)
         try:
             os.remove(fp)
             freed += sz
