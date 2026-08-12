@@ -21,11 +21,60 @@ def _norm_name(s: str) -> str:
 
 
 def _name_match(user_name: str, naver_name: str) -> bool:
-    """내 상호 ↔ 네이버 업체명 매칭(정규화 후 양방향 부분일치, 짧은 오탐 방지)."""
+    """내 상호 ↔ 네이버 업체명 매칭.
+
+    ① 정규화 후 양방향 부분일치(기존)
+    ② ①이 실패해도 '핵심 토큰'이 충분히 겹치면 같은 가게로 본다(2026-08-12 실사고).
+       실측: 사장님이 '초량루마썬팅'(지역명 붙임)이라 입력하면 네이버의 '루마썬팅 현대상사'와
+       포함관계가 안 되어 실제 5위인데 '미노출'로 오판했다. 지역명·지점 접미사를 떼고 비교한다.
+    한 글자 토큰·너무 짧은 이름은 오탐 위험이 커서 제외한다(다른 가게를 내 가게로 보면 더 나쁘다).
+    """
     u, n = _norm_name(user_name), _norm_name(naver_name)
     if len(u) < 2 or not n:
         return False
-    return u in n or (len(n) >= 3 and n in u)
+    # ① 겹치는 부분이 '고유 상호'라 부를 만큼 길어야 한다(4글자↑).
+    #    짧은 조각(‘썬팅’ 같은 업종어)으로 남의 가게에 붙는 오탐이 실사고였다.
+    if (u in n or n in u) and min(len(u), len(n)) >= 4:
+        return True
+    # ② 한쪽의 고유 토큰이 다른 쪽 안에 통째로 들어있는가(붙여쓴 입력·지점 표기 차이 흡수).
+    #    '초량루마썬팅' ⊃ '루마썬팅', '스타벅스 서면점' ↔ '스타벅스 부산대점'.
+    for t in (_core_tokens(naver_name) | _core_tokens(user_name)):
+        tt = _norm_name(t)
+        if len(tt) >= 4 and tt in u and tt in n:
+            return True
+    # ③ 지역·지점 수식어를 뗀 '고유 브랜드'가 완전히 같은가 — 짧은 브랜드(3글자)의 지점 차이 흡수.
+    #    '지벤트 초량점' ↔ '지벤트 서면점'. 완전일치만 인정해 오탐을 막는다.
+    ub, nb = _core_tokens(user_name), _core_tokens(naver_name)
+    if ub and nb and ub == nb:
+        return True
+    return False
+
+
+# 지역·지점 수식어(붙어 있으면 고유 상호가 아니다) — 업종 중립: 지명·형태만, 업종어 금지
+_GENERIC = ("점", "본점", "지점", "직영점", "센터", "매장", "샵", "샾", "스토어",
+            "주식회사", "㈜", "유한회사", "상사", "공업사", "자동차")
+
+
+def _core_tokens(s: str) -> set:
+    """상호에서 지점·법인 수식어를 뺀 고유 토큰 집합. '초량루마썬팅' → {'루마썬팅'} 지향.
+    '○○점'(지점 표기)은 통째로 버린다 — 지명을 코드에 박지 않고 패턴으로 처리(업종·지역 중립)."""
+    import re as _re
+    raw = _re.split(r"[\s()\[\]{}·・.,\-–—_/&'\"]+", (s or "").strip())
+    out = set()
+    for w in raw:
+        w = w.strip().lower()
+        if not w:
+            continue
+        if len(w) <= 4 and w.endswith("점"):    # '초량점'·'서면점'·'본점' = 지점 표기 → 제외
+            continue
+        for g in _GENERIC:                      # 접미/접두 수식어 제거
+            if w.endswith(g) and len(w) > len(g) + 1:
+                w = w[: -len(g)]
+            if w.startswith(g) and len(w) > len(g) + 1:
+                w = w[len(g):]
+        if len(w) >= 2:
+            out.add(w)
+    return out
 
 
 def configured() -> bool:
