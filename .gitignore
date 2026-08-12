@@ -25,3 +25,7 @@ data/*
 # pytest
 .pytest_cache/
 .prod-snapshot.sqlite*
+
+# 브라우저 자동화 잔여물 — 페이지 스냅샷에 API 키가 찍혀 GitHub push가 막혔다(2026-08-13)
+.playwright-mcp/
+captcha-dialog.png

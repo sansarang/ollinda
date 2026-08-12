@@ -405,7 +405,20 @@ def blocks_ingest(tenant_id: str, rows: list) -> dict:
     return {"ok": True, "saved": saved}
 
 
-_MIN_SCAN_VOLUME = 100     # 월검색량 하한 — 이 아래는 지면을 훑어도 유입이 없다(정찰 기준과 동일)
+def _min_scan_volume() -> int:
+    """정찰 하한 = 빈자리 판정 하한(gapscout.MIN_VOLUME). 단일 소스로 묶는다.
+
+    2026-08-13 실측 사고: 주석엔 '정찰 기준과 동일'이라 적혀 있었는데 숫자가 갈라져
+    정찰 100 / 판정 30이 됐다. 정찰이 100으로 막으니 30~99짜리 동네 롱테일은 지도에
+    들어오지도 못했고, 판정 하한을 30으로 낮춘 개선이 통째로 죽어 있었다.
+    같은 규칙이 두 곳에 살면 그 자체가 결함이다 — 숫자가 아니라 출처를 하나로 둔다.
+    """
+    try:
+        from app.services import gapscout as _gs
+        return int(_gs.MIN_VOLUME)
+    except Exception:
+        _log.exception("[blogreach] 정찰 하한 조회 실패 — 보수적으로 30")
+        return 30
 
 
 def scout_plan(tenant_id: str, limit: int = 30, ttl_days: int = 7) -> list:
@@ -467,6 +480,19 @@ def scout_plan(tenant_id: str, limit: int = 30, ttl_days: int = 7) -> list:
             _add(q.get("keyword") or "")
     except Exception:
         pass
+    # ④ 소재 롱테일 — ①~③은 전부 '이미 쓴 키워드'라 닫힌 루프였다(2026-08-13 실측).
+    #    그래서 지도에는 대형 판만 쌓이고 이길 수 있는 롱테일은 후보에 들어오지도 못했다.
+    #    속성값은 사장님 실데이터에 실재하는 것만 쓴다(스키마 예시 토큰 금지 — 유령 키워드 입구).
+    try:
+        from app.services import longtail as _lt
+        proven = _lt.proven_axis_values(tenant_id, t)
+        if proven:
+            for k in _lt.combos(t, proven, extra_tail=False):
+                _add(k)
+        else:
+            _log.info("[blogreach] 소재 롱테일 0 — 실데이터에 확인된 속성값이 없습니다 t=%s", tenant_id)
+    except Exception:
+        _log.exception("[blogreach] 소재 롱테일 생성 실패 t=%s", tenant_id)
     if not cands:
         return []
     # 최근에 훑은 것은 건너뛰고, 오래된 것·미측정부터 — 매일 조금씩 지도를 넓힌다
@@ -501,7 +527,8 @@ def scout_plan(tenant_id: str, limit: int = 30, ttl_days: int = 7) -> list:
         from app.services import searchad as _sa
         if _sa.configured() and todo:
             vols = _sa.volume_map(todo) or {}
-            _kept = [k for k in todo if int(vols.get(k.replace(" ", "")) or 0) >= _MIN_SCAN_VOLUME]
+            _floor = _min_scan_volume()
+            _kept = [k for k in todo if int(vols.get(k.replace(" ", "")) or 0) >= _floor]
             if _kept:
                 todo = _kept
     except Exception:

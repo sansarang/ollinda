@@ -58,16 +58,11 @@ def _seller_longtail_candidates(t) -> list:
     """셀러·병행 롱테일 후보 — 업종 스키마 search_grammar × (매물 컨텍스트 속성 | 스키마 속성 토큰).
     업종 무관 동적: 중고차=차종+중고, 캔들=향+캔들 등 스키마가 문법·속성을 공급(차량 하드코딩 제거).
     검색량 검증은 호출부(관문)에서. 광역+업종 폴백 항상 포함."""
-    import re as _r
-    from app.services import indschema as _isc
-    ind0 = ((t.industry or "").replace("/", ",").split(",")[0] or "").strip()
-    biz = (getattr(t, "biz_type", "local") or "local")
-    wide = next((_r.sub(r"(특별시|광역시|특별자치시|특별자치도|자치도|도)$", "", tk)
-                 for tk in (t.region or "").split()
-                 if _r.search(r"(특별시|광역시|특별자치시|특별자치도|도)$", tk)), "")
-    sch = _isc.get_schema(t.industry, biz)
-    grammars = sch.get("search_grammar") or ["{속성} 추천", "{지역} {업종}"]
-    # 속성 값: 매물 컨텍스트(실입력) 우선, 없으면 스키마 예시 토큰
+    from app.services import longtail as _lt
+    # 속성 값: 매물 컨텍스트(실입력)만 쓴다.
+    #   ★ 재고 컨텍스트가 없으면 '스키마 예시 차종'을 실재고처럼 쓰지 마라 — 딜러에게 없는 모델
+    #     (캐스퍼·레이 등 예시 토큰)로 유령 키워드·콘텐츠가 생성된다. 스키마 토큰은 '업로드 인식'용이지
+    #     '없는 매물 키워드 생성'용이 아니다. 재고 없으면 모델별 롱테일은 건너뛰고 지역+업종 generic만.
     attrs, years = [], []
     for c in db.recent_inventory_context(t.id, limit=6):
         for v in (c.get("model"), c.get("car_class")):
@@ -75,32 +70,8 @@ def _seller_longtail_candidates(t) -> list:
                 attrs.append(v)
         if c.get("year"):
             years.append(c["year"])
-    if not attrs:
-        # ★ 재고 컨텍스트가 없으면 '스키마 예시 차종'을 실재고처럼 쓰지 마라 — 딜러에게 없는 모델
-        #   (캐스퍼·레이 등 예시 토큰)로 유령 키워드·콘텐츠가 생성된다. 스키마 토큰은 '업로드 인식'용이지
-        #   '없는 매물 키워드 생성'용이 아니다. 재고 없으면 모델별 롱테일은 건너뛰고 아래 지역+업종 generic만.
-        attrs = []
-    out = []
-
-    def _emit(g, subs):
-        kw = g
-        for ph, val in subs.items():
-            kw = kw.replace("{" + ph + "}", val)
-        kw = " ".join(_r.sub(r"\{[^}]*\}", "", kw).split())   # 미치환 플레이스홀더 제거
-        if kw and len(kw) >= 3:
-            out.append(kw)
-    # 서열: 속성(+연식) 조합을 먼저(롱테일), 그다음 지역+속성, 마지막 광역+업종
-    for a in attrs:
-        for g in grammars:
-            _emit(g, {"속성": a, "차종": a, "지역": wide, "업종": ind0, "의도": "추천", "연식": (years[0] if years else "")})
-    _emit("{지역} {업종} 추천", {"지역": wide, "업종": ind0})
-    _emit("{업종} 추천", {"업종": ind0})
-    seen, uniq = set(), []
-    for kw in out:
-        k = " ".join(kw.split())
-        if k and k not in seen:
-            seen.add(k); uniq.append(k)
-    return uniq
+    # 치환 규칙은 longtail.combos 한 곳에만 산다(정찰 씨앗과 같은 함수).
+    return _lt.combos(t, attrs, years=years)
 
 
 def relevant_experience(tenant_id: str, keyword: str, limit: int = 2) -> list[dict]:

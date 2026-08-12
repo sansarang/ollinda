@@ -1,0 +1,115 @@
+"""소재 롱테일 후보 생성 골든 (2026-08-13).
+
+사고: 빈자리 정찰의 후보가 [이미 쓴 키워드]에서만 나오는 닫힌 루프여서, 지도에
+대형 판(부산 중고차·썬팅 가격)만 쌓였다. 점수 산식을 이길 수 있는 쪽으로 고쳐도
+재료가 대형 키워드뿐이라 효과가 없었다.
+여기서 무는 것: ①문법×증명값으로 롱테일이 실제로 나온다 ②미증명 스키마 예시 토큰은
+절대 나오지 않는다(유령 키워드) ③정찰 하한과 판정 하한이 다시 갈라지지 않는다.
+"""
+import types
+
+from app.services import longtail as lt
+
+
+def _t(**kw):
+    d = {"id": "T1", "industry": "썬팅", "biz_type": "local", "region": "부산광역시 동구"}
+    d.update(kw)
+    return types.SimpleNamespace(**d)
+
+
+# ── ① 문법 × 증명된 속성값 → 롱테일 ────────────────────────────────
+def test_combos_makes_longtail_from_proven_attrs():
+    out = lt.combos(_t(), ["EV5"], grammars=["{차종} {업종}", "{지역} {업종}"])
+    assert "EV5 썬팅" in out, out
+    assert "부산 썬팅" in out, out
+
+
+def test_combos_without_attrs_makes_no_attribute_keyword():
+    """속성값이 없으면 속성 조합은 만들지 않는다 — 빈칸이 유일한 폴백이다."""
+    out = lt.combos(_t(), [], grammars=["{차종} {업종}"])
+    assert not any("{" in k for k in out), out
+    # 광역+업종 폴백만 남는다(기존 동작 보존)
+    assert out == ["부산 썬팅 추천", "썬팅 추천"], out
+
+
+def test_unsubstituted_placeholder_never_leaks():
+    """지역이 없어도 '{지역} 썬팅' 같은 문자열이 검색어로 새 나가면 안 된다."""
+    out = lt.combos(_t(region=""), ["EV5"], grammars=["{지역} {차종} {업종}"])
+    assert all("{" not in k and "}" not in k for k in out), out
+    assert "EV5 썬팅" in out, out
+
+
+def test_wide_region_uses_spoken_form():
+    """'부산광역시 썬팅'은 아무도 안 친다(실측 검색량 0)."""
+    assert lt.wide_region("부산광역시 동구") == "부산"
+    assert lt.wide_region("서울특별시 강남구") == "서울"
+    assert lt.wide_region("") == ""
+    # 구(區)만 있는 지역은 광역이 없으니 빈칸 — 억지로 채우지 않는다
+    assert lt.wide_region("동구") == ""
+
+
+def test_wide_region_do_form_is_stripped_as_is():
+    """'경상남도'→'경상남'. 사람이 치는 말은 '경남'이라 검색량 관문에서 걸러진다 —
+    여기서 임의로 줄임말을 만들면 canonical_region 규칙이 두 곳에 사는 셈이 된다.
+    기존 동작(autoqueue와 동일)을 그대로 박제해 둔다."""
+    assert lt.wide_region("경상남도 양산시") == "경상남"
+
+
+def test_extra_tail_off_keeps_only_longtail():
+    out = lt.combos(_t(), ["EV5"], grammars=["{차종} {업종}"], extra_tail=False)
+    assert out == ["EV5 썬팅"], out
+
+
+# ── ② 유령 키워드 방지 — 미증명 스키마 예시 토큰은 나오지 않는다 ──────
+def test_proven_axis_values_rejects_unproven_schema_tokens(monkeypatch):
+    """스키마 예시 차종(캐스퍼)은 사장님 실데이터에 없으면 후보가 될 수 없다.
+    이것이 '딜러에게 없는 매물로 유령 글'이 나가던 계열의 입구다."""
+    from app.services import gapscout as gs
+    monkeypatch.setattr(gs, "owner_domain", lambda tid: {"tokens": {"EV5", "열차단"}})
+    monkeypatch.setattr(gs, "_axis_tokens", lambda t: [
+        {"axis": "차종", "tokens": ["EV5", "캐스퍼", "레이"]},
+        {"axis": "필름·시공", "tokens": ["열차단", "유리막코팅"]},
+    ])
+    vals = lt.proven_axis_values("T1", _t())
+    assert set(vals) == {"EV5", "열차단"}, vals
+
+
+def test_proven_axis_values_empty_when_no_owner_data(monkeypatch):
+    """실데이터가 없으면 빈 리스트 — 스키마 예시로 채우지 않는다(침묵 폴백 금지)."""
+    from app.services import gapscout as gs
+    monkeypatch.setattr(gs, "owner_domain", lambda tid: {"tokens": set()})
+    monkeypatch.setattr(gs, "_axis_tokens", lambda t: [{"axis": "차종", "tokens": ["캐스퍼"]}])
+    assert lt.proven_axis_values("T1", _t()) == []
+
+
+# ── ③ 하한 드리프트 재발 방지 ────────────────────────────────────
+def test_scan_floor_equals_gap_floor():
+    """정찰 하한 > 판정 하한이면 롱테일은 지도에 들어오지도 못한다(2026-08-13 실사고).
+    숫자를 각자 적지 말고 출처를 하나로 둔다."""
+    from app.services import blogreach as br
+    from app.services import gapscout as gs
+    assert br._min_scan_volume() == gs.MIN_VOLUME
+
+
+def test_scan_floor_low_enough_for_local_demand():
+    """'부산 기장 중고차'(월 80회) 같은 동네 실수요가 정찰에서 잘리면 안 된다."""
+    from app.services import blogreach as br
+    assert br._min_scan_volume() <= 80
+
+
+# ── ④ 큐 경로가 같은 함수를 쓴다(규칙 이중화 방지) ─────────────────
+def test_autoqueue_delegates_to_canonical_combiner(monkeypatch):
+    from app.services import autoqueue as aq
+    monkeypatch.setattr(aq.db, "recent_inventory_context",
+                        lambda tid, limit=6: [{"model": "쏘렌토", "car_class": "SUV", "year": "2020"}])
+    called = {}
+    real = lt.combos
+
+    def _spy(t, attrs, **kw):
+        called["attrs"] = list(attrs)
+        return real(t, attrs, **kw)
+
+    monkeypatch.setattr(lt, "combos", _spy)
+    out = aq._seller_longtail_candidates(_t(industry="중고차", biz_type="seller"))
+    assert called.get("attrs") == ["쏘렌토", "SUV"], called
+    assert out and all("{" not in k for k in out), out
