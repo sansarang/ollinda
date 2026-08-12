@@ -388,3 +388,24 @@ def test_volume_map_queries_every_keyword(monkeypatch):
     assert seen == set(kws), f"조회 누락 {len(set(kws) - seen)}개"
     assert len(out) == len(kws), f"결과 누락: {len(out)}/{len(kws)}"
     assert all(v == 100 for v in out.values()), f"조용히 0이 된 항목: {out}"
+
+
+def test_title_speaker_is_the_shop_not_the_customer():
+    """제목 화자 게이트 — 2026-08-01 '화자 뒤집힘' 재발(2026-08-12 사장님 지적) 박제.
+
+    사고: 본문엔 화자 규칙이 있는데 제목엔 없어서 중고차 글 제목이
+    '중고차 후기 … 직접 검수'(손님이 산 뒤 쓰는 말투)로 나왔다.
+    우리는 파는 쪽이다 — 손님 체험담 말투 제목은 선택되면 안 된다.
+    단 '후기'는 실검색어라 키워드로는 허용한다(과교정 금지)."""
+    from app.generators.text_claude import _pick_title
+    body = "투싼 하이브리드 57,216km 2,990만원 성능점검기록부 무사고 실매물 검수 공개"
+    kw = "부산 기장 중고차"
+    customer_voice = f"{kw} 후기 — 투싼 하이브리드 N라인 57,216km 내돈내산 직접 써보니"
+    shop_voice = f"{kw} 가격 공개 — 투싼 N라인 57,216km 성능점검부 정리"
+    title, why = _pick_title([customer_voice, shop_voice], kw, body)
+    assert title == shop_voice, f"손님 화자 제목이 선택됨 — 화자 뒤집힘 회귀: {title}"
+
+    # 과교정 금지: '후기'만 든 정상 제목은 계속 살아있어야 한다(검색어)
+    only_kw = f"{kw} 후기 정리 — 투싼 N라인 57,216km 성능점검부 공개"
+    t2, _ = _pick_title([only_kw], kw, body)
+    assert t2 == only_kw, "'후기' 키워드가 들어간 정상 제목까지 탈락 — 과교정"
