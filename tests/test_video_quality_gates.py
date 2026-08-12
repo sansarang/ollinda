@@ -56,3 +56,23 @@ def test_render_storyboard_has_sale_price_param():
     import inspect
     sig = inspect.signature(v.ShortVideoGenerator.render_storyboard)
     assert "sale_price" in sig.parameters, "render_storyboard가 VG3 판매가 기준을 안 받음"
+
+
+def test_clip_skip_is_not_an_error():
+    """정상 스킵을 예외로 처리하지 않는다(2026-08-12 Sentry 오탐 사고 박제).
+
+    '클립 미요청'·'플랜 미포함'은 지극히 정상인 분기다. 이걸 raise → exception 로그로
+    처리하면 Sentry가 장애로 승격해 진짜 장애가 알림 속에 묻힌다.
+    반대로 _clip_cut의 진짜 실패는 계속 exception으로 올라와야 한다."""
+    import inspect
+    from app.generators import video
+
+    src = inspect.getsource(video.NaverVideoGenerator._naver_video) \
+        if hasattr(video, "NaverVideoGenerator") and hasattr(video.NaverVideoGenerator, "_naver_video") \
+        else inspect.getsource(video)
+    assert 'raise RuntimeError("clip_not_requested")' not in src, \
+        "정상 스킵(클립 미요청)을 예외로 던짐 — Sentry 오탐 회귀"
+    assert 'raise RuntimeError("plan_no_clip")' not in src, \
+        "정상 스킵(플랜 미포함)을 예외로 던짐 — Sentry 오탐 회귀"
+    # 진짜 실패 경로는 살아있어야 한다(침묵 금지)
+    assert "클립 파생 실패(본편은 유지)" in src, "클립 컷 실패 로그가 사라짐(침묵 위험)"

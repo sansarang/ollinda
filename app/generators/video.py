@@ -2262,18 +2262,23 @@ class ShortVideoGenerator(Generator):
         #   실측 배경: 지역+업종 통합검색 첫 화면에 블로그 지면이 0인 판이 많고, 클립 블록은 열려 있다.
         #   블로그 첨부용(20~45초 정보형)과 클립용(15~25초 훅형)은 성격이 다르다 → 같은 소스에서
         #   앞부분만 잘라 파생(재생성·LLM·AI 0, ffmpeg 재인코딩만 = 원가 증가 0).
-        try:
-            if "clip" not in getattr(asset, "_want_platforms", {"clip"}):
-                raise RuntimeError("clip_not_requested")  # ★ 사용자가 클립을 요청했을 때만 만든다
-            if not self._clip_allowed(tenant):
-                raise RuntimeError("plan_no_clip")       # 아래 except가 조용히 흡수(본편 유지)
-            clip_path, clip_dur = self._clip_cut(final, out_dir, kw_nat)
-            if clip_path:
-                meta["clip"] = {"path": clip_path, "duration_sec": clip_dur,
-                                "filename": (os.path.splitext(fname)[0] + "_클립.mp4"),
-                                "title": vtitle, "desc": desc, "hashtags": hashtags}
-        except Exception:
-            _nlog.exception("[naver-video] 클립 파생 실패(본편은 유지)")
+        # ★ '안 만드는 게 정상'인 조건은 예외가 아니라 분기다(2026-08-12 Sentry 오탐 사고).
+        #   예전엔 raise로 빠져 exception 로그 → Sentry가 장애로 승격 → 진짜 장애가 묻혔다.
+        if "clip" not in getattr(asset, "_want_platforms", {"clip"}):
+            _nlog.info("[naver-video] 클립 미요청 — 파생 생략(정상)")
+        elif not self._clip_allowed(tenant):
+            _nlog.info("[naver-video] 플랜에 클립 미포함 — 파생 생략(정상)")
+        else:
+            try:                                    # 여기서 나는 예외만 '진짜 실패'
+                clip_path, clip_dur = self._clip_cut(final, out_dir, kw_nat)
+                if clip_path:
+                    meta["clip"] = {"path": clip_path, "duration_sec": clip_dur,
+                                    "filename": (os.path.splitext(fname)[0] + "_클립.mp4"),
+                                    "title": vtitle, "desc": desc, "hashtags": hashtags}
+                else:
+                    _nlog.warning("[naver-video] 클립 컷 결과 없음(본편은 유지)")
+            except Exception:
+                _nlog.exception("[naver-video] 클립 파생 실패(본편은 유지)")
         return final, meta
 
     def _clip_allowed(self, tenant) -> bool:
