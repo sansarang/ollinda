@@ -3921,8 +3921,9 @@ async def api_rank_check(request: Request):
         name = (form.get("name") or "").strip()           # 셀러 모드에선 '스토어명'
         mode = (form.get("mode") or "").strip()           # ''(매장) | 'seller'
         brand = (form.get("brand") or "").strip()
+        addr = (form.get("addr") or "").strip()           # 후보 목록에서 고른 내 가게 주소(동명 구분)
     except Exception:
-        industry = region = name = mode = brand = ""
+        industry = region = name = mode = brand = addr = ""
     if mode == "seller":
         if not industry:
             return JSONResponse({"error": "상품 키워드를 입력해주세요."}, status_code=400)
@@ -3930,7 +3931,7 @@ async def api_rank_check(request: Request):
         return JSONResponse({"error": "업종 또는 상호를 입력해주세요."}, status_code=400)
 
     # ── 앞단 게이트 ① 동일 상호+지역 TTL 캐시 → 네이버 콜 자체를 절감(레이트리밋과 별개) ──
-    ckey = f"{mode}|{industry}|{region}|{name}|{brand}".lower()
+    ckey = f"{mode}|{industry}|{region}|{name}|{brand}|{addr}".lower()
     cached = ratelimit.cache_get(ckey, RANK_CACHE_TTL)
     if cached is not None:
         return JSONResponse(cached)                      # 캐시 히트 = 네이버 콜 0 → 한도 미차감
@@ -3947,7 +3948,7 @@ async def api_rank_check(request: Request):
     if mode == "seller":
         result = diagnose.diagnose_product_rank(industry, name, brand)   # 쇼핑검색 40위 스캔
     else:
-        result = diagnose.diagnose_rank(industry, region, name)
+        result = diagnose.diagnose_rank(industry, region, name, addr=addr)
     # 진단→생성 연결(상위노출 PHASE 1): 미노출 키워드(검색량 큰 순) 상위 3개 = 타겟 콘텐츠 제안
     from app import config as _cfg
     from urllib.parse import quote as _q
@@ -3961,6 +3962,29 @@ async def api_rank_check(request: Request):
     if u and u.get("tenant_id"):
         diagnose.save_baseline(u["tenant_id"], result)   # before/after 기준점
     return JSONResponse(result)
+
+
+@app.post("/api/store-candidates")
+async def api_store_candidates(request: Request):
+    """상호로 '내 가게 후보'를 주소와 함께 반환(2026-08-12 사장님 지시).
+    동명 가게가 여럿일 때 사용자가 주소를 보고 자기 가게를 고르게 한다 — 남의 가게 순위를
+    내 순위로 보고하는 허위 양성을 막는 장치."""
+    from app.services import place
+    try:
+        form = await request.form()
+        name = (form.get("name") or "").strip()
+        region = (form.get("region") or "").strip()
+    except Exception:
+        return JSONResponse({"error": "잘못된 요청"}, status_code=400)
+    if len(name) < 2:
+        return JSONResponse({"candidates": []})
+    if not place.configured():
+        return JSONResponse({"candidates": []})     # 키 없으면 조용히 빈 목록(진단은 계속 동작)
+    try:
+        cands = place.find_candidates(name, region, limit=5)
+    except Exception:
+        cands = []
+    return JSONResponse({"candidates": cands})
 
 
 @app.api_route("/admin/drip/run", methods=["GET", "POST"])

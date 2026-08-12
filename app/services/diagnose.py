@@ -54,7 +54,7 @@ def _volumes(keywords: list[str]) -> dict:
         return {}
 
 
-def diagnose_rank(industry: str, region: str, name: str) -> dict:
+def diagnose_rank(industry: str, region: str, name: str, addr: str = "") -> dict:
     """다중 키워드 스캔 결과. 반환:
     {keyword, rank, estimated, headline, subline, cta,
      scan:[{keyword,rank,volume,status}], caught:[...], missing:[...], missed_volume}
@@ -77,7 +77,7 @@ def diagnose_rank(industry: str, region: str, name: str) -> dict:
     vol = _volumes(keywords)
     scan, any_measured = [], False
     for kw in keywords:
-        rank = place.rank(kw, name)            # 1~5 / 0(5위밖) / None(조회불가)
+        rank = place.rank(kw, name, addr=addr)  # addr 있으면 동명 가게 구분(2026-08-12)
         v = vol.get(kw.replace(" ", ""), None)
         if rank is None:
             status = "unknown"

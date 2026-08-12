@@ -193,15 +193,45 @@ def shop_top(keyword: str, limit: int = 3) -> list[dict]:
     return out
 
 
-def rank(keyword: str, store_name: str, limit: int = 5) -> int | None:
+def find_candidates(store_name: str, region: str = "", limit: int = 5) -> list[dict]:
+    """상호로 '내 가게 후보'를 주소와 함께 찾는다(2026-08-12 사장님 지시).
+
+    동명 가게가 여럿이면 순위 판정이 남의 가게를 볼 수 있다 — 사용자가 주소를 보고
+    자기 가게를 직접 고르게 한다(헌법: 자사 식별자 매칭만, 허위 양성 금지).
+    반환: [{name, address, category, tel, id}] — id는 이후 정확 매칭용 고유 키.
+    """
+    q = " ".join(x for x in [(region or "").strip(), (store_name or "").strip()] if x)
+    if not q.strip():
+        return []
+    items = search(q, max(limit, 5)) or []
+    # 상호가 실제로 걸리는 것만(지역+업종 검색 결과가 섞여 오는 것 방지)
+    hits = [it for it in items if _name_match(store_name, it.get("name", ""))]
+    if not hits:                                  # 상호 단독 재시도(지역명이 방해했을 수 있음)
+        hits = [it for it in (search(store_name, max(limit, 5)) or [])
+                if _name_match(store_name, it.get("name", ""))]
+    out = []
+    for it in hits[:limit]:
+        out.append({"name": it.get("name", ""), "address": it.get("address", ""),
+                    "category": it.get("category", ""), "tel": it.get("tel", ""),
+                    "id": _norm_name(it.get("name", "")) + "|" + _norm_name(it.get("address", ""))[:24]})
+    return out
+
+
+def rank(keyword: str, store_name: str, limit: int = 5, addr: str = "") -> int | None:
     """참고용 순위 — 네이버 지역검색 상위 limit 안에서 내 가게 위치(1~limit).
-    상위 밖이면 0, 조회 불가(무키/실패)면 None."""
+    상위 밖이면 0, 조회 불가(무키/실패)면 None.
+    addr: 사용자가 후보 목록에서 고른 주소 — 주면 동명 가게와 확실히 구분한다(2026-08-12)."""
     items = search(keyword, limit)
     if not items:
         return None
+    a_want = _norm_name(addr)[:24] if addr else ""
     for i, it in enumerate(items, 1):
-        if _name_match(store_name, it.get("name", "")):
-            return i
+        if not _name_match(store_name, it.get("name", "")):
+            continue
+        if a_want:                                  # 주소가 주어지면 주소까지 일치해야 내 가게
+            if _norm_name(it.get("address", ""))[:24] != a_want:
+                continue
+        return i
     return 0
 
 

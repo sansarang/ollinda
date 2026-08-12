@@ -535,6 +535,7 @@ def _hero() -> str:
       <input id="rc_ind" placeholder="업종" class="w-full sm:flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400">
       <input id="rc_name" placeholder="상호" class="w-full sm:flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400"></div>
     <button onclick="rankCheck()" class="w-full mt-2.5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition">현재 순위 확인</button>
+    <div id="rc_pick" class="hidden mt-3"></div>
     <div id="rc_out" class="text-slate-600 text-sm mt-3"></div>
    </div>
    {_hero_demo_card()}
@@ -558,9 +559,38 @@ def _hero() -> str:
    i.placeholder=seller?'상품 키워드(블루투스 이어폰)':'업종';
    n.placeholder=seller?'스토어/브랜드명':'상호';
    sub.textContent=seller?'상품 키워드·스토어명만 — 네이버 쇼핑 현재 순위를 바로 확인':'지역·업종·상호만 — 네이버 현재 순위를 바로 확인';}}
-  async function rankCheck(){{var o=document.getElementById('rc_out');o.textContent='조회 중…';
+  // ★ 동명 가게 구분(2026-08-12): 상호로 후보를 먼저 찾아 주소를 보여주고 사용자가 고른다.
+  //   남의 가게 순위를 내 순위로 보고하는 허위 양성을 막는 장치.
+  async function rankCheck(){{
+   var pick=document.getElementById('rc_pick');
+   if(window.__rcMode!=='seller' && !window.__rcAddr && !window.__rcPicked){{
+     var nm=document.getElementById('rc_name').value.trim();
+     if(nm.length>=2){{
+       var o0=document.getElementById('rc_out');o0.textContent='가게 찾는 중…';
+       try{{
+         var cf=new FormData();cf.append('name',nm);cf.append('region',document.getElementById('rc_region').value);
+         var cr=await (await fetch('/api/store-candidates',{{method:'POST',body:cf}})).json();
+         var cs=(cr.candidates||[]);
+         if(cs.length>1){{                                   // 후보 2곳 이상 = 사용자가 골라야 한다
+           o0.textContent='';
+           var h='<div class="text-xs text-slate-500 mb-1.5">같은 이름의 가게가 여러 곳이에요. <b class="text-slate-700">내 가게를 골라주세요</b></div>';
+           cs.forEach(function(c,i){{
+             h+='<button type="button" onclick="rcPick('+i+')" class="block w-full text-left bg-white border border-slate-200 hover:border-indigo-400 rounded-xl px-3 py-2 mt-1.5 transition">'
+               +'<div class="text-sm font-bold text-slate-800">'+c.name+'</div>'
+               +'<div class="text-xs text-slate-400">'+(c.address||'')+(c.category?(' · '+c.category):'')+'</div></button>';
+           }});
+           h+='<button type="button" onclick="rcPick(-1)" class="block w-full text-center text-xs text-slate-400 mt-2 underline">내 가게가 없어요 — 그냥 진단하기</button>';
+           pick.innerHTML=h;pick.classList.remove('hidden');window.__rcCands=cs;return;
+         }}
+         if(cs.length===1)window.__rcAddr=cs[0].address||'';   // 후보 1곳이면 그걸로 확정
+       }}catch(e){{}}
+     }}
+   }}
+   pick.classList.add('hidden');
+   var o=document.getElementById('rc_out');o.textContent='조회 중…';
    var fd=new FormData();fd.append('region',document.getElementById('rc_region').value);
    fd.append('industry',document.getElementById('rc_ind').value);fd.append('name',document.getElementById('rc_name').value);
+   if(window.__rcAddr)fd.append('addr',window.__rcAddr);
    if(window.__rcMode==='seller')fd.append('mode','seller');
    try{{var r=await fetch('/api/rank-check',{{method:'POST',body:fd}});var d=await r.json();
    if(d.error){{o.textContent=d.error;return;}}
@@ -581,6 +611,19 @@ def _hero() -> str:
      +'<a href="/login/kakao" class="inline-block text-indigo-600 underline font-bold mt-3">'+d.cta+' →</a>'
      +(d.estimated?' <span class="text-slate-400 text-xs">(추정)</span>':'');
    }}catch(e){{o.textContent='조회 실패 — 잠시 후 다시';}}}}
+  function rcPick(i){{
+   var cs=window.__rcCands||[];
+   if(i>=0&&cs[i]){{window.__rcAddr=cs[i].address||'';document.getElementById('rc_name').value=cs[i].name;}}
+   else{{window.__rcAddr='';}}                        // '내 가게가 없어요' — 이름만으로 진단
+   window.__rcPicked=true;                            // 다시 물어보지 않음
+   document.getElementById('rc_pick').classList.add('hidden');
+   rankCheck();
+  }}
+  // 상호를 바꾸면 이전 선택을 버린다(다른 가게를 이전 주소로 판정하는 사고 방지)
+  document.addEventListener('input',function(e){{
+   if(e.target&&e.target.id==='rc_name'){{window.__rcAddr='';window.__rcPicked=false;
+     var p=document.getElementById('rc_pick');if(p)p.classList.add('hidden');}}
+  }});
   async function sendReport(){{var em=document.getElementById('rc_email').value.trim();
    var m=document.getElementById('rc_leadmsg');if(!em||em.indexOf('@')<0){{m.style.color='#e11';m.textContent='이메일을 확인해주세요';return;}}
    m.style.color='#059669';m.textContent='보내는 중…';
