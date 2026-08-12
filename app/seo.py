@@ -729,7 +729,55 @@ def resolve_target_keyword(industry: str, region: str, note: str, biz: str = "lo
                 kws = list(dict.fromkeys([kw0] + [k for k in kws if k != kw0]))[:10]
         except Exception:
             pass
+    # 🧱 지면 게이트(2026-08-13 사장님 승인) — 통합검색 첫 화면에 '블로그 지면'이 아예 없는
+    #   판에는 글을 쏘지 않는다. 실측: 올린다가 쓴 '부산 기장 중고차' 글은 블로그탭 6위를
+    #   찍었지만 그 키워드의 첫 화면에는 블로그 블록 자체가 없어 손님 눈에는 0이었다
+    #   (블로그탭 순위는 착시 — 헌법 3장). _surface_first는 '뒤로 미루기'만 해서 후보가
+    #   그것뿐이면 그대로 선택됐다. 결정이 끝나는 자리에서 한 번 더 본다(빈자리 승격과 같은 이유).
+    #   ★ 판정 근거가 '최근 실측'일 때만 뺀다. 미측정(None)은 빼지 않는다 — 모른다고 버리면
+    #     지도가 얇은 신규 가게가 아무 글도 못 쓴다.
+    try:
+        kw0, kws = _drop_dead_surfaces(kw0, kws, tenant_id)
+    except Exception:
+        _lgk.getLogger("shopcast.seo").exception("[resolve-kw] 지면 게이트 실패 — 원래 키워드 유지")
     return kw0, kws
+
+
+def _surface_verdict(tenant_id: str, kw: str) -> "bool | None":
+    """이 키워드 첫 화면에 블로그 지면이 있는가 — 최근 실측만 신뢰. 모르면 None."""
+    if not (tenant_id and kw):
+        return None
+    try:
+        from datetime import datetime as _dt, timedelta as _td
+        from app.services import blogreach as _brc
+        from app.services.gapscout import MAP_TTL_DAYS as _ttl
+        b = _brc.blocks_for(tenant_id, kw) or {}
+        surf = b.get("blog_surface")
+        if surf is None:
+            return None
+        ts = (b.get("checked_at") or "")[:19]
+        if not ts:
+            return None
+        if _dt.fromisoformat(ts) < (_dt.utcnow() - _td(days=_ttl)):
+            return None                     # 낡은 판정은 근거로 쓰지 않는다
+        return bool(surf)
+    except Exception:
+        return None
+
+
+def _drop_dead_surfaces(kw0: str, kws: list, tenant_id: str) -> tuple:
+    """지면 없음이 실측된 키워드를 대표 자리에서 뺀다. 살아 있는 후보로 교체하되,
+    전부 죽었으면 바꾸지 않고 사유만 남긴다(임의 키워드를 지어내지 않는다)."""
+    if _surface_verdict(tenant_id, kw0) is not False:
+        return kw0, kws
+    alive = [k for k in kws if k != kw0 and _surface_verdict(tenant_id, k) is not False]
+    import logging as _lgd
+    _dlog = _lgd.getLogger("shopcast.seo")
+    if not alive:
+        _dlog.warning("[resolve-kw] 지면 없음(%r) — 대체할 살아 있는 판이 없어 그대로 진행", kw0)
+        return kw0, kws
+    _dlog.warning("[resolve-kw] 지면 없음 → 교체: %r → %r", kw0, alive[0])
+    return alive[0], list(dict.fromkeys([alive[0]] + [k for k in kws if k != alive[0]]))[:10]
 
 
 def keyword_plan(industry_name: str, region: str, note: str = "", axis: str = "local", brand: str = "") -> dict:

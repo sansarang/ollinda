@@ -138,3 +138,57 @@ def test_blocks_bootstraps_shopcast_path_without_env():
     r = subprocess.run([_s.executable, "-c", code], capture_output=True, text=True,
                        cwd=os.sep, env=env)
     assert r.returncode == 0 and "ok" in r.stdout, (r.stdout, r.stderr[-500:])
+
+
+# ── ⑥ 지면 게이트 — 자리 없는 판에는 글을 쏘지 않는다 ─────────────
+def _mk_surface(monkeypatch, verdicts: dict, fresh: bool = True):
+    """kw → blog_surface 실측을 흉내낸다(checked_at 신선도 포함)."""
+    from datetime import datetime, timedelta
+    from app import seo
+    from app.services import blogreach as brc
+    ts = (datetime.utcnow() - timedelta(days=0 if fresh else 999)).isoformat()
+
+    def _fake(tid, kw):
+        if kw not in verdicts:
+            return {}
+        return {"blog_surface": verdicts[kw], "checked_at": ts}
+
+    monkeypatch.setattr(brc, "blocks_for", _fake)
+    return seo
+
+
+def test_dead_surface_keyword_is_swapped_out(monkeypatch):
+    """실측 사고: 올린다가 쓴 '부산 기장 중고차' 글은 블로그탭 6위였지만 그 키워드
+    첫 화면에 블로그 블록이 없어 손님 눈에는 0이었다(블로그탭 순위는 착시)."""
+    seo = _mk_surface(monkeypatch, {"부산 기장 중고차": False, "부산 기장 중고차판매": True})
+    kw0, kws = seo._drop_dead_surfaces("부산 기장 중고차",
+                                       ["부산 기장 중고차", "부산 기장 중고차판매"], "T1")
+    assert kw0 == "부산 기장 중고차판매", (kw0, kws)
+    assert kws[0] == "부산 기장 중고차판매"
+
+
+def test_live_surface_keyword_is_kept(monkeypatch):
+    seo = _mk_surface(monkeypatch, {"부산 동구 썬팅": True})
+    kw0, _ = seo._drop_dead_surfaces("부산 동구 썬팅", ["부산 동구 썬팅"], "T1")
+    assert kw0 == "부산 동구 썬팅"
+
+
+def test_unmeasured_keyword_is_never_dropped(monkeypatch):
+    """미측정(지도에 없음)은 '지면 없음'이 아니다 — 모른다고 버리면 신규 가게가 글을 못 쓴다."""
+    seo = _mk_surface(monkeypatch, {})
+    kw0, _ = seo._drop_dead_surfaces("새 키워드", ["새 키워드", "다른 키워드"], "T1")
+    assert kw0 == "새 키워드"
+
+
+def test_stale_measurement_is_not_used_as_evidence(monkeypatch):
+    """낡은 판정으로 키워드를 버리지 않는다 — 노트북이 꺼져 있던 기간이 근거가 되면 안 된다."""
+    seo = _mk_surface(monkeypatch, {"부산 기장 중고차": False}, fresh=False)
+    kw0, _ = seo._drop_dead_surfaces("부산 기장 중고차", ["부산 기장 중고차", "대체"], "T1")
+    assert kw0 == "부산 기장 중고차"
+
+
+def test_all_dead_keeps_original_and_does_not_invent(monkeypatch):
+    """전부 지면이 없으면 임의 키워드를 지어내지 않는다 — 사유만 남기고 그대로 간다."""
+    seo = _mk_surface(monkeypatch, {"A": False, "B": False})
+    kw0, kws = seo._drop_dead_surfaces("A", ["A", "B"], "T1")
+    assert kw0 == "A" and kws == ["A", "B"]

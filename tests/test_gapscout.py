@@ -425,9 +425,17 @@ def test_small_but_real_demand_survives_gate():
 
 
 def test_big_keyword_not_permanently_banned():
-    """과교정 금지 — 대형 키워드도 완전 배제는 아니다(보조 목표로는 살아있어야 한다)."""
+    """과교정 금지 — 단, 기준이 '크기'에서 '승산'으로 바뀌었다(2026-08-13 사장님 승인).
+
+    이전 계약: 대형 키워드도 0점으로 영구 배제하지 말 것(보조 목표로 남긴다).
+    바뀐 이유: 8월 순위 이력 실측에서 문서 50만+ 판은 단 한 번도 못 잡았다. '보조 목표'가
+      아니라 그냥 못 이기는 판이었고, 목록에 남아 있는 동안 계속 1위를 차지해 글감을 먹었다.
+    지금 계약: 검색량이 커도 문서가 적으면(=이길 수 있으면) 절대 자르지 않는다.
+      즉 과교정 방지는 유지하되, 잣대가 검색량 크기가 아니라 경쟁 밀도다.
+    """
     from app.services.gapscout import _score
-    assert _score(9310, True, 800_000, 0) > 0, "대형 키워드가 0점으로 영구 배제됨(과교정)"
+    assert _score(9310, True, 20_000, 0) > 0, "검색량이 크다는 이유로 배제됨(과교정)"
+    assert _score(9310, True, 120_000, 0) > 0, "문서 12만은 아직 승산 창 안이다"
 
 
 def test_no_surface_still_zero():
@@ -452,3 +460,42 @@ def test_nationwide_keyword_loses_to_local_longtail():
     nationwide = _score(96_900, True, 396_849, 13)
     local_long = _score(80, True, 5_000, 0)
     assert local_long > nationwide, f"전국구가 우선({local_long} vs {nationwide}) — 노출 안 되는 글"
+
+
+# ── 승산 창(2026-08-13 사장님 승인) ──────────────────────────────
+def test_unwinnable_cuts_mega_document_keyword():
+    """문서 86만 건 '썬팅 가격'은 검색량이 커도 후보가 아니다.
+    실측: 8월 순위 이력 전체에서 이런 대형 판은 단 한 번도 못 잡았다."""
+    from app.services import gapscout as g
+    assert g.unwinnable(4330, 856_971)
+    assert g._score(4330, True, 856_971, 30) == 0.0
+
+
+def test_unwinnable_cuts_national_platform_keyword():
+    """'중고차매매사이트'(검색 9.7만 · 문서 39만) = 전국 플랫폼의 판.
+    문서 50만 미만이라 상한만으로는 안 잘린다 — 검색량과 함께 봐야 한다."""
+    from app.services import gapscout as g
+    assert g.unwinnable(96_900, 396_848)
+    assert g._score(96_900, True, 396_848, 30) == 0.0
+
+
+def test_local_demand_keyword_survives_the_window():
+    """동네 실수요는 살아남는다 — 자르는 것이 목적이 아니라 '이길 판'을 남기는 것이다."""
+    from app.services import gapscout as g
+    assert g.unwinnable(520, 81_061) is None          # 모닝 썬팅
+    assert g.unwinnable(80, 5_000) is None            # 부산 기장 중고차
+    assert g._score(520, True, 81_061, 30) > 0
+
+
+def test_midsize_keyword_not_cut_by_volume_alone():
+    """검색량이 커도 문서가 적으면 자르지 않는다(경쟁이 실제 기준)."""
+    from app.services import gapscout as g
+    assert g.unwinnable(9_000, 20_000) is None
+
+
+def test_unknown_doc_count_is_never_cut():
+    """문서 수 조회 실패(-1)를 '못 이긴다'로 판정하면 조회 장애가 곧 글감 0이 된다.
+    모르면 자르지 않는다 — 정직 게이트."""
+    from app.services import gapscout as g
+    assert g.unwinnable(4330, -1) is None
+    assert g._score(4330, True, -1, 30) > 0

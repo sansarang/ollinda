@@ -41,6 +41,28 @@ STALE_BONUS = 0.5         # 그 신호의 가산점(고정) — weak_comp를 곱
 DOC_LOG_DIV = 4.0         # 경쟁 약도 나눗수 — 작을수록 문서 수 차이가 점수에 크게 드러난다
                           #   (6.0일 때 문서 3천 vs 50만이 0.63 vs 0.08로 사실상 무의미했다)
 
+# 🚧 승산 창(2026-08-13 사장님 승인) — 가중치 조율로는 대형 판이 계속 1위였다.
+#   가중치는 '덜 좋다'고 말할 뿐 '못 이긴다'고 말하지 못한다. 못 이기는 판은 잘라낸다.
+#   근거(실측 2026-08 순위 이력): 우리가 실제로 잡은 판은 전부 작은 동네 키워드였고
+#   (부산 동구 썬팅 1위·부산 기장 중고차 6위), 큰 판(썬팅 가격 문서 86만·부산 중고차 60만)은
+#   측정 기간 내내 단 한 번도 못 잡았다. 그 경계를 숫자로 못 박는다.
+#   ※ 1차 기준이다 — 2~4주 순위 실측으로 검증해 조정한다(임의값 아님을 여기 남긴다).
+MAX_DOC_COUNT = 500_000   # 문서 50만 건 이상 = 어떤 검색량이어도 신규 소상공인이 못 이긴다
+BIG_DOC = 300_000         # 전국 대형 판 = 문서 30만+ 이면서
+BIG_VOLUME = 5_000        #   검색량 5천+ (동네 수요가 아니라 전국 수요 — 대형 매체·플랫폼의 판)
+
+
+def unwinnable(volume: int, doc_count: int) -> "str | None":
+    """이 판은 못 이긴다 — 사유 문자열, 이길 만하면 None.
+    문서 수 미상(-1)은 자르지 않는다(모른다고 버리지 않는다 — 정직 게이트)."""
+    if not isinstance(doc_count, int) or doc_count <= 0:
+        return None
+    if doc_count >= MAX_DOC_COUNT:
+        return f"문서 {doc_count:,}건 — 신규 가게가 뚫을 수 없는 판"
+    if doc_count >= BIG_DOC and int(volume or 0) >= BIG_VOLUME:
+        return f"문서 {doc_count:,}건 · 검색 {volume:,}회 — 전국 대형 판"
+    return None
+
 # 점수 가중치 — 데이터 필드다(하드코딩 금지 원칙: 값을 코드 로직에 박지 않고 여기 모은다).
 #   운영 중 조정 가능하도록 한 곳에 두고, 계산식은 이 표만 참조한다.
 WEIGHTS = {
@@ -191,6 +213,8 @@ def _score(volume: int, has_surface: bool, doc_count: int, top_age: int) -> floa
     import math
     if not has_surface or volume < MIN_VOLUME:
         return 0.0
+    if unwinnable(volume, doc_count):        # 못 이기는 판은 후보가 아니다(가중치로 미루지 않는다)
+        return 0.0
     s = WEIGHTS["volume_log"] * math.log10(max(10, volume))
     s += WEIGHTS["surface"]
     weak = 0.0
@@ -257,9 +281,15 @@ def scan(tenant_id: str, limit: int = 40, with_competition: bool = True) -> dict
             except Exception:
                 _log.warning("[gapscout] 경쟁 조회 실패 kw=%s", kw)
         domain, why = classify(kw, dom, axes, excluded)
+        # 잘라낸 이유는 반드시 남긴다 — 점수 0만 보이면 '왜 빠졌는지'를 아무도 모른다.
+        _lost = unwinnable(vol, dc) if vol >= MIN_VOLUME else ""
+        if _lost:
+            why = f"승산 없음 — {_lost}"
+            _log.info("[gapscout] 승산 창 제외 kw=%s (%s)", kw, _lost)
         out.append({"keyword": kw, "has_surface": True, "mine": 0, "volume": vol,
                     "doc_count": dc, "top_age_days": age,
                     "score": _score(vol, True, dc, age),
+                    "unwinnable": _lost or "",
                     "domain": domain, "domain_why": why,
                     # 블록 이름은 내보내지 않는다 — 미검증 귀속을 근거처럼 보이게 하면 안 된다.
                     "surface_note": "첫 화면에 블로그 글이 실림",
