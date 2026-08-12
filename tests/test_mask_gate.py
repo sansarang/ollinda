@@ -84,3 +84,24 @@ def test_detect_document_pii_graceful_without_tesseract(monkeypatch):
     from app import vision as v
     monkeypatch.setattr("shutil.which", lambda x: None)
     assert v.detect_document_pii("/nonexistent.jpg") == []
+
+
+def test_second_pass_log_levels(monkeypatch, caplog):
+    """2차 PII 패스 로그 레벨 계약(2026-08-12 Sentry 오탐 사고 박제):
+    ① 성공 보정(n>0)은 warning — error로 찍으면 Sentry가 장애로 승격해 진짜 장애가 묻힌다.
+    ② 2차 마스킹 '실패'는 error — 개인정보가 안 가려졌을 수 있는 진짜 위험(침묵 금지)."""
+    import logging
+    import inspect
+    from app.services import ingest
+
+    src = inspect.getsource(ingest._spawn_photo_edit) if hasattr(ingest, "_spawn_photo_edit") else ""
+    if not src:                       # 함수명이 바뀌면 모듈 전체에서 확인
+        src = inspect.getsource(ingest)
+    # 성공 경로는 warning
+    assert "2차 패스에서 PII %d건 추가 마스킹" in src
+    i_ok = src.index("2차 패스에서 PII %d건 추가 마스킹")
+    assert ".warning(" in src[max(0, i_ok - 300):i_ok], "성공 보정이 error로 찍힘 — Sentry 오탐 회귀"
+    # 실패 경로는 error + 침묵(pass) 금지
+    assert "2차 PII 마스킹 실패" in src, "2차 마스킹 실패를 삼키고 있음(개인정보 미가림 침묵)"
+    i_fail = src.index("2차 PII 마스킹 실패")
+    assert ".error(" in src[max(0, i_fail - 300):i_fail], "마스킹 실패가 error로 안 올라감"

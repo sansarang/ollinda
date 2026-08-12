@@ -657,10 +657,15 @@ def _spawn_photo_edit(tenant: Tenant, asset_id: str, paths: list, pre_set: set, 
                 try:
                     _n2 = photo_boost.mask_personal_info(p)
                     if _n2 > 0:
-                        logging.getLogger("shopcast.ingest").error(
-                            "[photo-edit] ⚠️ 2차 패스에서 PII %d건 추가 마스킹(1차 미탐): %s", _n2, p)
-                except Exception:
-                    pass
+                        # ⚠️ 레벨은 warning — 이건 '장애'가 아니라 2차 안전망이 제대로 잡은 성공 기록이다.
+                        #   error로 찍으면 Sentry가 이슈로 승격해 진짜 장애가 묻힌다(2026-08-12 오탐 사고).
+                        #   1차 미탐이 잦아지면(빈도 급증) 그때 탐지 워커를 점검한다.
+                        logging.getLogger("shopcast.ingest").warning(
+                            "[photo-edit] 2차 패스에서 PII %d건 추가 마스킹(1차 미탐 보정 완료): %s", _n2, p)
+                except Exception as _e2:
+                    # 2차 마스킹 자체가 실패하면 그건 진짜 문제 — 개인정보가 안 가려졌을 수 있다.
+                    logging.getLogger("shopcast.ingest").error(
+                        "[photo-edit] ⚠️ 2차 PII 마스킹 실패(미가림 위험) %s: %s", p, repr(_e2)[:120])
             for p in paths:                     # 보정본으로 R2 재미러(업로드 시 원본 미러를 덮음)
                 try:
                     storage.mirror_to_r2(p)
