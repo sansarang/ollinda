@@ -398,3 +398,39 @@ def test_feed_reports_what_is_missing():
     import inspect
     src = inspect.getsource(gs.feed)
     assert "materials" in src and "need" in src, "필요 재료를 알려주지 않는다"
+
+
+def test_winnable_beats_big_keyword():
+    """빈자리 점수 계약 — 2026-08-12 사장님 지적 박제.
+
+    사고: '빈자리 정찰'이 실제로는 '검색량 순위표'로 동작해, 소상공인이 절대 못 이기는
+    대형 키워드('썬팅 가격' 월4,330회/문서 50만건)를 1순위로 골랐다. 그만큼 노출이 안 된다.
+    계약: 검색량이 작아도 '이길 수 있는 판'(문서 적음)이 대형 키워드보다 앞선다.
+    """
+    from app.services.gapscout import _score
+    winnable = _score(35, True, 400, 0)        # 부산 동구 신차썬팅 — 월35회, 문서 400건
+    big = _score(4330, True, 500_000, 0)       # 썬팅 가격 — 월4,330회, 문서 50만건
+    assert winnable > big, f"대형 키워드가 여전히 우선({winnable} vs {big}) — 노출 안 되는 글 양산"
+
+    huge = _score(9310, True, 800_000, 0)      # 부산 중고차 — 전국구
+    local = _score(80, True, 5_000, 0)         # 부산 기장 중고차 — 동네 실수요
+    assert local > huge, f"동네 실수요가 전국구에 밀림({local} vs {huge})"
+
+
+def test_small_but_real_demand_survives_gate():
+    """소상공인 실수요(월 30~80회)가 관문에서 잘리지 않는다 — MIN_VOLUME 100은 알짜를 버렸다."""
+    from app.services.gapscout import _score, MIN_VOLUME
+    assert MIN_VOLUME <= 30, "동네 실수요 하한이 다시 올라감(월 80회 '부산 기장 중고차'가 잘린다)"
+    assert _score(80, True, 5_000, 0) > 0, "월 80회 실수요가 0점 처리됨"
+
+
+def test_big_keyword_not_permanently_banned():
+    """과교정 금지 — 대형 키워드도 완전 배제는 아니다(보조 목표로는 살아있어야 한다)."""
+    from app.services.gapscout import _score
+    assert _score(9310, True, 800_000, 0) > 0, "대형 키워드가 0점으로 영구 배제됨(과교정)"
+
+
+def test_no_surface_still_zero():
+    """지면(블로그 자리)이 없으면 여전히 0 — 이 원칙은 절대 흔들리면 안 된다."""
+    from app.services.gapscout import _score
+    assert _score(50_000, False, 100, 0) == 0.0, "지면 없는 판이 점수를 받음"
