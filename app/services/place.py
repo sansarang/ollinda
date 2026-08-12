@@ -200,15 +200,25 @@ def find_candidates(store_name: str, region: str = "", limit: int = 5) -> list[d
     자기 가게를 직접 고르게 한다(헌법: 자사 식별자 매칭만, 허위 양성 금지).
     반환: [{name, address, category, tel, id}] — id는 이후 정확 매칭용 고유 키.
     """
-    q = " ".join(x for x in [(region or "").strip(), (store_name or "").strip()] if x)
-    if not q.strip():
+    nm = (store_name or "").strip()
+    if not nm:
         return []
-    items = search(q, max(limit, 5)) or []
-    # 상호가 실제로 걸리는 것만(지역+업종 검색 결과가 섞여 오는 것 방지)
-    hits = [it for it in items if _name_match(store_name, it.get("name", ""))]
-    if not hits:                                  # 상호 단독 재시도(지역명이 방해했을 수 있음)
-        hits = [it for it in (search(store_name, max(limit, 5)) or [])
-                if _name_match(store_name, it.get("name", ""))]
+    # ★ 지역+상호와 상호 단독을 '둘 다' 조회해 합친다(2026-08-12 실측):
+    #   '서울 지벤트'는 1곳만 주는데 실제 서울에 여러 지점이 있다 — 한쪽만 믿으면
+    #   후보가 1곳으로 보여 선택 화면을 건너뛰고 남의 지점 순위를 보고하게 된다.
+    queries = [nm]
+    if (region or "").strip():
+        queries.insert(0, f"{region.strip()} {nm}")
+    hits, seen = [], set()
+    for q in queries:
+        for it in (search(q, max(limit, 5)) or []):
+            if not _name_match(nm, it.get("name", "")):
+                continue
+            key = _norm_name(it.get("name", "")) + "|" + _norm_name(it.get("address", ""))[:24]
+            if key in seen:
+                continue
+            seen.add(key)
+            hits.append(it)
     out = []
     for it in hits[:limit]:
         out.append({"name": it.get("name", ""), "address": it.get("address", ""),
