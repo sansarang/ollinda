@@ -113,3 +113,28 @@ def test_autoqueue_delegates_to_canonical_combiner(monkeypatch):
     out = aq._seller_longtail_candidates(_t(industry="중고차", biz_type="seller"))
     assert called.get("attrs") == ["쏘렌토", "SUV"], called
     assert out and all("{" not in k for k in out), out
+
+
+# ── ⑤ 야간 정찰이 경로 때문에 전멸하지 않는다 ─────────────────────
+def test_blocks_bootstraps_shopcast_path_without_env():
+    """2026-08-13 사고: cron에 PYTHONPATH가 없어 blocks.scan이 ModuleNotFoundError로
+    죽었고, 전 가게가 매일 조용히 건너뛰어져 지면 지도가 굶었다.
+    경로는 환경변수가 아니라 모듈이 스스로 찾는다."""
+    import os
+    import subprocess
+    import sys as _s
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    blocks_py = os.path.join(root, "app", "services", "scout", "blocks.py")
+    # shopcast를 sys.path에 넣어주지 않고, 파일 경로로만 blocks를 적재한다(cron과 같은 조건).
+    code = (
+        "import importlib.util, sys\n"
+        f"spec = importlib.util.spec_from_file_location('b', {blocks_py!r})\n"
+        "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\n"
+        "from app.services.scout import session\n"      # ← 부트스트랩이 없으면 여기서 죽는다
+        "print('ok')\n"
+    )
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+           "HOME": os.path.expanduser("~"), "SHOPCAST_HOME": root}
+    r = subprocess.run([_s.executable, "-c", code], capture_output=True, text=True,
+                       cwd=os.sep, env=env)
+    assert r.returncode == 0 and "ok" in r.stdout, (r.stdout, r.stderr[-500:])

@@ -17,6 +17,15 @@ import os
 import sys
 import time
 
+# ★ 2026-08-13 사고: 야간 지면 정찰이 매일 전 가게를 건너뛰고 있었다(지도가 굶었다).
+#   원인 — scan()이 app.services.scout.session을 하드 임포트하는데 cron 환경에는
+#   PYTHONPATH가 없어 ModuleNotFoundError('app')로 죽었다. nightly는 이를 '가게별 실패'로만
+#   찍어 전멸을 조용히 넘겼다. 경로를 환경변수에 기대지 않고 스스로 찾는다
+#   (서버는 이미 app이 import 가능하므로 무해 — 조건이 걸려 아무것도 안 한다).
+for _p in (os.environ.get("SHOPCAST_HOME"), os.path.expanduser("~/shopcast")):
+    if _p and os.path.isdir(os.path.join(_p, "app")) and _p not in sys.path:
+        sys.path.insert(0, _p)
+
 # ★ 서버 이관(2026-08-05): 맥북 홈 경로는 서버에 없다. 볼륨을 쓰되 없으면 상대경로.
 #   경로 규칙은 immune.data_root() 하나를 쓴다 — 새 규칙을 만들면 그게 경로 이원화다.
 try:
