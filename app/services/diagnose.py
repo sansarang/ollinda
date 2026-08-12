@@ -115,15 +115,15 @@ def diagnose_rank(industry: str, region: str, name: str, addr: str = "") -> dict
         more = f" 외 {len(caught) - 1}개 키워드 상위 노출 중" if len(caught) > 1 else " 상위 노출 중!"
         headline = f"🎯 {lead}{more}"
     else:
-        headline = "아직 상위 노출된 키워드가 없어요 — 기회가 큽니다"
+        headline = "아직 상위 5위 안에 든 키워드가 없어요 — 기회가 큽니다"
 
     # 놓치는 키워드(검색량 큰 순)로 손실 프레이밍
     miss_sorted = sorted(missing, key=lambda s: -(s["volume"] or 0))
     if miss_sorted:
         top_miss = miss_sorted[0]
-        sub = f"'{top_miss['keyword']}'{_mv(top_miss['volume'])}는 아직 놓치고 있어요."
+        sub = f"'{top_miss['keyword']}'{_mv(top_miss['volume'])}는 아직 상위 5위 밖이에요."
         if missed_volume:
-            sub += f" 미노출 키워드 합계 월 {missed_volume:,}회 검색을 놓치는 중."
+            sub += f" 5위 밖 키워드 합계 월 {missed_volume:,}회 검색을 놓치는 중."
     else:
         sub = "잡은 키워드를 더 넓혀 상위노출을 늘릴 수 있어요."
 
@@ -134,6 +134,8 @@ def diagnose_rank(industry: str, region: str, name: str, addr: str = "") -> dict
         "keyword": primary, "rank": top_rank, "estimated": False,
         "scan": scan, "caught": caught, "missing": missing, "missed_volume": missed_volume,
         "headline": headline, "subline": sub, "cta": cta,
+        # 5위까지만 스캔한다 — '미노출'이라 하면 아예 없는 것처럼 오해된다(2026-08-12 사장님 지적).
+        "miss_label": "상위 5위 밖",
     }
 
 

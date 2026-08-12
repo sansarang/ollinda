@@ -69,3 +69,15 @@ def test_block_name_not_exposed_until_verified(monkeypatch):
         assert shown[0].get("blocks_guess"), "블록 추정 기록이 사라짐(복원 불가)"
     finally:
         _clean(tid)
+
+
+def test_miss_label_says_out_of_top5_not_missing(monkeypatch):
+    """'미노출'은 아예 없는 것처럼 오해된다 — 실제로는 5위까지만 스캔한 결과다(2026-08-12 지적).
+    정직 원칙: 측정 범위를 그대로 말한다."""
+    from app.services import diagnose
+    import app.services.place as pl
+    monkeypatch.setattr(pl, "search", lambda kw, limit=5: [{"name": "남의가게", "address": "서울"}])
+    r = diagnose.diagnose_rank("썬팅", "부산 동구", "내가게")
+    assert r.get("miss_label") == "상위 5위 밖", "측정 범위를 숨긴 라벨(미노출) 회귀"
+    assert "미노출" not in r["subline"], "본문이 여전히 '미노출'로 단정"
+    assert "5위" in r["subline"] or "5위" in r["headline"], "범위 표기 사라짐"
