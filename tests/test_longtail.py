@@ -192,3 +192,56 @@ def test_all_dead_keeps_original_and_does_not_invent(monkeypatch):
     seo = _mk_surface(monkeypatch, {"A": False, "B": False})
     kw0, kws = seo._drop_dead_surfaces("A", ["A", "B"], "T1")
     assert kw0 == "A" and kws == ["A", "B"]
+
+
+# ── ⑦ 지면 판정 단일 규칙 (2026-08-13 거짓 양성 사고) ──────────────
+def test_blog_surface_single_rule_rejects_image_only_hit():
+    """사고: '부산 기장 중고차'는 우리 글이 '이미지' 블록에만 걸렸는데,
+    저장부가 `or bool(mine)`로 판정해 지도에서는 '블로그 지면 있음'이 됐다.
+    감시기는 같은 순간 blog_surface=false였다 — 같은 이름에 규칙이 둘이었다."""
+    from app.services.blogreach import blog_surface_of as bs
+    assert bs("", 1, []) is False, "이미지 블록에만 걸린 것을 블로그 지면으로 인정"
+
+
+def test_blog_surface_true_when_blog_blocks_exist():
+    from app.services.blogreach import blog_surface_of as bs
+    assert bs("인기글", 0, []) is True
+    assert bs(["인기글"], 1, []) is True
+
+
+def test_blog_surface_true_when_ours_seen_in_blog_block():
+    """인기글 링크가 리다이렉트라 귀속이 0으로 잡히는 경우(2026-08-01) — 지면은 실재한다."""
+    from app.services.blogreach import blog_surface_of as bs
+    assert bs("", 1, ["인기글"]) is True
+
+
+def test_blog_surface_unknown_for_legacy_rows():
+    """my_real_blocks를 잰 적 없는 구 데이터는 '없다'로 단정하지 않는다."""
+    from app.services.blogreach import blog_surface_of as bs
+    assert bs("", 1, None) is None
+
+
+def test_blog_surface_false_when_nothing_found():
+    from app.services.blogreach import blog_surface_of as bs
+    assert bs("", 0, None) is False
+
+
+def test_gate_drops_image_only_keyword_end_to_end(monkeypatch):
+    """단일 규칙 + 지면 게이트가 함께 물리는지 — 실제 사고 재현."""
+    from datetime import datetime
+    from app import seo
+    from app.services import blogreach as brc
+    rows = {"부산 기장 중고차": {"blog_blocks": "", "mine": 1, "mine_blocks": ""},
+            "부산 기장 중고차판매": {"blog_blocks": "인기글", "mine": 0, "mine_blocks": ""}}
+
+    def _fake(tid, kw):
+        r = rows.get(kw)
+        if not r:
+            return {}
+        return {"blog_surface": brc.blog_surface_of(r["blog_blocks"], r["mine"], r["mine_blocks"]),
+                "checked_at": datetime.utcnow().isoformat()}
+
+    monkeypatch.setattr(brc, "blocks_for", _fake)
+    kw0, _ = seo._drop_dead_surfaces("부산 기장 중고차",
+                                     ["부산 기장 중고차", "부산 기장 중고차판매"], "T1")
+    assert kw0 == "부산 기장 중고차판매", kw0

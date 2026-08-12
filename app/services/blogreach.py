@@ -372,7 +372,7 @@ def blocks_ingest(tenant_id: str, rows: list) -> dict:
             #      NULL로 덮인다. UPSERT로 바꿔 '이번에 잰 것만' 갱신하고 나머지는 보존한다.
             for col, ddl in (("suspect", "INTEGER DEFAULT 0"), ("fp_suspect", "INTEGER DEFAULT 0"),
                              ("mine_legacy", "INTEGER"), ("evidence", "TEXT"),
-                             ("collect_note", "TEXT")):
+                             ("collect_note", "TEXT"), ("mine_blocks", "TEXT")):
                 try:
                     c.execute(f"ALTER TABLE kw_blocks ADD COLUMN {col} {ddl}")
                 except Exception:
@@ -389,14 +389,18 @@ def blocks_ingest(tenant_id: str, rows: list) -> dict:
                     continue
                 c.execute(
                     "INSERT INTO kw_blocks(tenant_id, keyword, blocks, blog_blocks, mine, "
-                    "checked_at, evidence, collect_note) VALUES(?,?,?,?,?,?,?,?) "
+                    "checked_at, evidence, collect_note, mine_blocks) VALUES(?,?,?,?,?,?,?,?,?) "
                     "ON CONFLICT(tenant_id, keyword) DO UPDATE SET "
                     "blocks=excluded.blocks, blog_blocks=excluded.blog_blocks, mine=excluded.mine, "
-                    "checked_at=excluded.checked_at, evidence=excluded.evidence, collect_note=NULL",
+                    "checked_at=excluded.checked_at, evidence=excluded.evidence, collect_note=NULL, "
+                    "mine_blocks=excluded.mine_blocks",
                     (tenant_id, kw, "|".join(r.get("blocks") or [])[:400],
                      "|".join(r.get("blog_blocks") or [])[:200],
                      1 if r.get("my_visible") else 0, _d.utcnow().isoformat(),
-                     _js.dumps(r.get("visible_evidence") or {}, ensure_ascii=False)[:600], None))
+                     _js.dumps(r.get("visible_evidence") or {}, ensure_ascii=False)[:600], None,
+                     # ★ 우리 글이 '어떤 블록'에서 보였는지 — 이게 없으면 '이미지 블록에만 걸린 것'과
+                     #   '블로그 블록인데 귀속이 빗나간 것'을 영영 구분할 수 없다(지면 게이트의 근거).
+                     "|".join(r.get("my_real_blocks") or [])[:200]))
                 saved += 1
     except Exception as e:
         _log.exception("[blogreach] 블록 저장 실패")
@@ -536,6 +540,42 @@ def scout_plan(tenant_id: str, limit: int = 30, ttl_days: int = 7) -> list:
     return todo[:max(1, limit)]
 
 
+def blog_surface_of(blog_blocks, mine, mine_blocks=None) -> "bool | None":
+    """이 키워드 첫 화면에 '블로그 지면'이 있는가 — True/False/모름(None). 전 소비자 단일 규칙.
+
+    2026-08-13 사고: 같은 이름에 규칙이 둘이었다.
+      감시기(trackpub)  : bool(blog_blocks)
+      저장·참조(blocks_for): bool(blog_blocks) or bool(mine)   ← mine을 섞음
+    그 결과 '부산 기장 중고차'가 지도에서는 지면 True로 보였다. 실제로는 우리 글이
+    '이미지' 블록에만 걸린 것이고 블로그 지면은 없었다(감시기 실측 blog_surface=false).
+    지면 게이트가 이 거짓 양성 때문에 통째로 무력화됐다.
+
+    규칙:
+      · 블로그 블록이 잡혔다 → 있다
+      · 우리 글이 '블로그 성격 블록'에서 보였다 → 있다
+        (2026-08-01 실측: 인기글 링크가 리다이렉트라 귀속이 0으로 잡히는 경우가 있다.
+         그때도 지면은 실재하므로 my_real_blocks로 건진다)
+      · 우리 글은 보였는데 블로그 블록엔 안 잡혔다
+          - my_real_blocks를 잰 기록이 있으면 → 없다(확정)
+          - 잰 적이 없으면(구 데이터) → 모름. 모르는 것을 '없다'로 단정하지 않는다
+      · 그 외 → 없다
+    """
+    bb = [x for x in (blog_blocks or ([] if blog_blocks is None else [])) if x] \
+        if isinstance(blog_blocks, (list, tuple)) \
+        else [x for x in (blog_blocks or "").split("|") if x]
+    if isinstance(mine_blocks, (list, tuple)):
+        mb, measured = [x for x in mine_blocks if x], True
+    elif mine_blocks is None:
+        mb, measured = [], False
+    else:
+        mb, measured = [x for x in mine_blocks.split("|") if x], True
+    if bb or mb:
+        return True
+    if mine:
+        return False if measured else None
+    return False
+
+
 def blocks_for(tenant_id: str, keyword: str) -> dict:
     """저장된 블록 판정 조회 — 생성 작전이 '이 판에 블로그 지면이 있는가'를 참조."""
     try:
@@ -550,9 +590,10 @@ def blocks_for(tenant_id: str, keyword: str) -> dict:
         d = dict(r)
         d["blocks"] = [x for x in (d.get("blocks") or "").split("|") if x]
         d["blog_blocks"] = [x for x in (d.get("blog_blocks") or "").split("|") if x]
-        # 이 판에 블로그 지면이 있는가 — 블록 귀속이 빗나가도 '내 블로그가 실제로 보였다'면
-        # 지면은 있는 것이다(2026-08-01 실측: 인기글 링크가 리다이렉트라 귀속이 0으로 잡혔다).
-        d["blog_surface"] = bool(d["blog_blocks"]) or bool(d.get("mine"))
+        d["mine_blocks"] = ([x for x in (r["mine_blocks"] or "").split("|") if x]
+                            if ("mine_blocks" in d and d["mine_blocks"] is not None) else None)
+        # 판정은 단일 규칙 하나만 거친다(규칙이 두 곳에 살면 그 자체가 결함)
+        d["blog_surface"] = blog_surface_of(d["blog_blocks"], d.get("mine"), d["mine_blocks"])
         return d
     except Exception:
         return {}
