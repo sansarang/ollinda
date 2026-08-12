@@ -434,3 +434,21 @@ def test_no_surface_still_zero():
     """지면(블로그 자리)이 없으면 여전히 0 — 이 원칙은 절대 흔들리면 안 된다."""
     from app.services.gapscout import _score
     assert _score(50_000, False, 100, 0) == 0.0, "지면 없는 판이 점수를 받음"
+
+
+def test_stale_bonus_cannot_carry_a_huge_keyword():
+    """'상위 글 낡음'은 보조 신호다 — 이 보너스만으로 문서 60만 건 판이 1위가 되면 안 된다.
+    실사고(2026-08-12): weak_comp(4.0)가 낡음에도 곱해져 +2.0이 되어 '부산 중고차'(문서 60만,
+    상위글 3464일)가 롱테일을 제치고 1위를 유지했다."""
+    from app.services.gapscout import _score
+    huge_stale = _score(9310, True, 607_597, 3464)     # 대형 + 낡음 보너스
+    winnable = _score(35, True, 400, 0)                # 롱테일, 보너스 없음
+    assert winnable > huge_stale, f"낡음 보너스가 대형 키워드를 띄움({winnable} vs {huge_stale})"
+
+
+def test_nationwide_keyword_loses_to_local_longtail():
+    """전국구 대형 키워드(월 9.7만·문서 40만)가 동네 롱테일을 이기면 안 된다 — 못 이길 판이다."""
+    from app.services.gapscout import _score
+    nationwide = _score(96_900, True, 396_849, 13)
+    local_long = _score(80, True, 5_000, 0)
+    assert local_long > nationwide, f"전국구가 우선({local_long} vs {nationwide}) — 노출 안 되는 글"
