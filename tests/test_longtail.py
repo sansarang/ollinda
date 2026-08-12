@@ -245,3 +245,49 @@ def test_gate_drops_image_only_keyword_end_to_end(monkeypatch):
     kw0, _ = seo._drop_dead_surfaces("부산 기장 중고차",
                                      ["부산 기장 중고차", "부산 기장 중고차판매"], "T1")
     assert kw0 == "부산 기장 중고차판매", kw0
+
+
+# ── ⑧ 업종 중립 (2026-08-13 사장님 지적) ─────────────────────────
+# 사고: 치환 이름을 {속성}·{차종}으로만 알아들어, 스키마가 자기 업종 말({향}·{디자인})을
+#   쓰면 속성값이 통째로 사라졌다. 소재 롱테일이 사실상 차량계 업종 전용이었다.
+#   헌법 '새 기능은 최소 2개 업종으로 검증' — 여기선 5개 업종을 박제한다.
+import pytest
+
+
+@pytest.mark.parametrize("industry,attr,grammars,expect", [
+    ("썬팅",   "EV5",    ["{차종} {업종}"],            "EV5 썬팅"),
+    ("중고차", "쏘렌토",  ["{차종} 중고차"],            "쏘렌토 중고차"),
+    ("카페",   "드립",    ["{속성} {업종}"],            "드립 카페"),
+    ("캔들",   "라벤더",  ["{향} {업종}"],              "라벤더 캔들"),      # LLM 스키마 자기 말
+    ("네일",   "젤아트",  ["{디자인} {업종}"],          "젤아트 네일"),      # LLM 스키마 자기 말
+    ("사진관", "우정사진", ["{촬영종류} {업종}"],        "우정사진 사진관"),  # 처음 보는 이름
+])
+def test_material_longtail_works_in_every_industry(industry, attr, grammars, expect):
+    out = lt.combos(_t(industry=industry), [attr], grammars=grammars, extra_tail=False)
+    assert expect in out, (industry, out)
+
+
+def test_structural_slots_are_not_treated_as_attributes():
+    """지역·업종·의도·연식은 구조 자리다 — 속성값으로 덮어쓰면 '부산' 자리에 소재가 들어간다."""
+    out = lt.combos(_t(industry="중고차"), ["쏘렌토"], years=["2020"],
+                    grammars=["{지역} {차종} {업종}", "{연식} {차종} 중고"], extra_tail=False)
+    assert "부산 쏘렌토 중고차" in out, out
+    assert "2020 쏘렌토 중고" in out, out
+
+
+def test_repeated_word_keyword_is_cleaned():
+    """'젤네일 네일'은 아무도 안 친다 — 속성값이 업종어를 품는 업종에서 생긴다."""
+    out = lt.combos(_t(industry="네일"), ["젤네일"], grammars=["{디자인} {업종}"], extra_tail=False)
+    assert out == ["젤네일"], out
+    assert lt._dedupe_adjacent("신차썬팅 썬팅") == "신차썬팅"
+    assert lt._dedupe_adjacent("부산 동구 썬팅") == "부산 동구 썬팅"   # 정상 키워드는 그대로
+
+
+def test_empty_gaps_do_not_halt_generation():
+    """승산 창이 그 업종 후보를 전부 잘라도 글 생성은 멈추지 않는다.
+    빈자리는 '우선순위 재정렬' 재료이지 생성의 전제가 아니다 — 문서가 많은 업종이
+    통째로 굶는 일이 없어야 한다(승산 창 도입 시 가장 큰 위험)."""
+    from app import seo
+    c = ["부산 동구 썬팅", "모닝 썬팅"]
+    assert seo._gap_first(list(c), "없는-tenant", "") == c
+    assert seo._surface_first(list(c), "없는-tenant") == c

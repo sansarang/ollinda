@@ -46,6 +46,23 @@ def grammars_for(t) -> list[str]:
         return list(_FALLBACK_GRAMMAR)
 
 
+def _dedupe_adjacent(kw: str) -> str:
+    """겹말 정리 — '젤네일 네일'처럼 한 낱말이 옆 낱말에 이미 들어 있으면 짧은 쪽을 뺀다.
+
+    속성값이 업종어를 품는 업종에서 생긴다(네일의 '젤네일', 썬팅의 '신차썬팅').
+    사람은 이렇게 검색하지 않는다. 언어 규칙만 쓴다 — 업종어 목록 0.
+    """
+    toks = kw.split()
+    outt: list[str] = []
+    for w in toks:
+        if outt and (outt[-1] in w or w in outt[-1]):
+            if len(w) > len(outt[-1]):
+                outt[-1] = w              # 더 구체적인 쪽을 남긴다
+            continue
+        outt.append(w)
+    return " ".join(outt)
+
+
 def combos(t, attrs: list, *, years: list | None = None, grammars: list | None = None,
            extra_tail: bool = True) -> list[str]:
     """문법 × 증명된 속성값 → 검색어 후보(긴 것 먼저, 중복 제거).
@@ -59,21 +76,33 @@ def combos(t, attrs: list, *, years: list | None = None, grammars: list | None =
     yrs = [y for y in (years or []) if y]
     out: list[str] = []
 
-    def _emit(g: str, subs: dict):
-        kw = g
-        for ph, val in subs.items():
-            kw = kw.replace("{" + ph + "}", str(val or ""))
-        kw = " ".join(re.sub(r"\{[^}]*\}", "", kw).split())   # 미치환 플레이스홀더 제거
+    def _emit(g: str, subs: dict, attr: str = ""):
+        """플레이스홀더를 채운다.
+
+        ★ 2026-08-13 사장님 지적으로 발견: 예전엔 치환 이름을 {속성}·{차종}으로만 알아들었다.
+          그래서 스키마가 {향}(캔들)·{디자인}(네일)처럼 자기 업종 말을 쓰면 속성값이 통째로
+          사라지고 '부산 캔들' 같은 제네릭만 남았다 — 소재 롱테일이 차량계 업종에만 생겼다.
+          구조 자리(지역·업종·의도·연식)를 뺀 **나머지 이름은 전부 속성 자리로 본다.**
+          스키마가 어떤 말을 쓰든 동작한다(업종 중립).
+        """
+        def _sub(m):
+            name = m.group(1)
+            if name in subs:
+                return str(subs[name] or "")
+            return str(attr or "")           # 모르는 이름 = 그 업종의 속성 자리
+        kw = " ".join(re.sub(r"\{([^}]*)\}", _sub, g).split())
+        kw = _dedupe_adjacent(kw)
         if kw and len(kw) >= 3:
             out.append(kw)
 
+    _struct = {"지역": wide, "업종": ind0, "의도": "추천", "연식": (yrs[0] if yrs else "")}
     for a in attrs or []:
         for g in gs:
-            _emit(g, {"속성": a, "차종": a, "지역": wide, "업종": ind0,
-                      "의도": "추천", "연식": (yrs[0] if yrs else "")})
+            _emit(g, _struct, attr=a)
     if extra_tail:                       # 광역+업종 폴백은 항상 포함(기존 동작 보존)
-        _emit("{지역} {업종} 추천", {"지역": wide, "업종": ind0})
-        _emit("{업종} 추천", {"업종": ind0})
+        # 속성값 없이 부르는 자리라 '모르는 이름'이 빈칸이 되도록 attr을 주지 않는다
+        _emit("{지역} {업종} 추천", _struct)
+        _emit("{업종} 추천", _struct)
 
     seen, uniq = set(), []
     for kw in out:
