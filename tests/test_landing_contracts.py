@@ -208,3 +208,62 @@ def test_cancel_policy_present():
     h = _html()
     assert "언제든 해지" in h, "요금 섹션 해지 안내 누락"
     assert any("해지는 어떻게" in q for q, _ in landing._QA), "FAQ 해지 항목 누락"
+
+
+# ── 랜딩 정직·구성 계약 (2026-08-13 사장님 지시 1~4순위) ─────────────
+def _visible_text():
+    """사용자 눈에 실제로 보이는 텍스트만(스크립트·태그 제외)."""
+    import html as _h
+    h = landing.render()
+    h = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", h, flags=re.S | re.I)
+    return _h.unescape(re.sub(r"<[^>]+>", " ", h))
+
+
+def test_no_fabricated_social_proof():
+    """유료 고객 0명인데 '가장 인기'는 날조된 사회적 증거다(헌법: 날조 금지).
+    실제로 팔린 뒤 데이터로 붙일 배지 — 그 전엔 구성만 사실대로 말한다."""
+    t = _visible_text()
+    assert "가장 인기" not in t, "요금제에 근거 없는 '가장 인기' 배지가 다시 붙었다"
+
+
+def test_no_fabricated_customer_count():
+    """0→37로 세는 '이 콘텐츠 보고 온 손님'은 우리에게 없는 실적이다.
+    작게 (예시)를 달아도 화면에 남는 인상은 '37명이 왔다'는 실적이다."""
+    h = landing.render()
+    assert "data-count='37'" not in h and 'data-count="37"' not in h, \
+        "가짜 유입 숫자 애니메이션이 되살아났다"
+    assert "이 콘텐츠 보고 온 손님" not in _visible_text()
+
+
+def test_proof_is_above_the_fold():
+    """사장님이 가장 먼저 묻는 것은 '진짜 되나?'다. 실측 1위 사례가 첫 화면에 있어야 한다.
+    (실측 2026-08-13: 증거가 79번째 문단에 있었고 방문 40명 중 클릭 0명)"""
+    hero = landing._hero()
+    assert "1위" in hero, "히어로에 실측 결과가 없다 — 증거가 다시 아래로 내려갔다"
+    assert "실측" in hero, "실측 표기가 없다(허위 양성 방지 문구 포함)"
+
+
+def test_primary_cta_is_no_signup_trial():
+    """첫 행동은 '가입'이 아니라 '체험'이다 — 가입 없이 되는 미리보기가 있는데
+    버튼이 묻혀 한 달 넘게 아무도 안 썼다(마지막 사용 2026-07-11)."""
+    hero = landing._hero()
+    assert "가입 없이" in hero, "무료 체험 진입이 히어로에서 사라졌다"
+    i_trial = hero.find("가입 없이")
+    i_login = hero.find("/login/kakao")
+    assert 0 <= i_trial < i_login, "가입 버튼이 체험 버튼보다 위에 있다(마찰 큰 행동이 먼저)"
+
+
+def test_no_kitchen_jargon_on_landing():
+    """헌법: 사장님 화면에 주방 용어 금지. PAS·롱테일·실검색량은 만드는 사람 말이다.
+    C-Rank·D.I.A.+는 '네이버를 안다'는 신호라 소량 허용하되 늘어나면 실패시킨다."""
+    t = _visible_text()
+    for word in ("PAS", "롱테일", "실검색량"):
+        assert word not in t, f"주방 용어 '{word}'가 사장님 화면에 노출됐다"
+    assert t.count("C-Rank") <= 2, "C-Rank 노출이 늘었다 — 전문용어는 최소로"
+
+
+def test_long_feature_lists_are_collapsed():
+    """랜딩이 18섹션·272문단이라 폰에서 20번 넘게 스크롤해야 끝났다.
+    기능 나열은 결정에 필요한 정보가 아니다 — 지우지 말고 접어서 궁금한 사람만 펴 보게."""
+    h = landing.render()
+    assert h.count("<details") >= 2, "긴 나열 섹션이 다시 펼쳐진 채로 돌아왔다"

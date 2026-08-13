@@ -511,14 +511,38 @@ def _hero() -> str:
    소상공인 · 온라인 셀러 전용 · AI 마케팅 자동화</div>
   <h1 class="reveal text-4xl sm:text-6xl font-bold tracking-tight leading-[1.12] text-slate-900">
    네이버에서 우리 가게,<br><span class="text-indigo-600">검색 상위에 뜨게</span></h1>
-  <p class="reveal mt-7 text-lg text-slate-500 max-w-2xl mx-auto">사진만 올리면 AI가 <b class="text-slate-800">네이버 블로그·플레이스 상위노출에 유리한 글</b>을 씁니다.
-   <b class="text-slate-800">인스타·유튜브·릴스·X</b>까지 덤으로 만들어 <b class="text-slate-800">매장 방문·구매</b>로 연결해요.</p>
-  <p class="reveal mt-4 text-sm text-slate-400 max-w-xl mx-auto">C-Rank·D.I.A.+ 신호 반영 · 없는 가격·스펙 안 지어내는 정직한 글 · 실검색량 키워드</p>
-  <p class="reveal mt-1.5 text-sm text-slate-400 max-w-xl mx-auto">네이버만? <b class="text-slate-600">ChatGPT·AI 검색에도 내 가게가</b> — 인용되기 유리한 구조로 씁니다</p>
-  <div class="reveal mt-10 flex flex-col sm:flex-row gap-3 justify-center items-center">
-   <a href="/login/kakao" class="flex items-center justify-center px-10 py-4 rounded-2xl font-extrabold text-lg w-full sm:w-auto" style="background:#FEE500;color:#191600">카카오로 무료 시작</a>{_naver_hero_btn()}
-   <a href="/login/google" class="flex items-center justify-center gap-2 px-10 py-4 rounded-2xl font-extrabold text-lg bg-white border border-slate-200 text-slate-700 w-full sm:w-auto">{_GOOGLE_G} 구글로 시작</a></div>
-  <p class="reveal mt-5 text-base text-slate-500">이미 회원이면 <a href="/login" class="inline-block px-1 py-1 text-indigo-600 font-bold underline underline-offset-4">회원 로그인</a></p>
+  <p class="reveal mt-7 text-lg text-slate-500 max-w-2xl mx-auto">사진만 올리면 AI가 <b class="text-slate-800">네이버에 뜨는 글</b>을 씁니다.
+   <b class="text-slate-800">인스타·유튜브·릴스</b>까지 한 번에 만들어 <b class="text-slate-800">매장 방문·구매</b>로 연결해요.</p>
+
+  <!-- ★ 2026-08-13 사장님 지시: 증거를 첫 화면으로.
+       예전엔 여기가 C-Rank·D.I.A.+·PAS 같은 만드는 사람 말이었고, 실측 1위 사례는
+       스크롤 한참 아래(79번째 문단)에 있었다. 방문 40명 중 버튼을 누른 사람이 0명이었다.
+       사장님이 가장 먼저 묻는 것은 "진짜 되나?"다 — 설명이 아니라 결과가 믿음을 만든다. -->
+  <div class="reveal mt-8 inline-flex flex-wrap items-center justify-center gap-x-3 gap-y-2
+              bg-white border-2 border-indigo-200 rounded-2xl px-5 py-4 text-left shadow-sm">
+   <div class="text-sm text-slate-500">‘부산 동구 썬팅업체’ 검색</div>
+   <div class="flex items-center gap-2 text-sm font-bold text-slate-700">
+    <span class="text-slate-400">7/31 발행</span>
+    <span class="text-slate-300">→</span><span>8/2 12위</span>
+    <span class="text-slate-300">→</span>
+    <span class="text-indigo-600 text-xl font-extrabold">8/9 1위</span></div>
+   <div class="w-full text-xs text-slate-400">실제 이용 가게 · 2026년 8월 실측 · 개별 결과는 가게·키워드에 따라 달라요</div>
+  </div>
+
+  <!-- ★ 첫 행동을 '가입'에서 '체험'으로. 가입 없이 되는 미리보기가 있는데
+       버튼이 아래에 묻혀 한 달 넘게 아무도 안 썼다(마지막 사용 7/11).
+       처음 온 사장님에게 계정 연동은 큰 요구다 — 결과를 먼저 보여주고 가입은 그다음에. -->
+  <div class="reveal mt-9 flex flex-col items-center gap-3">
+   <button type="button" onclick="document.getElementById('herodemo').scrollIntoView({{behavior:'smooth',block:'center'}});var d=document.getElementById('d_ind');if(d)setTimeout(function(){{d.focus();}},400);"
+    class="w-full sm:w-auto px-10 py-4 rounded-2xl font-extrabold text-lg bg-indigo-600 hover:bg-indigo-700 text-white transition shadow-lg shadow-indigo-200">
+    가입 없이 3초 만에 결과 보기</button>
+   <p class="text-sm text-slate-400">업종만 고르면 진짜로 만들어 보여드려요 · 카드·전화번호 필요 없음</p>
+   <div class="flex flex-col sm:flex-row gap-2 items-center mt-2">
+    <span class="text-sm text-slate-400">이미 마음 정하셨다면</span>
+    <a href="/login/kakao" class="flex items-center justify-center px-6 py-2.5 rounded-xl font-bold text-sm" style="background:#FEE500;color:#191600">카카오로 무료 시작</a>{_naver_hero_btn()}
+    <a href="/login/google" class="flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl font-bold text-sm bg-white border border-slate-200 text-slate-700">{_GOOGLE_G} 구글로 시작</a></div>
+  </div>
+  <p class="reveal mt-4 text-sm text-slate-500">이미 회원이면 <a href="/login" class="inline-block px-1 py-1 text-indigo-600 font-bold underline underline-offset-4">회원 로그인</a></p>
   <!-- 두 미끼를 한눈에: 순위진단(왼쪽) + 무료 만들기(오른쪽) — 모바일은 세로 스택 -->
   <!-- grid-cols-1 명시(모바일 반응형): lg 미만에서 암시적 auto 트랙이 max-content(576px)로 커져
        카드가 뷰포트를 넘고 overflow-hidden에 잘리던 버그 — minmax(0,1fr) 트랙으로 강제 -->
@@ -783,8 +807,11 @@ def _results() -> str:
     c3 = ("<div class='reveal card p-6'>"
           "<div class='text-xs font-bold text-slate-400 mb-3'>성과 실측 · 내 손님 추적</div>"
           "<div class='flex items-center gap-4'><div class='rounded-lg border border-slate-200 p-1'>" + qr + "</div>"
-          "<div><div class='text-5xl font-bold text-indigo-600'><span data-count='37'>0</span><span class='text-xl'>회</span></div>"
-          "<div class='text-slate-500 text-sm'>이 콘텐츠 보고 온 손님 <span class='text-slate-400'>(예시)</span></div></div></div>"
+          # ★ 2026-08-13 정직 게이트: 예전엔 0→37로 세는 '손님 수'였다. 작게 (예시)를 달았어도
+          #   화면에 남는 인상은 '37명이 왔다'는 실적이다 — 우리에겐 그런 실적이 아직 없다.
+          #   숫자를 지어내지 말고, 무엇이 잡히는지(구조)만 사실대로 보여준다.
+          "<div><div class='text-2xl font-bold text-slate-900 leading-snug'>이 QR로 들어온 손님이<br>몇 명인지 잡힙니다</div>"
+          "<div class='text-slate-500 text-sm mt-1'>발행한 글·영상마다 자동 생성</div></div></div>"
           "<p class='text-slate-500 text-sm mt-3'>QR·링크로 <b class='text-slate-800'>실제 유입이 숫자로</b> 잡혀요.</p></div>")
     c4 = ("<div class='reveal card p-6 flex flex-col'>"
           "<div class='text-xs font-bold text-slate-400 mb-3'>사진 자동 보정 · 실제 전/후</div>"
@@ -846,7 +873,7 @@ def _features() -> str:
     """핵심 4개는 크게, 나머지 8개는 한 줄 리스트로 압축(12카드 밋밋함 해소)."""
     core = [("camera", "사진 한 장 → 5채널", "인스타·네이버·유튜브·릴스·X를 한 번에."),
             ("video", "사진 → 실사 무빙 영상", "정지 사진이 촬영 영상처럼 움직입니다(AI 카메라워크). 사람 목소리급 나레이션 + 단어 카라오케 자막까지 자동."),
-            ("target", "검색 상위노출 + 점수", "C-Rank·D.I.A·릴스 알고리즘 반영, 100점 점검."),
+            ("target", "검색에 잘 뜨는 구조로", "네이버·릴스가 좋아하는 형태(C-Rank·D.I.A.+)로 쓰고, 내보내기 전 100점 자동 점검."),
             ("chart", "순위 성장 추적", "네이버 순위가 오르는 걸 매주 ‘5위→2위’로 확인.")]
     rest = [("image", "인스타 캐러셀 자동", "사진 1장 → 정보 슬라이드(저장·도달↑)"),
             ("grid", "쇼츠·릴스·피드 규격", "9:16·1:1·4:5 자동 출력"),
@@ -868,7 +895,15 @@ def _features() -> str:
             f"<h2 class='reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900'>올린다가 <span class='text-indigo-600'>다 합니다</span></h2>"
             f"<p class='reveal text-center text-slate-500 mb-14'>생성부터 최적화·발행·관리까지.</p>"
             f"<div class='grid sm:grid-cols-2 lg:grid-cols-4 gap-5'>{big}</div>"
-            f"<div class='grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-5'>{small}</div></div></section>")
+            # ★ 2026-08-13 사장님 지시(4순위): 랜딩이 18섹션·272문단이라 폰에서 20번 넘게
+            #   스크롤해야 끝났다. 기능 나열은 '결정에 필요한 정보'가 아니라 '이미 마음먹은
+            #   사람이 확인하는 정보'다 — 지우지 말고 접어서, 궁금한 사람만 펴 보게 한다.
+            f"<details class='reveal mt-6 group'>"
+            f"<summary class='cursor-pointer list-none text-center text-sm font-bold text-indigo-600 "
+            f"hover:underline py-3'>기능 8가지 더 보기 <span class='group-open:hidden'>▾</span>"
+            f"<span class='hidden group-open:inline'>▴</span></summary>"
+            f"<div class='grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-3'>{small}</div>"
+            f"</details></div></section>")
 
 
 def _new_features() -> str:
@@ -911,7 +946,10 @@ def _pricing() -> str:
     cards = ""
     for name, price, sub, feats, key, hot in plans:
         wrap = "relative border-2 border-indigo-500" if hot else "border border-slate-200"
-        tag = ("<div class='absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-xs font-bold px-3 py-1 rounded-full'>가장 인기</div>"
+        # ★ 2026-08-13 정직 게이트: 예전엔 '가장 인기' 배지였다. 유료 고객이 0명인데
+        #   인기라고 쓰는 것은 날조된 사회적 증거다(헌법: 날조로 게이트를 통과시키지 않는다).
+        #   실제로 팔린 뒤에 데이터로 붙일 배지다. 그 전까지는 '구성'만 사실대로 말한다.
+        tag = ("<div class='absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-xs font-bold px-3 py-1 rounded-full'>성과 추적 포함</div>"
                if hot else "")
         lis = "".join(f"<li class='flex gap-2 items-start'><span class='text-indigo-500 mt-0.5'>{_icon('check', 'w-4 h-4')}</span><span>{f}</span></li>" for f in feats)
         btn = "bg-indigo-600 hover:bg-indigo-700 text-white" if hot else "bg-slate-100 hover:bg-slate-200 text-slate-700"
@@ -1134,14 +1172,14 @@ def _naver_preview() -> str:
     <div class="text-xs text-slate-400 border-b border-slate-100 pb-2 mb-3">초량 루마썬팅 블로그 · 방금 전 · 조회 12</div>
     <p class="text-sm text-slate-700 leading-relaxed">{body}</p>
     <div class="mt-4">{tag_html}</div>
-    <div class="mt-3 text-xs text-slate-400">PAS 오프닝 · 손님 스토리 · 실검색량 키워드 · 정직(없는 가격·스펙 안 씀) 자동 적용</div>
+    <div class="mt-3 text-xs text-slate-400">손님 고민으로 시작 · 실제 검색되는 말 사용 · 없는 가격·스펙은 쓰지 않음 — 자동 적용</div>
    </div></div>"""
 
 
 def _why_rank() -> str:
     """왜 상위노출 되나 — 2026 알고리즘을 '알고' 만든다 + 채널별 최적화(#2·#5)."""
     chans = [
-        ("pen", "네이버 블로그", "C-Rank·D.I.A.+ 반영, PAS 오프닝으로 체류↑, FAQ·표·사진배치"),
+        ("pen", "네이버 블로그", "네이버가 좋아하는 글 구조(C-Rank·D.I.A.+) · 손님 고민으로 시작해 끝까지 읽게 · 자주 묻는 질문·표·사진 배치"),
         ("play", "유튜브 쇼츠", "검색 키워드 제목, 30~45초·완주율·루프로 재노출"),
         ("video", "인스타 릴스", "3초 훅 + '저장·공유' 유도(도달 최강 신호), 해시태그 3~5개"),
         ("message", "X (트위터)", "외부링크 대신 검색 유도(도달 페널티 회피) + 답글 유발"),
@@ -1153,15 +1191,21 @@ def _why_rank() -> str:
     return f"""
 <section class="bg-white py-24">
  <div class="max-w-6xl mx-auto px-5">
-  <div class="text-center mb-4"><span class="reveal inline-block px-3 py-1 rounded-full bg-[#EEF2FF] border border-indigo-100 text-xs font-bold text-indigo-600">2026 최신 알고리즘 반영</span></div>
-  <h2 class="reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900">왜 우리 콘텐츠는 <span class="text-indigo-600">상위에 뜰까요?</span></h2>
-  <p class="reveal text-center text-slate-500 mb-12 max-w-2xl mx-auto">그냥 글이 아닙니다. 채널마다 <b class="text-slate-800">노출 알고리즘이 다르다</b>는 걸 알고, 각각 다르게 최적화해서 만듭니다.</p>
-  <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">{cards}</div>
-  <div class="reveal card-hi p-6 text-center">
-   <div class="text-sm text-slate-500 mb-1">네이버 검색광고 <b class="text-slate-800">실검색량</b> 연동</div>
-   <div class="text-lg sm:text-xl font-bold text-slate-900">지어낸 키워드가 아니라, <span class="text-indigo-600 text-xl sm:text-2xl">‘셀프네일 월 4,540회’</span>처럼 진짜 뜨는 키워드로 씁니다</div>
-   <div class="text-xs text-slate-400 mt-2">검색량 <b class="text-indigo-600 text-sm font-bold">500~5,000</b> 롱테일(경쟁↓·전환↑)을 실측으로 골라 반영</div>
-  </div>
+  <h2 class="reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900">아무 말이나 <span class="text-indigo-600">쓰지 않습니다</span></h2>
+  <p class="reveal text-center text-slate-500 mb-8 max-w-2xl mx-auto">손님이 <b class="text-slate-800">실제로 검색하는 말</b>을 찾아서, 그 말에 답하는 글을 씁니다.
+   지어낸 말로 채우면 아무도 안 찾아옵니다.</p>
+  <!-- ★ 2026-08-13: 여기가 랜딩에서 가장 어려운 대목이었다. C-Rank·D.I.A.+·PAS·롱테일 같은
+       만드는 사람 말이 그대로 나와 있었다(헌법: 사장님 화면에 주방 용어 금지).
+       채널별 상세는 지우지 않고 접어둔다 — 알고 싶은 사람만 펴 보면 된다. -->
+  <details class="reveal">
+   <summary class="cursor-pointer list-none text-center text-sm font-bold text-indigo-600 hover:underline py-3">
+    채널마다 어떻게 다르게 만드나요? ▾</summary>
+   <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4 mb-6">{cards}</div>
+   <div class="card-hi p-5 text-center">
+    <div class="text-base font-bold text-slate-900">네이버 검색광고 데이터를 그대로 씁니다</div>
+    <div class="text-sm text-slate-500 mt-1">한 달에 몇 명이 그 말을 검색하는지 실제 숫자를 보고 고릅니다 — 지어낸 말로 쓰지 않습니다</div>
+   </div>
+  </details>
  </div></section>"""
 
 
@@ -1258,7 +1302,7 @@ def _copy_compare() -> str:
     <div class="text-xs font-bold text-slate-400 mb-3">흔한 AI 글</div>
     <p class="text-sm text-slate-500 leading-relaxed">{before}</p></div>
    <div class="reveal rounded-2xl p-6 bg-white border-2 border-indigo-500">
-    <div class="text-xs font-bold text-indigo-600 mb-3">올린다 (PAS·손님스토리·손실회피)</div>
+    <div class="text-xs font-bold text-indigo-600 mb-3">올린다 — 손님 고민으로 시작하는 글</div>
     <p class="text-sm text-slate-700 leading-relaxed">{after}</p></div>
   </div>
  </div></section>"""
