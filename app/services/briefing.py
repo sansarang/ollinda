@@ -312,7 +312,7 @@ def build_briefing(t, plan: str = "free") -> dict:
                                     "이벤트·새 소식을 알릴 타이밍이에요. " + best["partner_note"])
     except Exception:
         pass
-    best["date"] = __import__("datetime").datetime.utcnow().strftime("%Y-%m-%d")
+    best["date"] = db.kst_today()               # 브리핑 날짜 = 사장님 달력
     return best
 
 
@@ -336,9 +336,8 @@ def _send_kakao_stub(t, b: dict) -> None:
 def send_morning(now_kst_hour: int) -> dict:
     """현재 KST 시각과 tenant.briefing_hour가 일치하는 가게에 아침 브리핑 생성·발송.
     스케줄러가 매시 정각 호출(인스턴스 1개 전제 + daily_briefings sent 플래그로 1일 1회 보장)."""
-    import datetime
     import os
-    today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+    today = db.kst_today()          # ★ KST 08시/20시에 도는데 그때 UTC는 전날이다
     sent = 0
     for u in db.list_users():
         tid = u.get("tenant_id")
@@ -395,9 +394,8 @@ def _evening_text(t, st: dict) -> str:
 
 def send_evening() -> dict:
     """저녁 20시 — '오늘 콘텐츠를 만든' 가게에만 성과 피드백(안 만든 날은 조용히 — 스팸 방지)."""
-    import datetime
     import os
-    today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+    today = db.kst_today()          # ★ KST 08시/20시에 도는데 그때 UTC는 전날이다
     sent = 0
     for u in db.list_users():
         tid = u.get("tenant_id")
@@ -435,7 +433,7 @@ def send_evening() -> dict:
 
 def get_or_create_today(t, plan: str = "free") -> dict:
     """오늘 브리핑 조회(있으면 재사용 — 1일 1회) 없으면 생성·저장."""
-    today = __import__("datetime").datetime.utcnow().strftime("%Y-%m-%d")
+    today = db.kst_today()
     cached = db.get_briefing(t.id, today)
     if cached:
         return cached

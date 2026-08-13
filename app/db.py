@@ -2585,6 +2585,20 @@ def get_pieces_for_assets(asset_ids: list) -> dict:
     return out
 
 
+def kst_today() -> str:
+    """사장님 달력 기준 '오늘'(YYYY-MM-DD). 날짜로 묶는 집계는 전부 이걸 쓴다.
+
+    2026-08-13 사장님 지적: "오늘 8월 13일이다".
+    서버는 UTC로 돌아 date.today()가 한국 날짜와 9시간 어긋난다. 그래서 '오늘 방문자'가
+    실제로는 [한국시간 오늘 09:00 ~ 내일 09:00] 구간이었고, 한국 새벽 0~9시 방문은
+    어제 칸에 들어갔다. 숫자는 서버 실값인데 '오늘'의 뜻이 사장님 달력과 달랐다 —
+    측정 원칙 위반(정밀해 보이는 어긋난 값보다 사장님 달력과 맞는 값이 낫다).
+    저장 타임스탬프는 UTC 그대로 둔다(저장 변경 금지) — 바뀌는 건 '날짜로 묶는 기준'뿐이다.
+    """
+    from datetime import datetime as _dt, timedelta as _td
+    return (_dt.utcnow() + _td(hours=9)).strftime("%Y-%m-%d")
+
+
 def fmt_kst(ts: str | None, date_only: bool = False) -> str:
     """표시 전용 KST 변환 — DB 저장은 UTC 유지(저장 변경 금지). ISO UTC 문자열 → 'YYYY-MM-DD HH:MM'(KST).
     파싱 실패 시 원문 앞부분 반환(화면이 깨지지 않게)."""

@@ -3134,8 +3134,9 @@ def root(request: Request):
         return RedirectResponse("/me", status_code=303)
     from app import landing
     # 실제 방문자 집계(2026-08-11) — 봇 제외, IP당 하루 1회만(순방문). 날조 없이 서버 실값.
-    from datetime import date as _date
-    _today = _date.today().isoformat()
+    # ★ '오늘'은 사장님 달력 기준(KST). 서버는 UTC라 date.today()를 쓰면 한국 새벽 0~9시
+    #   방문이 어제 칸에 들어간다(2026-08-13 사장님 지적 — 실측: 오늘 8명이 아니라 18명이었다).
+    _today = db.kst_today()
     visits = db.get_counter("landing_visits")
     today = db.get_counter(f"visits_day:{_today}")
     try:
@@ -6549,7 +6550,7 @@ def api_briefing_pass(request: Request):
         return JSONResponse({"ok": False}, status_code=401)
     t = _ensure_user_tenant(u)
     import datetime
-    db.pass_briefing(t.id, datetime.datetime.utcnow().strftime("%Y-%m-%d"))
+    db.pass_briefing(t.id, db.kst_today())      # '오늘'은 사장님 달력 기준
     return JSONResponse({"ok": True, "message": "오늘은 쉬어가요. 내일 아침에 다시 브리핑드릴게요!"})
 
 
