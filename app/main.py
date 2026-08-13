@@ -4035,7 +4035,8 @@ async def api_rank_check(request: Request):
                     from app import seo as _seo0
                     region = _seo0._kw_shorten(" ".join(_addr0[:2])) or " ".join(_addr0[:2])
                 if not industry and _c.get("category"):
-                    industry = _re2.split(r"[,·/|>]", _c["category"])[0].strip()
+                    from app import seo as _seo2
+                    industry = _seo2.canonical_industry(_c["category"])
                 addr = addr or (_c.get("address") or "")
                 logging.getLogger("shopcast").info(
                     "[rank-check] 상호로 보완 name=%r → region=%r industry=%r", name, region, industry)
@@ -4096,6 +4097,14 @@ async def api_store_candidates(request: Request):
         cands = place.find_candidates(name, region, limit=5)
     except Exception:
         cands = []
+    # ★ 2026-08-14: 화면이 카테고리·주소를 스스로 가공하지 않게 서버가 '쓸 값'을 실어준다.
+    #   실측 — '광택전문'을 그대로 업종으로 쓰면 '부산 광택전문' 월 20회,
+    #   정규화한 '광택'은 '부산 광택' 월 250회(12배). 규칙이 두 곳에 살면 또 갈라진다.
+    from app import seo as _seo1
+    for _c in cands:
+        _a = (_c.get("address") or "").split()
+        _c["use_region"] = _seo1._kw_shorten(" ".join(_a[:2])) if len(_a) >= 2 else ""
+        _c["use_industry"] = _seo1.canonical_industry(_c.get("category") or "")
     return JSONResponse({"candidates": cands})
 
 

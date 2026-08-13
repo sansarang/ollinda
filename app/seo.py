@@ -233,6 +233,28 @@ def _dedup_tokens(s: str) -> str:
     return " ".join(out)
 
 
+def canonical_industry(category: str) -> str:
+    """지도 카테고리 → 사람이 실제로 치는 업종어. 단일 관문(2026-08-14).
+
+    사고: 상호로 가게를 찾아 카테고리를 그대로 업종으로 썼더니 '광택전문'이 됐고,
+      진단이 '부산 광택전문'(월 20회)으로 돌았다. 실측 '부산 광택'은 250회 —
+      12배 차이다. 카테고리는 업체 분류명이지 검색어가 아니다.
+      (지명에서 '부산광역시 썬팅'을 잡았던 것과 같은 계열: 우리 말 vs 사람 말)
+
+    언어 규칙만 쓴다 — 업종 목록 하드코딩 0.
+      ① 여러 분류가 붙으면 첫 번째만('썬팅,광택' → '썬팅')
+      ② 분류 접미사를 뗀다('광택전문' → '광택', '카페전문점' → '카페')
+      ③ 떼고 남은 말이 너무 짧으면 원형 유지(과교정 방지)
+    """
+    c = re.split(r"[,·/|>]", (category or "").strip())[0].strip()
+    if not c:
+        return ""
+    m = re.match(r"^(.*?)(전문점|전문|점포|매장)$", c)
+    if m and len(m.group(1)) >= 2:
+        return m.group(1).strip()
+    return c
+
+
 def canonical_region(region: str, biz_type: str = "local", industry: str = "",
                      allow_region_hook=None, verify_volume: bool = True) -> str:
     """★ 세트 지역 토큰 단일 소스(canonical) — 지역이 등장하는 전 표면(제목·훅·태그·해시태그·영상)이 참조.

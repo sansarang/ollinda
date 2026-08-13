@@ -664,20 +664,12 @@ def _hero() -> str:
   //   가게를 찾았으면 그 가게의 지역·업종을 그대로 쓴다 — 사장님께 다시 묻지 않는다.
   function rcFillFrom(c){{
    try{{
+     // ★ 가공은 서버가 한다(use_region·use_industry) — 화면은 받아 쓰기만.
+     //   지명 구어형·업종 정규화 규칙이 두 곳에 살면 또 갈라진다(실측: '부산광역시 썬팅'
+     //   월 20회 / '부산 광택전문' 월 20회 → 정규화 후 각각 680회·250회).
      var r=document.getElementById('rc_region'), i=document.getElementById('rc_ind');
-     if(r&&!r.value.trim()&&c.address){{
-       // ★ 지명은 구어형으로 — '부산광역시 썬팅'은 아무도 안 친다(실측 월 20회).
-       //   서버도 같은 관문(seo._kw_shorten)을 타지만, 화면 입력칸에도 구어형이 보여야
-       //   사장님이 '이게 내 지역이 맞구나' 하고 알아본다.
-       var t=(c.address||'').split(/\s+/).filter(Boolean).slice(0,2).join(' ');
-       t=t.replace(/^(\S+?)(특별시|광역시|특별자치시)/,'$1');
-       if(t) r.value=t;
-     }}
-     if(i&&!i.value.trim()&&c.category){{
-       // '썬팅,광택' · '자동차정비,수리' → 대표 업종 하나만
-       var g=(c.category||'').split(/[,·/|>]/)[0].trim();
-       if(g) i.value=g;
-     }}
+     if(r&&!r.value.trim()&&c.use_region) r.value=c.use_region;
+     if(i&&!i.value.trim()&&c.use_industry) i.value=c.use_industry;
    }}catch(e){{}}
   }}
   function rcPick(i){{

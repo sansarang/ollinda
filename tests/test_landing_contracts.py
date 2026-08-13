@@ -385,3 +385,26 @@ def test_resolved_region_uses_spoken_form():
     assert "_kw_shorten" in around, "보완한 지역이 구어형 관문을 안 거친다"
     from app import seo
     assert seo._kw_shorten("부산광역시 동구") == "부산 동구"
+
+
+def test_category_is_normalized_to_a_searchable_word():
+    """2026-08-14 실측: 지도 카테고리 '광택전문'을 그대로 업종으로 써서
+    '부산 광택전문'(월 20회)으로 진단했다. '부산 광택'은 250회 — 12배 차이다.
+    카테고리는 업체 분류명이지 검색어가 아니다."""
+    from app import seo
+    assert seo.canonical_industry("광택전문") == "광택"
+    assert seo.canonical_industry("썬팅,광택") == "썬팅"          # 첫 분류만
+    assert seo.canonical_industry("자동차정비,수리") == "자동차정비"
+    assert seo.canonical_industry("정비") == "정비"               # 과교정 금지
+    assert seo.canonical_industry("") == ""                       # 없으면 빈칸
+
+
+def test_client_does_not_reinvent_normalization():
+    """지명·업종 가공 규칙은 서버 한 곳에만 산다. 화면은 use_region/use_industry를
+    받아 쓰기만 한다 — 규칙이 두 곳에 살면 또 갈라진다(오늘 두 번 갈라졌다)."""
+    h = landing.render()
+    assert "use_region" in h and "use_industry" in h, "화면이 서버 값을 안 쓴다"
+    i = h.find("function rcFillFrom")
+    around = h[i:i + 900]
+    assert "특별시" not in around and "split(/[,·" not in around, \
+        "화면이 지명·업종 가공 규칙을 다시 구현했다"
