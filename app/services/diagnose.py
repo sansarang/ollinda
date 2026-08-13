@@ -64,14 +64,22 @@ def diagnose_rank(industry: str, region: str, name: str, addr: str = "") -> dict
     ind0 = (industry.replace("/", ",").split(",")[0] or "").strip()
     primary = (f"{region} {ind0}".strip() if ind0 else "") or (keywords[-1] if keywords else "") or "내 지역 업종"
 
-    # 상호 없으면 순위 조회 불가 → 정직한 추정 폴백(검색량은 붙여 기회 제시)
+    # 순위 조회 불가 → 정직한 폴백. ★ 2026-08-14: 왜 못 했는지를 사실대로 구분해 말한다.
+    #   예전엔 상호를 넣었는데도 "상호까지 입력하면…"이라고 답해, 사장님이 이미 한 일을
+    #   다시 하라고 시켰다(빈손인 것보다 엉뚱한 안내가 더 나쁘다).
     if not name or not keywords:
+        if not name:
+            _sub = "상호까지 입력하면 키워드별 실제 순위를 바로 보여드려요."
+        else:
+            _sub = ("이 상호로는 가게를 찾지 못했어요. 지역과 업종을 함께 넣어주시면 "
+                    "키워드별 실제 순위를 보여드려요.")
         return {
             "keyword": primary, "rank": None, "estimated": True,
             "scan": [], "caught": [], "missing": [], "missed_volume": 0,
-            "headline": f"'{primary}' 등에서 우리 가게, 아직 상위에 없을 가능성이 커요",
-            "subline": "상호까지 입력하면 키워드별 실제 순위를 바로 보여드려요.",
-            "cta": "올린다로 상위노출 시작하기",
+            "headline": (f"'{primary}' 등에서 우리 가게, 아직 상위에 없을 가능성이 커요"
+                         if not name else f"'{name}' 가게를 찾지 못했어요"),
+            "subline": _sub,
+            "cta": "올린다로 검색 노출 시작하기",
         }
 
     vol = _volumes(keywords)

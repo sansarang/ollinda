@@ -622,7 +622,10 @@ def _hero() -> str:
            h+='<button type="button" onclick="rcPick(-1)" class="block w-full text-center text-xs text-slate-400 mt-2 underline">내 가게가 없어요 — 그냥 진단하기</button>';
            pick.innerHTML=h;pick.classList.remove('hidden');window.__rcCands=cs;return;
          }}
-         if(cs.length===1)window.__rcAddr=cs[0].address||'';   // 후보 1곳이면 그걸로 확정
+         if(cs.length===1){{                                  // 후보 1곳이면 그걸로 확정
+           window.__rcAddr=cs[0].address||'';
+           rcFillFrom(cs[0]);                                 // ★ 지역·업종까지 채운다
+         }}
        }}catch(e){{}}
      }}
    }}
@@ -654,9 +657,30 @@ def _hero() -> str:
    //    자기 가게 이름이 박힌 진짜 결과를 봐야 '나도 써봐야겠다'가 된다.
    try{{ if(typeof instantTitles==='function') instantTitles(); }}catch(e){{}}
    }}catch(e){{o.textContent='조회 실패 — 잠시 후 다시';}}}}
+  // ★ 2026-08-14 사장님 지적: 첫 화면이 "상호만 넣으면 몇 위인지 확인해드려요"라고 약속하는데
+  //   실제로는 빈손이 돌아왔다(headline이 자리표시자 '내 지역 업종'인 채, 잡은 것 0·못 잡은 것 0).
+  //   원인 — 진단 키워드는 [지역+업종]으로 만드는데 상호만 넣으면 둘 다 비어 키워드가 0개였다.
+  //   후보 조회는 이미 돌면서 주소만 받아 쓰고, 주소·업종을 입력칸에 채우지 않았다.
+  //   가게를 찾았으면 그 가게의 지역·업종을 그대로 쓴다 — 사장님께 다시 묻지 않는다.
+  function rcFillFrom(c){{
+   try{{
+     var r=document.getElementById('rc_region'), i=document.getElementById('rc_ind');
+     if(r&&!r.value.trim()&&c.address){{
+       // 주소 앞 두 마디 = 검색하는 사람이 쓰는 지역 표기(부산광역시 동구 → 서버가 구어형으로 줄인다)
+       var t=(c.address||'').split(/\s+/).filter(Boolean).slice(0,2).join(' ');
+       if(t) r.value=t;
+     }}
+     if(i&&!i.value.trim()&&c.category){{
+       // '썬팅,광택' · '자동차정비,수리' → 대표 업종 하나만
+       var g=(c.category||'').split(/[,·/|>]/)[0].trim();
+       if(g) i.value=g;
+     }}
+   }}catch(e){{}}
+  }}
   function rcPick(i){{
    var cs=window.__rcCands||[];
-   if(i>=0&&cs[i]){{window.__rcAddr=cs[i].address||'';document.getElementById('rc_name').value=cs[i].name;}}
+   if(i>=0&&cs[i]){{window.__rcAddr=cs[i].address||'';document.getElementById('rc_name').value=cs[i].name;
+     rcFillFrom(cs[i]);}}
    else{{window.__rcAddr='';}}                        // '내 가게가 없어요' — 이름만으로 진단
    window.__rcPicked=true;                            // 다시 물어보지 않음
    document.getElementById('rc_pick').classList.add('hidden');

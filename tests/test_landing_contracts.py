@@ -343,3 +343,30 @@ def test_hero_has_shop_name_input_and_reuses_one_diagnosis_path():
     assert h.count("async function rankCheck") == 1, "진단 함수가 두 벌로 늘었다"
     assert h.count("/api/rank-check") == 1, "진단 API를 두 곳에서 부른다(경로 이중화)"
     assert h.count('id="rc_name"') == 1, "상호 입력칸이 중복 정의됐다"
+
+
+def test_shop_name_only_promise_is_backed_by_resolution():
+    """2026-08-14 사장님 지적: 첫 화면이 '상호만 넣으면 몇 위인지 확인해드려요'라고 약속하는데
+    실제로는 빈손이 돌아왔다(headline이 자리표시자 '내 지역 업종', 잡은 것 0).
+
+    원인: 진단 키워드는 [지역+업종]으로 만드는데 상호만 오면 둘 다 비어 키워드가 0개.
+    약속을 지우거나, 지킬 수 있게 만들거나 둘 중 하나다 — 상호로 가게를 찾아 지역·업종을
+    채우는 보완이 화면과 서버 양쪽에 있어야 한다(한쪽만 있으면 다른 경로에서 또 빈손).
+    """
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    h = landing.render()
+    assert "rcFillFrom" in h, "화면: 찾은 가게의 지역·업종을 채우는 보완이 없다"
+    main = open(os.path.join(root, "app", "main.py"), encoding="utf-8").read()
+    assert "상호로 보완" in main, "서버: 상호만 왔을 때의 보완이 없다"
+
+
+def test_empty_result_message_does_not_ask_for_what_was_given():
+    """상호를 넣었는데 '상호까지 입력하면…'이라고 답하면, 이미 한 일을 다시 시키는 것이다.
+    빈손인 것보다 엉뚱한 안내가 더 나쁘다 — 왜 못 했는지를 사실대로 구분해 말한다."""
+    from app.services import diagnose
+    r = diagnose.diagnose_rank(industry="", region="", name="있을리없는가게이름ZZZ")
+    assert "상호까지 입력하면" not in (r.get("subline") or ""), \
+        "상호를 받고도 상호를 넣으라고 안내한다"
+    r2 = diagnose.diagnose_rank(industry="", region="", name="")
+    assert "상호" in (r2.get("subline") or ""), "상호가 없을 때는 상호를 요청해야 한다"

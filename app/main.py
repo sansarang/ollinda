@@ -4014,6 +4014,30 @@ async def api_rank_check(request: Request):
     elif not (industry or name):
         return JSONResponse({"error": "업종 또는 상호를 입력해주세요."}, status_code=400)
 
+    # ★ 2026-08-14 사장님 지적 — 랜딩은 "상호만 넣으면 몇 위인지 확인해드려요"라고 약속하는데
+    #   실제로는 빈손이 돌아왔다(headline이 자리표시자 '내 지역 업종', 잡은 것 0·못 잡은 것 0).
+    #   원인: 진단 키워드는 [지역+업종] 조합으로 만드는데 상호만 오면 둘 다 비어 키워드가 0개다.
+    #   해결: 상호로 가게를 찾아 그 가게의 주소·업종을 쓴다 — 사장님께 다시 묻지 않는다.
+    #   화면(rcFillFrom)에서도 채우지만 서버가 답할 수 있어야 다른 경로에서 또 빈손이 안 된다.
+    #   ※ 후보가 여럿이면 손대지 않는다 — 남의 가게를 내 가게로 판정하는 허위 양성이 더 나쁘다.
+    if mode != "seller" and name and not (industry or region):
+        try:
+            import re as _re2
+            from app.services import place as _pl
+            _cands = _pl.find_candidates(name, "", limit=3) if _pl.configured() else []
+            if len(_cands) == 1:
+                _c = _cands[0]
+                _addr0 = (_c.get("address") or "").split()
+                if not region and len(_addr0) >= 2:
+                    region = " ".join(_addr0[:2])
+                if not industry and _c.get("category"):
+                    industry = _re2.split(r"[,·/|>]", _c["category"])[0].strip()
+                addr = addr or (_c.get("address") or "")
+                logging.getLogger("shopcast").info(
+                    "[rank-check] 상호로 보완 name=%r → region=%r industry=%r", name, region, industry)
+        except Exception:
+            logging.getLogger("shopcast").exception("[rank-check] 상호 보완 실패 name=%r", name)
+
     # ── 앞단 게이트 ① 동일 상호+지역 TTL 캐시 → 네이버 콜 자체를 절감(레이트리밋과 별개) ──
     ckey = f"{mode}|{industry}|{region}|{name}|{brand}|{addr}".lower()
     cached = ratelimit.cache_get(ckey, RANK_CACHE_TTL)
