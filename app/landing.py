@@ -535,8 +535,13 @@ def _hero() -> str:
   <div class="reveal mt-9 flex flex-col items-center gap-3">
    <button type="button" onclick="document.getElementById('herodemo').scrollIntoView({{behavior:'smooth',block:'center'}});var d=document.getElementById('d_ind');if(d)setTimeout(function(){{d.focus();}},400);"
     class="w-full sm:w-auto px-10 py-4 rounded-2xl font-extrabold text-lg bg-indigo-600 hover:bg-indigo-700 text-white transition shadow-lg shadow-indigo-200">
-    가입 없이 3초 만에 결과 보기</button>
-   <p class="text-sm text-slate-400">업종만 고르면 진짜로 만들어 보여드려요 · 카드·전화번호 필요 없음</p>
+    가입 없이 내 가게 글 만들어보기</button>
+   <!-- ★ 2026-08-13 사장님 지적: 처음엔 '3초 만에 결과 보기'라고 썼다. 실측하니 126초였고,
+        보여주는 것도 완성본이 아니라 블로그 글 도입부였다. 날조 배지 2건을 지운 자리에
+        내가 세 번째 거짓말을 넣은 셈이다. 걸리는 시간과 보여주는 범위를 그대로 적는다.
+        (완성본·영상은 가입 후 무료 2회 — 그 경계도 여기서 미리 말한다) -->
+   <p class="text-sm text-slate-400">업종만 고르면 <b class="text-slate-600">내 가게용 블로그 글 도입부</b>를 진짜로 만들어 보여드려요<br>
+    <span class="text-slate-400">약 2분 걸려요 · 카드·전화번호 필요 없음 · 완성본과 영상은 가입 후 무료 2회</span></p>
    <div class="flex flex-col sm:flex-row gap-2 items-center mt-2">
     <span class="text-sm text-slate-400">이미 마음 정하셨다면</span>
     <a href="/login/kakao" class="flex items-center justify-center px-6 py-2.5 rounded-xl font-bold text-sm" style="background:#FEE500;color:#191600">카카오로 무료 시작</a>{_naver_hero_btn()}

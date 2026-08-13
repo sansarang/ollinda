@@ -267,3 +267,28 @@ def test_long_feature_lists_are_collapsed():
     기능 나열은 결정에 필요한 정보가 아니다 — 지우지 말고 접어서 궁금한 사람만 펴 보게."""
     h = landing.render()
     assert h.count("<details") >= 2, "긴 나열 섹션이 다시 펼쳐진 채로 돌아왔다"
+
+
+def test_no_unverified_speed_promise_on_demo_cta():
+    """2026-08-13 사장님 지적: 날조 배지 2건을 지운 직후, 그 자리에 '3초 만에 결과 보기'라는
+    세 번째 거짓말을 내가 넣었다. 실측은 126초였고 보여주는 것도 완성본이 아닌 도입부였다.
+
+    체험 버튼 주변에 '초' 단위 속도 약속을 두지 않는다 — 생성은 LLM·영상 대기라
+    초 단위로 보장할 수 없다. 시간을 말하려면 실측 범위(분)로만 말한다.
+    """
+    import html as _h
+    hero = re.sub(r"<!--.*?-->", " ", landing._hero(), flags=re.S)   # 주석은 화면에 안 보인다
+    vis = _h.unescape(re.sub(r"<[^>]+>", " ", hero))
+    i = vis.find("가입 없이")
+    assert i >= 0, "체험 진입 문구가 사라졌다"
+    around = vis[max(0, i - 200):i + 300]
+    assert not re.search(r"\d+\s*초\s*(만에|안에|이면)", around), \
+        f"체험 버튼이 초 단위 속도를 약속한다(실측 126초 — 지킬 수 없는 약속): {around[:120]!r}"
+
+
+def test_demo_cta_states_what_is_actually_shown():
+    """무료 체험이 주는 것은 완성본이 아니라 '블로그 글 도입부'다.
+    받는 것을 부풀리면 열어본 사람이 더 크게 실망한다."""
+    hero = landing._hero()
+    assert "도입부" in hero, "체험이 무엇을 보여주는지(도입부)를 말하지 않는다"
+    assert "가입 후" in hero, "완성본·영상이 가입 후라는 경계를 말하지 않는다"
