@@ -529,19 +529,40 @@ def _hero() -> str:
    <div class="w-full text-xs text-slate-400">실제 이용 가게 · 2026년 8월 실측 · 개별 결과는 가게·키워드에 따라 달라요</div>
   </div>
 
-  <!-- ★ 첫 행동을 '가입'에서 '체험'으로. 가입 없이 되는 미리보기가 있는데
-       버튼이 아래에 묻혀 한 달 넘게 아무도 안 썼다(마지막 사용 7/11).
-       처음 온 사장님에게 계정 연동은 큰 요구다 — 결과를 먼저 보여주고 가입은 그다음에. -->
-  <div class="reveal mt-9 flex flex-col items-center gap-3">
-   <button type="button" onclick="document.getElementById('herodemo').scrollIntoView({{behavior:'smooth',block:'center'}});var d=document.getElementById('d_ind');if(d)setTimeout(function(){{d.focus();}},400);"
-    class="w-full sm:w-auto px-10 py-4 rounded-2xl font-extrabold text-lg bg-indigo-600 hover:bg-indigo-700 text-white transition shadow-lg shadow-indigo-200">
-    가입 없이 내 가게 글 만들어보기</button>
-   <!-- ★ 2026-08-13 사장님 지적: 처음엔 '3초 만에 결과 보기'라고 썼다. 실측하니 126초였고,
-        보여주는 것도 완성본이 아니라 블로그 글 도입부였다. 날조 배지 2건을 지운 자리에
-        내가 세 번째 거짓말을 넣은 셈이다. 걸리는 시간과 보여주는 범위를 그대로 적는다.
-        (완성본·영상은 가입 후 무료 2회 — 그 경계도 여기서 미리 말한다) -->
-   <p class="text-sm text-slate-400">업종만 고르면 <b class="text-slate-600">내 가게용 블로그 글 도입부</b>를 진짜로 만들어 보여드려요<br>
-    <span class="text-slate-400">약 2분 걸려요 · 카드·전화번호 필요 없음 · 완성본과 영상은 가입 후 무료 2회</span></p>
+  <!-- ★ 2026-08-14 사장님 지시: 첫 화면에 상호 입력칸.
+       스크롤하기 전에 '내 가게'를 넣게 한다 — 남의 사례를 읽는 것과 내 가게 이름이
+       결과에 뜨는 것은 다른 일이다.
+       ★ 진단 경로는 하나만 쓴다: 여기서 값만 받아 _try의 rankCheck()로 넘긴다.
+         입력·판정 로직을 두 벌로 만들면 그게 다음 사고 예약이다(canonical 원칙). -->
+  <div class="reveal mt-9 max-w-lg mx-auto">
+   <form onsubmit="heroCheck();return false;" class="flex flex-col sm:flex-row gap-2">
+    <input id="hero_name" placeholder="상호를 입력하세요 (예: 초량 루마썬팅)" autocomplete="organization"
+     class="w-full sm:flex-1 min-w-0 rounded-2xl border-2 border-indigo-200 px-4 py-3.5 text-slate-800 text-base outline-none focus:border-indigo-500 shadow-sm">
+    <button type="submit"
+     class="w-full sm:w-auto px-7 py-3.5 rounded-2xl font-extrabold text-base bg-indigo-600 hover:bg-indigo-700 text-white transition shadow-lg shadow-indigo-200 whitespace-nowrap">
+     내 가게 확인하기</button></form>
+   <p class="text-sm text-slate-400 mt-3">가입 없이 · 지금 <b class="text-slate-600">내 가게 순위</b>와
+    <b class="text-slate-600">쓰면 좋을 글 제목</b>을 바로 보여드려요</p>
+  </div>
+  <script>
+  function heroCheck(){{
+   var v=(document.getElementById('hero_name')||{{}}).value||'';
+   v=v.trim();
+   var n=document.getElementById('rc_name');
+   if(n) n.value=v;                       // 값만 넘긴다 — 판정은 _try의 rankCheck() 하나뿐
+   var t=document.getElementById('try');
+   if(t) t.scrollIntoView({{behavior:'smooth',block:'start'}});
+   if(!v){{ if(n) setTimeout(function(){{n.focus();}},400); return; }}
+   setTimeout(function(){{ if(typeof rankCheck==='function') rankCheck(); }},450);
+  }}
+  </script>
+
+  <!-- ★ 2026-08-13 사장님 지적: 처음엔 '3초 만에 결과 보기'라고 썼다. 실측하니 126초였고,
+       보여주는 것도 완성본이 아니라 블로그 글 도입부였다. 날조 배지 2건을 지운 자리에
+       내가 세 번째 거짓말을 넣은 셈이다. 걸리는 시간과 보여주는 범위를 그대로 적는다. -->
+  <div class="reveal mt-6 flex flex-col items-center gap-3">
+   <p class="text-xs text-slate-400">사진까지 올리면 <b class="text-slate-500">블로그 글 도입부</b>도 만들어 드려요 ·
+    약 2분 · 완성본과 영상은 가입 후 무료 2회</p>
    <div class="flex flex-col sm:flex-row gap-2 items-center mt-2">
     <span class="text-sm text-slate-400">이미 마음 정하셨다면</span>
     <a href="/login/kakao" class="flex items-center justify-center px-6 py-2.5 rounded-xl font-bold text-sm" style="background:#FEE500;color:#191600">카카오로 무료 시작</a>{_naver_hero_btn()}

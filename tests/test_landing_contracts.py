@@ -328,3 +328,18 @@ def test_removed_sections_kept_their_promises():
     assert "자동 발행은 하지 않아요" in h, "자동 발행 부인 약속이 사라졌다"
     assert "실제 화면 구성" in h, "목업 화면에 목업 표기가 사라졌다"
     assert "한 번 답하면" in h, "경험 자산 약속이 사라졌다"
+
+
+def test_hero_has_shop_name_input_and_reuses_one_diagnosis_path():
+    """2026-08-14 사장님 지시: 첫 화면에 상호 입력칸.
+    남의 사례를 읽는 것과 내 가게 이름이 결과에 뜨는 것은 다른 일이다.
+    ★ 단, 진단 로직은 한 벌만 산다 — 히어로는 값만 넘기고 판정은 rankCheck() 하나뿐이다
+    (경로 규칙이 두 곳에 살면 그 자체가 결함)."""
+    hero = landing._hero()
+    assert 'id="hero_name"' in hero, "첫 화면 상호 입력칸이 없다"
+    assert "rankCheck" in hero, "히어로가 기존 진단 경로를 쓰지 않는다"
+    # 진단 로직은 페이지 전체에 한 벌만 산다(정의 1회 · API 호출 1곳)
+    h = landing.render()
+    assert h.count("async function rankCheck") == 1, "진단 함수가 두 벌로 늘었다"
+    assert h.count("/api/rank-check") == 1, "진단 API를 두 곳에서 부른다(경로 이중화)"
+    assert h.count('id="rc_name"') == 1, "상호 입력칸이 중복 정의됐다"
