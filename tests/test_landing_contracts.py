@@ -408,3 +408,21 @@ def test_client_does_not_reinvent_normalization():
     around = h[i:i + 900]
     assert "특별시" not in around and "split(/[,·" not in around, \
         "화면이 지명·업종 가공 규칙을 다시 구현했다"
+
+
+def test_province_regions_use_city_name_only():
+    """2026-08-14 실측 — 구리 카센터 180회 / 구리시 카센터 30회 /
+    경기도 구리시 자동차정비 20회. 도 이름을 붙이면 아무도 안 친다.
+    광역시는 붙여 쓰지만(부산 동구 썬팅=실검색) 도는 빼고 시 이름만 쓴다."""
+    from app import seo
+    assert seo._kw_shorten("경기도 구리시 카센터") == "구리 카센터"
+    assert seo._kw_shorten("경상남도 양산시 미용실") == "양산 미용실"
+    assert seo._kw_shorten("구리시 카센터") == "구리 카센터"
+    # 광역시+구는 그대로 — 실제로 검색되는 조합이다
+    assert seo._kw_shorten("부산광역시 동구 썬팅") == "부산 동구 썬팅"
+    assert seo._kw_shorten("부산 동구 썬팅") == "부산 동구 썬팅"
+    # 지역을 통째로 지우면 전국 키워드가 된다(소상공인이 못 이기는 판)
+    assert seo._kw_shorten("경기도 카센터") == "경기 카센터"
+    # 과교정 금지 — 지명 자리가 아닌 '…시'는 건드리지 않는다
+    assert seo._kw_shorten("자동차정비 시공 가격") == "자동차정비 시공 가격"
+    assert seo._kw_shorten("임시 점검") == "임시 점검"
