@@ -25,6 +25,21 @@ _log = logging.getLogger("shopcast.longtail")
 # 문법이 없을 때의 최소 틀 — 업종 어휘 0(플레이스홀더뿐)
 _FALLBACK_GRAMMAR = ["{속성} {업종}", "{지역} {업종}"]
 
+# 속성값이 없어도 항상 붙는 '제네릭 꼬리'. 큐가 비지 않게 두는 안전판이다.
+_TAIL_GRAMMARS = ["{지역} {업종} 추천", "{업종} 추천"]
+
+
+def generic_tails(t) -> list[str]:
+    """이 가게의 제네릭 폴백 검색어 — '이게 폴백인가'를 묻는 쪽이 쓰는 단일 소스.
+
+    2026-08-13 사장님 승인 수정: 예전엔 소비자(autoqueue)가 문자열로 추측했다 —
+      kw.endswith("추천") and any(w in kw for w in (t.industry or "중고차").split())
+    업종이 비면 '중고차'로 때우는 하드코딩이 박혀 있었고(업종 중립 위반), '추천'으로 끝나는
+    진짜 롱테일까지 폴백으로 오인해 검색량 관문을 통과시켰다.
+    만드는 쪽이 답을 알고 있다 — 추측하지 말고 물어본다(생성 경로 = 참조 경로).
+    """
+    return combos(t, [], extra_tail=True)
+
 
 def wide_region(region: str) -> str:
     """검색어에 쓸 광역 지명 — '부산광역시'는 아무도 안 친다(실측: 검색량 0)."""
@@ -100,9 +115,9 @@ def combos(t, attrs: list, *, years: list | None = None, grammars: list | None =
         for g in gs:
             _emit(g, _struct, attr=a)
     if extra_tail:                       # 광역+업종 폴백은 항상 포함(기존 동작 보존)
-        # 속성값 없이 부르는 자리라 '모르는 이름'이 빈칸이 되도록 attr을 주지 않는다
-        _emit("{지역} {업종} 추천", _struct)
-        _emit("{업종} 추천", _struct)
+        for g in _TAIL_GRAMMARS:
+            # 속성값 없이 부르는 자리라 '모르는 이름'이 빈칸이 되도록 attr을 주지 않는다
+            _emit(g, _struct)
 
     seen, uniq = set(), []
     for kw in out:

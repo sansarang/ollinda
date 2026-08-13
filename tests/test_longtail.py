@@ -291,3 +291,30 @@ def test_empty_gaps_do_not_halt_generation():
     c = ["부산 동구 썬팅", "모닝 썬팅"]
     assert seo._gap_first(list(c), "없는-tenant", "") == c
     assert seo._surface_first(list(c), "없는-tenant") == c
+
+
+# ── ⑨ 폴백 판별은 만든 쪽에 묻는다 (업종 하드코딩 제거) ─────────────
+def test_generic_tails_are_industry_neutral():
+    """예전 코드: kw.endswith("추천") and any(w in kw for w in (t.industry or "중고차").split())
+    업종이 비면 '중고차'로 때웠다(업종 중립 위반)."""
+    assert lt.generic_tails(_t(industry="캔들", region="서울특별시 마포구")) == \
+        ["서울 캔들 추천", "캔들 추천"]
+    assert lt.generic_tails(_t(industry="", region="")) == []      # 업종 없으면 빈칸(때우지 않는다)
+
+
+def test_real_longtail_ending_in_추천_is_not_mistaken_for_fallback():
+    """'젤아트 네일 추천'은 폴백이 아니라 진짜 롱테일이다 — 문자열 추측의 오탐."""
+    t = _t(industry="네일", region="부산광역시 동구")
+    tails = set(lt.generic_tails(t))
+    real = lt.combos(t, ["젤아트"], grammars=["{디자인} {업종} 추천"], extra_tail=False)
+    assert real == ["젤아트 네일 추천"], real
+    assert real[0] not in tails, "진짜 롱테일이 폴백으로 오인됨"
+
+
+def test_autoqueue_uses_generator_for_fallback_check():
+    """소비자가 문자열로 추측하지 않는다 — 소스에 업종 리터럴이 남아 있으면 실패."""
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "app", "services", "autoqueue.py"), encoding="utf-8").read()
+    code = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("#"))
+    assert 'or "중고차"' not in code, "업종 하드코딩 폴백이 코드에 남아 있다"

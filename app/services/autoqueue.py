@@ -221,6 +221,8 @@ def refill(t, plan: str = "free") -> dict:
         if ((getattr(t, "biz_type", "local") or "local") in ("seller", "hybrid")
                 and not db.writing_queue_rows(t.id, status="pending", limit=1)):
             cands = [c for c in _seller_longtail_candidates(t) if not _skip_kw(t, c)]
+            from app.services import longtail as _lt0
+            _tails = set(_lt0.generic_tails(t))
             from app.services import searchad as _sa
             _measured = _sa.configured()
             vols = {}
@@ -233,7 +235,9 @@ def refill(t, plan: str = "free") -> dict:
                     break
                 v = vols.get(kw.replace(" ", ""))
                 # 검색량 실측: 월 100회 미만이면 스킵(저볼륨 판 이중 차단). 폴백('광역+업종')은 무측정도 허용(큐 안 비게).
-                _is_fallback = kw.endswith("추천") and any(w in kw for w in (t.industry or "중고차").split())
+                # ★ 폴백 여부는 만든 쪽에 물어본다 — 문자열 추측은 업종 하드코딩을 부르고
+                #   '추천'으로 끝나는 진짜 롱테일까지 관문을 그냥 통과시켰다(2026-08-13).
+                _is_fallback = kw in _tails
                 if _measured and v is not None and v < MIN_QUEUE_VOLUME and not _is_fallback:
                     continue
                 if db.enqueue_writing(t.id, "P4", kw, "review",
