@@ -507,12 +507,20 @@ def _hero() -> str:
 <section class="relative hero-bg overflow-hidden">
  <div class="hero-dots absolute inset-x-0 top-0 h-96 pointer-events-none"></div>
  <div class="relative max-w-6xl mx-auto px-5 pt-20 pb-16 text-center">
+  <!-- ★ 2026-08-14 타깃·메시지 재조정(조사 근거).
+       조사: 자영업자 10명 중 6명 이상이 '마케팅 지출 대비 효과를 체감 못 함'(2024).
+       상처는 '성장 실패'가 아니라 **확인 불가**다. 대행의 고질적 불만도 '깜깜이'다.
+       그래서 약속(늘려드립니다)이 아니라 계기판(확인해드립니다)으로 말한다 —
+       손실 회피가 이익 추구를 이기고, 통제감 상실이 가장 큰 불만이기 때문이다.
+       타깃도 실측대로 좁힌다: 서이추 138건에서 서로이웃 차단율이 카센터·정비 0%,
+       디테일링 22%인 반면 썬팅은 64%였다. 문이 열린 정비계열을 앞에 세운다. -->
   <div class="reveal inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white border border-indigo-100 text-xs font-semibold text-indigo-600 mb-8">
-   소상공인 · 온라인 셀러 전용 · AI 마케팅 자동화</div>
+   카센터 · 정비 · 디테일링 · 썬팅 · 중고차 사장님을 위해</div>
   <h1 class="reveal text-4xl sm:text-6xl font-bold tracking-tight leading-[1.12] text-slate-900">
-   네이버에서 우리 가게,<br><span class="text-indigo-600">검색 상위에 뜨게</span></h1>
-  <p class="reveal mt-7 text-lg text-slate-500 max-w-2xl mx-auto">사진만 올리면 AI가 <b class="text-slate-800">네이버에 뜨는 글</b>을 씁니다.
-   <b class="text-slate-800">인스타·유튜브·릴스</b>까지 한 번에 만들어 <b class="text-slate-800">매장 방문·구매</b>로 연결해요.</p>
+   광고비 쓰신 만큼,<br><span class="text-indigo-600">효과 있었는지 아세요?</span></h1>
+  <p class="reveal mt-7 text-lg text-slate-500 max-w-2xl mx-auto">올린다는 사진만 올리면 글과 영상을 만들고,
+   <b class="text-slate-800">그 글이 지금 검색 몇 위인지 매일 확인해</b> 알려드립니다.
+   <b class="text-slate-800">떨어지면 고친 글을 먼저</b> 가져와요.</p>
 
   <!-- ★ 2026-08-13 사장님 지시: 증거를 첫 화면으로.
        예전엔 여기가 C-Rank·D.I.A.+·PAS 같은 만드는 사람 말이었고, 실측 1위 사례는
@@ -541,8 +549,8 @@ def _hero() -> str:
     <button type="submit"
      class="w-full sm:w-auto px-7 py-3.5 rounded-2xl font-extrabold text-base bg-indigo-600 hover:bg-indigo-700 text-white transition shadow-lg shadow-indigo-200 whitespace-nowrap">
      내 가게 확인하기</button></form>
-   <p class="text-sm text-slate-400 mt-3">가입 없이 · 지금 <b class="text-slate-600">내 가게 순위</b>와
-    <b class="text-slate-600">쓰면 좋을 글 제목</b>을 바로 보여드려요</p>
+   <p class="text-sm text-slate-400 mt-3">가입 없이 · 카드 없이 · <b class="text-slate-600">지금 몇 위인지</b>
+    바로 확인해드려요</p>
   </div>
   <script>
   function heroCheck(){{
@@ -797,9 +805,9 @@ def _try() -> str:
  <div class="max-w-4xl mx-auto px-5">
   <div class="reveal text-center mb-8">
    <span class="inline-block px-3 py-1 rounded-full bg-[#EEF2FF] text-indigo-600 text-xs font-bold mb-3">가입 없이 · 무료</span>
-   <h2 class="text-2xl sm:text-3xl font-bold text-slate-900">지금 내 가게로 해보세요</h2>
-   <p class="text-slate-500 text-sm mt-2">상호만 넣으면 <b class="text-slate-800">현재 순위</b>와
-    <b class="text-slate-800">지금 쓰면 좋을 글 제목</b>을 바로 보여드려요.</p></div>
+   <h2 class="text-2xl sm:text-3xl font-bold text-slate-900">우리 가게, 지금 몇 위일까요?</h2>
+   <p class="text-slate-500 text-sm mt-2">상호만 넣으면 <b class="text-slate-800">현재 순위</b>를 바로 확인해드리고,
+    <b class="text-slate-800">아직 못 잡은 검색어</b>로 쓰면 좋을 글 제목까지 지어드려요.</p></div>
   <div class="reveal max-w-2xl mx-auto bg-white border-2 border-indigo-200 rounded-2xl shadow-sm p-5">
    <div class="flex gap-1.5 mb-3 text-xs font-bold">
      <button type="button" id="rc_mlocal" onclick="rcSetMode('local')" class="px-3 py-1.5 rounded-lg border border-indigo-500 bg-indigo-50 text-indigo-700 transition">동네 매장</button>
@@ -1127,7 +1135,19 @@ def _pricing() -> str:
                   f"<a href='{href}' class='{btn} mt-7 text-center px-4 py-3.5 rounded-xl font-bold transition'>{cta}</a>{annual}</div>")
     return (f"<section id='pricing' class='bg-[#F9FAFB] py-24'><div class='max-w-5xl mx-auto px-5'>"
             f"<h2 class='reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900'>합리적인 요금 <span class='text-indigo-600 text-xl align-middle'>런칭 특가</span></h2>"
-            f"<p class='reveal text-center text-slate-500 mb-14'>홍보 영상 외주는 편당 5~15만원, 블로그 대행은 월 30~50만원 — "
+            # ★ 2026-08-14 가격 앵커(조사 근거): 크몽 블로그 대행 실판매가 38만/58만/77만원
+            #   (한 서비스만 856건 거래). 지불 의사는 이미 있다 — 비싸서 안 사는 게 아니다.
+            #   '월 13만원'만 있으면 비싸고, 대행가 옆에 두면 싸다. 앵커가 있어야 판단이 선다.
+            f"<div class='reveal max-w-2xl mx-auto mb-8 bg-white border border-slate-200 rounded-2xl p-5 text-center'>"
+            f"<div class='text-sm text-slate-400 mb-2'>지금 시장에서 같은 일을 맡기면</div>"
+            f"<div class='flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-slate-500'>"
+            f"<span>블로그 대행 <b class='text-slate-700 line-through decoration-slate-300'>월 38~77만원</b></span>"
+            f"<span class='text-slate-300'>+</span>"
+            f"<span>홍보 영상 <b class='text-slate-700 line-through decoration-slate-300'>편당 5~15만원</b></span></div>"
+            f"<div class='text-lg font-bold text-slate-900 mt-3'>올린다는 둘 다 포함해 "
+            f"<span class='text-indigo-600'>월 12만 9천원부터</span></div>"
+            f"<div class='text-[11px] text-slate-400 mt-2'>대행 시세는 2026년 8월 공개 마켓 실판매가 기준</div></div>"
+            f"<p class='reveal text-center text-slate-500 mb-14'>"
             f"올린다는 실사 무빙 영상까지 통째로, 지금 가격은 런칭 기간 한정입니다.</p>"
             f"<div class='grid sm:grid-cols-3 gap-6 items-stretch pt-3'>{cards}</div>"
             f"<p class='reveal text-center text-xs text-slate-400 mt-8'>언제든 해지 가능 — 해지 후 다음 결제일부터 청구되지 않아요 · 남은 기간은 그대로 이용</p>"
