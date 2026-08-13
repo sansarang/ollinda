@@ -1723,6 +1723,87 @@ def admin_gap_list(tenant_id: str = "", domain: str = "", limit: int = 30):
     return JSONResponse({"ok": True, "gaps": _gs.list_gaps(tenant_id, domain, limit)})
 
 
+@app.get("/admin/ops-summary")
+def admin_ops_summary(days: int = 7):
+    """📋 운영 현황 한 장(2026-08-13 사장님 지시) — 사령탑이 받아 그린다.
+
+    왜: '가입 몇 명·누가 뭘 썼나'를 물으실 때마다 DB를 직접 캐야 했다. 값은 전부 이미
+    있는데 모아 보는 자리가 없었다. 새로 수집하는 것 0 — 있는 값을 사장님 달력(KST)으로
+    묶어 돌려줄 뿐이다.
+
+    방문자는 집계 카운터가 아니라 **원자료(idempotency 방문 기록)를 KST로 다시 세어** 돌린다.
+    카운터는 UTC 날짜로 쌓인 옛 값이 섞여 있어 날짜별 숫자가 사장님 달력과 안 맞는다
+    (실측: 옛 방식 '오늘 8명' → 실제 18명).
+    """
+    from datetime import datetime as _dt, timedelta as _td
+    today = db.kst_today()
+    yday = (_dt.fromisoformat(today) - _td(days=1)).strftime("%Y-%m-%d")
+
+    # ── 방문자(순방문 = 같은 IP 하루 1명) ───────────────────────────
+    by_day: dict = {}
+    try:
+        with db._conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS idempotency(key TEXT PRIMARY KEY, at TEXT)")
+            for r in c.execute("SELECT key, at FROM idempotency WHERE key LIKE 'visit:%'").fetchall():
+                try:
+                    d = db.fmt_kst(r["at"], date_only=True)
+                    ip = (r["key"] or "").split(":", 2)[2]
+                except Exception:
+                    continue
+                if d and ip:
+                    by_day.setdefault(d, set()).add(ip)
+    except Exception:
+        logging.getLogger("shopcast").exception("[ops] 방문 기록 조회 실패")
+    recent = sorted(by_day, reverse=True)[:max(1, days)]
+    visitors = {"today": len(by_day.get(today, ())), "yesterday": len(by_day.get(yday, ())),
+                "unique_total": len({ip for s in by_day.values() for ip in s}),
+                "by_day": [{"date": d, "n": len(by_day[d])} for d in recent]}
+
+    # ── 가입자 + 마지막 활동 ────────────────────────────────────────
+    last_act: dict = {}
+    try:
+        with db._conn() as c:
+            for r in c.execute("SELECT tenant_id, MAX(created_at) m FROM assets "
+                               "GROUP BY tenant_id").fetchall():
+                last_act[r["tenant_id"]] = r["m"]
+    except Exception:
+        pass
+    signups = []
+    try:
+        for u in db.list_users():
+            tid = u.get("tenant_id") or ""
+            signups.append({
+                "email": u.get("email") or "",
+                "name": u.get("name") or "",
+                "joined": db.fmt_kst(u.get("created_at") or ""),
+                "plan": u.get("plan") or "free",
+                "used": int(u.get("free_used") or 0),
+                "last_activity": db.fmt_kst(last_act.get(tid) or "") if last_act.get(tid) else "",
+                # 실가입자 판정은 biz-metrics와 같은 규칙 하나만 쓴다(규칙 이중화 금지)
+                "is_real": not (_is_owner(u)
+                                or (u.get("email") or "").lower().endswith(("@ollinda.test",
+                                                                           "@ollinda.guest"))
+                                or _tenant_is_demo(tid)),
+            })
+    except Exception:
+        logging.getLogger("shopcast").exception("[ops] 가입자 조회 실패")
+    signups.sort(key=lambda x: x["joined"], reverse=True)
+
+    # ── 활동량(최근 N일) ────────────────────────────────────────────
+    since = (_dt.utcnow() - _td(days=days)).isoformat()
+    act = {}
+    for tb, key in (("assets", "sets"), ("content_pieces", "pieces"), ("blog_publishes", "publishes")):
+        try:
+            with db._conn() as c:
+                col = "published_at" if tb == "blog_publishes" else "created_at"
+                act[key] = int(c.execute(
+                    f"SELECT COUNT(*) n FROM {tb} WHERE {col} >= ?", (since,)).fetchone()["n"])
+        except Exception:
+            act[key] = None                    # 모르면 빈칸 — 0으로 때우지 않는다
+    return JSONResponse({"ok": True, "today": today, "days": days,
+                         "visitors": visitors, "signups": signups, "activity": act})
+
+
 @app.get("/admin/scout-plan")
 def admin_scout_plan(tenant: str = "", limit: int = 30, ttl_days: int = 7, shops_only: str = ""):
     """🗺 지면 정찰 계획(2026-08-01 사장님 승인 ①) — 맥 야간 정찰기가 '오늘 훑을 키워드'를 받아간다.
@@ -2612,7 +2693,7 @@ def admin_biz_metrics(days: int = 30):
         pass
     paid = trial = new_today = 0
     real_total = real_trial = 0                        # 실가입자(운영자·테스트 제외, 2026-07-31 사장님 지적)
-    today = now.date().isoformat()
+    today = db.kst_today()                             # '오늘' = 사장님 달력
     for u in users:
         pl = (u.get("plan") or "free").lower()
         _em = (u.get("email") or "").lower()
@@ -2628,7 +2709,9 @@ def admin_biz_metrics(days: int = 30):
                 real_trial += 1
         if _real:
             real_total += 1
-        if (u.get("created_at") or "")[:10] == today:
+        # 가입일도 사장님 달력 기준(KST)으로 비교한다 — created_at은 UTC 저장이라
+        # 그냥 앞 10자를 비교하면 한국 새벽 가입이 어제로 잡힌다(2026-08-13 계열 수정).
+        if db.fmt_kst(u.get("created_at") or "", date_only=True) == today:
             new_today += 1
     # 구독·결제(테이블 있으면)
     revenue_mrr = 0
