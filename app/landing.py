@@ -666,8 +666,11 @@ def _hero() -> str:
    try{{
      var r=document.getElementById('rc_region'), i=document.getElementById('rc_ind');
      if(r&&!r.value.trim()&&c.address){{
-       // 주소 앞 두 마디 = 검색하는 사람이 쓰는 지역 표기(부산광역시 동구 → 서버가 구어형으로 줄인다)
+       // ★ 지명은 구어형으로 — '부산광역시 썬팅'은 아무도 안 친다(실측 월 20회).
+       //   서버도 같은 관문(seo._kw_shorten)을 타지만, 화면 입력칸에도 구어형이 보여야
+       //   사장님이 '이게 내 지역이 맞구나' 하고 알아본다.
        var t=(c.address||'').split(/\s+/).filter(Boolean).slice(0,2).join(' ');
+       t=t.replace(/^(\S+?)(특별시|광역시|특별자치시)/,'$1');
        if(t) r.value=t;
      }}
      if(i&&!i.value.trim()&&c.category){{

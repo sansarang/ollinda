@@ -370,3 +370,18 @@ def test_empty_result_message_does_not_ask_for_what_was_given():
         "상호를 받고도 상호를 넣으라고 안내한다"
     r2 = diagnose.diagnose_rank(industry="", region="", name="")
     assert "상호" in (r2.get("subline") or ""), "상호가 없을 때는 상호를 요청해야 한다"
+
+
+def test_resolved_region_uses_spoken_form():
+    """2026-08-14 실측: 상호 보완은 됐는데 지역이 '부산광역시 동구'로 들어가
+    '부산광역시 썬팅'(월 20회)이라는, 아무도 치지 않는 말로 진단하고 있었다.
+    지명은 canonical 관문(seo._kw_shorten)을 반드시 거친다 — 규칙이 두 곳에 살면 안 된다."""
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    main = open(os.path.join(root, "app", "main.py"), encoding="utf-8").read()
+    i = main.find("상호로 보완")
+    assert i > 0, "상호 보완 블록이 없다"
+    around = main[max(0, i - 1500):i + 500]
+    assert "_kw_shorten" in around, "보완한 지역이 구어형 관문을 안 거친다"
+    from app import seo
+    assert seo._kw_shorten("부산광역시 동구") == "부산 동구"

@@ -4029,7 +4029,11 @@ async def api_rank_check(request: Request):
                 _c = _cands[0]
                 _addr0 = (_c.get("address") or "").split()
                 if not region and len(_addr0) >= 2:
-                    region = " ".join(_addr0[:2])
+                    # ★ 지명은 반드시 구어형 관문을 거친다(seo._kw_shorten) — 행정 풀네임을
+                    #   그대로 쓰면 '부산광역시 썬팅'(월 20회)처럼 아무도 안 치는 말로 진단하게
+                    #   된다. 실측 2026-08-14: 보완은 됐는데 엉뚱한 키워드를 재고 있었다.
+                    from app import seo as _seo0
+                    region = _seo0._kw_shorten(" ".join(_addr0[:2])) or " ".join(_addr0[:2])
                 if not industry and _c.get("category"):
                     industry = _re2.split(r"[,·/|>]", _c["category"])[0].strip()
                 addr = addr or (_c.get("address") or "")
