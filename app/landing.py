@@ -548,27 +548,9 @@ def _hero() -> str:
     <a href="/login/google" class="flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl font-bold text-sm bg-white border border-slate-200 text-slate-700">{_GOOGLE_G} 구글로 시작</a></div>
   </div>
   <p class="reveal mt-4 text-sm text-slate-500">이미 회원이면 <a href="/login" class="inline-block px-1 py-1 text-indigo-600 font-bold underline underline-offset-4">회원 로그인</a></p>
-  <!-- 두 미끼를 한눈에: 순위진단(왼쪽) + 무료 만들기(오른쪽) — 모바일은 세로 스택 -->
-  <!-- grid-cols-1 명시(모바일 반응형): lg 미만에서 암시적 auto 트랙이 max-content(576px)로 커져
-       카드가 뷰포트를 넘고 overflow-hidden에 잘리던 버그 — minmax(0,1fr) 트랙으로 강제 -->
-  <div class="reveal mt-12 max-w-4xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-5 items-start text-left">
-   <div class="bg-white border-2 border-indigo-200 rounded-2xl shadow-sm p-5">
-    <div class="flex items-center gap-2 text-slate-800 font-bold text-sm mb-1">{_icon('search', 'w-4 h-4 text-indigo-600')} 내 가게·상품 순위 즉시 진단</div>
-    <div class="flex gap-1.5 mb-2 text-xs font-bold">
-      <button type="button" id="rc_mlocal" onclick="rcSetMode('local')" class="px-3 py-1.5 rounded-lg border border-indigo-500 bg-indigo-50 text-indigo-700 transition">동네 매장</button>
-      <button type="button" id="rc_mseller" onclick="rcSetMode('seller')" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 transition">온라인 셀러</button></div>
-    <p id="rc_sub" class="text-xs text-slate-400 mb-3">지역·업종·상호만 — 네이버 현재 순위를 바로 확인</p>
-    <!-- 모바일: 3칸 세로 스택(각 100%) / sm+: 가로 1행 -->
-    <div class="flex flex-col sm:flex-row gap-2">
-      <input id="rc_region" placeholder="지역(부산 동구)" class="w-full sm:flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400">
-      <input id="rc_ind" placeholder="업종" class="w-full sm:flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400">
-      <input id="rc_name" placeholder="상호" class="w-full sm:flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400"></div>
-    <button onclick="rankCheck()" class="w-full mt-2.5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition">현재 순위 확인</button>
-    <div id="rc_pick" class="hidden mt-3"></div>
-    <div id="rc_out" class="text-slate-600 text-sm mt-3"></div>
-   </div>
-   {_hero_demo_card()}
-  </div>
+  <!-- ★ 2026-08-13: 순위진단·무료체험 위젯은 두 번째 화면(_try)으로 옮겼다.
+       첫 화면은 '무슨 일이 일어나는지'만 보여준다 — 입력칸 여섯 개가 첫 화면에 있으면
+       읽기도 전에 일을 시키는 꼴이라 사장님이 그냥 나간다. -->
   <script>
   function fillDemo(){{var v=document.getElementById('rc_ind').value.trim();var d=document.getElementById('d_ind');
    if(d&&v&&!d.value)d.value=v;
@@ -639,6 +621,9 @@ def _hero() -> str:
      +'<div id="rc_leadmsg" class="text-xs text-emerald-600 mt-1.5"></div></div>'
      +'<a href="/login/kakao" class="inline-block text-indigo-600 underline font-bold mt-3">'+d.cta+' →</a>'
      +(d.estimated?' <span class="text-slate-400 text-xs">(추정)</span>':'');
+   // ⚡ 진단이 끝나면 곧바로 '내 가게용 제목'을 AI가 지어 이어 붙인다(2026-08-13).
+   //    자기 가게 이름이 박힌 진짜 결과를 봐야 '나도 써봐야겠다'가 된다.
+   try{{ if(typeof instantTitles==='function') instantTitles(); }}catch(e){{}}
    }}catch(e){{o.textContent='조회 실패 — 잠시 후 다시';}}}}
   function rcPick(i){{
    var cs=window.__rcCands||[];
@@ -688,6 +673,156 @@ def _video() -> str:
     if(e.isIntersecting){{v.muted=true;var p=v.play();if(p&&p.catch)p.catch(function(){{}});}}
     else{{v.pause();}}}});}},{{threshold:.35}});
   vs.forEach(function(v){{vio.observe(v);}});}})();
+ </script></section>"""
+
+
+def _flow() -> str:
+    """★ 2026-08-13 사장님 지시 — 첫 화면에서 '실제로 무슨 일이 일어나는지'를 끝까지 보여준다.
+
+    왜 바꿨나: 기존 랜딩은 18섹션·272문단이었고, 첫 화면은 설명뿐이었다. 방문 40명 중
+    버튼을 누른 사람이 0명. 사장님 말씀 그대로 — 가입부터 글·영상 생성, 그 글이 어떻게
+    실측되고, 그다음 무슨 글을 쓰는지까지가 한 화면에서 보여야 한다.
+    설명 대신 실물만 놓는다(실제 생성 영상·실제 쓴 글·실측 순위·실제 다음 글감).
+    """
+    step = ("<div class='shrink-0 w-7 h-7 rounded-full bg-indigo-600 text-white text-sm "
+            "font-extrabold flex items-center justify-center'>{}</div>")
+
+    # ① 사진 올리기 — 보정 전/후 실물
+    s1 = (f"<div class='reveal card p-5'>"
+          f"<div class='flex items-center gap-2 mb-3'>{step.format(1)}"
+          f"<div class='font-bold text-slate-900'>사진만 올립니다</div></div>"
+          f"<div class='grid grid-cols-2 gap-2'>"
+          f"<div><img src='{_v('/demo/food-before.jpg')}' loading='lazy' decoding='async' "
+          f"class='w-full rounded-xl object-cover' style='aspect-ratio:4/3' alt='폰으로 찍은 사진'>"
+          f"<div class='text-[11px] text-slate-400 text-center mt-1'>폰으로 찍은 사진</div></div>"
+          f"<div><img src='{_v('/demo/food-after.jpg')}' loading='lazy' decoding='async' "
+          f"class='w-full rounded-xl object-cover' style='aspect-ratio:4/3' alt='올린다 자동 보정'>"
+          f"<div class='text-[11px] text-indigo-600 font-bold text-center mt-1'>자동 보정 후</div></div></div>"
+          f"<p class='text-slate-500 text-sm mt-3'>보정·번호판 가림까지 자동으로 합니다.</p></div>")
+
+    # ② 글·영상 생성 — 실제 생성물
+    s2 = (f"<div class='reveal card p-5'>"
+          f"<div class='flex items-center gap-2 mb-3'>{step.format(2)}"
+          f"<div class='font-bold text-slate-900'>글과 영상이 나옵니다</div></div>"
+          f"<video src='{_v('/demo/local_short.mp4')}' controls muted loop playsinline "
+          f"preload='metadata' poster='{_v('/demo/short_poster.jpg')}' "
+          f"class='w-full max-w-[190px] mx-auto rounded-xl bg-black'></video>"
+          f"<div class='mt-3 bg-[#F9FAFB] border border-slate-200 rounded-xl p-3'>"
+          f"<div class='text-[11px] text-slate-400 mb-1'>네이버 블로그 · 실제 생성된 글</div>"
+          f"<div class='text-sm font-bold text-slate-800 leading-snug'>부산 동구 썬팅업체 후기, "
+          f"포터2 냉동탑차 열차단 시공 팩트정리</div></div>"
+          f"<p class='text-slate-500 text-sm mt-3'>영상은 나레이션·자막까지 · 실제 올린다 생성물입니다.</p></div>")
+
+    # ③ 실측 — 발행 후 순위가 어떻게 움직였나
+    def _tl(date, label, hot=False):
+        dot = "bg-indigo-600" if hot else "bg-slate-300"
+        txt = "text-slate-900 font-extrabold" if hot else "text-slate-600"
+        return (f"<div class='flex items-center gap-3 py-1'>"
+                f"<span class='w-2.5 h-2.5 rounded-full {dot} shrink-0'></span>"
+                f"<span class='text-xs text-slate-400 w-11 shrink-0'>{date}</span>"
+                f"<span class='text-sm {txt}'>{label}</span></div>")
+    s3 = (f"<div class='reveal card-hi p-5'>"
+          f"<div class='flex items-center gap-2 mb-3'>{step.format(3)}"
+          f"<div class='font-bold text-slate-900'>매일 순위를 재드립니다</div></div>"
+          f"<div class='text-sm text-slate-500 mb-2'>‘부산 동구 썬팅업체’ 검색</div>"
+          f"<div class='border-l-2 border-indigo-100 ml-1 pl-3'>"
+          + _tl("7/31", "글 발행")
+          + _tl("8/2", "네이버 블로그검색 <b>12위</b>")
+          + _tl("8/9", "<span class='text-indigo-600 text-lg'>1위</span>", hot=True)
+          + f"</div>"
+          f"<p class='text-slate-500 text-sm mt-3'>발행 9일 만에 1위. 글은 쓰는 날이 아니라 "
+          f"<b class='text-slate-700'>떨어지는 날</b>이 문제라, 떨어지면 고친 글을 먼저 내밉니다.</p>"
+          f"<p class='text-[11px] text-slate-400 mt-1'>자동 발행은 하지 않아요 — 발행 버튼은 언제나 사장님 몫</p>"
+          f"<p class='text-[11px] text-slate-400 mt-1'>실제 이용 가게 · 2026년 8월 실측 · "
+          f"결과는 가게·검색어에 따라 달라요</p></div>")
+
+    # ④ 다음 글감 — 이 루프가 계속 돈다
+    s4 = (f"<div class='reveal card p-5'>"
+          f"<div class='flex items-center gap-2 mb-3'>{step.format(4)}"
+          f"<div class='font-bold text-slate-900'>다음에 쓸 글을 찾아옵니다</div></div>"
+          f"<div class='bg-[#F9FAFB] border border-slate-200 rounded-xl p-3 space-y-2'>"
+          f"<div class='text-[11px] text-slate-400'>먼저 쓰면 좋은 이야기</div>"
+          f"<div class='text-sm text-slate-800 font-semibold leading-snug'>"
+          f"겨울에 시공해도 괜찮은지 궁금해하는 분들이 많아요</div>"
+          f"<div class='text-xs text-slate-400'>아직 이 질문에 답한 글이 없어요</div>"
+          f"<div class='flex gap-1.5 pt-1'>"
+          f"<span class='px-2.5 py-1 rounded-lg bg-indigo-600 text-white text-xs font-bold'>이걸로 쓸래요</span>"
+          f"<span class='px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-500 text-xs'>저희는 안 해요</span>"
+          f"</div></div>"
+          f"<p class='text-slate-500 text-sm mt-3'>손님이 찾는데 답이 없는 자리를 찾아 올려드려요. "
+          f"고르기만 하시면 ①로 돌아갑니다.</p>"
+          f"<p class='text-[11px] text-slate-400 mt-1'>실제 화면 구성 — 글감 내용은 가게마다 달라요</p></div>")
+
+    return (f"<section class='bg-[#F9FAFB] py-16'><div class='max-w-6xl mx-auto px-5'>"
+            f"<h2 class='reveal text-2xl sm:text-3xl font-bold text-center text-slate-900 mb-2'>"
+            f"가입하면 이렇게 <span class='text-indigo-600'>돌아갑니다</span></h2>"
+            f"<p class='reveal text-center text-slate-500 mb-10'>사진 올리는 것 말고는 올린다가 합니다.</p>"
+            f"<div class='grid sm:grid-cols-2 lg:grid-cols-4 gap-4 items-start'>{s1}{s2}{s3}{s4}</div>"
+            f"</div></section>")
+
+
+def _try() -> str:
+    """★ 2026-08-13 사장님 지시 — 두 번째 화면 = 지금 바로 무료로 써보는 자리.
+
+    전환 설계: 처음 온 사장님이 2분(전체 생성 실측 126초)을 기다려주지 않는다.
+    그래서 순서를 바꾼다 —
+      ① 상호만 넣으면 → 지금 내 가게 순위(실데이터)
+      ② 이어서 AI가 **내 가게 이름이 박힌 글 제목**을 즉석으로(짧은 호출 1회)
+      ③ 그게 마음에 들면 전체(글·영상) 생성으로 — 이때 2분은 기꺼이 기다린다
+    '내 것'을 먼저 보여줘야 '나도 써봐야겠다'가 된다.
+    """
+    return f"""
+<section id="try" class="bg-white py-16 border-t border-slate-100">
+ <div class="max-w-4xl mx-auto px-5">
+  <div class="reveal text-center mb-8">
+   <span class="inline-block px-3 py-1 rounded-full bg-[#EEF2FF] text-indigo-600 text-xs font-bold mb-3">가입 없이 · 무료</span>
+   <h2 class="text-2xl sm:text-3xl font-bold text-slate-900">지금 내 가게로 해보세요</h2>
+   <p class="text-slate-500 text-sm mt-2">상호만 넣으면 <b class="text-slate-800">현재 순위</b>와
+    <b class="text-slate-800">지금 쓰면 좋을 글 제목</b>을 바로 보여드려요.</p></div>
+  <div class="reveal max-w-2xl mx-auto bg-white border-2 border-indigo-200 rounded-2xl shadow-sm p-5">
+   <div class="flex gap-1.5 mb-3 text-xs font-bold">
+     <button type="button" id="rc_mlocal" onclick="rcSetMode('local')" class="px-3 py-1.5 rounded-lg border border-indigo-500 bg-indigo-50 text-indigo-700 transition">동네 매장</button>
+     <button type="button" id="rc_mseller" onclick="rcSetMode('seller')" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 transition">온라인 셀러</button></div>
+   <p id="rc_sub" class="text-xs text-slate-400 mb-3">지역·업종·상호만 — 네이버 현재 순위를 바로 확인</p>
+   <div class="flex flex-col sm:flex-row gap-2">
+     <input id="rc_region" placeholder="지역(부산 동구)" class="w-full sm:flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400">
+     <input id="rc_ind" placeholder="업종" class="w-full sm:flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400">
+     <input id="rc_name" placeholder="상호" class="w-full sm:flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400"></div>
+   <button onclick="rankCheck()" class="w-full mt-2.5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition">내 가게 확인하기</button>
+   <div id="rc_pick" class="hidden mt-3"></div>
+   <div id="rc_out" class="text-slate-600 text-sm mt-3"></div>
+   <div id="it_out" class="hidden mt-3"></div>
+  </div>
+  <div class="reveal max-w-2xl mx-auto mt-5">{_hero_demo_card()}</div>
+ </div>
+ <script>
+ // ⚡ 진단이 끝나면, 아직 못 잡은 검색어로 '내 가게용 제목'을 AI가 즉석 생성해 이어 붙인다.
+ //    (2026-08-13) 전체 생성은 2분이라 첫 방문자를 못 잡는다 — 짧은 호출로 '내 것'을 먼저 보여준다.
+ async function instantTitles(){{
+  var box=document.getElementById('it_out'); if(!box) return;
+  var top=window.__rcTop||{{}};
+  var fd=new FormData();
+  fd.append('name',(document.getElementById('rc_name')||{{}}).value||'');
+  fd.append('industry',(document.getElementById('rc_ind')||{{}}).value||'');
+  fd.append('region',(document.getElementById('rc_region')||{{}}).value||'');
+  fd.append('keyword',top.kw||'');
+  box.className='mt-3'; box.innerHTML='<div class="text-xs text-slate-400">지금 쓰면 좋을 글 제목을 만들고 있어요…</div>';
+  try{{
+   var r=await fetch('/api/instant-titles',{{method:'POST',body:fd}});
+   var d=await r.json();
+   if(!d.ok||!(d.titles||[]).length){{ box.className='hidden'; return; }}
+   var lis=d.titles.map(function(t){{
+     return '<div class="flex items-start gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2.5">'
+       +'<span class="text-indigo-500 mt-0.5">✎</span><span class="text-sm text-slate-800 font-semibold">'+
+       t.replace(/[<>]/g,'')+'</span></div>';}}).join('');
+   box.innerHTML='<div class="bg-[#F9FAFB] border border-slate-200 rounded-2xl p-4">'
+     +'<div class="text-xs font-bold text-indigo-600 mb-2">AI가 방금 지은 — 내 가게가 지금 쓰면 좋을 글</div>'
+     +'<div class="space-y-2">'+lis+'</div>'
+     +'<div class="text-[11px] text-slate-400 mt-2">없는 가격·성능은 넣지 않았어요</div>'
+     +'<button type="button" onclick="document.getElementById(\\'herodemo\\').scrollIntoView({{behavior:\\'smooth\\',block:\\'center\\'}})" '
+     +'class="w-full mt-3 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-bold">이 글 전체로 만들어보기 →</button></div>';
+  }}catch(e){{ box.className='hidden'; }}
+ }}
  </script></section>"""
 
 
@@ -1329,7 +1464,14 @@ def _honesty() -> str:
   <h2 class="reveal text-3xl sm:text-4xl font-bold mb-3 text-slate-900">없는 건 <span class="text-indigo-600">지어내지 않습니다</span></h2>
   <p class="reveal text-slate-500 mb-14 max-w-xl mx-auto">허위 콘텐츠는 차라리 안 만드는 게 낫습니다. 손님을 속이면 신뢰를 잃으니까요. <b class="text-slate-700">올린다는 사진과 사장님이 준 정보로만</b> 정직하게 씁니다.</p>
   <div class="grid grid-cols-2 sm:grid-cols-4 gap-6">{cells}</div>
+  <!-- ★ 2026-08-13: 경험 자산 약속(_experience_strip)을 여기로 압축했다. 섹션을 지우면서
+       약속까지 지우면 안 된다 — 이건 꾸밈이 아니라 우리가 지키기로 한 계약이다. -->
   <div class="reveal card p-5 mt-12 flex items-center gap-4 text-left max-w-2xl mx-auto">
+   <span class="shrink-0 w-11 h-11 rounded-xl bg-[#EEF2FF] text-indigo-600 flex items-center justify-center">{_icon('check', 'w-5 h-5')}</span>
+   <div><div class="font-bold text-sm text-slate-800">한 번 답하면, 계속 씁니다</div>
+   <div class="text-xs text-slate-500 mt-0.5">글을 만들 때 그 주제로 딱 한 가지만 여쭤봐요. 답하신 경험은 다음 글에 자동으로 들어가고, 쌓일수록 질문이 줄어듭니다. 답이 없는 주제는 지어내지 않고 사실 기반 글로 먼저 나갑니다.</div></div>
+  </div>
+  <div class="reveal card p-5 mt-4 flex items-center gap-4 text-left max-w-2xl mx-auto">
    <span class="shrink-0 w-11 h-11 rounded-xl bg-[#EEF2FF] text-indigo-600 flex items-center justify-center">{_icon('shield', 'w-5 h-5')}</span>
    <div><div class="font-bold text-sm text-slate-800">SNS 비밀번호는 받지 않습니다</div>
    <div class="text-xs text-slate-500 mt-0.5">채널 연결은 공식 인증(OAuth)으로만 해요. 비밀번호를 달라는 마케팅 업체는 사장님 계정을 통째로 위험에 빠뜨립니다.</div></div>
@@ -1358,12 +1500,15 @@ def render(visits: int = 0, today: int = 0) -> str:
     # gtag는 <head> 안이 구글 권장 위치(서치콘솔 GA 소유확인도 head 기준) — body로 내리지 말 것
     return (_HEAD_META + _ga() + _BODY_OPEN + _seo_jsonld() + _nav()
             + _visit_bar(visits, today)
-            + _hero() + _problem() + _vacantq()
-            + _video() + _copy_compare()
-            + _results() + _rank_loop()
-            + _why_rank() + _briefing_sell()
-            + _experience_strip() + _honesty()
-            + _features() + _modes()
+            # ★ 2026-08-13 사장님 지시: "랜딩이 너저분하다 · 실제로 하는 것만 간단명료하게"
+            #   18섹션 → 8섹션. 순서 = ①무슨 일이 일어나는지(실물 4단계) ②지금 내 가게로
+            #   무료로 해보기 ③진짜 결과물 ④정직 원칙 ⑤요금 ⑥FAQ·문의.
+            #   뺀 것(_problem·_copy_compare·_rank_loop·_why_rank·_briefing_sell·
+            #   _experience_strip·_features·_modes·_vacantq)은 '설명·중복·기능 나열'이다.
+            #   기능 나열은 결정에 필요한 정보가 아니라 이미 결정한 사람이 확인하는 정보다.
+            #   ※ 함수는 지우지 않는다 — 되돌릴 수 있어야 한다.
+            + _hero() + _flow() + _try()
+            + _video() + _honesty()
             + _pricing() + _docs_download() + _faq() + _contact() + _cta() + _footer()
             + _sticky_cta() + _kakao_float() + _FOOT)
 

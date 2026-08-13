@@ -4091,6 +4091,67 @@ def unsub(e: str = "", t: str = ""):
         "<a href='/' style='color:#6366F1'>← 홈으로</a></div>")
 
 
+@app.post("/api/instant-titles")
+async def api_instant_titles(request: Request):
+    """⚡ 즉석 글 제목 제안(2026-08-13 사장님 지시 — 전환 극대화).
+
+    왜: 전체 생성은 실측 126초다. 처음 온 사장님이 2분을 기다려주지 않는다. 그런데
+    '내 가게 이름이 박힌 진짜 결과'를 보는 순간이 가장 강한 전환 장치다.
+    그래서 무거운 생성 전에, 짧은 호출 하나로 **그 가게가 지금 쓰면 좋을 제목**을 낸다.
+
+    정직 게이트: 없는 가격·스펙·경험은 제목에 넣지 않는다. 순위·검색 데이터가 없으면
+    지어내지 않고 빈손으로 돌려준다(빈 배열 + 사유) — 템플릿으로 채우지 않는다.
+    """
+    try:
+        form = await request.form()
+        name = (form.get("name") or "").strip()[:40]
+        industry = (form.get("industry") or "").strip()[:30]
+        region = (form.get("region") or "").strip()[:30]
+        kw = (form.get("keyword") or "").strip()[:40]     # 진단이 찾은 '아직 못 잡은' 검색어
+    except Exception:
+        return JSONResponse({"ok": False, "titles": [], "why": "입력을 읽지 못했습니다"})
+    if not (industry or kw):
+        return JSONResponse({"ok": False, "titles": [], "why": "업종 또는 검색어가 필요합니다"})
+
+    from app import ratelimit
+    ck = f"ititle|{name}|{industry}|{region}|{kw}".lower()
+    hit = ratelimit.cache_get(ck, 6 * 3600)
+    if hit is not None:
+        return JSONResponse(hit)
+    ip = _client_ip(request)
+    if not _is_dev_ip(ip) and not ratelimit.allow(f"ititle:{ip}", per_min=6, per_hour=40):
+        return JSONResponse({"ok": False, "titles": [], "why": "잠시 후 다시 시도해주세요"})
+
+    target = kw or " ".join(x for x in (region, industry) if x)
+    try:
+        import re as _re
+        from app import llm
+        raw = llm.call(
+            "너는 한국 소상공인의 네이버 블로그 글 제목을 짓는 사람이다.\n"
+            f"[가게] {name or '이 가게'}\n[업종] {industry}\n[지역] {region}\n"
+            f"[잡고 싶은 검색어] {target}\n\n"
+            "이 가게가 지금 쓰면 좋을 블로그 글 제목 3개를 지어라.\n"
+            "규칙:\n"
+            "- 검색해서 들어온 손님의 궁금증에 답하는 제목(정보형·근거형)\n"
+            "- 화자는 가게(파는 쪽)다. '내돈내산·직접 써보니' 같은 손님 화자 금지\n"
+            "- 가격·성능·수치를 지어내지 마라. 모르는 것은 쓰지 않는다\n"
+            "- 각 25자 이내, 한 줄에 하나씩, 번호·따옴표·설명 없이 제목만",
+            max_tokens=220)
+        titles = [_re.sub(r"^[\s\-•*\d.)]+", "", ln).strip().strip('"“”')
+                  for ln in (raw or "").splitlines()]
+        titles = [t for t in titles if 6 <= len(t) <= 40][:3]
+    except Exception:
+        logging.getLogger("shopcast").exception("[instant-titles] 생성 실패")
+        return JSONResponse({"ok": False, "titles": [],
+                             "why": "지금은 제안을 만들지 못했어요"})
+    if not titles:
+        # 침묵 폴백 금지 — 템플릿·업종명으로 채우지 않고 빈손 + 사유를 돌려준다
+        return JSONResponse({"ok": False, "titles": [], "why": "제안을 만들지 못했어요"})
+    out = {"ok": True, "titles": titles, "keyword": target}
+    ratelimit.cache_set(ck, out)
+    return JSONResponse(out)
+
+
 @app.post("/api/rank-report")
 async def api_rank_report(request: Request):
     """진단 결과 리드 캡처(2026-08-11 마케팅 A) — 이메일 받아 리포트 발송 + 리드 저장.

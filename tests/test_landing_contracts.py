@@ -292,3 +292,39 @@ def test_demo_cta_states_what_is_actually_shown():
     hero = landing._hero()
     assert "도입부" in hero, "체험이 무엇을 보여주는지(도입부)를 말하지 않는다"
     assert "가입 후" in hero, "완성본·영상이 가입 후라는 경계를 말하지 않는다"
+
+
+# ── 랜딩 재구성 계약 (2026-08-13 사장님 지시: 첫 화면에 전 과정 · 2번째는 무료 · 간단명료) ──
+def test_first_screen_shows_the_whole_loop():
+    """사장님 지시: 가입부터 글·영상 생성, 그 결과가 어떻게 실측되고, 다음에 무슨 글을
+    쓰는지까지가 첫 화면에서 보여야 한다. 설명이 아니라 실물로."""
+    f = landing._flow()
+    assert "사진만 올립니다" in f, "① 사진 단계 누락"
+    assert ".mp4" in f and "실제 생성된 글" in f, "② 실제 영상·글 결과물 누락"
+    assert "1위" in f and "실측" in f, "③ 발행 후 실측 단계 누락"
+    assert "다음에 쓸 글" in f, "④ 다음 글감 단계 누락 — 루프가 끊긴다"
+
+
+def test_second_screen_is_free_trial_with_ai_preview():
+    """2번째 화면은 '지금 내 가게로 무료로'다. 전체 생성은 실측 126초라 첫 방문자를
+    못 잡는다 — 짧은 AI 호출로 '내 가게용 제목'을 먼저 보여준다."""
+    t = landing._try()
+    assert "가입 없이" in t and "무료" in t
+    assert "instantTitles" in t and "/api/instant-titles" in t, "AI 즉석 제안이 빠졌다"
+    assert "없는 가격·성능은 넣지 않았어요" in t, "AI 결과에 정직 고지가 없다"
+
+
+def test_landing_is_not_cluttered():
+    """랜딩이 18섹션·272문단이라 폰에서 20번 넘게 스크롤해야 끝났다(사장님: 너저분하다).
+    섹션 수에 상한을 둔다 — 늘리려면 이 계약을 다시 논의해야 한다."""
+    h = landing.render()
+    n = len(re.findall(r"<section", h))
+    assert n <= 12, f"섹션이 {n}개로 늘었다 — 랜딩이 다시 너저분해진다"
+
+
+def test_removed_sections_kept_their_promises():
+    """섹션을 지우면서 '약속'까지 지우면 안 된다. 꾸밈이 아니라 지키기로 한 계약이다."""
+    h = _html()
+    assert "자동 발행은 하지 않아요" in h, "자동 발행 부인 약속이 사라졌다"
+    assert "실제 화면 구성" in h, "목업 화면에 목업 표기가 사라졌다"
+    assert "한 번 답하면" in h, "경험 자산 약속이 사라졌다"
