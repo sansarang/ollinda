@@ -54,6 +54,9 @@ def _volumes(keywords: list[str]) -> dict:
         return {}
 
 
+from app.services import blogrank as _blogrank
+
+
 def diagnose_rank(industry: str, region: str, name: str, addr: str = "") -> dict:
     """다중 키워드 스캔 결과. 반환:
     {keyword, rank, estimated, headline, subline, cta,
@@ -82,10 +85,29 @@ def diagnose_rank(industry: str, region: str, name: str, addr: str = "") -> dict
             "cta": "올린다로 검색 노출 시작하기",
         }
 
+    # ★ 2026-08-14 사장님 지시 — "자기가 쓴 글이 몇 위에 노출되는지만 제공하면 된다."
+    #   그전까지는 place.rank로 '가게가 검색에 뜨는가'를 봤다. 그건 블로그 글을 한 번도
+    #   안 쓴 사장님에게도 '5위 밖'이라고 말한다 — 당연한 얘기라 아무 정보가 없다.
+    #   알고 싶은 것은 '내가 쓴 글이 어디쯤 있는가'다. 그래서 상호로 그 가게 블로그를 찾고,
+    #   찾으면 **그 블로그의 글**이 각 검색어에서 몇 위인지 본다(글 제목까지 함께 보여준다).
+    #   못 찾으면 순위를 말하지 않는다 — 없는 것을 '5위 밖'이라고 부르지 않는다.
+    my_blog = {}
+    try:
+        my_blog = _blogrank.find_blog_by_name(name) or {}
+    except Exception:
+        my_blog = {}
+    blog_id = my_blog.get("blog_id") or ""
+
     vol = _volumes(keywords)
     scan, any_measured = [], False
     for kw in keywords:
-        rank = place.rank(kw, name, addr=addr)  # addr 있으면 동명 가게 구분(2026-08-12)
+        if blog_id:
+            _r = _blogrank.blog_rank(kw, blog_id)
+            rank = _r.get("rank")
+            _post = {"post_title": _r.get("post_title") or "", "url": _r.get("url") or ""}
+        else:
+            rank = place.rank(kw, name, addr=addr)  # addr 있으면 동명 가게 구분(2026-08-12)
+            _post = {}
         v = vol.get(kw.replace(" ", ""), None)
         if rank is None:
             status = "unknown"
@@ -95,7 +117,7 @@ def diagnose_rank(industry: str, region: str, name: str, addr: str = "") -> dict
         else:
             status = "top"
             any_measured = True
-        scan.append({"keyword": kw, "rank": rank, "volume": v, "status": status})
+        scan.append({"keyword": kw, "rank": rank, "volume": v, "status": status, **_post})
 
     caught = [s for s in scan if s["status"] == "top"]
     missing = [s for s in scan if s["status"] == "missing"]
@@ -119,21 +141,35 @@ def diagnose_rank(industry: str, region: str, name: str, addr: str = "") -> dict
         return f"(월 {v:,}회 검색)" if v else ""
 
     if caught:
-        lead = f"'{best['keyword']}' {best['rank']}위"
-        more = f" 외 {len(caught) - 1}개 키워드 상위 노출 중" if len(caught) > 1 else " 상위 노출 중!"
+        if blog_id:
+            _t = (best.get("post_title") or "").strip()
+            _t = (_t[:26] + "…") if len(_t) > 27 else _t
+            lead = (f"「{_t}」 글이 '{best['keyword']}'에서 {best['rank']}위"
+                    if _t else f"'{best['keyword']}' {best['rank']}위")
+        else:
+            lead = f"'{best['keyword']}' {best['rank']}위"
+        more = f" · 외 {len(caught) - 1}개 검색어에도 노출 중" if len(caught) > 1 else ""
         headline = f"🎯 {lead}{more}"
+    elif blog_id:
+        headline = f"'{my_blog.get('blog_name') or name}' 글이 아직 5위 안에는 없어요 — 기회가 큽니다"
     else:
-        headline = "아직 상위 5위 안에 든 키워드가 없어요 — 기회가 큽니다"
+        # ★ 블로그를 못 찾았으면 순위를 말하지 않는다. 글을 안 쓴 사람에게 '5위 밖'은
+        #   당연한 얘기이고, 그걸 성적표처럼 보여주면 없는 것을 있는 것처럼 말하는 셈이다.
+        headline = "아직 검색에 잡히는 블로그 글이 없어요"
 
     # 놓치는 키워드(검색량 큰 순)로 손실 프레이밍
     miss_sorted = sorted(missing, key=lambda s: -(s["volume"] or 0))
-    if miss_sorted:
+    if not blog_id:
+        # 블로그를 못 찾은 사장님 — 순위 얘기가 아니라 '무엇이 없는지'를 말한다.
+        sub = ("이 상호로 쓰신 블로그 글을 찾지 못했어요. 글을 올리기 시작하면 "
+               "그 글이 검색 몇 위인지 매일 확인해 알려드려요.")
+    elif miss_sorted:
         top_miss = miss_sorted[0]
-        sub = f"'{top_miss['keyword']}'{_mv(top_miss['volume'])}는 아직 상위 5위 밖이에요."
+        sub = f"'{top_miss['keyword']}'{_mv(top_miss['volume'])}에는 아직 내 글이 안 보여요."
         if missed_volume:
-            sub += f" 5위 밖 키워드 합계 월 {missed_volume:,}회 검색을 놓치는 중."
+            sub += f" 안 잡힌 검색어 합계 월 {missed_volume:,}회를 놓치는 중."
     else:
-        sub = "잡은 키워드를 더 넓혀 상위노출을 늘릴 수 있어요."
+        sub = "잡은 검색어를 더 넓힐 수 있어요."
 
     cta = (f"놓치는 검색 월 {missed_volume:,}회 잡으러 가기" if missed_volume
            else ("상위 유지·강화하기" if top_rank == 1 else "상위노출 시작하기"))
@@ -199,7 +235,7 @@ def diagnose_product_rank(product_kw: str, store: str, brand: str = "") -> dict:
         else:
             status = "top"
             any_measured = True
-        scan.append({"keyword": kw, "rank": rank, "volume": v, "status": status})
+        scan.append({"keyword": kw, "rank": rank, "volume": v, "status": status, **_post})
 
     caught = [s for s in scan if s["status"] == "top"]
     missing = [s for s in scan if s["status"] == "missing"]

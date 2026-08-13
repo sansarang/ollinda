@@ -638,7 +638,15 @@ def _hero() -> str:
    try{{var r=await fetch('/api/rank-check',{{method:'POST',body:fd}});var d=await r.json();
    if(d.error){{o.textContent=d.error;return;}}
    var rows='';
-   (d.caught||[]).forEach(function(s){{rows+='<div class="flex justify-between bg-slate-50 rounded-lg px-3 py-1.5 mt-1.5"><span class="text-slate-700">'+s.keyword+'</span><span class="text-emerald-600 font-bold">'+s.rank+'위</span></div>';}});
+   // ★ 2026-08-14: 잡힌 검색어에는 '어떤 글이' 잡혔는지 함께 보여준다.
+   //   사장님이 알고 싶은 건 '내가 쓴 그 글'이 어디 있느냐다(순위 숫자만으론 남 얘기 같다).
+   (d.caught||[]).forEach(function(s){{
+     var t=(s.post_title||'').replace(/[<>]/g,'');
+     rows+='<div class="bg-slate-50 rounded-lg px-3 py-2 mt-1.5">'
+       +'<div class="flex justify-between"><span class="text-slate-700">'+s.keyword+'</span>'
+       +'<span class="text-emerald-600 font-bold">'+s.rank+'위</span></div>'
+       +(t?('<div class="text-xs text-slate-400 mt-0.5 truncate">「'+t+'」</div>'):'')
+       +'</div>';}});
    (d.missing||[]).forEach(function(s){{var v=s.volume?(' <span class="text-slate-400">월 '+s.volume.toLocaleString()+'회</span>'):'';rows+='<div class="flex justify-between bg-slate-50 rounded-lg px-3 py-1.5 mt-1.5"><span class="text-slate-500">'+s.keyword+v+'</span><span class="text-slate-400 font-bold">'+(d.miss_label||'미노출')+'</span></div>';}});
    var mk='';
    window.__rcTop=(d.targets&&d.targets.length)?{{kw:d.targets[0].keyword,vol:d.targets[0].volume||0}}:null;

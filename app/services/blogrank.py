@@ -126,6 +126,41 @@ def blog_rank(keyword: str, blog_id: str, limit: int = TOP_N) -> dict:
     return {"rank": 0, "url": "", "post_title": "", "checked": len(items)}
 
 
+def find_blog_by_name(store_name: str, limit: int = 20) -> dict:
+    """상호로 '그 가게가 직접 쓰는 블로그'를 찾는다(2026-08-14 사장님 지시).
+
+    왜 필요한가: 진단이 '가게가 검색에 뜨는가'만 보고 있었다. 사장님 말씀대로
+    **블로그 글을 안 쓴 사람에게 순위를 말하는 것은 의미가 없다.** 알고 싶은 것은
+    '내가 쓴 글이 몇 위에 노출되는가'다. 그러려면 먼저 그 가게의 블로그를 찾아야 한다.
+
+    판정은 자사 식별자 매칭만 쓴다(헌법 3장) — 블로그 이름이 상호와 맞아야 한다.
+    상호를 '언급한' 남의 후기 블로그를 내 블로그로 잡으면 허위 양성이다.
+    못 찾으면 빈 dict — 지어내지 않는다.
+    """
+    nm = (store_name or "").strip()
+    if not (configured() and len(nm) >= 2):
+        return {}
+    try:
+        from app.services.place import _name_match
+    except Exception:
+        return {}
+    best: dict = {}
+    for it in _search_blog(nm, limit):
+        bid = _item_blog_id(it)
+        bname = (it.get("bloggername") or "").strip()
+        if not (bid and bname):
+            continue
+        if not _name_match(nm, bname):          # 블로그 이름 = 자사 식별자
+            continue
+        if not best:
+            best = {"blog_id": bid, "blog_name": bname}
+        elif best["blog_id"] == bid:
+            continue
+    if best:
+        _log.info("[blogrank] 상호→블로그 %r → %s(%s)", nm, best["blog_id"], best["blog_name"])
+    return best
+
+
 def _norm_post_url(u: str) -> str:
     """포스트 URL 정규화 — blog.naver.com/{id}/{글번호} 꼴로(모바일 m. / 쿼리 제거)."""
     u = (u or "").strip().split("?")[0].rstrip("/")

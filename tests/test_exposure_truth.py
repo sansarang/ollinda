@@ -73,11 +73,35 @@ def test_block_name_not_exposed_until_verified(monkeypatch):
 
 def test_miss_label_says_out_of_top5_not_missing(monkeypatch):
     """'미노출'은 아예 없는 것처럼 오해된다 — 실제로는 5위까지만 스캔한 결과다(2026-08-12 지적).
-    정직 원칙: 측정 범위를 그대로 말한다."""
+    정직 원칙: 측정 범위를 그대로 말한다.
+
+    ★ 2026-08-14 계약 정밀화 — 이 규칙은 '순위를 말할 때'의 규칙이다. 블로그 글이 없어
+      순위 주장 자체를 하지 않는 경우까지 '5위' 표기를 강제하면, 없는 측정을 있는 것처럼
+      말하게 된다(사장님 지적: 글을 안 쓴 사람에게 순위는 의미가 없다).
+      그래서 '내 글을 찾은 경우'로 조건을 좁히고, 못 찾은 경우는 별도 계약으로 검증한다.
+    """
     from app.services import diagnose
+    import app.services.blogrank as br
     import app.services.place as pl
+    monkeypatch.setattr(br, "find_blog_by_name", lambda n, limit=20: {"blog_id": "myblog", "blog_name": n})
+    monkeypatch.setattr(br, "blog_rank", lambda kw, bid, limit=5: {"rank": 0, "url": "", "post_title": "", "checked": 5})
     monkeypatch.setattr(pl, "search", lambda kw, limit=5: [{"name": "남의가게", "address": "서울"}])
     r = diagnose.diagnose_rank("썬팅", "부산 동구", "내가게")
     assert r.get("miss_label") == "상위 5위 밖", "측정 범위를 숨긴 라벨(미노출) 회귀"
     assert "미노출" not in r["subline"], "본문이 여전히 '미노출'로 단정"
     assert "5위" in r["subline"] or "5위" in r["headline"], "범위 표기 사라짐"
+
+
+def test_no_blog_means_no_rank_claim(monkeypatch):
+    """사장님 지적(2026-08-14): "블로그 글을 쓰지도 않은 사람이 뭘 순위를 알겠어?"
+    맞다. 글이 없으면 순위는 당연히 없고, 그걸 '5위 밖'이라고 부르면 없는 것을
+    있는 것처럼 말하는 셈이다. 순위 대신 '무엇이 없는지'를 말해야 한다."""
+    from app.services import diagnose
+    import app.services.blogrank as br
+    import app.services.place as pl
+    monkeypatch.setattr(br, "find_blog_by_name", lambda n, limit=20: {})   # 블로그 없음
+    monkeypatch.setattr(pl, "search", lambda kw, limit=5: [{"name": "남의가게", "address": "서울"}])
+    r = diagnose.diagnose_rank("썬팅", "부산 동구", "내가게")
+    assert "5위" not in r["headline"], "글도 없는데 순위를 말한다"
+    assert "블로그" in r["headline"] or "글" in r["headline"], "무엇이 없는지 말하지 않는다"
+    assert "찾지 못했" in r["subline"] or "없" in r["subline"]
