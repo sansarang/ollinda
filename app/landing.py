@@ -100,6 +100,8 @@ body{font-family:'Pretendard','Apple SD Gothic Neo',system-ui,sans-serif;-webkit
 .card-hi{background:#F5F3FF;border:1px solid #DDD6FE;border-radius:16px}   /* 강조 카드(연보라) */
 /* 무료 결과 확장(가로 레이아웃): 좁은 위젯 칸을 탈출해 뷰포트 기준 넓게(최대 1160px) 중앙 정렬 */
 .result-expanded{width:100vw;margin-left:calc(50% - 50vw);padding:0 16px}
+/* 진단 결과가 뜨면 중복 가입 버튼을 감춘다 — 결과 안에 주 CTA가 이미 있다(2026-08-14) */
+body.has-result .hide-on-result{display:none !important}
 .result-inner{max-width:1160px;margin:0 auto}
 /* 채널 카드 그리드: 데스크탑 auto-fit(화면 폭 따라 3~4열 자동), 모바일(<768px)은 가로 스와이프 유지 */
 @media(min-width:768px){.tz-grid{display:grid !important;
@@ -579,7 +581,11 @@ def _hero() -> str:
   <!-- ★ 2026-08-13 사장님 지적: 처음엔 '3초 만에 결과 보기'라고 썼다. 실측하니 126초였고,
        보여주는 것도 완성본이 아니라 블로그 글 도입부였다. 날조 배지 2건을 지운 자리에
        내가 세 번째 거짓말을 넣은 셈이다. 걸리는 시간과 보여주는 범위를 그대로 적는다. -->
-  <div class="reveal mt-6 flex flex-col items-center gap-3">
+  <!-- ★ 2026-08-14 — 진단 결과가 뜨면 이 구역은 역할이 끝난다(hide-on-result).
+       실측: 결과 화면에 가입 버튼이 한 화면에 7개(모바일)·6개(PC)까지 겹쳤다.
+       오늘 결과 CTA를 새로 넣으면서 원래 있던 버튼을 안 지운 탓이다.
+       업계 권장은 '페이지당 주요 CTA 하나' — 선택지가 많으면 사람은 고르는 대신 멈춘다. -->
+  <div class="reveal mt-6 flex flex-col items-center gap-3 hide-on-result">
    <p class="text-xs text-slate-400">사진까지 올리면 <b class="text-slate-500">블로그 글 도입부</b>도 만들어 드려요 ·
     약 2분 · 완성본과 영상은 가입 후 무료 2회</p>
    <div class="flex flex-col sm:flex-row gap-2 items-center mt-2">
@@ -587,7 +593,7 @@ def _hero() -> str:
     <a href="/login/kakao" class="flex items-center justify-center px-6 py-2.5 rounded-xl font-bold text-sm" style="background:#FEE500;color:#191600">카카오로 무료 시작</a>{_naver_hero_btn()}
     <a href="/login/google" class="flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl font-bold text-sm bg-white border border-slate-200 text-slate-700">{_GOOGLE_G} 구글로 시작</a></div>
   </div>
-  <p class="reveal mt-4 text-sm text-slate-500">이미 회원이면 <a href="/login" class="inline-block px-1 py-1 text-indigo-600 font-bold underline underline-offset-4">회원 로그인</a></p>
+  <p class="reveal mt-4 text-sm text-slate-500 hide-on-result">이미 회원이면 <a href="/login" class="inline-block px-1 py-1 text-indigo-600 font-bold underline underline-offset-4">회원 로그인</a></p>
   <!-- ★ 2026-08-13: 순위진단·무료체험 위젯은 두 번째 화면(_try)으로 옮겼다.
        첫 화면은 '무슨 일이 일어나는지'만 보여준다 — 입력칸 여섯 개가 첫 화면에 있으면
        읽기도 전에 일을 시키는 꼴이라 사장님이 그냥 나간다. -->
@@ -705,9 +711,8 @@ def _hero() -> str:
    o.innerHTML='<b class="text-slate-900">'+d.headline+'</b>'+rows
      +'<div class="text-slate-400 mt-2">'+d.subline+'</div>'
      +'<a href="'+_href+'" class="block w-full text-center bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl px-4 py-3.5 mt-4 font-extrabold text-[15px] leading-snug transition shadow-lg shadow-indigo-200">'+_cta+'</a>'
-     +'<div class="text-center text-xs text-slate-400 mt-1.5">카카오로 3초 · 카드 없이 · 무료 2회</div>'
-     +'<div class="text-center mt-1.5"><a href="'+_href.replace("/login/kakao","/login/google")+'" class="text-xs text-slate-400 underline">구글로 가입하기</a>'
-     +' · <button type="button" onclick="fillDemo()" class="text-xs text-slate-400 underline">가입 없이 맛보기</button></div>'
+     +'<div class="text-center text-xs text-slate-400 mt-1.5">카카오로 3초 · 카드 없이 · 무료 2회 · '
+     +'<a href="'+_href.replace("/login/kakao","/login/google")+'" class="underline">구글로</a></div>'
      // ★ B. 이메일 회수(2026-08-14) — 진단은 봤는데 가입 안 하는 사람이 대다수다.
      //   대화형 도구의 높은 전환은 '결과를 받아보시겠어요?' 지점에서 나온다(조사).
      //   가입(계정 연동)보다 이메일 한 줄이 마찰이 훨씬 낮고, 드립 메일이 이미 돈다.
@@ -718,8 +723,9 @@ def _hero() -> str:
      +'<button onclick="sendReport()" class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-sm whitespace-nowrap">받기</button></div>'
      +'<div id="rc_leadmsg" class="text-xs text-emerald-600 mt-1.5"></div></div>'
      + mk
-     +'<a href="/login/kakao" class="inline-block text-slate-400 underline text-xs mt-3">계정 만들고 바로 시작하기 →</a>'
+     +'<div class="text-center mt-3"><button type="button" onclick="fillDemo()" class="text-xs text-slate-400 underline">아직 결심 안 되셨으면 — 가입 없이 맛보기</button></div>'
      +(d.estimated?' <span class="text-slate-400 text-xs">(추정)</span>':'');
+   document.body.classList.add('has-result');   // 중복 가입 버튼 감추기(hide-on-result)
    // 가게를 못 찾은 경우에만 지역·업종을 묻는다(찾았으면 물을 이유가 없다)
    try{{ if((d.headline||'').indexOf('찾지 못했')>=0 && typeof rcNeedMore==='function') rcNeedMore(); }}catch(e){{}}
    // ⚡ 진단이 끝나면 곧바로 '내 가게용 제목'을 AI가 지어 이어 붙인다(2026-08-13).
@@ -1419,7 +1425,8 @@ def _sticky_cta() -> str:
     env(safe-area-inset-bottom)은 브라우저 UI를 포함하지 않으므로 +12px 여유를 더해
     터치 타겟 전체를 주소창 위로 띄운다. onclick의 location.href는 폴백(기본 내비 실패 대비),
     href는 그대로 유지(JS 꺼져도 동작)."""
-    return ('<div class="fixed bottom-0 left-0 right-0 z-50 sm:hidden bg-white/95 backdrop-blur border-t border-slate-200 px-3 pt-3" '
+    # ★ 진단 결과가 뜨면 숨긴다 — 결과 안의 주 CTA와 완전히 중복이다(2026-08-14).
+    return ('<div class="fixed bottom-0 left-0 right-0 z-50 sm:hidden hide-on-result bg-white/95 backdrop-blur border-t border-slate-200 px-3 pt-3" '
             'style="padding-bottom:max(28px,calc(env(safe-area-inset-bottom) + 12px))">'
             '<a href="/login/kakao" '
             'onclick="trackEv(\'sticky_cta\',{});window.location.href=\'/login/kakao\';return false;" '

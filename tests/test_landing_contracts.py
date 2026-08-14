@@ -35,7 +35,7 @@ def test_rendered_tailwind_classes_covered_by_built_css():
     """렌더 HTML의 Tailwind 유틸리티가 빌드 CSS에 실재해야 한다(누락=화면 깨짐).
     인라인 <style>의 커스텀 클래스는 제외."""
     custom_prefixes = ("reveal", "card", "hero-", "rise", "baclip", "badiv",
-                      "result-", "iq-opt", "tz-grid")
+                      "result-", "iq-opt", "tz-grid", "hide-on-result")
     h = landing.render() + landing.terms() + landing.privacy()
     css = open(os.path.join(os.path.dirname(landing.__file__), "static", "landing.css")).read()
     classes = set()
@@ -461,10 +461,16 @@ def test_email_capture_sits_right_after_result():
     아래 있어야 한다."""
     h = landing.render()
     assert "이 결과를 이메일로 받아두세요" in h, "결과 직후 이메일 회수가 없다"
-    i_res = h.find("d.headline")
-    i_mail = h.find("이 결과를 이메일로 받아두세요")
-    i_login = h.find("계정 만들고 바로 시작하기")
-    assert 0 < i_res < i_mail < i_login, "이메일 회수가 가입 링크보다 뒤에 있다(마찰 순서 역전)"
+    # ★ 소스 위치가 아니라 '화면에 그려지는 순서'로 재야 한다 — CTA 문구는 innerHTML 조립보다
+    #   위에서 변수로 만들어지므로 소스 순서로 재면 늘 어긋난다(2026-08-14 오판).
+    i0 = h.find("o.innerHTML=")
+    assert i0 > 0, "결과 조립부를 못 찾았다"
+    seg = h[i0:i0 + 3000]
+    order = [seg.find(x) for x in ("d.headline", "'+_cta+'", "이 결과를 이메일로 받아두세요",
+                                   "아직 결심 안 되셨으면")]
+    assert all(v >= 0 for v in order), f"결과 구성요소가 빠졌다: {order}"
+    assert order == sorted(order), \
+        f"마찰 순서(결과→가입→이메일→출구)가 어긋났다: {order}"
 
 
 def test_pricing_table_is_collapsed_until_asked():
@@ -494,3 +500,40 @@ def test_ai_titles_are_clickable_and_carry_that_title():
     assert i > 0
     seg = h[i:i + 700]
     assert "<a href=" in seg and "cursor-pointer" in seg, "제목 카드가 여전히 클릭 불가다"
+
+
+def test_result_screen_has_one_primary_cta_and_one_exit():
+    """2026-08-14 실측 — 진단 결과 화면에 가입 버튼이 한 화면에 7개(모바일)·6개(PC)였다.
+    오늘 결과 CTA를 새로 넣으면서 원래 있던 버튼을 안 지운 탓이다. 계속 더하기만 했다.
+
+    업계 권장은 '페이지당 주요 CTA 하나'. 선택지가 많으면 사람은 고르는 대신 멈춘다.
+    → 결과가 뜨면 중복 진입로는 감춘다(hide-on-result). 남는 것은
+      [주 CTA 하나] + [아직 결심 못 한 사람의 출구 하나]뿐이다.
+    """
+    h = landing.render()
+    # 감추는 장치가 살아 있는가
+    assert "body.has-result .hide-on-result" in h, "결과 화면에서 중복 버튼을 감추는 규칙이 없다"
+    assert "classList.add('has-result')" in h, "결과가 떠도 감추기가 발동하지 않는다"
+    for frag in ("이미 마음 정하셨다면", "이미 회원이면"):
+        i = h.find(frag)
+        assert i > 0, frag
+        # 그 블록이 hide-on-result 표식을 달고 있는지(앞쪽 태그에서 확인)
+        assert "hide-on-result" in h[max(0, i - 700):i], f"'{frag}' 구역이 결과 화면에서 안 감춰진다"
+    assert "sm:hidden hide-on-result" in h, "하단 고정 배너가 결과 화면에서 안 감춰진다"
+
+    # 결과 안에는 주 CTA 1개 + 출구 1개만
+    i = h.find("무료 가입하고")
+    seg = h[i:i + 2600]
+    assert seg.count("fillDemo()") == 1, "결과 안 '가입 없이' 출구가 하나가 아니다"
+    assert "계정 만들고 바로 시작하기" not in h, "중복 가입 링크가 되살아났다"
+
+
+def test_signup_entry_points_are_bounded():
+    """진입로 총량에 상한을 둔다 — 하나씩 늘리다 보면 오늘처럼 7개가 된다."""
+    import re as _re
+    h = landing.render()
+    # 화면에 글자로 보이는 '시작/가입' 버튼·링크 개수(정적 마크업 기준)
+    n = len(_re.findall(r"<(?:a|button)[^>]*>(?:(?!</(?:a|button)>).)*?(?:무료 시작|구글로 시작|무료로 시작하기|가입)", h, _re.S))
+    # 소스 기준 개수(JS 분기 포함). 지금 값에 못을 박는다 — 하나라도 더하면 실패한다.
+    # 오늘 이 값이 조용히 늘어 결과 화면에 7개가 겹쳤다. 늘리기 전에 지울 것부터 찾아라.
+    assert n <= 9, f"가입 진입로가 {n}개로 늘었다 — 늘리기 전에 지울 것부터 찾아라"
