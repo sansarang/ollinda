@@ -701,6 +701,7 @@ def _hero() -> str:
    if(d.blog_id) _q.set('blog', d.blog_id);
    if(_gap) _q.set('kw', _gap);
    var _href='/login/kakao?'+_q.toString();
+   window.__signupHref=_href;          // AI 제목 카드가 같은 링크(가게 정보 포함)를 재사용한다
    o.innerHTML='<b class="text-slate-900">'+d.headline+'</b>'+rows
      +'<div class="text-slate-400 mt-2">'+d.subline+'</div>'
      +'<a href="'+_href+'" class="block w-full text-center bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl px-4 py-3.5 mt-4 font-extrabold text-[15px] leading-snug transition shadow-lg shadow-indigo-200">'+_cta+'</a>'
@@ -916,16 +917,25 @@ def _try() -> str:
    var r=await fetch('/api/instant-titles',{{method:'POST',body:fd}});
    var d=await r.json();
    if(!d.ok||!(d.titles||[]).length){{ box.className='hidden'; return; }}
+   // ★ 2026-08-14 사장님 지적 — 제목이 카드처럼 생겨서 눌릴 것 같은데 죽어 있었다
+   //   (onclick 없음·href 없음·cursor auto). 눌러도 아무 일도 안 일어났다.
+   //   여기가 가장 뜨거운 순간이다 — 내 가게 이름이 든 제목을 방금 봤다.
+   //   각 제목을 '그 글부터 만들어달라'는 가입 링크로 만든다(제목을 kw로 실어 보낸다).
+   var _base=(window.__signupHref||'/login/kakao');
+   var _sep=(_base.indexOf('?')>=0?'&':'?');
    var lis=d.titles.map(function(t){{
-     return '<div class="flex items-start gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2.5">'
-       +'<span class="text-indigo-500 mt-0.5">✎</span><span class="text-sm text-slate-800 font-semibold">'+
-       t.replace(/[<>]/g,'')+'</span></div>';}}).join('');
+     var tx=t.replace(/[<>]/g,'');
+     var href=_base+_sep+'kw='+encodeURIComponent(tx);
+     return '<a href="'+href+'" class="flex items-start gap-2 bg-white border border-slate-200 '
+       +'hover:border-indigo-400 hover:bg-indigo-50 rounded-xl px-3 py-2.5 cursor-pointer transition">'
+       +'<span class="text-indigo-500 mt-0.5">✎</span>'
+       +'<span class="text-sm text-slate-800 font-semibold flex-1">'+tx+'</span>'
+       +'<span class="text-xs text-indigo-500 font-bold whitespace-nowrap mt-0.5">이 글로 →</span></a>';}}).join('');
    box.innerHTML='<div class="bg-[#F9FAFB] border border-slate-200 rounded-2xl p-4">'
-     +'<div class="text-xs font-bold text-indigo-600 mb-2">AI가 방금 지은 — 내 가게가 지금 쓰면 좋을 글</div>'
+     +'<div class="text-xs font-bold text-indigo-600 mb-1">AI가 방금 지은 — 내 가게가 지금 쓰면 좋을 글</div>'
+     +'<div class="text-[11px] text-slate-400 mb-2">누르시면 그 글부터 무료로 만들어드려요</div>'
      +'<div class="space-y-2">'+lis+'</div>'
-     +'<div class="text-[11px] text-slate-400 mt-2">없는 가격·성능은 넣지 않았어요</div>'
-     +'<button type="button" onclick="document.getElementById(\\'herodemo\\').scrollIntoView({{behavior:\\'smooth\\',block:\\'center\\'}})" '
-     +'class="w-full mt-3 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-bold">이 글 전체로 만들어보기 →</button></div>';
+     +'<div class="text-[11px] text-slate-400 mt-2">없는 가격·성능은 넣지 않았어요</div></div>';
   }}catch(e){{ box.className='hidden'; }}
  }}
  </script></section>"""

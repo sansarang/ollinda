@@ -476,3 +476,19 @@ def test_pricing_table_is_collapsed_until_asked():
     i_anchor = h.find("월 38~77만원")
     i_details = h.find("요금제 3가지 자세히 보기")
     assert 0 < i_anchor < i_details, "앵커가 요금표보다 뒤에 있다"
+
+
+def test_ai_titles_are_clickable_and_carry_that_title():
+    """2026-08-14 사장님 지적 — AI 제목이 카드처럼 생겼는데 눌러도 아무 일도 안 일어났다
+    (실측: onclick 없음 · href 없음 · cursor auto · 클릭해도 스크롤·URL 그대로).
+    내 가게 이름이 든 제목을 방금 본 순간이 가장 뜨겁다 — 그 자리를 죽여두면 안 된다.
+    각 제목은 '그 글부터 만들어달라'는 가입 링크여야 하고, 그 제목을 kw로 실어야 한다."""
+    h = landing.render()
+    assert "window.__signupHref" in h, "제목 카드가 가입 링크를 재사용하지 않는다"
+    assert "'kw='+encodeURIComponent" in h, "누른 제목을 실어 보내지 않는다"
+    assert "누르시면 그 글부터" in h, "누를 수 있다는 안내가 없다"
+    # 카드가 <a>여야 한다 — div면 눌러도 아무 일도 안 일어난다
+    i = h.find("d.titles.map")
+    assert i > 0
+    seg = h[i:i + 700]
+    assert "<a href=" in seg and "cursor-pointer" in seg, "제목 카드가 여전히 클릭 불가다"
