@@ -485,7 +485,9 @@ def test_ai_titles_are_clickable_and_carry_that_title():
     각 제목은 '그 글부터 만들어달라'는 가입 링크여야 하고, 그 제목을 kw로 실어야 한다."""
     h = landing.render()
     assert "window.__signupHref" in h, "제목 카드가 가입 링크를 재사용하지 않는다"
-    assert "'kw='+encodeURIComponent" in h, "누른 제목을 실어 보내지 않는다"
+    # ★ 2026-08-14 실측 — 세 제목이 전부 같은 kw를 실어 보냈다(기존 kw가 이미 있어 무시됨).
+    #   3개를 보여주고 고르게 해놓고 선택이 반영 안 되면 보여준 의미가 없다.
+    assert "searchParams.set('kw'" in h, "고른 제목이 링크에 반영되지 않는다(같은 키 중복)"
     assert "누르시면 그 글부터" in h, "누를 수 있다는 안내가 없다"
     # 카드가 <a>여야 한다 — div면 눌러도 아무 일도 안 일어난다
     i = h.find("d.titles.map")

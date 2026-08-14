@@ -921,11 +921,15 @@ def _try() -> str:
    //   (onclick 없음·href 없음·cursor auto). 눌러도 아무 일도 안 일어났다.
    //   여기가 가장 뜨거운 순간이다 — 내 가게 이름이 든 제목을 방금 봤다.
    //   각 제목을 '그 글부터 만들어달라'는 가입 링크로 만든다(제목을 kw로 실어 보낸다).
-   var _base=(window.__signupHref||'/login/kakao');
-   var _sep=(_base.indexOf('?')>=0?'&':'?');
+   // ★ 2026-08-14 실측 결함 — 세 제목이 전부 같은 kw를 실어 보냈다.
+   //   결과 CTA가 만든 링크에 이미 kw가 들어 있어, 뒤에 또 붙이면 같은 키가 두 번이 되고
+   //   서버는 앞의 값을 읽는다. 고른 제목이 무시되면 3개를 보여준 의미가 없다.
+   //   → 기존 kw를 지우고 '고른 제목'으로 다시 세운다.
+   var _u=new URL((window.__signupHref||'/login/kakao'), location.origin);
    var lis=d.titles.map(function(t){{
      var tx=t.replace(/[<>]/g,'');
-     var href=_base+_sep+'kw='+encodeURIComponent(tx);
+     _u.searchParams.set('kw', tx);          // set = 있으면 갈아끼운다
+     var href=_u.pathname+'?'+_u.searchParams.toString();
      return '<a href="'+href+'" class="flex items-start gap-2 bg-white border border-slate-200 '
        +'hover:border-indigo-400 hover:bg-indigo-50 rounded-xl px-3 py-2.5 cursor-pointer transition">'
        +'<span class="text-indigo-500 mt-0.5">✎</span>'
