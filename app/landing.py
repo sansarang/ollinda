@@ -660,7 +660,20 @@ def _hero() -> str:
        +'<span class="text-emerald-600 font-bold">'+s.rank+'위</span></div>'
        +(t?('<div class="text-xs text-slate-400 mt-0.5 truncate">「'+t+'」</div>'):'')
        +'</div>';}});
-   (d.missing||[]).forEach(function(s){{var v=s.volume?(' <span class="text-slate-400">월 '+s.volume.toLocaleString()+'회</span>'):'';rows+='<div class="flex justify-between bg-slate-50 rounded-lg px-3 py-1.5 mt-1.5"><span class="text-slate-500">'+s.keyword+v+'</span><span class="text-slate-400 font-bold">'+(d.miss_label||'미노출')+'</span></div>';}});
+   // ★ 2026-08-14: 블로그가 없는 사장님에게는 순위를 말하지 않는다.
+   //   '글이 없어요'라고 해놓고 아래에서 '상위 5위 밖'이라 하면 없는 글의 순위를 말하는 셈이다.
+   //   그분에게 저 줄은 순위표가 아니라 '손님이 이렇게 찾고 있다'는 기회 목록이어야 한다.
+   if(d.no_blog){{
+     if((d.missing||[]).length)
+       rows+='<div class="text-xs font-bold text-slate-500 mt-3 mb-1">손님들이 이렇게 찾고 있어요</div>';
+     (d.missing||[]).forEach(function(s){{
+       var v=s.volume?('월 '+s.volume.toLocaleString()+'회'):'';
+       rows+='<div class="flex justify-between bg-slate-50 rounded-lg px-3 py-2 mt-1.5">'
+         +'<span class="text-slate-700">'+s.keyword+'</span>'
+         +'<span class="text-indigo-600 font-bold text-sm">'+v+'</span></div>';}});
+   }} else {{
+     (d.missing||[]).forEach(function(s){{var v=s.volume?(' <span class="text-slate-400">월 '+s.volume.toLocaleString()+'회</span>'):'';rows+='<div class="flex justify-between bg-slate-50 rounded-lg px-3 py-1.5 mt-1.5"><span class="text-slate-500">'+s.keyword+v+'</span><span class="text-slate-400 font-bold">'+(d.miss_label||'미노출')+'</span></div>';}});
+   }}
    var mk='';
    window.__rcTop=(d.targets&&d.targets.length)?{{kw:d.targets[0].keyword,vol:d.targets[0].volume||0}}:null;
    (d.targets||[]).forEach(function(tg){{var v=tg.volume?(' (월 '+tg.volume.toLocaleString()+'회)'):'';

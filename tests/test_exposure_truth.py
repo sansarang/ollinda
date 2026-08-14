@@ -105,3 +105,32 @@ def test_no_blog_means_no_rank_claim(monkeypatch):
     assert "5위" not in r["headline"], "글도 없는데 순위를 말한다"
     assert "블로그" in r["headline"] or "글" in r["headline"], "무엇이 없는지 말하지 않는다"
     assert "찾지 못했" in r["subline"] or "없" in r["subline"]
+
+
+def test_no_blog_rows_are_opportunity_not_rank(monkeypatch):
+    """2026-08-14 캡쳐 검토에서 발견 — 제목은 "블로그 글이 없어요"라고 해놓고
+    바로 아래 표에서 '상위 5위 밖'이라 순위를 말하고 있었다. 읽는 사람에겐
+    "내 글이 5위 밖"으로 읽힌다. 없는 글의 순위를 있는 것처럼 말한 셈이다.
+    글이 없으면 저 줄은 순위표가 아니라 '손님이 이렇게 찾고 있다'는 기회 목록이다."""
+    from app.services import diagnose
+    import app.services.blogrank as br
+    import app.services.place as pl
+    monkeypatch.setattr(br, "find_blog_by_name", lambda n, limit=20: {})
+    monkeypatch.setattr(pl, "search", lambda kw, limit=5: [{"name": "남의가게", "address": "서울"}])
+    r = diagnose.diagnose_rank("썬팅", "부산 동구", "내가게")
+    assert r.get("no_blog") is True, "블로그 없음이 표시되지 않는다"
+    assert "5위" not in (r.get("miss_label") or ""), "글도 없는데 순위 라벨을 붙인다"
+
+    # 블로그가 있으면 종전대로 측정 범위를 밝힌다
+    monkeypatch.setattr(br, "find_blog_by_name", lambda n, limit=20: {"blog_id": "b", "blog_name": n})
+    monkeypatch.setattr(br, "blog_rank", lambda kw, bid, limit=5: {"rank": 0, "url": "", "post_title": "", "checked": 5})
+    r2 = diagnose.diagnose_rank("썬팅", "부산 동구", "내가게")
+    assert r2.get("no_blog") is False and r2.get("miss_label") == "상위 5위 밖"
+
+
+def test_landing_renders_no_blog_rows_without_rank_label():
+    """화면도 같이 갈라져야 한다 — 서버만 고치면 표는 그대로 순위를 말한다."""
+    from app import landing
+    h = landing.render()
+    assert "d.no_blog" in h, "화면이 블로그 없음 분기를 안 탄다"
+    assert "손님들이 이렇게 찾고 있어요" in h, "기회 목록 표기가 없다"
