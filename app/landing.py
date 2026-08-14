@@ -665,14 +665,30 @@ def _hero() -> str:
    window.__rcTop=(d.targets&&d.targets.length)?{{kw:d.targets[0].keyword,vol:d.targets[0].volume||0}}:null;
    (d.targets||[]).forEach(function(tg){{var v=tg.volume?(' (월 '+tg.volume.toLocaleString()+'회)'):'';
      mk+='<a href="'+tg.make_href+'" class="block bg-indigo-50 hover:bg-indigo-100 rounded-xl px-3.5 py-2.5 mt-2 text-indigo-700 font-bold text-sm transition">'+tg.keyword+v+' — 이 키워드 잡는 글 만들기 →</a>';}});
+   // ★ A. 개인화 CTA(2026-08-14) — 결과를 본 직후가 가장 뜨거운 순간인데 그 자리가
+   //   일반 문구였다. 조사: 개인화된 CTA가 +202%. 그 가게 이름과 '비어 있는 검색어'를
+   //   그대로 넣는다. 글이 있는 사장님과 없는 사장님에게 할 말이 다르다.
+   var _nm=(document.getElementById('rc_name').value||'').trim().replace(/[<>]/g,'');
+   var _gap=((d.missing||[])[0]||{{}}).keyword||'';
+   var _hasPost=(d.caught||[]).length>0;
+   var _cta = _hasPost
+     ? (_gap? _nm+'이(가) ‘'+_gap+'’ 잡는 글, 무료로 받기 →' : _nm+' 다음 글 무료로 받기 →')
+     : (_nm? _nm+' 첫 글, 무료로 만들어드릴게요 →' : '내 가게 첫 글 무료로 만들기 →');
    o.innerHTML='<b class="text-slate-900">'+d.headline+'</b>'+rows
-     +'<div class="text-slate-400 mt-2">'+d.subline+'</div>'+mk
-     +'<button type="button" onclick="fillDemo()" class="block w-full text-left bg-white border border-indigo-200 hover:border-indigo-400 rounded-xl px-3.5 py-2.5 mt-2 text-indigo-700 font-bold text-sm transition">이 업종으로 바로 만들어보기 (가입 없이) →</button>'
-     +'<div id="rc_lead" class="mt-3 pt-3 border-t border-slate-100"><div class="text-xs text-slate-500 mb-1.5">📩 이 진단 리포트를 이메일로 받아보시겠어요?</div>'
-     +'<div class="flex gap-1.5"><input id="rc_email" type="email" inputmode="email" placeholder="이메일 주소" class="flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2 text-sm outline-none focus:border-indigo-400">'
-     +'<button onclick="sendReport()" class="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm whitespace-nowrap">받기</button></div>'
+     +'<div class="text-slate-400 mt-2">'+d.subline+'</div>'
+     +'<button type="button" onclick="fillDemo()" class="block w-full text-center bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl px-4 py-3.5 mt-4 font-extrabold text-[15px] leading-snug transition shadow-lg shadow-indigo-200">'+_cta+'</button>'
+     +'<div class="text-center text-xs text-slate-400 mt-1.5">가입 없이 · 카드 없이 · 약 2분</div>'
+     // ★ B. 이메일 회수(2026-08-14) — 진단은 봤는데 가입 안 하는 사람이 대다수다.
+     //   대화형 도구의 높은 전환은 '결과를 받아보시겠어요?' 지점에서 나온다(조사).
+     //   가입(계정 연동)보다 이메일 한 줄이 마찰이 훨씬 낮고, 드립 메일이 이미 돈다.
+     +'<div id="rc_lead" class="mt-4 pt-3 border-t border-slate-100">'
+     +'<div class="text-sm font-bold text-slate-700 mb-1">📩 이 결과를 이메일로 받아두세요</div>'
+     +'<div class="text-xs text-slate-400 mb-2">지금 안 하셔도, 나중에 보시라고 보내드려요</div>'
+     +'<div class="flex gap-1.5"><input id="rc_email" type="email" inputmode="email" placeholder="이메일 주소" class="flex-1 min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-indigo-400">'
+     +'<button onclick="sendReport()" class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-sm whitespace-nowrap">받기</button></div>'
      +'<div id="rc_leadmsg" class="text-xs text-emerald-600 mt-1.5"></div></div>'
-     +'<a href="/login/kakao" class="inline-block text-indigo-600 underline font-bold mt-3">'+d.cta+' →</a>'
+     + mk
+     +'<a href="/login/kakao" class="inline-block text-slate-400 underline text-xs mt-3">계정 만들고 바로 시작하기 →</a>'
      +(d.estimated?' <span class="text-slate-400 text-xs">(추정)</span>':'');
    // 가게를 못 찾은 경우에만 지역·업종을 묻는다(찾았으면 물을 이유가 없다)
    try{{ if((d.headline||'').indexOf('찾지 못했')>=0 && typeof rcNeedMore==='function') rcNeedMore(); }}catch(e){{}}
@@ -1178,9 +1194,16 @@ def _pricing() -> str:
             f"<div class='text-lg font-bold text-slate-900 mt-3'>올린다는 둘 다 포함해 "
             f"<span class='text-indigo-600'>월 12만 9천원부터</span></div>"
             f"<div class='text-[11px] text-slate-400 mt-2'>대행 시세는 2026년 8월 공개 마켓 실판매가 기준</div></div>"
-            f"<p class='reveal text-center text-slate-500 mb-14'>"
+            f"<p class='reveal text-center text-slate-500 mb-8'>"
             f"올린다는 실사 무빙 영상까지 통째로, 지금 가격은 런칭 기간 한정입니다.</p>"
-            f"<div class='grid sm:grid-cols-3 gap-6 items-stretch pt-3'>{cards}</div>"
+            # ★ C. 요금표 접기(2026-08-14) — 가입자 0명인 상태에서 첫 방문자에게
+            #   결제 버튼 3개를 펼쳐 보이는 건 이르다. 업계 권장도 '점진적 공개'다.
+            #   앵커(위 한 줄)는 늘 보이고, 상세 표는 궁금한 사람만 편다.
+            f"<details class='reveal'>"
+            f"<summary class='cursor-pointer list-none text-center text-sm font-bold text-indigo-600 "
+            f"hover:underline py-3'>요금제 3가지 자세히 보기 ▾</summary>"
+            f"<div class='grid sm:grid-cols-3 gap-6 items-stretch pt-6'>{cards}</div>"
+            f"</details>"
             f"<p class='reveal text-center text-xs text-slate-400 mt-8'>언제든 해지 가능 — 해지 후 다음 결제일부터 청구되지 않아요 · 남은 기간은 그대로 이용</p>"
             f"</div></section>")
 

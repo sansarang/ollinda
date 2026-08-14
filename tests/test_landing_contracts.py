@@ -430,3 +430,38 @@ def test_province_regions_use_city_name_only():
     # 과교정 금지 — 지명 자리가 아닌 '…시'는 건드리지 않는다
     assert seo._kw_shorten("자동차정비 시공 가격") == "자동차정비 시공 가격"
     assert seo._kw_shorten("임시 점검") == "임시 점검"
+
+
+# ── 전환 구조 (2026-08-14 시장 조사 반영) ────────────────────────
+def test_result_cta_is_personalized():
+    """조사: 개인화된 CTA가 일반 CTA보다 +202%. 결과를 본 직후가 가장 뜨거운 순간인데
+    그 자리에 일반 문구('이 업종으로 만들어보기')가 있었다.
+    가게 이름과 '비어 있는 검색어'를 그대로 넣는다 — 글이 있는 사장님과 없는 사장님에게
+    할 말도 달라야 한다."""
+    h = landing.render()
+    assert "_nm+" in h and "_gap" in h, "결과 CTA에 가게 이름·검색어가 안 들어간다"
+    assert "첫 글, 무료로 만들어드릴게요" in h, "글이 없는 사장님용 문구가 없다"
+    assert "잡는 글, 무료로 받기" in h, "글이 있는 사장님용 문구가 없다"
+
+
+def test_email_capture_sits_right_after_result():
+    """대화형 도구의 높은 전환은 '결과를 받아보시겠어요?' 지점에서 나온다(조사).
+    진단은 봤는데 가입 안 하는 사람이 대다수 — 가입보다 마찰 낮은 회수로가 결과 바로
+    아래 있어야 한다."""
+    h = landing.render()
+    assert "이 결과를 이메일로 받아두세요" in h, "결과 직후 이메일 회수가 없다"
+    i_res = h.find("d.headline")
+    i_mail = h.find("이 결과를 이메일로 받아두세요")
+    i_login = h.find("계정 만들고 바로 시작하기")
+    assert 0 < i_res < i_mail < i_login, "이메일 회수가 가입 링크보다 뒤에 있다(마찰 순서 역전)"
+
+
+def test_pricing_table_is_collapsed_until_asked():
+    """가입자 0명인 상태에서 첫 방문자에게 결제 버튼 3개를 펼쳐 보이는 건 이르다.
+    앵커(대행 시세 대비)는 늘 보이고, 상세 표는 궁금한 사람만 편다(점진적 공개)."""
+    h = landing.render()
+    assert "요금제 3가지 자세히 보기" in h, "요금표가 펼쳐진 채로 돌아왔다"
+    assert "월 38~77만원" in h, "가격 앵커가 사라졌다 — 앵커 없이는 12.9만원이 비싸 보인다"
+    i_anchor = h.find("월 38~77만원")
+    i_details = h.find("요금제 3가지 자세히 보기")
+    assert 0 < i_anchor < i_details, "앵커가 요금표보다 뒤에 있다"
