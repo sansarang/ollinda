@@ -247,10 +247,10 @@ def test_primary_cta_is_no_signup_trial():
     """첫 행동은 '가입'이 아니라 '체험'이다 — 가입 없이 되는 미리보기가 있는데
     버튼이 묻혀 한 달 넘게 아무도 안 썼다(마지막 사용 2026-07-11)."""
     hero = landing._hero()
-    assert "가입 없이" in hero, "무료 체험 진입이 히어로에서 사라졌다"
+    assert "가입 없이" in hero, "무료 진입 문구가 히어로에서 사라졌다"
     i_trial = hero.find("가입 없이")
     i_login = hero.find("/login/kakao")
-    assert 0 <= i_trial < i_login, "가입 버튼이 체험 버튼보다 위에 있다(마찰 큰 행동이 먼저)"
+    assert 0 <= i_trial < i_login, "가입 버튼이 무료 진단보다 위에 있다(마찰 큰 행동이 먼저)"
 
 
 def test_no_kitchen_jargon_on_landing():
@@ -336,13 +336,17 @@ def test_hero_has_shop_name_input_and_reuses_one_diagnosis_path():
     ★ 단, 진단 로직은 한 벌만 산다 — 히어로는 값만 넘기고 판정은 rankCheck() 하나뿐이다
     (경로 규칙이 두 곳에 살면 그 자체가 결함)."""
     hero = landing._hero()
-    assert 'id="hero_name"' in hero, "첫 화면 상호 입력칸이 없다"
-    assert "rankCheck" in hero, "히어로가 기존 진단 경로를 쓰지 않는다"
-    # 진단 로직은 페이지 전체에 한 벌만 산다(정의 1회 · API 호출 1곳)
+    assert 'id="rc_name"' in hero, "첫 화면 상호 입력칸이 없다"
+    assert "rankCheck" in hero, "히어로가 진단을 실행하지 않는다"
+    # ★ 2026-08-14 사장님 지적("입력했는데 아래로 내려가서 또 검색한다") —
+    #   같은 일에 입력구가 둘이면 사람은 멈춘다. 진단 위젯은 페이지에 딱 한 벌만 산다.
     h = landing.render()
     assert h.count("async function rankCheck") == 1, "진단 함수가 두 벌로 늘었다"
     assert h.count("/api/rank-check") == 1, "진단 API를 두 곳에서 부른다(경로 이중화)"
-    assert h.count('id="rc_name"') == 1, "상호 입력칸이 중복 정의됐다"
+    for _id in ("rc_name", "rc_region", "rc_ind", "rc_out", "rc_pick", "it_out"):
+        assert h.count(f'id="{_id}"') == 1, f"{_id} 입력·출력구가 중복됐다"
+    # 결과는 입력한 자리(히어로)에서 편다 — 다른 섹션으로 끌고 가지 않는다
+    assert 'id="rc_out"' in hero, "결과가 입력한 자리에서 안 나온다"
 
 
 def test_shop_name_only_promise_is_backed_by_resolution():

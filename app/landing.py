@@ -542,26 +542,37 @@ def _hero() -> str:
        결과에 뜨는 것은 다른 일이다.
        ★ 진단 경로는 하나만 쓴다: 여기서 값만 받아 _try의 rankCheck()로 넘긴다.
          입력·판정 로직을 두 벌로 만들면 그게 다음 사고 예약이다(canonical 원칙). -->
-  <div class="reveal mt-9 max-w-lg mx-auto">
-   <form onsubmit="heroCheck();return false;" class="flex flex-col sm:flex-row gap-2">
-    <input id="hero_name" placeholder="상호를 입력하세요 (예: 초량 루마썬팅)" autocomplete="organization"
+  <!-- ★ 2026-08-14 사장님 지적: "입력했는데 아래로 내려가서 또 검색을 한다."
+       실측 — 상호칸이 두 개였다(히어로 599px · 두 번째 섹션 3,143px). 입력하면 약 3화면을
+       점프해 똑같이 생긴 칸을 다시 만났다. 같은 일에 입력구가 둘이면 사람은 멈춘다.
+       → 진단 위젯을 통째로 첫 화면으로 올리고, 결과도 이 자리에서 편다. 아래 칸은 없앤다.
+       보이는 칸은 '상호' 하나뿐이다. 지역·업종은 가게를 찾으면 자동으로 채워지므로
+       숨겨두고, **못 찾았을 때만** 펼친다(그때는 사장님 손이 필요하다). -->
+  <div class="reveal mt-9 max-w-xl mx-auto text-left">
+   <div class="flex gap-1.5 mb-2 text-xs font-bold justify-center">
+     <button type="button" id="rc_mlocal" onclick="rcSetMode('local')" class="px-3 py-1.5 rounded-lg border border-indigo-500 bg-indigo-50 text-indigo-700 transition">동네 매장</button>
+     <button type="button" id="rc_mseller" onclick="rcSetMode('seller')" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 transition">온라인 셀러</button></div>
+   <form onsubmit="rankCheck();return false;" class="flex flex-col sm:flex-row gap-2">
+    <input id="rc_name" placeholder="상호를 입력하세요 (예: 초량 루마썬팅)" autocomplete="organization"
      class="w-full sm:flex-1 min-w-0 rounded-2xl border-2 border-indigo-200 px-4 py-3.5 text-slate-800 text-base outline-none focus:border-indigo-500 shadow-sm">
     <button type="submit"
      class="w-full sm:w-auto px-7 py-3.5 rounded-2xl font-extrabold text-base bg-indigo-600 hover:bg-indigo-700 text-white transition shadow-lg shadow-indigo-200 whitespace-nowrap">
      내 가게 확인하기</button></form>
-   <p class="text-sm text-slate-400 mt-3">가입 없이 · 카드 없이 · <b class="text-slate-600">지금 몇 위인지</b>
-    바로 확인해드려요</p>
+   <!-- 보조 입력 — 기본 숨김. 가게를 못 찾았을 때만 rcNeedMore()가 펼친다 -->
+   <div id="rc_more" class="hidden flex-col sm:flex-row gap-2 mt-2">
+     <input id="rc_region" placeholder="지역(부산 동구)" class="w-full sm:flex-1 min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400">
+     <input id="rc_ind" placeholder="업종" class="w-full sm:flex-1 min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400"></div>
+   <p id="rc_sub" class="text-sm text-slate-400 mt-3 text-center">가입 없이 · 카드 없이 ·
+    <b class="text-slate-600">내가 쓴 글이 몇 위인지</b> 바로 확인해드려요</p>
+   <div id="rc_pick" class="hidden mt-3"></div>
+   <div id="rc_out" class="text-slate-600 text-sm mt-3"></div>
+   <div id="it_out" class="hidden mt-3"></div>
   </div>
   <script>
-  function heroCheck(){{
-   var v=(document.getElementById('hero_name')||{{}}).value||'';
-   v=v.trim();
-   var n=document.getElementById('rc_name');
-   if(n) n.value=v;                       // 값만 넘긴다 — 판정은 _try의 rankCheck() 하나뿐
-   var t=document.getElementById('try');
-   if(t) t.scrollIntoView({{behavior:'smooth',block:'start'}});
-   if(!v){{ if(n) setTimeout(function(){{n.focus();}},400); return; }}
-   setTimeout(function(){{ if(typeof rankCheck==='function') rankCheck(); }},450);
+  // 가게를 못 찾았을 때만 지역·업종을 묻는다 — 찾은 경우엔 물을 이유가 없다.
+  function rcNeedMore(){{
+   var m=document.getElementById('rc_more');
+   if(m&&m.classList.contains('hidden')){{m.classList.remove('hidden');m.classList.add('flex');}}
   }}
   </script>
 
@@ -598,7 +609,9 @@ def _hero() -> str:
    r.classList.toggle('hidden',seller);
    i.placeholder=seller?'상품 키워드(블루투스 이어폰)':'업종';
    n.placeholder=seller?'스토어/브랜드명':'상호';
-   sub.textContent=seller?'상품 키워드·스토어명만 — 네이버 쇼핑 현재 순위를 바로 확인':'지역·업종·상호만 — 네이버 현재 순위를 바로 확인';}}
+   if(sub) sub.textContent=seller?'스토어명만 넣으면 쇼핑 검색 순위를 바로 확인해드려요'
+     :'가입 없이 · 카드 없이 · 내가 쓴 글이 몇 위인지 바로 확인해드려요';
+   if(seller && typeof rcNeedMore==='function') rcNeedMore();}}
   // ★ 동명 가게 구분(2026-08-12): 상호로 후보를 먼저 찾아 주소를 보여주고 사용자가 고른다.
   //   남의 가게 순위를 내 순위로 보고하는 허위 양성을 막는 장치.
   async function rankCheck(){{
@@ -661,6 +674,8 @@ def _hero() -> str:
      +'<div id="rc_leadmsg" class="text-xs text-emerald-600 mt-1.5"></div></div>'
      +'<a href="/login/kakao" class="inline-block text-indigo-600 underline font-bold mt-3">'+d.cta+' →</a>'
      +(d.estimated?' <span class="text-slate-400 text-xs">(추정)</span>':'');
+   // 가게를 못 찾은 경우에만 지역·업종을 묻는다(찾았으면 물을 이유가 없다)
+   try{{ if((d.headline||'').indexOf('찾지 못했')>=0 && typeof rcNeedMore==='function') rcNeedMore(); }}catch(e){{}}
    // ⚡ 진단이 끝나면 곧바로 '내 가게용 제목'을 AI가 지어 이어 붙인다(2026-08-13).
    //    자기 가게 이름이 박힌 진짜 결과를 봐야 '나도 써봐야겠다'가 된다.
    try{{ if(typeof instantTitles==='function') instantTitles(); }}catch(e){{}}
@@ -830,26 +845,15 @@ def _try() -> str:
     return f"""
 <section id="try" class="bg-white py-16 border-t border-slate-100">
  <div class="max-w-4xl mx-auto px-5">
+  <!-- ★ 2026-08-14: 여기 있던 진단 위젯(상호·지역·업종 3칸)은 첫 화면으로 올렸다.
+       같은 일에 입력구가 둘이면 사람은 "내가 잘못 넣었나?" 하고 멈춘다(사장님 지적).
+       이 섹션은 이제 '사진 올려서 실제로 만들어보기' 하나만 한다. -->
   <div class="reveal text-center mb-8">
    <span class="inline-block px-3 py-1 rounded-full bg-[#EEF2FF] text-indigo-600 text-xs font-bold mb-3">가입 없이 · 무료</span>
-   <h2 class="text-2xl sm:text-3xl font-bold text-slate-900">우리 가게, 지금 몇 위일까요?</h2>
-   <p class="text-slate-500 text-sm mt-2">상호만 넣으면 <b class="text-slate-800">현재 순위</b>를 바로 확인해드리고,
-    <b class="text-slate-800">아직 못 잡은 검색어</b>로 쓰면 좋을 글 제목까지 지어드려요.</p></div>
-  <div class="reveal max-w-2xl mx-auto bg-white border-2 border-indigo-200 rounded-2xl shadow-sm p-5">
-   <div class="flex gap-1.5 mb-3 text-xs font-bold">
-     <button type="button" id="rc_mlocal" onclick="rcSetMode('local')" class="px-3 py-1.5 rounded-lg border border-indigo-500 bg-indigo-50 text-indigo-700 transition">동네 매장</button>
-     <button type="button" id="rc_mseller" onclick="rcSetMode('seller')" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 transition">온라인 셀러</button></div>
-   <p id="rc_sub" class="text-xs text-slate-400 mb-3">지역·업종·상호만 — 네이버 현재 순위를 바로 확인</p>
-   <div class="flex flex-col sm:flex-row gap-2">
-     <input id="rc_region" placeholder="지역(부산 동구)" class="w-full sm:flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400">
-     <input id="rc_ind" placeholder="업종" class="w-full sm:flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400">
-     <input id="rc_name" placeholder="상호" class="w-full sm:flex-1 min-w-0 rounded-xl border border-slate-200 px-2.5 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400"></div>
-   <button onclick="rankCheck()" class="w-full mt-2.5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition">내 가게 확인하기</button>
-   <div id="rc_pick" class="hidden mt-3"></div>
-   <div id="rc_out" class="text-slate-600 text-sm mt-3"></div>
-   <div id="it_out" class="hidden mt-3"></div>
-  </div>
-  <div class="reveal max-w-2xl mx-auto mt-5">{_hero_demo_card()}</div>
+   <h2 class="text-2xl sm:text-3xl font-bold text-slate-900">사진 올려서 직접 만들어보세요</h2>
+   <p class="text-slate-500 text-sm mt-2">업종만 고르면 <b class="text-slate-800">내 가게용 블로그 글 도입부</b>를
+    진짜로 만들어 보여드려요 · 약 2분</p></div>
+  <div class="reveal max-w-2xl mx-auto">{_hero_demo_card()}</div>
  </div>
  <script>
  // ⚡ 진단이 끝나면, 아직 못 잡은 검색어로 '내 가게용 제목'을 AI가 즉석 생성해 이어 붙인다.
