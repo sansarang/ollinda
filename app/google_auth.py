@@ -11,7 +11,7 @@ import uuid
 from urllib.parse import urlencode
 
 import requests
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
 from app import auth, db
@@ -43,13 +43,19 @@ def make_router() -> APIRouter:
     r = APIRouter()
 
     @r.get("/login/google")
-    def login():
+    def login(request: Request):
+        # ★ 2026-08-14 — 카카오와 같은 이유로 진단 결과를 쿠키에 실어 넘긴다(signup_carry).
+        from app import signup_carry as _sc
         if not configured():
-            return _instant_signup("구글회원")   # 키 없으면 버튼 한 번에 즉시 가입
+            resp = _instant_signup("구글회원")   # 키 없으면 버튼 한 번에 즉시 가입
+            _sc.attach(resp, request.query_params)
+            return resp
         q = {"client_id": os.environ["GOOGLE_CLIENT_ID"], "redirect_uri": _redirect_uri(),
              "response_type": "code", "scope": "openid email profile",
              "access_type": "online"}   # prompt 제거 → 이미 구글 로그인돼 있으면 재선택 없이 바로 통과
-        return RedirectResponse(AUTHORIZE + "?" + urlencode(q))
+        resp = RedirectResponse(AUTHORIZE + "?" + urlencode(q))
+        _sc.attach(resp, request.query_params)
+        return resp
 
     @r.get("/login/google/callback")
     def callback(code: str = "", error: str = ""):

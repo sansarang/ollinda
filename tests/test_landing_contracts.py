@@ -439,9 +439,15 @@ def test_result_cta_is_personalized():
     가게 이름과 '비어 있는 검색어'를 그대로 넣는다 — 글이 있는 사장님과 없는 사장님에게
     할 말도 달라야 한다."""
     h = landing.render()
-    assert "_nm+" in h and "_gap" in h, "결과 CTA에 가게 이름·검색어가 안 들어간다"
-    assert "첫 글, 무료로 만들어드릴게요" in h, "글이 없는 사장님용 문구가 없다"
-    assert "잡는 글, 무료로 받기" in h, "글이 있는 사장님용 문구가 없다"
+    assert "_nm" in h and "_gap" in h, "결과 CTA에 가게 이름·검색어가 안 들어간다"
+    assert "첫 글 받기" in h, "글이 없는 사장님용 문구가 없다"
+    assert "잡는 글 받기" in h, "글이 있는 사장님용 문구가 없다"
+    # ★ 2026-08-14 사장님 지시 — 버튼 하나로 바로 가입. 그리고 방금 알아낸 가게 정보를
+    #   함께 넘겨야 가입 직후 "딱 3가지만 알려주세요"에서 약속이 끊기지 않는다.
+    assert "무료 가입하고" in h, "가입 직행 CTA가 아니다"
+    assert "/login/kakao?'+_q" in h or "_href" in h, "가입 링크에 가게 정보를 안 싣는다"
+    for k in ("'nm'", "'rg'", "'ind'", "'ad'", "'blog'", "'kw'"):
+        assert k in h, f"가입 링크에 {k}가 빠졌다 — 온보딩에서 다시 묻게 된다"
 
 
 def test_email_capture_sits_right_after_result():

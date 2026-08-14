@@ -41,12 +41,20 @@ def make_router() -> APIRouter:
     r = APIRouter()
 
     @r.get("/login/kakao")
-    def login():
+    def login(request: Request):
+        # ★ 2026-08-14: 랜딩 진단에서 이미 찾아낸 가게 정보(상호·지역·업종·주소·블로그)를
+        #   쿠키에 실어 가입 너머로 넘긴다. 그래야 가입 직후 "딱 3가지만 알려주세요"를
+        #   사장님께 또 묻지 않는다("가입하고 이 글 전체 받기" 약속이 거기서 끊기지 않게).
+        from app import signup_carry as _sc
         if not configured():
-            return _instant_signup("카카오회원")   # 키 없으면 버튼 한 번에 즉시 가입
+            resp = _instant_signup("카카오회원")   # 키 없으면 버튼 한 번에 즉시 가입
+            _sc.attach(resp, request.query_params)
+            return resp
         url = (f"{AUTHORIZE}?response_type=code&client_id={os.environ['KAKAO_REST_KEY']}"
                f"&redirect_uri={_redirect_uri()}")
-        return RedirectResponse(url)
+        resp = RedirectResponse(url)
+        _sc.attach(resp, request.query_params)
+        return resp
 
     @r.get("/login/kakao/callback")
     def callback(code: str = "", error: str = ""):

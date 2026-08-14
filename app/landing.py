@@ -672,12 +672,28 @@ def _hero() -> str:
    var _gap=((d.missing||[])[0]||{{}}).keyword||'';
    var _hasPost=(d.caught||[]).length>0;
    var _cta = _hasPost
-     ? (_gap? _nm+'이(가) ‘'+_gap+'’ 잡는 글, 무료로 받기 →' : _nm+' 다음 글 무료로 받기 →')
-     : (_nm? _nm+' 첫 글, 무료로 만들어드릴게요 →' : '내 가게 첫 글 무료로 만들기 →');
+     ? (_gap? '무료 가입하고 ‘'+_gap+'’ 잡는 글 받기 →' : '무료 가입하고 '+_nm+' 다음 글 받기 →')
+     : (_nm? '무료 가입하고 '+_nm+' 첫 글 받기 →' : '무료 가입하고 내 가게 첫 글 받기 →');
+   // ★ 2026-08-14 사장님 지시 — 버튼 하나로 바로 가입. 결과를 본 직후가 가장 뜨거운 순간이고,
+   //   비가입 미리보기는 흐린 도입부뿐이라 거기서 끝나면 아무것도 안 남는다.
+   //   ★ 약속을 지키려면 방금 알아낸 가게 정보를 함께 넘겨야 한다 — 안 그러면 가입 직후
+   //     "딱 3가지만 알려주세요" 화면이 나와서 '이 글 받기'가 거기서 끊긴다(signup_carry).
+   var _q = new URLSearchParams();
+   if(_nm) _q.set('nm', _nm);
+   var _rg=(document.getElementById('rc_region')||{{}}).value||'';
+   var _in=(document.getElementById('rc_ind')||{{}}).value||'';
+   if(_rg) _q.set('rg', _rg);
+   if(_in) _q.set('ind', _in);
+   if(window.__rcAddr) _q.set('ad', window.__rcAddr);
+   if(d.blog_id) _q.set('blog', d.blog_id);
+   if(_gap) _q.set('kw', _gap);
+   var _href='/login/kakao?'+_q.toString();
    o.innerHTML='<b class="text-slate-900">'+d.headline+'</b>'+rows
      +'<div class="text-slate-400 mt-2">'+d.subline+'</div>'
-     +'<button type="button" onclick="fillDemo()" class="block w-full text-center bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl px-4 py-3.5 mt-4 font-extrabold text-[15px] leading-snug transition shadow-lg shadow-indigo-200">'+_cta+'</button>'
-     +'<div class="text-center text-xs text-slate-400 mt-1.5">가입 없이 · 카드 없이 · 약 2분</div>'
+     +'<a href="'+_href+'" class="block w-full text-center bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl px-4 py-3.5 mt-4 font-extrabold text-[15px] leading-snug transition shadow-lg shadow-indigo-200">'+_cta+'</a>'
+     +'<div class="text-center text-xs text-slate-400 mt-1.5">카카오로 3초 · 카드 없이 · 무료 2회</div>'
+     +'<div class="text-center mt-1.5"><a href="'+_href.replace("/login/kakao","/login/google")+'" class="text-xs text-slate-400 underline">구글로 가입하기</a>'
+     +' · <button type="button" onclick="fillDemo()" class="text-xs text-slate-400 underline">가입 없이 맛보기</button></div>'
      // ★ B. 이메일 회수(2026-08-14) — 진단은 봤는데 가입 안 하는 사람이 대다수다.
      //   대화형 도구의 높은 전환은 '결과를 받아보시겠어요?' 지점에서 나온다(조사).
      //   가입(계정 연동)보다 이메일 한 줄이 마찰이 훨씬 낮고, 드립 메일이 이미 돈다.

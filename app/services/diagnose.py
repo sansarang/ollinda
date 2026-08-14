@@ -178,6 +178,9 @@ def diagnose_rank(industry: str, region: str, name: str, addr: str = "") -> dict
         "keyword": primary, "rank": top_rank, "estimated": False,
         "scan": scan, "caught": caught, "missing": missing, "missed_volume": missed_volume,
         "headline": headline, "subline": sub, "cta": cta,
+        # ★ 2026-08-14: 찾아낸 블로그를 화면에 돌려준다. 가입 링크에 실어 보내야
+        #   가입 직후 온보딩에서 블로그를 또 묻지 않는다(signup_carry).
+        "blog_id": blog_id, "blog_name": my_blog.get("blog_name") or "",
         # 5위까지만 스캔한다 — '미노출'이라 하면 아예 없는 것처럼 오해된다(2026-08-12 사장님 지적).
         "miss_label": "상위 5위 밖",
     }

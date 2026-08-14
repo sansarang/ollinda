@@ -5372,6 +5372,27 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
     else:
         hist = "<p class='text-slate-400 text-sm py-6 text-center'>아직 만든 콘텐츠가 없어요. 위에서 사진 올려 만들어보세요.</p>"
     # ── 최초 1회 온보딩 vs 작동 대시보드 ──
+    # ★ 2026-08-14 사장님 지시 — 랜딩 진단에서 이미 찾아낸 가게 정보를 가입 너머로 실어 왔다면
+    #   여기서 채운다. 방금 우리가 알아낸 것을 사장님께 다시 입력시키지 않는다.
+    #   (자동으로 채우되 무엇을 채웠는지 밝히고, 언제든 고칠 수 있게 둔다 — 정직 게이트)
+    _carry_filled, _carry = [], {}
+    from app.signup_carry import COOKIE as _SC_COOKIE
+    try:
+        from app import signup_carry as _sc
+        _carry = _sc.unpack(request.cookies.get(_sc.COOKIE) or "")
+        if _carry:
+            _carry_filled = _sc.apply_to_tenant(t, _carry)
+            if _carry_filled:
+                t = db.get_tenant(t.id) or t          # 갱신본으로 다시 읽는다
+    except Exception:
+        logging.getLogger("shopcast").exception("[me] 진단 정보 인계 실패")
+    if _carry_filled:
+        _kw0 = (_carry.get("kw") or "").strip()
+        banner += ("<div class='flex items-start gap-3 bg-emerald-50 text-emerald-800 p-4 "
+                   "rounded-2xl mb-4 text-sm'><span>✅</span><div>방금 확인한 가게 정보로 "
+                   f"<b>{esc(' · '.join(_carry_filled))}</b>을(를) 채워뒀어요. 다르면 설정에서 고치실 수 있어요."
+                   + (f"<br>이제 <b>‘{esc(_kw0)}’</b> 글을 만들어 드릴게요 — 아래에서 사진만 올려주세요."
+                      if _kw0 else "") + "</div></div>")
     onboarded = bool((t.industry or "").strip())
     if not onboarded:
         _multi = len(db.list_user_stores(u["id"])) > 1
@@ -5388,7 +5409,14 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                  + f"</div>{_back}</div>")
         card = (f"<div class='{_CARD} p-5'>"
                 "<h2 class='font-bold mb-3'>내 가게/상품 정보</h2>" + store_form_min + "</div>")
-        return _subscriber_page(f"{esc(t.name)} · 시작 설정", banner + intro + card)
+        _cb = ""
+        if _carry_filled:
+            _cb = ("<div class='flex items-start gap-3 bg-emerald-50 text-emerald-800 p-4 "
+                   "rounded-2xl mb-4 text-sm'><span>✅</span><div>방금 확인한 가게 정보로 "
+                   f"<b>{esc(' · '.join(_carry_filled))}</b>을(를) 채워뒀어요. 다르면 고쳐주세요.</div></div>")
+        _r = _subscriber_page(f"{esc(t.name)} · 시작 설정", banner + _cb + intro + card)
+        _r.delete_cookie(_SC_COOKIE)          # 한 번 쓰면 지운다(수명 짧게)
+        return _r
     # 온보딩 완료 → 사진 올려 생성이 메인
     from app.services import pay as _pay
     _plan = u.get("plan") or "free"
@@ -5736,7 +5764,10 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             #   콘텐츠 목록·발행 이력은 그 아래로 — 순서만 바꾸고 기존 화면은 그대로 둔다.
             + "<div class='max-w-[1400px]'>" + banner + exposure_card + main_inner + "</div></main></div>"
             + landing._FOOT)
-    return HTMLResponse(page)
+    _resp = HTMLResponse(page)
+    if _carry_filled:
+        _resp.delete_cookie(_SC_COOKIE)
+    return _resp
 
 
 @app.post("/me/store")
