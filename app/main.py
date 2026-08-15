@@ -3005,8 +3005,68 @@ def _progress_payload(t) -> dict:
     except Exception:
         pass
     if pr.get("status") == "failed":
-        out["error_note"] = "생성이 중단됐어요 — 다시 시도해 주세요"
+        # ★ 2026-08-15 — error_note를 만들어놓고 화면에서 아무도 안 읽고 있었다.
+        #   실패 사유를 그대로 넘긴다(조용한 실패 금지). 다시 시도 가능 여부도 함께.
+        out["error_note"] = "만들다가 중단됐어요"
+        out["error"] = (pr.get("error") or "")[:160]
+        try:
+            out["can_retry"] = bool(db.retryable_gen_jobs(t.id))
+        except Exception:
+            out["can_retry"] = False
     return out
+
+
+@app.post("/me/gen-retry")
+def me_gen_retry(request: Request):
+    """실패한 생성을 사장님이 다시 시도 (2026-08-15).
+
+    왜: 실패하면 화면에 "다시 시도해 주세요"만 뜨고 정작 방법이 없었다.
+      사진을 처음부터 다시 올려야 했다 — 돈 내고 쓰는 분에게는 해지 사유다.
+    ★ 복구 경로는 재시작 복구(_resume_jobs)와 같은 ingest_upload 하나만 쓴다.
+      새 경로를 만들면 한쪽만 고쳐지고, 그게 오늘까지 반복한 사고의 모양이다.
+    """
+    u = auth.current_user(request)
+    if not u:
+        return RedirectResponse("/login", status_code=303)
+    t = _ensure_user_tenant(u)
+    jobs = db.retryable_gen_jobs(t.id)
+    if not jobs:
+        return RedirectResponse("/me?err=" + _q("다시 시도할 작업을 찾지 못했어요"), status_code=303)
+    j = jobs[0]
+
+    def _run():
+        import glob as _g, json as _jj, os as _o, shutil as _sh
+        _lg = logging.getLogger("shopcast.jobs")
+        try:
+            fps = sorted(_g.glob(_o.path.join(j["spool_dir"], "*")))
+            if not fps:
+                db.set_gen_progress(t.id, "failed", "다시 시도 실패", "사진을 찾지 못했어요",
+                                    status="failed")
+                return
+            files = []
+            for fp in fps:
+                with open(fp, "rb") as f:
+                    files.append((f.read(), _o.path.basename(fp)[3:] or "photo.jpg"))
+            meta = _jj.loads(j.get("meta") or "{}")
+            _lg.warning("[gen-retry] 사장님 요청 재시도 job=%s 사진 %d장", j["id"][:8], len(files))
+            db.set_gen_progress(t.id, "start", "다시 만드는 중", "사장님 요청", 0.05, new=True)
+            from app.services.ingest import ingest_upload as _iu
+            made = _iu(t, files, meta.get("note") or "", target_kw=meta.get("target_kw") or "",
+                       angle=meta.get("angle") or "", intake={},
+                       pre_cleaned_idx=set(meta.get("pre_idx") or []) or None)
+            db.finish_gen_job(j["id"], "done" if made else "failed",
+                              asset_id=(made[0].asset_id if made else ""))
+            if made:
+                _sh.rmtree(j["spool_dir"], ignore_errors=True)
+        except Exception as e:
+            _lg.exception("[gen-retry] 재시도 실패 job=%s", j.get("id"))
+            # 조용한 실패 금지 — 왜 안 됐는지 사장님 화면에 남긴다
+            db.set_gen_progress(t.id, "failed", "다시 시도했지만 또 안 됐어요",
+                                f"{type(e).__name__}", status="failed", error=str(e)[:200])
+
+    import threading as _thr
+    _thr.Thread(target=_run, daemon=True).start()
+    return RedirectResponse("/me", status_code=303)
 
 
 @app.get("/me/gen-progress")
@@ -12942,7 +13002,13 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
           "try{"
           "var pr=await (await fetch('/me/gen-progress')).json();"
           "if(pr&&pr.status&&pr.status!=='idle'){if(pr.label)setLabel(pr.label);if(pr.pct!=null)setBar(pr.pct*100);setDetail(pr.detail||'');setSlow(pr.slow||'');"
-          "if(pr.status==='failed'){clearInterval(iv);setLabel('생성이 중단됐어요 — 다시 시도해 주세요');setSlow('사진 수를 줄이거나 잠시 후 다시 시도해 주세요');return;}"
+          # ★ 2026-08-15 — 예전엔 "다시 시도해 주세요"라는 글자만 띄우고 정작 누를 게 없었다.
+          #   사진은 서버에 남아 있는데(성공했을 때만 지운다) 사장님은 처음부터 다시 올려야 했다.
+          #   실패 사유가 있으면 그대로 보여준다(조용한 실패 금지).
+          "if(pr.status==='failed'){clearInterval(iv);setLabel('만들다가 중단됐어요');"
+          "setDetail(pr.error||'');"
+          "setSlow('올리신 사진은 그대로 있어요 — 아래 버튼을 누르시면 이어서 만들어드려요');"
+          "var rb=document.getElementById('gRetry');if(rb)rb.classList.remove('hidden');return;}"
           # ★ 완성의 순간(테트리스 원칙 4): done 신호 → 보러가기 버튼 + 3초 자동 이동 + (딴 탭이면) 브라우저 알림.
           #   구조건(피스 5개)은 영상 온디맨드 이후 영원히 안 채워져 사용자가 100%에서 방치됐음(캡처 실측).
           "if(pr.status==='done'){clearInterval(iv);"
@@ -12970,6 +13036,10 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
                    "<div id='gSlow' class='text-xs text-amber-600 mt-2'></div>"
                    "<a id='gGo' class='hidden block mt-3 w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 "
                    "text-white font-extrabold text-sm transition'>지금 보러 가기 →</a>"
+                   # ★ 실패했을 때 누를 자리(2026-08-15). 사진은 서버에 남아 있어 이어서 만들 수 있다.
+                   "<form method='post' action='/me/gen-retry' id='gRetry' class='hidden mt-3'>"
+                   "<button class='block w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 "
+                   "text-white font-extrabold text-sm transition'>올리신 사진으로 다시 만들기 →</button></form>"
                    "<p id='gTeam' class='text-xs text-slate-400 mt-3'>AI 전문가팀이 만드는 중…</p></div></div>")
     return form + js + gen_overlay
 

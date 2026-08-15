@@ -2806,6 +2806,40 @@ def finish_gen_job(job_id: str, status: str = "done", asset_id: str = "") -> Non
         pass
 
 
+def retryable_gen_jobs(tenant_id: str, max_age_hours: int = 48) -> list[dict]:
+    """실패했지만 **사진이 아직 남아 있어 다시 시도할 수 있는** 작업 (2026-08-15).
+
+    왜: 지금은 생성이 실패하면 화면에 "다시 시도해 주세요"라는 글자만 뜨고,
+      정작 다시 시도할 방법이 없었다. 사장님은 사진을 처음부터 다시 올려야 한다.
+      돈 내고 쓰는 분에게 이건 해지 사유다.
+    성공했을 때만 spool을 지우므로 실패 건의 사진은 남아 있다 — 그걸 쓴다.
+    """
+    import os as _os
+    from datetime import datetime, timedelta
+    try:
+        with _conn() as c:
+            _ensure_gen_jobs(c)
+            rows = c.execute("SELECT * FROM gen_jobs WHERE tenant_id=? AND status='failed' "
+                             "ORDER BY created_at DESC LIMIT 20", (tenant_id,)).fetchall()
+        cut = datetime.utcnow() - timedelta(hours=max_age_hours)
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                if datetime.fromisoformat((d.get("created_at") or "")[:19]) < cut:
+                    continue
+            except Exception:
+                continue
+            sp = d.get("spool_dir") or ""
+            if not (sp and _os.path.isdir(sp) and _os.listdir(sp)):
+                continue          # 사진이 없으면 다시 시도해도 못 만든다 — 내보내지 않는다
+            d["photo_count"] = len([f for f in _os.listdir(sp) if not f.startswith(".")])
+            out.append(d)
+        return out
+    except Exception:
+        return []
+
+
 def pending_gen_jobs(max_age_hours: int = 6) -> list[dict]:
     """재시작으로 죽은 진행 중 잡 — 부팅 시 이어하기 대상(너무 낡은 건 제외)."""
     from datetime import datetime, timedelta
