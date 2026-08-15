@@ -289,6 +289,24 @@ def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
             f"사진 지칭 — 본문 문장이 사진을 번호로 부른다({', '.join(_pref[:4])}). "
             "마커는 내용에 맞게 다시 배치되므로 문장에 박힌 번호는 어긋난다. "
             "번호를 빼고 '아래 사진'으로 쓰거나, 그 문장을 사진 설명이 아닌 주제 서술로 바꿔라.")
+    # 🎯 질의별 답변 문단 — 점수와 무관하게 결함이다(2026-08-16 실측).
+    #   네이버는 글이 아니라 문단을 뽑아 노출한다. 같은 값을 다섯 문단에 하나씩 흩어놓으면
+    #   반복만 될 뿐 뽑아갈 덩어리가 없다(실물: 2,990만원이 5문단에 1개씩).
+    #   ★ 봉인은 하지 않는다 — 발행을 멈추는 대신 사장님·운영자 눈에 보이게 한다.
+    try:
+        from app.services import answerblock as _abg
+        _abr = _abg.audit(pl.get("body") or "", pl.get("target_keywords") or [], pl.get("title") or "")
+        if _abr["scattered"]:
+            au.setdefault("warnings", []).append(
+                f"질의별 답변 문단 — {', '.join(_abr['scattered'])} 재료가 여러 문단에 흩어져 있다. "
+                "네이버는 검색어에 맞는 '한 문단'을 뽑아 노출하므로, 흩어지면 뽑아갈 단위가 없다. "
+                "같은 값을 반복하지 말고 한 문단에 모아 구간이 비교되게 써라(없는 값은 지어내지 말 것).")
+        if _abr["missing"]:
+            au.setdefault("warnings", []).append(
+                f"질의별 답변 문단 — 소제목으로 {', '.join(_abr['missing'])}을(를) 약속해놓고 "
+                "그 답이 되는 덩어리가 없다. 약속을 지키거나 그 소제목을 빼라.")
+    except Exception:
+        pass                                    # 경고 생성 실패가 게이트를 막지 않는다
     if (_pref or (isinstance(score, int) and score < POLISH_TARGET)) \
             and _time.monotonic() < _deadline:
         try:

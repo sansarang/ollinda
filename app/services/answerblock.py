@@ -43,6 +43,32 @@ INTENTS: dict = {
 
 MIN_SIGNALS = 2          # 한 문단이 '답변 덩어리'로 인정받는 최소 구체 신호 수
 SCATTER_TOTAL = 3        # 이 이상 신호가 있는데 한 문단에 모이지 않으면 '흩어짐'
+MAX_ATTRS = 3            # 한 글이 노리는 속성 축 상한(겹침 0.8~4.2% — 다중 타깃은 환상)
+
+
+def plan(core: str = "", keywords=None) -> dict:
+    """노리는 질의를 [핵심 1개 + 속성 축 2~3개]로 나눈다.
+
+    왜 나누나 (2026-08-16 실측):
+      검색어마다 판이 분리돼 있다 — 두 검색어 이상에 걸친 글 비율이
+      중고차 0.8% · 썬팅 4.2% · 이어폰 15.8%. **한 글이 여러 핵심 키워드를 먹는 일은 없다.**
+      대신 같은 판 안의 속성 질의(가격·시간·과정·비교)는 전용 문단으로 함께 딸 수 있다
+      (실측 사례: 한 글이 '부산 썬팅' 9위와 '썬팅 가격' 10위를 서로 다른 문단으로 동시 확보).
+
+    핵심은 `seo.resolve_target_keyword()`가 이미 정한 값을 그대로 받는다(canonical 단일 관문).
+    속성 축은 후보 키워드에 실제로 그 축 표지가 있을 때만 잡는다 — 축을 지어내지 않는다.
+    """
+    kws = [k for k in (keywords or []) if (k or "").strip()]
+    core = (core or "").strip() or (kws[0] if kws else "")
+    attrs, seen = [], set()
+    for name, (qre, _sre) in INTENTS.items():
+        if name in seen:
+            continue
+        hit = next((k for k in kws if k != core and qre.search(k)), "")
+        if hit:
+            seen.add(name)
+            attrs.append({"intent": name, "query": hit})
+    return {"core": core, "attrs": attrs[:MAX_ATTRS]}
 
 
 def paragraphs(body: str) -> list:
@@ -73,32 +99,42 @@ def _wanted(intent_re, *texts) -> bool:
 def audit(body: str, keywords=None, title: str = "") -> dict:
     """질의별 답변 문단 점검.
 
-    반환 {"intents": {의도: {"wanted","best","total","ok"}}, "missing": [...], "scattered": [...]}
-      · missing   — 노리는 의도인데 답변 덩어리가 없다(뽑아갈 문단이 없음)
-      · scattered — 재료는 충분한데 여러 문단에 흩어져 있다(모으면 뽑힌다)
+    ★ 게이트는 '없는 값을 지어내라'고 요구하면 안 된다(정직 게이트, 2026-08-16 수정).
+      `seo.target_keywords()`는 모든 가게에 "{업종} 가격"·"{업종} 추천"을 **항상** 붙인다.
+      그래서 '노린 축'을 그대로 요구하면 가격을 공개하지 않는 가게는 **가격을 지어내야**
+      통과하게 된다. 그건 게이트가 날조를 강요하는 것이다.
+      → 판정을 셋으로 나눈다:
+
+        scattered — 재료가 본문에 있는데 여러 문단에 흩어졌다      → **실패**(모으면 끝, 날조 불필요)
+        missing   — 소제목으로 약속해놓고 덩어리가 없다             → **실패**(약속 위반)
+        unfilled  — 노렸지만 그 축의 재료 자체가 없다               → **통과**(경고만. 빈칸이 날조보다 낫다)
+
+    반환 {"intents", "missing", "scattered", "unfilled", "n_paras"}
     """
     body = body or ""
     heads = " ".join(re.findall(r"^#{2,3}\s*(.+)$", body, re.M))
     kw_txt = " ".join([k for k in (keywords or []) if k])
     paras = paragraphs(body)
-    intents, missing, scattered = {}, [], []
+    intents, missing, scattered, unfilled = {}, [], [], []
     for name, (qre, sre) in INTENTS.items():
-        wanted = _wanted(qre, kw_txt, title, heads)
+        aimed = _wanted(qre, kw_txt, title)        # 노린 축(후보 키워드·제목)
+        promised = _wanted(qre, heads)             # 소제목으로 약속한 축
         per = [len(sre.findall(p)) for p in paras]
         best = max(per) if per else 0
         total = sum(per)
-        ok = best >= MIN_SIGNALS
-        intents[name] = {"wanted": wanted, "best": best, "total": total, "ok": ok}
-        if not wanted:
-            continue
-        if ok:
+        ok_ = best >= MIN_SIGNALS
+        intents[name] = {"aimed": aimed, "promised": promised,
+                         "best": best, "total": total, "ok": ok_}
+        if ok_ or not (aimed or promised):
             continue
         if total >= SCATTER_TOTAL:
-            scattered.append(name)          # 재료는 있는데 안 모였다 — 고치기 쉬운 쪽
+            scattered.append(name)                 # 재료 있음 · 안 모임 → 고칠 수 있다
+        elif promised:
+            missing.append(name)                   # 약속했는데 덩어리 없음 → 약속 위반
         else:
-            missing.append(name)
+            unfilled.append(name)                  # 재료 없음 → 지어내게 하지 않는다
     return {"intents": intents, "missing": missing, "scattered": scattered,
-            "n_paras": len(paras)}
+            "unfilled": unfilled, "n_paras": len(paras)}
 
 
 def ok(body: str, keywords=None, title: str = "") -> bool:
@@ -107,31 +143,54 @@ def ok(body: str, keywords=None, title: str = "") -> bool:
 
 
 def detail(body: str, keywords=None, title: str = "") -> str:
-    """게이트·로그용 한 줄 사유. 통과면 빈 문자열."""
+    """게이트·로그용 한 줄 사유. 통과면 빈 문자열(unfilled는 사유가 아니라 참고)."""
     r = audit(body, keywords, title)
     parts = []
     if r["scattered"]:
         parts.append("흩어짐:" + ",".join(r["scattered"]))
     if r["missing"]:
-        parts.append("없음:" + ",".join(r["missing"]))
+        parts.append("약속미이행:" + ",".join(r["missing"]))
     return " ".join(parts)
 
 
-def prompt_rule(keywords=None) -> str:
+def note(body: str, keywords=None, title: str = "") -> str:
+    """실패는 아니지만 남겨둘 관찰 — 노렸는데 재료가 없어 못 채운 축."""
+    r = audit(body, keywords, title)
+    return ("재료없음:" + ",".join(r["unfilled"])) if r["unfilled"] else ""
+
+
+_AXIS_HOWTO = {
+    "가격": "금액과 구간을 한 문단 안에 모아라(30만원대 / 50만원대 / 80만원대처럼 비교되게)",
+    "시간": "소요 시간 수치를 한 문단에 모아라(항목별로 몇 분·몇 시간인지)",
+    "과정": "순서를 한 문단 또는 연속된 목록으로 모아라(먼저 → 그다음 → 마지막)",
+    "비교": "무엇과 무엇이 어떻게 다른지를 한 문단에서 마주 놓아라(반면·대신·차이)",
+}
+
+
+def prompt_rule(keywords=None, core: str = "") -> str:
     """생성 프롬프트에 넣을 규칙 문장(업종 무관 — 글 구조 규칙).
 
     ★ 프롬프트 지시는 확률이고 게이트가 보장이다. 둘 다 둔다(기존 제목·FAQ와 같은 패턴).
+    ★ [핵심 1개 + 속성 축 2~3개] 구조를 명시한다 — 평평한 키워드 목록만 주면
+      모델이 어느 것을 글 전체로 답하고 어느 것을 전용 문단으로 답할지 알 수 없다.
     """
-    kws = [k for k in (keywords or []) if k][:3]
-    aim = f"(노리는 검색어: {', '.join(kws)})" if kws else ""
-    return (
-        "[질의별 답변 문단 — 필수]\n"
-        f"네이버는 글 전체가 아니라 **검색어에 맞는 문단 하나**를 뽑아 노출한다{aim}. "
-        "따라서 노리는 질의마다 그 질의에 정면으로 답하는 문단이 **한 덩어리로** 서 있어야 한다.\n"
-        "· 가격을 노리면 → 금액과 구간을 **한 문단 안에** 모아라(여러 문단에 흩뿌리지 마라).\n"
-        "· 과정을 노리면 → 순서를 한 문단(또는 연속된 목록)에 모아라.\n"
-        "· 시간을 노리면 → 소요 시간 수치를 한 문단에 모아라.\n"
-        "· 각 문단은 '이 질문에 대한 답'처럼 그 문단만 읽어도 뜻이 통해야 한다.\n"
-        "· 도입부에만 힘주지 마라 — 도입부가 항상 뽑히는 것이 아니다.\n"
-        "※ 없는 값을 지어내서 채우지 마라. 모르는 값은 빈칸으로 두고 아는 것만 모아라.\n"
-    )
+    p = plan(core, keywords)
+    lines = [
+        "[질의별 답변 문단 — 필수]",
+        "네이버는 글 전체가 아니라 **검색어에 맞는 문단 하나**를 뽑아 노출한다. "
+        "실측: 같은 글이 검색어에 따라 다른 대목을 요약으로 받았다(3업종 84%).",
+    ]
+    if p["core"]:
+        lines.append(f"· **핵심 질의 '{p['core']}'** — 이 글 전체가 답한다. 제목과 도입이 이 질의를 정면으로 받는다.")
+    for a in p["attrs"]:
+        lines.append(f"· **속성 질의 '{a['query']}'** — 이 질의만 답하는 **전용 문단 하나**를 두어라. "
+                     f"{_AXIS_HOWTO.get(a['intent'], '관련 내용을 한 문단에 모아라')}.")
+    lines += [
+        "· 각 문단은 그 문단만 읽어도 뜻이 통해야 한다 — 앞 문단을 가리키는 말('위에서 말한 그것') 금지.",
+        "· 그 질의어가 해당 문단 **안에** 들어 있어야 한다(제목에만 있으면 안 된다).",
+        "· 소제목이 그 질의를 그대로 말하게 하라(문단 경계 표지).",
+        "· 도입부에만 힘주지 마라 — 도입부가 항상 뽑히는 것이 아니다.",
+        "※ **없는 값을 지어내서 채우지 마라.** 모르는 값은 그 문단을 통째로 빼고, "
+        "아는 축으로만 써라. 빈칸이 날조보다 낫다.",
+    ]
+    return "\n".join(lines) + "\n"

@@ -368,11 +368,13 @@ class BlogDraftGenerator(Generator):
             _anat_line = _anat_line + _bp_line
         except Exception:
             pass
-        try:      # 🎯 질의별 답변 문단 규칙(2026-08-16 실측) — 게이트와 같은 모듈이 문장을 만든다
+        try:      # 🎯 질의별 답변 문단 규칙(2026-08-16 실측) — 게이트와 같은 모듈이 문장을 만든다.
+            #   핵심(kw0)은 seo.resolve_target_keyword가 정한 canonical 값을 그대로 넘긴다.
             from app.services import answerblock as _abm
-            _ab_rule = _abm.prompt_rule(kws)
+            _ab_plan = _abm.plan(kw0, kws)
+            _ab_rule = _abm.prompt_rule(kws, core=kw0)
         except Exception:
-            _ab_rule = ""
+            _ab_plan, _ab_rule = {}, ""
         prompt = (
             f"[가게] {tenant.name} (업종: {prof.name}, 지역: {_reg_txt})\n"
             f"[사업형태] {strat.label} — {strat.goal}\n"
@@ -607,6 +609,9 @@ class BlogDraftGenerator(Generator):
                      "body": seo.natural_kr_number(body), "photo_markers": markers,
                      "recommended_image_placement": d.get("이미지배치", ""),
                      "tags": tags, "seo_keywords": tags, "target_keywords": kws,
+                     # 🎯 노린 질의 구조[핵심 1 + 속성 2~3] — 발행 후 queryscout 실측과 대조해
+                     #   '노린 질의'와 '실제로 잡힌 질의'를 채점하기 위한 기록(2026-08-16)
+                     "query_plan": _ab_plan,
                      "keyword_density": kdens,
                      "biz_type": strat.key, "closing": strat.closing, "buy_block": buy,
                      "angle": getattr(asset, "angle", "") or "",

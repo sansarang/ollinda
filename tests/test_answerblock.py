@@ -39,18 +39,33 @@ PROCESS = """## 과정
 
 # ── 계측기 눈금이 살아 있는가 (규율 4) ────────────────────────────────────
 
-def test_meter_separates_four_extremes():
-    """네 극단값이 네 판정으로 갈려야 한다. 하나로 뭉치면 자가 죽은 것."""
+def test_meter_separates_three_states():
+    """모아둠 / 흩어짐 / 재료없음이 서로 다른 판정이어야 한다."""
     kw = ["부산 썬팅 가격"]
-    verdicts = {
-        "모아둠": ab.detail(GATHERED, kw, "썬팅 가격"),
-        "흩어짐": ab.detail(SCATTERED, kw, "썬팅 가격"),
-        "없음": ab.detail(ABSENT, kw, "썬팅 가격"),
-    }
-    assert verdicts["모아둠"] == "", f"모은 글이 걸렸다: {verdicts['모아둠']}"
-    assert "흩어짐" in verdicts["흩어짐"], verdicts["흩어짐"]
-    assert "없음" in verdicts["없음"], verdicts["없음"]
-    assert len(set(verdicts.values())) == 3, f"판정이 뭉쳤다: {verdicts}"
+    assert ab.detail(GATHERED, kw, "썬팅 가격") == "", "모은 글이 걸렸다"
+    assert "흩어짐" in ab.detail(SCATTERED, kw, "썬팅 가격")
+    # 재료가 아예 없는 경우는 '실패'가 아니라 '관찰'이다(아래 정직 게이트 테스트 참조)
+    assert ab.detail(ABSENT, kw, "썬팅 가격") == ""
+    assert "재료없음" in ab.note(ABSENT, kw, "썬팅 가격")
+
+
+def test_gate_never_forces_fabrication():
+    """★ seo.target_keywords는 모든 가게에 '{업종} 가격'을 항상 붙인다.
+    노린 축을 그대로 요구하면 가격을 공개 안 하는 가게는 **가격을 지어내야** 통과한다.
+    게이트가 날조를 강요하면 안 된다(정직 게이트)."""
+    kw = ["부산 썬팅", "썬팅 추천", "썬팅 가격"]      # 실제 target_keywords가 만드는 모양
+    assert ab.ok(ABSENT, kw, "부산 썬팅"), \
+        f"재료 없는 축 때문에 글이 막혔다 — 날조 압력: {ab.detail(ABSENT, kw, '부산 썬팅')}"
+    r = ab.audit(ABSENT, kw, "부산 썬팅")
+    assert "가격" in r["unfilled"] and "가격" not in r["missing"]
+
+
+def test_promise_in_heading_must_be_kept():
+    """소제목으로 '가격'을 약속했으면 덩어리가 있어야 한다 — 약속 위반은 실패."""
+    body = "## 가격 안내\n저희는 정성껏 시공합니다. 문의 주세요."
+    r = ab.audit(body, ["부산 썬팅"], "부산 썬팅")
+    assert "가격" in r["missing"], r
+    assert "약속미이행" in ab.detail(body, ["부산 썬팅"], "부산 썬팅")
 
 
 def test_heading_does_not_swallow_its_paragraph():
@@ -85,20 +100,73 @@ def test_process_intent_works_too():
 def test_unwanted_intent_is_not_demanded():
     """노리지 않는 의도까지 요구하면 모든 글이 걸린다."""
     r = ab.audit(ABSENT, ["부산 썬팅"], "부산 썬팅")
-    assert r["intents"]["가격"]["wanted"] is False
+    assert r["intents"]["가격"]["aimed"] is False
     assert not r["missing"] and not r["scattered"]
+
+
+# ── 핵심 1개 + 속성 2~3개 ────────────────────────────────────────────────
+
+def test_plan_splits_core_and_attributes():
+    """실측: 검색어마다 판이 분리(겹침 0.8~4.2%) → 핵심은 하나, 속성만 함께 딴다."""
+    kws = ["부산 동구 썬팅", "부산 동구 썬팅 가격", "썬팅 시공 과정", "썬팅 추천"]
+    p = ab.plan("부산 동구 썬팅", kws)
+    assert p["core"] == "부산 동구 썬팅"
+    got = {a["intent"] for a in p["attrs"]}
+    assert "가격" in got and "과정" in got
+    assert all(a["query"] != p["core"] for a in p["attrs"]), "핵심이 속성으로도 잡혔다"
+
+
+def test_plan_caps_attribute_count():
+    """다중 타깃은 환상 — 상한이 없으면 문단이 얕아져 전부 안 뽑힌다."""
+    kws = ["핵심", "가격 얼마", "시간 얼마나 걸려", "과정 방법", "비교 차이"]
+    assert len(ab.plan("핵심", kws)["attrs"]) <= ab.MAX_ATTRS <= 3
+
+
+def test_plan_does_not_invent_axes():
+    """후보에 없는 축을 지어내면 안 된다 — 없는 질의를 노리게 된다."""
+    p = ab.plan("부산 썬팅", ["부산 썬팅"])
+    assert p["attrs"] == []
+
+
+def test_prompt_states_core_and_attribute_roles():
+    """평평한 목록만 주면 모델이 무엇을 글 전체로 답할지 모른다."""
+    rule = ab.prompt_rule(["부산 동구 썬팅", "부산 동구 썬팅 가격"], core="부산 동구 썬팅")
+    assert "핵심 질의" in rule and "속성 질의" in rule
+    assert "전용 문단" in rule
+
+
+def test_generator_records_query_plan():
+    """발행 후 '노린 질의 vs 실제로 잡힌 질의'를 대조하려면 계획이 남아야 한다."""
+    import os
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "app", "generators", "text_claude.py")
+    src = open(p, encoding="utf-8").read()
+    assert "query_plan" in src and "_ab_plan" in src
 
 
 # ── 업종 중립 (헌법) ─────────────────────────────────────────────────────
 
 def test_industry_neutral_no_hardcoded_terms():
-    """업종명·지명·상품명이 코드에 박히면 안 된다 — 언어 규칙만 쓴다."""
+    """업종명·지명·상품명이 **판정 로직**에 박히면 안 된다 — 언어 규칙만 쓴다.
+
+    독스트링의 실측 사례 인용('썬팅 83%')은 근거 기록이라 허용한다.
+    검사 대상은 실제로 실행되는 코드다 → AST로 독스트링만 걷어내고 본다.
+    """
+    import ast
     import os
-    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                            "app", "services", "answerblock.py"), encoding="utf-8").read()
-    body = src.split('"""', 2)[-1]          # 독스트링(실측 사례 인용)은 제외
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "app", "services", "answerblock.py")
+    src = open(p, encoding="utf-8").read()
+    tree = ast.parse(src)
+    for node in ast.walk(tree):            # 독스트링 노드를 빈 문자열로 치환
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if (node.body and isinstance(node.body[0], ast.Expr)
+                    and isinstance(node.body[0].value, ast.Constant)
+                    and isinstance(node.body[0].value.value, str)):
+                node.body[0].value.value = ""
+    code = ast.unparse(tree)
     for term in ("썬팅", "중고차", "네일", "이어폰", "부산", "기장", "빵집"):
-        assert term not in body, f"업종·지명이 코드에 박혔다: {term}"
+        assert term not in code, f"업종·지명이 판정 로직에 박혔다: {term}"
 
 
 def test_works_across_industries():
@@ -132,7 +200,11 @@ def test_prompt_rule_is_wired_into_generator():
 
 
 def test_prompt_rule_forbids_fabrication():
-    """없는 값을 지어내 문단을 채우면 정직 게이트 위반이 된다."""
-    rule = ab.prompt_rule(["부산 썬팅 가격"])
-    assert "지어내" in rule and "빈칸" in rule
-    assert "한 덩어리" in rule or "한 문단" in rule
+    """없는 값을 지어내 문단을 채우면 정직 게이트 위반이 된다.
+
+    ★ 뜻으로 검사한다 — 문구를 다듬을 때마다 깨지는 골든은 사람을 문구에 묶는다
+      (2026-08-14에 약속 골든 6개가 그렇게 깨졌다).
+    """
+    rule = ab.prompt_rule(["부산 동구 썬팅", "부산 동구 썬팅 가격"], core="부산 동구 썬팅")
+    assert "지어내" in rule and "빈칸" in rule, "날조 금지 문장이 없다"
+    assert "문단" in rule, "문단 단위 원칙이 안 들어갔다"
