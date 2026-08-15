@@ -76,6 +76,16 @@ def track_publish(t, piece, publish: dict) -> dict:
         if idx:
             db.mark_publish_indexed(pid)
     pr = blogrank.post_rank(kw, url)
+    if pr.get("rank") is None:
+        # ★ 재평가 구간(발행 후 3~5일)이 가장 중요한데, 조회 실패는 '행 없음'으로 사라져
+        #   **미측정과 미노출이 구분되지 않는다**(2026-08-16 실측: 12일 구간에 5일치만 남음).
+        #   1회만 재시도하고, 그래도 실패하면 조용히 넘기지 않고 사유를 남긴다(침묵 폴백 금지).
+        import time as _t
+        _t.sleep(1.0)                      # 저속 원칙 — 재시도는 1회, 간격 1초
+        pr = blogrank.post_rank(kw, url)
+        if pr.get("rank") is None:
+            _log.warning("[race] 순위 실측 실패(조회불가) — 재평가 구간에 구멍이 생긴다 "
+                         "tenant=%s kw=%r url=%s", getattr(t, "id", "?"), kw, url[:60])
     out["rank"] = pr.get("rank")
     if pr.get("rank") is not None:
         prev = db.get_prev_rank(t.id, kw, kind="post")
@@ -89,8 +99,13 @@ def track_publish(t, piece, publish: dict) -> dict:
 
 
 def track_all_publishes(days: int = 45) -> dict:
-    """스케줄러용 — 최근 발행 글 전부 일별 실측. 반환 {tracked}."""
+    """스케줄러용 — 최근 발행 글 전부 일별 실측. 반환 {tracked, missed, reeval}.
+
+    ★ `missed`(조회 실패로 그날 기록이 비는 건수)를 함께 센다 — 안 세면 궤적의 구멍이
+      '미노출'처럼 보인다. 특히 `reeval`(발행 후 1~7일, 재평가 구간)의 구멍은 치명적이다.
+    """
     n = 0
+    missed = reeval = reeval_missed = 0
     for u in db.list_users():
         tid = u.get("tenant_id")
         if not tid:
@@ -105,13 +120,24 @@ def track_all_publishes(days: int = 45) -> dict:
             if d > 14 and datetime.utcnow().weekday() != 0:
                 continue      # 비용 가드: 2주 지난 글은 주 1회(월요일)만 실측
             piece = db.get_piece(pub.get("piece_id") or "")   # 외부 글(rss_auto)은 piece 없음 — 그래도 추적
+            is_reeval = 0 <= d <= 7                           # 재평가 구간(실측: 3~5일에 자리가 갈린다)
+            reeval += 1 if is_reeval else 0
             try:
-                track_publish(t, piece, pub)
+                r = track_publish(t, piece, pub)
                 n += 1
+                if r.get("rank") is None:
+                    missed += 1
+                    reeval_missed += 1 if is_reeval else 0
             except Exception:
+                missed += 1
+                reeval_missed += 1 if is_reeval else 0
                 _log.exception("[race] 추적 실패 piece=%s", pub.get("piece_id"))
-    _log.info("[race] 발행 글 실황 추적 %d건", n)
-    return {"tracked": n}
+    _log.info("[race] 발행 글 실황 추적 %d건 (실측 실패 %d건 · 재평가 구간 %d건 중 실패 %d건)",
+              n, missed, reeval, reeval_missed)
+    if reeval_missed:
+        _log.warning("[race] ⚠ 재평가 구간(발행 1~7일) %d건이 오늘 실측에서 비었다 — "
+                     "이 구멍은 나중에 메울 수 없다", reeval_missed)
+    return {"tracked": n, "missed": missed, "reeval": reeval, "reeval_missed": reeval_missed}
 
 
 def _scout_line(kw: str, my_days: int) -> str:

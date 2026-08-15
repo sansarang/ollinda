@@ -53,7 +53,8 @@ def build_report(tenant, weekly_target: int | None = None) -> dict:
     # ② 순위 변화(7일) — 추적 키워드별, 소스(blog/place/blog_search) 구분
     changes = []
     for kw in db.tracked_keywords(tenant.id, limit=8):
-        for kind in ("blog_search", "place", "blog"):
+        from app.services import surfaces as _sf0
+        for kind in _sf0.PRIORITY:              # 신뢰도 순 — 키워드당 가장 정확한 지면 1개만
             ch = _rank_change_7d(tenant.id, kw, kind)
             if ch and ch["before"] is not None and ch["after"] is not None:
                 changes.append(ch)
@@ -91,7 +92,8 @@ def _email_body(rep: dict) -> str:
         b = c["before"] if c["before"] else "미노출"
         a = c["after"] if c["after"] else "미노출"
         arrow = "⬆️" if (c["after"] or 99) < (c["before"] or 99) and c["after"] else ("⬇️" if (c["after"] or 0) > (c["before"] or 0) and c["before"] else "—")
-        src = {"blog_search": "블로그탭", "place": "플레이스", "blog": "지역검색"}.get(c["kind"], c["kind"])
+        from app.services import surfaces as _sf
+        src = _sf.label(c["kind"])
         lines.append(f"🔎 {c['keyword']} ({src}): {b} → {a} {arrow}")
     lines += ["", rep.get("coaching", ""), "", "자세히 보기: https://ollinda.kr/me?tab=report"]
     return "\n".join(lines)

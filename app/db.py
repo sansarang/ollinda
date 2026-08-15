@@ -184,21 +184,33 @@ def get_prev_rank(tenant_id: str, keyword: str, kind: str = "") -> "int | None":
 
 
 def improving_keywords(tenant_id: str, limit: int = 5) -> list[dict]:
-    """순위가 개선된(또는 진입한) 키워드 — 학습 루프용. [{keyword, first, last, gain}]."""
+    """순위가 개선된(또는 진입한) 키워드 — 학습 루프용. [{keyword, kind, first, last, gain}].
+
+    ★ 반드시 **같은 지면 안에서만** 비교한다(2026-08-16 수정).
+      전에는 kind를 안 걸고 한 키워드의 모든 지면을 한 시계열로 묶어 gain을 계산했다 —
+      플레이스 3위와 블로그탭 1위를 비교해 '2계단 상승'을 만들어냈고, 그 값이
+      생성 브리프로 역주입됐다. 헌법: 지면 부재와 순위 밖은 다른 진단이다.
+    """
+    from app.services import surfaces
     out = []
     with _conn() as c:
         kws = c.execute("SELECT DISTINCT keyword FROM rank_snapshots WHERE tenant_id=?", (tenant_id,)).fetchall()
         for kr in kws:
             k = kr["keyword"]
-            rows = c.execute("SELECT rank, checked_at FROM rank_snapshots WHERE tenant_id=? AND keyword=? "
-                             "ORDER BY checked_at ASC", (tenant_id, k)).fetchall()
-            if len(rows) < 2:
-                continue
-            first = rows[0]["rank"] if rows[0]["rank"] else 6      # 0(밖)=6로 취급
-            last = rows[-1]["rank"] if rows[-1]["rank"] else 6
-            gain = first - last                                    # +면 순위 상승(숫자 작아짐)
-            if gain > 0:
-                out.append({"keyword": k, "first": rows[0]["rank"], "last": rows[-1]["rank"], "gain": gain})
+            for kind in surfaces.PRIORITY:              # 신뢰도 높은 지면부터 — 첫 유효 지면만 쓴다
+                rows = c.execute(
+                    "SELECT rank, checked_at FROM rank_snapshots WHERE tenant_id=? AND keyword=? "
+                    "AND COALESCE(kind,?)=? ORDER BY checked_at ASC",
+                    (tenant_id, k, surfaces.REGION_LEGACY, kind)).fetchall()
+                if len(rows) < 2:
+                    continue
+                first = surfaces.rank_for_compare(rows[0]["rank"], miss=6)   # 0(밖)=최하 취급
+                last = surfaces.rank_for_compare(rows[-1]["rank"], miss=6)
+                gain = first - last                    # +면 순위 상승(숫자 작아짐)
+                if gain > 0:
+                    out.append({"keyword": k, "kind": kind,
+                                "first": rows[0]["rank"], "last": rows[-1]["rank"], "gain": gain})
+                break                                  # 키워드당 지면 1개만(섞지 않는다)
     out.sort(key=lambda x: -x["gain"])
     return out[:limit]
 
@@ -208,9 +220,20 @@ def save_place_rank(tenant_id: str, keyword: str, rank: "int | None") -> None:
     save_rank_snapshot(tenant_id, keyword, rank, kind="place")
 
 
-def save_rank_snapshot(tenant_id: str, keyword: str, rank: "int | None", kind: str = "blog") -> None:
-    """순위 스냅샷 기록(하루 1개로 제한 — 같은 날 재조회는 갱신). kind=blog|place로 분리 추적."""
+def save_rank_snapshot(tenant_id: str, keyword: str, rank: "int | None", kind: str = "place") -> None:
+    """순위 스냅샷 기록(하루 1개로 제한 — 같은 날 재조회는 갱신).
+
+    kind는 `services/surfaces.py`가 유일 기준이다. 옛 라벨 'blog'(실제 내용은 지역검색)로는
+    새로 쓰지 않는다 — 같은 값을 kind='place'로 또 쓰던 중복의 원인이었다(2026-08-16).
+    막을 때는 조용히 삼키지 않고 로그를 남긴다(침묵 폴백 금지).
+    """
     if rank is None:
+        return
+    from app.services import surfaces
+    if not surfaces.writable(kind):
+        logging.getLogger("shopcast.rank").warning(
+            "[rank] 기록 거부 — 쓰기 금지 지면 kind=%r (허용: %s) tenant=%s kw=%r",
+            kind, ",".join(surfaces.WRITABLE), tenant_id, keyword)
         return
     today = _now()[:10]
     with _conn() as c:
@@ -1220,7 +1243,13 @@ def get_blog_publish(piece_id: str) -> Optional[dict]:
 
 
 def mark_publish_indexed(piece_id: str) -> None:
-    """색인 확인 기록(생존신고 P2) — 최초 검출 시각 1회만."""
+    """색인 확인 기록(생존신고 P2) — 최초 검출 시각 1회만.
+
+    ⚠ `indexed_at`은 **네이버가 색인한 시각이 아니라 우리가 확인한 시각**이다.
+      체크 주기(발행 후 24h는 30분, 이후는 더 성김)가 그대로 섞여 들어간다.
+      따라서 (indexed_at - published_at)은 소요시간이 아니라 **상한**이다.
+      24시간을 넘는 값은 네이버가 아니라 우리 폴링 간격을 재고 있는 것이다 → 소요시간으로 쓰지 않는다.
+    """
     try:
         with _conn() as c:
             c.execute("UPDATE blog_publishes SET indexed_at=? WHERE piece_id=? AND "

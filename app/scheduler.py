@@ -286,6 +286,12 @@ def _rank_track() -> None:
         race.track_all_publishes()
     except Exception:
         logging.exception("[scheduler] 발행 글 실황 추적 실패")
+    try:      # 🔭 남의 상위글 궤적 관측(2026-08-16) — 네이버가 순위를 어떻게 정하는지 남의 글로 배운다.
+        #   우리 글 표본 6개로는 규칙을 못 만든다(규율 6). 관측만 하고 아무것도 자동 실행하지 않는다.
+        from app.services import rivaltrack
+        logging.info("[scheduler] 남의 상위글 관측: %s", rivaltrack.sweep())
+    except Exception:
+        logging.exception("[scheduler] 남의 상위글 관측 실패")
     try:      # 트랙2 — gowatch 적응 큐 소비(관측 변화 → 개선 제안 카드). 자동 발행 0.
         from app.services import adapt_consume, gowatch_client
         if gowatch_client.configured():

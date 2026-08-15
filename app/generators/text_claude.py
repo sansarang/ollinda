@@ -368,6 +368,11 @@ class BlogDraftGenerator(Generator):
             _anat_line = _anat_line + _bp_line
         except Exception:
             pass
+        try:      # 🎯 질의별 답변 문단 규칙(2026-08-16 실측) — 게이트와 같은 모듈이 문장을 만든다
+            from app.services import answerblock as _abm
+            _ab_rule = _abm.prompt_rule(kws)
+        except Exception:
+            _ab_rule = ""
         prompt = (
             f"[가게] {tenant.name} (업종: {prof.name}, 지역: {_reg_txt})\n"
             f"[사업형태] {strat.label} — {strat.goal}\n"
@@ -406,6 +411,10 @@ class BlogDraftGenerator(Generator):
               "써라(예: 작업 주체를 밝히는 문장, 마무리 안내). 억지 반복·도배 금지, 정확한 표기 유지.\n"
             + "[필수 섹션] ① '## 자주 묻는 질문'(Q&A 정확히 3쌍) ② 가격대/영업시간/찾아오는길을 마크다운 표(| 항목 | 내용 |) 1개 "
             "③ '## 한눈 요약'(핵심 3줄 목록 — GEO).\n"
+            # 🎯 2026-08-16 실측(남의 상위글 339개): 네이버는 글이 아니라 '문단'을 뽑아 노출한다.
+            #   같은 글이 검색어에 따라 다른 대목을 요약으로 받았다(3업종 84%).
+            #   업종 무관한 글 구조 규칙이라 어떤 업종에도 그대로 적용된다.
+            + _ab_rule
             # ★ 채점기가 기계적으로 세는 항목은 처음부터 맞춘다(2026-08-01 실측). 이 네 가지가
             #   매 글 반복해서 깎였고(-8·-6·-5·-3), 뒤에서 재작성으로 되돌리느라 8분을 썼다.
             #   전부 업종·가게 무관한 '글 구조' 규칙이라 어떤 업종에도 그대로 적용된다.

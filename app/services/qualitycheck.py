@@ -73,6 +73,14 @@ def run_checks(asset_id: str) -> dict:
         _dg = pl.get("dwell_gate") or {}
         _chk(checks, "발현률 게이트 기록", isinstance(_dg, dict),
              f"missing={_dg.get('missing')} fixed={_dg.get('fixed')}")
+        # 🎯 질의별 독립 답변 문단(2026-08-16 실측) — 네이버는 글이 아니라 문단을 뽑아 노출한다.
+        #   노리는 질의에 답하는 덩어리가 없거나 흩어져 있으면 뽑아갈 단위가 없다.
+        try:
+            from app.services import answerblock as _ab
+            _abd = _ab.detail(body, pl.get("target_keywords") or [], title)
+            _chk(checks, "질의별 답변 문단", not _abd, _abd)
+        except Exception:
+            _chk(checks, "질의별 답변 문단", False, "검사기 로드 실패")
 
     if cap:
         t = (cap.payload or {}).get("text") or ""

@@ -25,16 +25,15 @@ def on_publish(tenant, piece) -> None:
         kw = _target_keyword(tenant, piece)
         if not kw:
             return
+        from app.services import surfaces
+        # ★ 지역검색 순위는 한 번만 기록한다(kind='place') — 옛 kind='blog' 중복 제거(2026-08-16).
         cur = place.rank(kw, getattr(tenant, "name", ""))   # 현재 순위(무키/실패 None)
-        db.save_rank_snapshot(tenant.id, kw, cur, kind="blog")
-        # 매장형: 플레이스 노출 순위 분리 추적(성장 PHASE 8)
-        if (getattr(tenant, "biz_type", "local") or "local") in ("local", "hybrid"):
-            db.save_place_rank(tenant.id, kw, cur)
+        db.save_place_rank(tenant.id, kw, cur)
         # 블로그 연결 시: blog_id 정확 매칭 순위도 병행 스냅샷(블로그등록 PHASE 3)
         if getattr(tenant, "blog_id", ""):
             from app.services import blogrank
             br = blogrank.blog_rank(kw, tenant.blog_id)
-            db.save_rank_snapshot(tenant.id, kw, br["rank"], kind="blog_search")
+            db.save_rank_snapshot(tenant.id, kw, br["rank"], kind=surfaces.BLOG_SEARCH)
         if cur and 0 < cur <= config.PERFORMANCE_RANK_THRESHOLD:   # 1페이지 진입 → 성과형 과금 이벤트(스텁)
             db.record_perf_event(tenant.id, kw, cur)
         due = (datetime.utcnow() + timedelta(days=config.REPORT_AFTER_DAYS)).isoformat()

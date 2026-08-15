@@ -12,6 +12,7 @@ import logging
 from urllib.parse import quote
 
 from app import config, db
+from app.services import surfaces
 
 _log = logging.getLogger("shopcast.ranktrack")
 
@@ -56,20 +57,21 @@ def track_tenant(t) -> int:
         if _biz == "seller":
             # 셀러: 지역검색 대신 쇼핑검색 순위(kind='shop') — 상품 키워드 승부(셀러 C1)
             cur = place.shop_rank(kw, t.name, getattr(t, "brand_name", "") or "")
-            db.save_rank_snapshot(t.id, kw, cur, kind="shop")
+            db.save_rank_snapshot(t.id, kw, cur, kind=surfaces.SHOP)
             if cur is not None:
                 n += 1
         else:
+            # ★ 지역검색 순위는 **한 번만** 기록한다(kind='place').
+            #   전에는 같은 값을 kind='blog'로 한 번 더 써서 두 계열이 100% 동일한 중복이었고,
+            #   'blog'라는 이름 때문에 블로그 순위로 오독됐다(2026-08-16 수정).
             cur = place.rank(kw, t.name)
-            db.save_rank_snapshot(t.id, kw, cur, kind="blog")      # None이면 내부에서 스킵
+            db.save_place_rank(t.id, kw, cur)                       # None이면 내부에서 스킵
             if cur is not None:
                 n += 1
-            if _biz in ("local", "hybrid"):
-                db.save_place_rank(t.id, kw, cur)                   # 플레이스 노출(분리 추적)
         if bid:
             from app.services import blogrank
             br = blogrank.blog_rank(kw, bid)
-            db.save_rank_snapshot(t.id, kw, br["rank"], kind="blog_search")
+            db.save_rank_snapshot(t.id, kw, br["rank"], kind=surfaces.BLOG_SEARCH)
             if br["rank"] is not None:
                 n += 1
     return n
@@ -118,11 +120,17 @@ def stagnant_keywords(tenant_id: str, limit: int = 3) -> list[dict]:
     반환: [{keyword, first, last, retry_angle, retry_label, href}]"""
     out = []
     for kw in db.tracked_keywords(tenant_id, limit=10):
-        hist = [h for h in db.rank_history(tenant_id, kw) if h.get("rank") is not None]
+        # ★ 지면을 섞지 않는다 — 신뢰도 높은 지면부터 보고 첫 유효 계열만 쓴다(2026-08-16).
+        hist = []
+        for _kind in surfaces.PRIORITY:
+            hist = [h for h in db.rank_history(tenant_id, kw, kind=_kind)
+                    if h.get("rank") is not None]
+            if len(hist) >= 2:
+                break
         if len(hist) < 2:
             continue
-        first = hist[0]["rank"] or 31           # 0(미노출)=최하 취급
-        last = hist[-1]["rank"] or 31
+        first = surfaces.rank_for_compare(hist[0]["rank"])    # 0(미노출)=최하 취급
+        last = surfaces.rank_for_compare(hist[-1]["rank"])
         if last < first:                         # 오르는 중 — 학습 루프(improving)가 담당
             continue
         prev = _last_angle(tenant_id, kw)
@@ -149,16 +157,19 @@ def rank_deltas(tenant_id: str, limit: int = 6) -> list[dict]:
     """대시보드용 순위 변화 — [{keyword, kind, first, last, dir(up|down|flat|enter), history:[...]}]."""
     out = []
     for kw in db.tracked_keywords(tenant_id, limit=limit):
+        # ★ '기록이 가장 많은 지면'이 아니라 '가장 믿을 수 있는 지면'을 쓴다(2026-08-16).
+        #   옛 라벨(blog)은 기록이 길어도 지역검색 중복분이라, 길이로 고르면 그쪽이 이겼다.
         best = None
-        for kind in ("blog_search", "place", "blog", "shop"):
+        for kind in surfaces.PRIORITY:
             hist = [h for h in db.rank_history(tenant_id, kw, kind=kind) if h.get("rank") is not None]
-            if len(hist) >= 1 and (best is None or len(hist) > len(best[1])):
+            if hist:
                 best = (kind, hist)
+                break
         if not best:
             continue
         kind, hist = best
         first, last = hist[0]["rank"], hist[-1]["rank"]
-        f, l = (first or 31), (last or 31)
+        f, l = surfaces.rank_for_compare(first), surfaces.rank_for_compare(last)
         if not first and last:
             d = "enter"                          # 미노출 → 진입
         elif l < f:

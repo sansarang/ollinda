@@ -3352,9 +3352,31 @@ def robots():
 
 @app.get("/sitemap.xml")
 def sitemap():
+    """사이트맵 — 네이버·구글 봇의 유일한 진입로.
+
+    실측 근거(2026-08-16, 자체 서버 로그 Yeti 17건 전수):
+      · 네이버는 매 세션 sitemap.xml을 **가장 먼저** 친다(4세션 중 3세션).
+      · 404가 0건이다 — 링크·사이트맵에 없는 URL은 **찍어보지도 않는다**(AI봇은 404율 72~99%).
+        즉 여기 없는 페이지는 네이버에게 존재하지 않는다.
+      · 이틀 주기로 재방문한다. `lastmod`가 없으면 무엇이 바뀌었는지 판단할 근거가 없어
+        매번 헛걸음한다 — 실제로 그랬다.
+
+    ★ `lastmod`는 지어내지 않는다(정직 게이트). 이 페이지들을 실제로 렌더하는 코드
+      (`app/landing.py`)의 수정 시각을 쓴다 — 내용이 바뀔 수 있었던 유일한 시점이다.
+      매일 오늘 날짜를 찍는 것은 변경 신호 위조다.
+    """
     base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
-    urls = ["/", "/privacy", "/terms", "/refund"]
-    items = "".join(f"<url><loc>{base}{u}</loc><changefreq>weekly</changefreq>"
+    urls = ["/", "/intro", "/privacy", "/terms", "/refund"]
+    lastmod = ""
+    try:
+        import datetime as _dtm
+        from app import landing as _lp
+        _mt = os.path.getmtime(_lp.__file__)
+        lastmod = _dtm.datetime.utcfromtimestamp(_mt).strftime("%Y-%m-%d")
+    except Exception:
+        lastmod = ""                      # 모르면 비운다 — 없는 정보는 빈칸(헌법)
+    _lm = f"<lastmod>{lastmod}</lastmod>" if lastmod else ""
+    items = "".join(f"<url><loc>{base}{u}</loc>{_lm}<changefreq>weekly</changefreq>"
                     f"<priority>{'1.0' if u == '/' else '0.5'}</priority></url>" for u in urls)
     xml = ('<?xml version="1.0" encoding="UTF-8"?>'
            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + items + '</urlset>')
@@ -6557,14 +6579,23 @@ def _caption_box(tenant, blog, n: int, caps=None) -> str:
 
 
 def _index_label(pub: dict) -> str:
-    """(색인 가속 2-4) 색인 상태 실측 라벨 — indexed_at/published_at 차이로 소요시간 계산. 추정 금지."""
+    """색인 상태 라벨.
+
+    ★ 정직 정정(2026-08-16): `indexed_at`은 네이버가 색인한 시각이 **아니라 우리가 확인한 시각**이다.
+      (7/14 06:39~06:40에 3건, 7/24 22:31에 2건이 동시 색인으로 찍힌 것이 배치 확인의 흔적)
+      그래서 "N분 **만에**"는 거짓이다 — 우리가 아는 건 "그 시점**까지는** 잡혔다"는 상한뿐이다.
+      · 발행 후 24시간 안: 집중 체크가 30분 간격이라 상한으로서 의미가 있다 → "N 안에"로 표기.
+      · 24시간 넘어감: 숫자가 네이버 색인이 아니라 **우리 폴링 간격**을 반영한다 → 숫자를 말하지 않는다.
+    """
     try:
         from datetime import datetime
         t0 = datetime.fromisoformat((pub.get("published_at") or "")[:19])
         t1 = datetime.fromisoformat((pub.get("indexed_at") or "")[:19])
         h = max(0, (t1 - t0).total_seconds()) / 3600
-        took = (f"{int(h * 60)}분" if h < 1 else f"{h:.0f}시간") if h < 48 else f"{h / 24:.0f}일"
-        return f"네이버가 글을 받았어요({took} 만에)"
+        if h >= 24:                       # 폴링 간격이 섞인 구간 — 소요시간을 주장하지 않는다
+            return "네이버가 글을 받았어요"
+        took = f"{int(h * 60)}분" if h < 1 else f"{h:.0f}시간"
+        return f"네이버가 글을 받았어요({took} 안에 확인)"
     except Exception:
         return "네이버가 글을 받았어요"
 
@@ -6649,7 +6680,8 @@ def _blog_connect_card(t, fw: str) -> str:
             for c in (_d.get("rank_changes") or [])[:4]:
                 _b = c.get("before") or "미노출"
                 _a = c.get("after") or "미노출"
-                _src = {"blog_search": "블로그탭", "place": "플레이스", "blog": "지역검색", "shop": "쇼핑검색"}.get(c.get("kind"), "")
+                from app.services import surfaces as _sf2
+                _src = _sf2.label(c.get("kind") or "")
                 _up = (c.get("after") or 99) < (c.get("before") or 99) and c.get("after")
                 _cls = "text-emerald-600" if _up else "text-slate-500"
                 _rows2 += (f"<div class='flex justify-between text-sm py-1 border-b border-slate-100'>"
@@ -6954,7 +6986,7 @@ def _growth_card(t, fw: str) -> str:
     deltas = ranktrack.rank_deltas(t.id)
     if not deltas:
         return ""
-    _src_lab = {"blog_search": "블로그탭", "place": "플레이스", "blog": "지역검색", "shop": "쇼핑검색"}
+    from app.services import surfaces as _sf3   # 지면 라벨 단일 관문(사전 복사 금지)
 
     def _spark(history: list) -> str:
         """순위 미니 그래프 — 낮은 순위(1위)가 높은 막대. 0(미노출)은 최하 취급."""
@@ -6976,7 +7008,7 @@ def _growth_card(t, fw: str) -> str:
                  "flat": f"<span class='text-slate-500 font-bold'>{l_lab} 유지</span>"}[d["dir"]]
         rows += ("<div class='flex items-center justify-between border-b border-slate-100 py-2.5 gap-3'>"
                  f"<div class='min-w-0'><div class='text-sm font-bold text-slate-700 truncate'>{esc(d['keyword'])} "
-                 f"<span class='text-[10px] text-slate-400 font-normal'>{_src_lab.get(d['kind'], '')}</span></div>"
+                 f"<span class='text-[10px] text-slate-400 font-normal'>{_sf3.label(d['kind'])}</span></div>"
                  f"<div class='text-xs mt-0.5'>{badge}</div></div>" + _spark(d["history"]) + "</div>")
     # 코칭: 오른 키워드 = 더 밀기 / 정체 = 앵글 재도전
     coach = ""
@@ -7552,8 +7584,10 @@ def my_rank(request: Request):
     for k in kws[:5]:
         det = place.rank_detail(k, t.name)
         cur = det["rank"]
-        prev = db.get_prev_rank(t.id, k)            # 오늘 이전 순위(변화 계산)
-        db.save_rank_snapshot(t.id, k, cur)         # 오늘 순위 기록
+        from app.services import surfaces as _sf
+        # ★ 지역검색 순위다 — 같은 지면끼리만 비교·기록한다(2026-08-16 지면 혼합 수정)
+        prev = db.get_prev_rank(t.id, k, kind=_sf.PLACE)   # 오늘 이전 순위(변화 계산)
+        db.save_place_rank(t.id, k, cur)                   # 오늘 순위 기록
         item = {"kw": k, "rank": cur, "prev": prev,
                 "rival": det["rival"], "leader": det["leader"],
                 "citation": _cites.get(k)}          # 순위/클릭과 함께 인용수 표시(없으면 null)
