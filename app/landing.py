@@ -110,7 +110,7 @@ body.has-result .hide-on-result{display:none !important}
 
 _HEAD = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
-<title>올린다 — 네이버 검색 상위노출에 유리한 AI 마케팅</title>
+<title>올린다 — 사진만 올리면 글·영상까지, 검색에 잘 뜨는 콘텐츠</title>
 <meta name=description content="사진만 올리면 AI가 네이버 블로그·플레이스 상위노출에 유리한 글을 씁니다. 인스타·유튜브·릴스·X까지 자동 생성(네이버는 초안 반자동 발행). 소상공인 AI 마케팅 올린다.">
 <meta name=keywords content="AI 마케팅,소상공인 마케팅,셀러 마케팅,인스타 자동 업로드,네이버 블로그 자동,유튜브 쇼츠 자동,콘텐츠 자동화,SNS 대행,쿠팡 마케팅,올린다,Ollinda">
 <meta name=robots content="index,follow,max-image-preview:large,max-snippet:-1">
@@ -121,7 +121,7 @@ _HEAD = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <meta property=og:site_name content="올린다">
 <meta property=og:locale content="ko_KR">
 <meta property=og:type content=website>
-<meta property=og:title content="올린다 — 네이버 검색 상위노출에 유리한 AI 마케팅">
+<meta property=og:title content="올린다 — 사진만 올리면 글·영상까지, 검색에 잘 뜨는 콘텐츠">
 <meta property=og:description content="사진만 올리면 네이버 상위노출에 유리한 글 + 5채널 콘텐츠. 소상공인 마케팅.">
 <meta property=og:image content="__BASE__/demo/og.png">
 <meta property=og:image:width content="1200">
@@ -414,7 +414,7 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
      box.innerHTML='<div class="card p-5 text-center">'
       +'<div class="inline-block bg-amber-50 text-amber-700 text-[11px] font-bold px-2.5 py-1 rounded-full mb-2">안내</div>'
       +'<p class="text-slate-900 font-extrabold text-base mb-1">무료 미리보기 2회를 모두 사용하셨어요</p>'
-      +'<p class="text-slate-500 text-xs mb-4">이 기기(네트워크)에서 이미 2번 만들어보셨어요. 가입하면 <b class="text-slate-700">무료 2회가 새로</b> 생기고 5채널 전부 + 영상까지 열려요.</p>'
+      +'<p class="text-slate-500 text-xs mb-4">이 기기(네트워크)에서 이미 2번 만들어보셨어요. 가입하시면 <b class="text-slate-700">무료 2회가 새로</b> 생기고, 글과 영상 전부 받으실 수 있어요.</p>'
       +'<a href="/login/kakao" class="block py-3 rounded-xl font-extrabold mb-2" style="background:#FEE500;color:#191600">카카오로 3초 가입</a>'
       +'<a href="/login/google" class="block py-3 rounded-xl font-bold bg-white border border-slate-200 text-slate-700">구글로 가입</a></div>';
      box.scrollIntoView({behavior:'smooth',block:'nearest'});return;}
@@ -424,7 +424,7 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
         +'<a href="/login/google" class="block py-3 rounded-xl font-bold bg-white border border-slate-200 text-slate-700">구글로 가입</a>';}
    box.innerHTML='<div class="card p-5 text-center">'
     +'<p class="text-slate-900 font-bold mb-1">'+esc(d.message||'가입하면 바로 만들어드려요!')+'</p>'
-    +'<p class="text-slate-500 text-xs mb-4">가입 후 \\'내 작업실\\'에서 사진을 올리면 5채널이 자동 생성됩니다.</p>'
+    +'<p class="text-slate-500 text-xs mb-4">가입하시고 사진만 올리시면 글과 영상이 함께 만들어집니다.</p>'
     +cta+'</div>';
    box.scrollIntoView({behavior:'smooth',block:'nearest'});
   }catch(err){renderFail('생성 요청에 문제가 있었어요');}
@@ -519,10 +519,10 @@ def _hero() -> str:
   <div class="reveal inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white border border-indigo-100 text-xs font-semibold text-indigo-600 mb-8">
    카센터 · 정비 · 디테일링 · 썬팅 · 중고차 사장님을 위해</div>
   <h1 class="reveal text-4xl sm:text-6xl font-bold tracking-tight leading-[1.12] text-slate-900">
-   광고비 쓰신 만큼,<br><span class="text-indigo-600">효과 있었는지 아세요?</span></h1>
-  <p class="reveal mt-7 text-lg text-slate-500 max-w-2xl mx-auto">올린다는 사진만 올리면 글과 영상을 만들고,
-   <b class="text-slate-800">그 글이 지금 검색 몇 위인지 매일 확인해</b> 알려드립니다.
-   <b class="text-slate-800">떨어지면 고친 글을 먼저</b> 가져와요.</p>
+   광고비 쓰셨는데,<br><span class="text-indigo-600">효과가 있긴 한 걸까요?</span></h1>
+  <p class="reveal mt-7 text-lg text-slate-500 max-w-2xl mx-auto">사진만 올려주시면 글과 영상을 만들어 드려요.
+   그리고 <b class="text-slate-800">그 글이 검색에서 몇 위인지 매일 확인해</b> 알려드립니다.
+   <b class="text-slate-800">순위가 떨어지면 고친 글을 먼저</b> 가져다드려요.</p>
 
   <!-- ★ 2026-08-13 사장님 지시: 증거를 첫 화면으로.
        예전엔 여기가 C-Rank·D.I.A.+·PAS 같은 만드는 사람 말이었고, 실측 1위 사례는
@@ -565,7 +565,7 @@ def _hero() -> str:
      <input id="rc_region" placeholder="지역(부산 동구)" class="w-full sm:flex-1 min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400">
      <input id="rc_ind" placeholder="업종" class="w-full sm:flex-1 min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-slate-800 text-sm outline-none focus:border-indigo-400"></div>
    <p id="rc_sub" class="text-sm text-slate-400 mt-3 text-center">가입 없이 · 카드 없이 ·
-    <b class="text-slate-600">내가 쓴 글이 몇 위인지</b> 바로 확인해드려요</p>
+    <b class="text-slate-600">사장님 글이 지금 몇 위인지</b> 바로 알려드려요</p>
    <div id="rc_pick" class="hidden mt-3"></div>
    <div id="rc_out" class="text-slate-600 text-sm mt-3"></div>
    <div id="it_out" class="hidden mt-3"></div>
@@ -616,7 +616,7 @@ def _hero() -> str:
    i.placeholder=seller?'상품 키워드(블루투스 이어폰)':'업종';
    n.placeholder=seller?'스토어/브랜드명':'상호';
    if(sub) sub.textContent=seller?'스토어명만 넣으면 쇼핑 검색 순위를 바로 확인해드려요'
-     :'가입 없이 · 카드 없이 · 내가 쓴 글이 몇 위인지 바로 확인해드려요';
+     :'가입 없이 · 카드 없이 · 사장님 글이 지금 몇 위인지 바로 알려드려요';
    if(seller && typeof rcNeedMore==='function') rcNeedMore();}}
   // ★ 동명 가게 구분(2026-08-12): 상호로 후보를 먼저 찾아 주소를 보여주고 사용자가 고른다.
   //   남의 가게 순위를 내 순위로 보고하는 허위 양성을 막는 장치.
@@ -784,7 +784,7 @@ def _video() -> str:
  <div class="max-w-4xl mx-auto px-5">
   <div class="reveal text-center mb-8">
    <h2 class="text-2xl sm:text-3xl font-bold text-slate-900">실제 결과물, 직접 보세요</h2>
-   <p class="text-slate-500 text-sm mt-2">사진 5장만 올리면 <b class="text-slate-800">음성 영상</b>과 <b class="text-slate-800">네이버 블로그 글</b>이 자동으로. 아래는 실제 생성 결과입니다.</p></div>
+   <p class="text-slate-500 text-sm mt-2">사진 5장이면 <b class="text-slate-800">목소리가 들어간 영상</b>과 <b class="text-slate-800">블로그 글</b>이 함께 나옵니다. 아래는 실제로 만들어진 결과예요.</p></div>
   <div class="reveal max-w-sm mx-auto card overflow-hidden">
    <video src="{_v('/demo/local_short.mp4')}" controls muted loop playsinline preload="metadata" poster="{_v('/demo/short_poster.jpg')}" class="w-full bg-black"></video>
    <div class="text-slate-600 text-sm px-5 py-3.5">초량 루마썬팅 — 사진 5장 → AI 자동 생성 시공 과정 세로 영상 <b class="text-slate-800">(음성 나레이션 + 자막 · 번호판 자동 가림)</b>
@@ -815,7 +815,7 @@ def _flow() -> str:
     # ① 사진 올리기 — 보정 전/후 실물
     s1 = (f"<div class='reveal card p-5'>"
           f"<div class='flex items-center gap-2 mb-3'>{step.format(1)}"
-          f"<div class='font-bold text-slate-900'>사진만 올립니다</div></div>"
+          f"<div class='font-bold text-slate-900'>사진만 올려주세요</div></div>"
           f"<div class='grid grid-cols-2 gap-2'>"
           f"<div><img src='{_v('/demo/food-before.jpg')}' loading='lazy' decoding='async' "
           f"class='w-full rounded-xl object-cover' style='aspect-ratio:4/3' alt='폰으로 찍은 사진'>"
@@ -823,12 +823,12 @@ def _flow() -> str:
           f"<div><img src='{_v('/demo/food-after.jpg')}' loading='lazy' decoding='async' "
           f"class='w-full rounded-xl object-cover' style='aspect-ratio:4/3' alt='올린다 자동 보정'>"
           f"<div class='text-[11px] text-indigo-600 font-bold text-center mt-1'>자동 보정 후</div></div></div>"
-          f"<p class='text-slate-500 text-sm mt-3'>보정·번호판 가림까지 자동으로 합니다.</p></div>")
+          f"<p class='text-slate-500 text-sm mt-3'>보정도, 번호판 가리는 것도 올린다가 해요.</p></div>")
 
     # ② 글·영상 생성 — 실제 생성물
     s2 = (f"<div class='reveal card p-5'>"
           f"<div class='flex items-center gap-2 mb-3'>{step.format(2)}"
-          f"<div class='font-bold text-slate-900'>글과 영상이 나옵니다</div></div>"
+          f"<div class='font-bold text-slate-900'>글이랑 영상이 나와요</div></div>"
           f"<video src='{_v('/demo/local_short.mp4')}' controls muted loop playsinline "
           f"preload='metadata' poster='{_v('/demo/short_poster.jpg')}' "
           f"class='w-full max-w-[190px] mx-auto rounded-xl bg-black'></video>"
@@ -836,7 +836,7 @@ def _flow() -> str:
           f"<div class='text-[11px] text-slate-400 mb-1'>네이버 블로그 · 실제 생성된 글</div>"
           f"<div class='text-sm font-bold text-slate-800 leading-snug'>부산 동구 썬팅업체 후기, "
           f"포터2 냉동탑차 열차단 시공 팩트정리</div></div>"
-          f"<p class='text-slate-500 text-sm mt-3'>영상은 나레이션·자막까지 · 실제 올린다 생성물입니다.</p></div>")
+          f"<p class='text-slate-500 text-sm mt-3'>영상엔 목소리와 자막까지 들어가요. 실제로 만들어진 결과물입니다.</p></div>")
 
     # ③ 실측 — 발행 후 순위가 어떻게 움직였나
     def _tl(date, label, hot=False):
@@ -848,23 +848,23 @@ def _flow() -> str:
                 f"<span class='text-sm {txt}'>{label}</span></div>")
     s3 = (f"<div class='reveal card-hi p-5'>"
           f"<div class='flex items-center gap-2 mb-3'>{step.format(3)}"
-          f"<div class='font-bold text-slate-900'>매일 순위를 재드립니다</div></div>"
+          f"<div class='font-bold text-slate-900'>매일 순위를 확인해요</div></div>"
           f"<div class='text-sm text-slate-500 mb-2'>‘부산 동구 썬팅업체’ 검색</div>"
           f"<div class='border-l-2 border-indigo-100 ml-1 pl-3'>"
           + _tl("7/31", "글 발행")
           + _tl("8/2", "네이버 블로그검색 <b>12위</b>")
           + _tl("8/9", "<span class='text-indigo-600 text-lg'>1위</span>", hot=True)
           + f"</div>"
-          f"<p class='text-slate-500 text-sm mt-3'>발행 9일 만에 1위. 글은 쓰는 날이 아니라 "
-          f"<b class='text-slate-700'>떨어지는 날</b>이 문제라, 떨어지면 고친 글을 먼저 내밉니다.</p>"
-          f"<p class='text-[11px] text-slate-400 mt-1'>자동 발행은 하지 않아요 — 발행 버튼은 언제나 사장님 몫</p>"
+          f"<p class='text-slate-500 text-sm mt-3'>올린 지 9일 만에 1위가 됐어요. 글은 쓰는 날보다 "
+          f"<b class='text-slate-700'>떨어지는 날</b>이 문제라, 떨어지면 고친 글을 먼저 가져다드려요.</p>"
+          f"<p class='text-[11px] text-slate-400 mt-1'>저희가 마음대로 올리지 않아요 — 올리기 버튼은 사장님이 누르십니다</p>"
           f"<p class='text-[11px] text-slate-400 mt-1'>실제 이용 가게 · 2026년 8월 실측 · "
           f"결과는 가게·검색어에 따라 달라요</p></div>")
 
     # ④ 다음 글감 — 이 루프가 계속 돈다
     s4 = (f"<div class='reveal card p-5'>"
           f"<div class='flex items-center gap-2 mb-3'>{step.format(4)}"
-          f"<div class='font-bold text-slate-900'>다음에 쓸 글을 찾아옵니다</div></div>"
+          f"<div class='font-bold text-slate-900'>다음에 쓸 글도 찾아드려요</div></div>"
           f"<div class='bg-[#F9FAFB] border border-slate-200 rounded-xl p-3 space-y-2'>"
           f"<div class='text-[11px] text-slate-400'>먼저 쓰면 좋은 이야기</div>"
           f"<div class='text-sm text-slate-800 font-semibold leading-snug'>"
@@ -874,14 +874,14 @@ def _flow() -> str:
           f"<span class='px-2.5 py-1 rounded-lg bg-indigo-600 text-white text-xs font-bold'>이걸로 쓸래요</span>"
           f"<span class='px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-500 text-xs'>저희는 안 해요</span>"
           f"</div></div>"
-          f"<p class='text-slate-500 text-sm mt-3'>손님이 찾는데 답이 없는 자리를 찾아 올려드려요. "
-          f"고르기만 하시면 ①로 돌아갑니다.</p>"
+          f"<p class='text-slate-500 text-sm mt-3'>손님들은 찾는데 아직 답한 글이 없는 것들을 찾아다 드려요. "
+          f"마음에 드는 걸 고르시면, 다시 사진만 올리시면 돼요.</p>"
           f"<p class='text-[11px] text-slate-400 mt-1'>실제 화면 구성 — 글감 내용은 가게마다 달라요</p></div>")
 
     return (f"<section class='bg-[#F9FAFB] py-16'><div class='max-w-6xl mx-auto px-5'>"
             f"<h2 class='reveal text-2xl sm:text-3xl font-bold text-center text-slate-900 mb-2'>"
-            f"가입하면 이렇게 <span class='text-indigo-600'>돌아갑니다</span></h2>"
-            f"<p class='reveal text-center text-slate-500 mb-10'>사진 올리는 것 말고는 올린다가 합니다.</p>"
+            f"가입하시면 이렇게 <span class='text-indigo-600'>굴러갑니다</span></h2>"
+            f"<p class='reveal text-center text-slate-500 mb-10'>사진만 올리시면 나머지는 올린다가 합니다.</p>"
             f"<div class='grid sm:grid-cols-2 lg:grid-cols-4 gap-4 items-start'>{s1}{s2}{s3}{s4}</div>"
             f"</div></section>")
 
@@ -904,9 +904,9 @@ def _try() -> str:
        이 섹션은 이제 '사진 올려서 실제로 만들어보기' 하나만 한다. -->
   <div class="reveal text-center mb-8">
    <span class="inline-block px-3 py-1 rounded-full bg-[#EEF2FF] text-indigo-600 text-xs font-bold mb-3">가입 없이 · 무료</span>
-   <h2 class="text-2xl sm:text-3xl font-bold text-slate-900">사진 올려서 직접 만들어보세요</h2>
-   <p class="text-slate-500 text-sm mt-2">업종만 고르면 <b class="text-slate-800">내 가게용 블로그 글 도입부</b>를
-    진짜로 만들어 보여드려요 · 약 2분</p></div>
+   <h2 class="text-2xl sm:text-3xl font-bold text-slate-900">사진 올려서 한번 만들어보세요</h2>
+   <p class="text-slate-500 text-sm mt-2">업종만 고르시면 <b class="text-slate-800">사장님 가게 글의 앞부분</b>을
+    실제로 만들어서 보여드려요 · 2분쯤 걸려요</p></div>
   <div class="reveal max-w-2xl mx-auto">{_hero_demo_card()}</div>
  </div>
  <script>
@@ -959,7 +959,7 @@ def _hero_demo_card() -> str:
     return f"""
    <div id="herodemo" class="bg-white border-2 border-indigo-200 rounded-2xl shadow-sm p-5">
     <div class="flex items-center gap-2 text-slate-800 font-bold text-sm mb-1">{_icon('camera', 'w-4 h-4 text-indigo-600')} 내 사진으로 지금 만들어보기</div>
-    <p class="text-xs text-slate-400 mb-3">사진 올리고 업종만 고르면 <b class="text-slate-600">진짜로 생성</b>해서 바로 보여드려요 · 가입 없이</p>
+    <p class="text-xs text-slate-400 mb-3">사진 올리고 업종만 고르면 <b class="text-slate-600">정말로 만들어서</b> 바로 보여드려요 · 가입 없이</p>
     <div id="d_target_hint" class="hidden bg-[#EEF2FF] text-indigo-700 text-xs font-bold rounded-xl px-3 py-2 mb-2"></div>
     <form id="demoForm" class="space-y-2">
      <input type=hidden id="d_target_kw"><input type=hidden id="d_target_vol">
@@ -995,7 +995,7 @@ def _hero_demo_card() -> str:
      <button id="d_submit" class="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition disabled:opacity-40 disabled:cursor-not-allowed">실제로 만들어보기</button>
      <div id="d_submit_hint" class="hidden text-center text-xs text-slate-400"></div></form>
     <div id="demoResult" class="mt-4"></div>
-    <p class="text-center text-slate-400 text-xs mt-2">가입 없이 미리보기 · 가입하면 <b class="text-slate-600">5채널 전부 + 영상</b> 무료 2회</p>
+    <p class="text-center text-slate-400 text-xs mt-2">가입 안 하셔도 맛보기는 됩니다 · 가입하시면 <b class="text-slate-600">글과 영상 전부</b> 무료 2회</p>
    </div>"""
 
 
@@ -1016,7 +1016,7 @@ def _experience_strip() -> str:
    <p class="text-slate-600 text-sm sm:text-base max-w-2xl mx-auto">글을 만들 때 그 주제로 <b class="text-slate-800">딱 한 가지</b>만 여쭤봐요.
     답하신 경험은 저장돼서 다음 글에 자동으로 들어가고 — <b class="text-slate-800">쌓일수록 질문이 줄어듭니다.</b>
     나중엔 사진만 던지셔도 돼요.</p>
-   <p class="text-xs text-slate-400 mt-4">답이 없는 주제는 지어내지 않습니다 — 경험 없이도 쓸 수 있는 사실 기반 글로 먼저 나가요.</p>
+   <p class="text-xs text-slate-400 mt-4">모르는 건 지어내지 않아요 — 경험이 없으셔도 사실만으로 쓸 수 있는 글부터 먼저 나갑니다.</p>
   </div>
  </div></section>"""
 
@@ -1195,18 +1195,18 @@ def _pricing() -> str:
         return (f"<span class='line-through text-slate-300 text-lg font-semibold mr-1.5'>{list_won:,}원</span>"
                 f"월 {sale_won:,}원")
     plans = [("라이트", _pr(lb, b), f"월 6세트 · 처음 시작용 · 연결제 시 월 {by:,}원",
-              ["월 콘텐츠 6세트(블로그+인스타+X)", "실사 무빙 영상 2편(사진이 촬영 영상처럼 움직임)",
-               "검색 상위노출 구조 + 품질 자동검사",
+              ["월 콘텐츠 6세트(블로그+인스타+X)", "영상 2편 (사진이 촬영한 것처럼 움직여요)",
+               "검색에 잘 뜨는 형태로 + 내보내기 전 자동 점검",
                "사진 자동 보정 + 번호판·개인정보 가림"] + _flim("basic"),
               "basic", False),
              ("스탠다드", _pr(lp, p), f"월 12세트 · 성과까지 · 연결제 시 월 {py:,}원",
-              ["월 콘텐츠 12세트 + 실사 무빙 영상 8편", "네이버 클립 전용 영상(검색 첫 화면 진입)",
-               "사람 목소리급 나레이션(단어 단위 자막 싱크)",
-               "순위 성장 추적 · 미노출 자동 개선",
-               "성과 실측(QR·유입 집계)", "이길 키워드 자동 선정(승산 분석)"] + _flim("pro"),
+              ["월 콘텐츠 12세트 + 영상 8편", "네이버 클립용 영상(검색 첫 화면에 뜨는 자리)",
+               "사람 목소리 같은 나레이션 + 말에 맞춰 뜨는 자막",
+               "순위 변화 추적 · 안 뜨면 고친 글 제안",
+               "QR로 실제 손님 수 확인", "이길 만한 검색어를 골라드림"] + _flim("pro"),
               "pro", True),
              ("프로", _pr(la, af), "월 20세트 · 영상 무제한 · 최우선",
-              ["월 콘텐츠 20세트 + 실사 무빙 영상 무제한", "네이버 클립 전용 영상(검색 첫 화면 진입)",
+              ["월 콘텐츠 20세트 + 영상 무제한", "네이버 클립용 영상(검색 첫 화면에 뜨는 자리)",
                "우선 생성 · 다중 가게",
                "전담 지원(카톡 우선 응대)"] + _flim("agency"),
               "agency", False)]
@@ -1232,7 +1232,7 @@ def _pricing() -> str:
                   f"<ul class='space-y-2.5 text-sm text-slate-600 flex-1 mt-2'>{lis}</ul>"
                   f"<a href='{href}' class='{btn} mt-7 text-center px-4 py-3.5 rounded-xl font-bold transition'>{cta}</a>{annual}</div>")
     return (f"<section id='pricing' class='bg-[#F9FAFB] py-24'><div class='max-w-5xl mx-auto px-5'>"
-            f"<h2 class='reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900'>합리적인 요금 <span class='text-indigo-600 text-xl align-middle'>런칭 특가</span></h2>"
+            f"<h2 class='reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900'>요금 <span class='text-indigo-600 text-xl align-middle'>시작 기념 할인</span></h2>"
             # ★ 2026-08-14 가격 앵커(조사 근거): 크몽 블로그 대행 실판매가 38만/58만/77만원
             #   (한 서비스만 856건 거래). 지불 의사는 이미 있다 — 비싸서 안 사는 게 아니다.
             #   '월 13만원'만 있으면 비싸고, 대행가 옆에 두면 싸다. 앵커가 있어야 판단이 선다.
@@ -1246,7 +1246,7 @@ def _pricing() -> str:
             f"<span class='text-indigo-600'>월 12만 9천원부터</span></div>"
             f"<div class='text-[11px] text-slate-400 mt-2'>대행 시세는 2026년 8월 공개 마켓 실판매가 기준</div></div>"
             f"<p class='reveal text-center text-slate-500 mb-8'>"
-            f"올린다는 실사 무빙 영상까지 통째로, 지금 가격은 런칭 기간 한정입니다.</p>"
+            f"영상까지 전부 포함된 가격이고, 지금 금액은 시작 기념 할인가예요.</p>"
             # ★ C. 요금표 접기(2026-08-14) — 가입자 0명인 상태에서 첫 방문자에게
             #   결제 버튼 3개를 펼쳐 보이는 건 이르다. 업계 권장도 '점진적 공개'다.
             #   앵커(위 한 줄)는 늘 보이고, 상세 표는 궁금한 사람만 편다.
@@ -1259,7 +1259,7 @@ def _pricing() -> str:
             f"</div></section>")
 
 
-_QA = [("정말 사진만 올리면 되나요?", "네. 사진과 한 줄 설명만 주시면 AI가 5채널 콘텐츠를 만듭니다. 사진 1장만 있어도 자막·음성이 들어간 세로 숏폼까지 자동 생성됩니다."),
+_QA = [("정말 사진만 올리면 되나요?", "네. 사진이랑 한 줄 설명만 주시면 됩니다. 사진 한 장만 있어도 자막과 목소리가 들어간 세로 영상까지 만들어 드려요."),
        ("쿠팡·11번가 셀러도 되나요?", "네. '온라인 셀러'로 설정하면 글 마무리가 지도 대신 구매 링크/검색어로, 키워드가 지역명 대신 상품·후기 키워드로 자동 전환됩니다. (쿠팡은 직링크 정책상 '검색어 유도'를 권장)"),
        ("제 SNS 비밀번호를 줘야 하나요?", "아니요. 공식 OAuth로 한 번만 권한을 허용하면 됩니다. 비밀번호는 저장하지 않습니다."),
        ("네이버 블로그도 되나요?", "글·사진을 완성해 드리고, 임시저장된 글을 네이버에서 발행만 누르시면 됩니다. (네이버는 공식 발행 API가 없어 반자동)"),
@@ -1389,7 +1389,7 @@ def _footer() -> str:
    <div>
     <div class="card p-4 text-sm">
       <p class="font-semibold text-slate-800 mb-1">올린다는 이렇게 만들었습니다</p>
-      <p class="text-slate-500 text-xs">실제 소상공인·중고차 매장 현장 요구에서 출발해, AI(글·비전·TTS·영상)와 네이버 상위노출 노하우를 결합해 개발했습니다.</p>
+      <p class="text-slate-500 text-xs">썬팅집·중고차 매장 사장님들이 실제로 필요하다고 하신 것에서 시작했습니다. 검색에 잘 뜨게 만드는 방법을 AI에 붙여 만들었어요.</p>
      </div>
     <div class="mt-4 flex flex-wrap gap-3 text-sm">
      <a href="#contact" class="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:border-slate-300">문의하기</a>
@@ -1449,13 +1449,14 @@ def _naver_preview() -> str:
     title = "부산 동구 썬팅업체 후기, 포터2 냉동탑차 열차단 시공 팩트정리"
     body = (
         "화물차 타시는 사장님, 한여름 앞유리로 쏟아지는 햇빛에 팔뚝이 익는 느낌 받아보신 적 있으시죠? "
-        "<span class='text-indigo-500 text-xs'>(← 검색 유입 손님 공감 = 이탈 방지)</span><br>"
+        ""
         "오후 배송 돌 때 서쪽 햇빛 눈부심에 신호등이 순간 안 보이면 진짜 아찔합니다. "
         "그래서 오늘은 직접 시공한 <b>현대 포터2 냉동탑차 열차단 썬팅</b>을 처음부터 끝까지 보여드릴게요.<br><br>"
         "<b>■ 오늘의 케이스 — 포터2 냉동탑차 앞유리·측면</b><br>"
         "매일 장거리 배송 도는 냉동탑차 사장님 요청은 명확했어요. ‘더위랑 눈부심만 잡아달라.’ "
         "화물차는 유리 면적이 넓어 열차단 성능이 더 중요하죠. (내비·후방카메라는 옵션으로 함께) "
-        "<span class='text-indigo-500 text-xs'>(← 손님 스토리 + 과정 = 신뢰·체류)</span>")
+        ""
+          )
     tags = ["부산동구썬팅", "열차단썬팅", "포터2썬팅", "화물차썬팅"]
     tag_html = "".join(f"<span class='inline-block bg-slate-100 text-slate-500 text-xs px-2 py-1 rounded-full mr-1 mb-1'>#{t}</span>" for t in tags)
     return f"""
@@ -1466,7 +1467,7 @@ def _naver_preview() -> str:
     <div class="text-xs text-slate-400 border-b border-slate-100 pb-2 mb-3">초량 루마썬팅 블로그 · 방금 전 · 조회 12</div>
     <p class="text-sm text-slate-700 leading-relaxed">{body}</p>
     <div class="mt-4">{tag_html}</div>
-    <div class="mt-3 text-xs text-slate-400">손님 고민으로 시작 · 실제 검색되는 말 사용 · 없는 가격·스펙은 쓰지 않음 — 자동 적용</div>
+    <div class="mt-3 text-xs text-slate-400">손님 고민으로 시작하고, 실제로 검색되는 말을 쓰고, 없는 가격·성능은 넣지 않아요</div>
    </div></div>"""
 
 
@@ -1541,7 +1542,7 @@ def _rank_loop() -> str:
     steps = [
         ("chart", "1. 매일 실측", "발행된 <b class='text-slate-800'>모든 글의 네이버 순위</b>를 매일 자동으로 확인해요 — 사장님이 발행한 글도, 예전 글도 전부."),
         ("scan", "2. 변화 감지", "순위가 떨어지거나 검색에서 사라지면 <b class='text-slate-800'>사장님보다 먼저</b> 알아챕니다."),
-        ("pen", "3. 고쳐서 제안", "떨어진 글의 <b class='text-slate-800'>개선판을 실제로 만들어</b> 카드로 가져와요. 자동 발행은 하지 않아요 — 발행 버튼은 언제나 사장님 몫."),
+        ("pen", "3. 고쳐서 제안", "떨어진 글의 <b class='text-slate-800'>개선판을 실제로 만들어</b> 카드로 가져와요. 저희가 마음대로 올리지 않아요 — 올리기 버튼은 사장님이 누르십니다."),
         ("refresh", "4. 회복 확인", "개선판을 발행하면 <b class='text-slate-800'>회복되는지 다시 실측</b>으로 지켜봐요. 효과 있던 방법은 다음 글에 학습됩니다."),
     ]
     cards = "".join(
@@ -1553,7 +1554,7 @@ def _rank_loop() -> str:
  <div class="max-w-6xl mx-auto px-5">
   <div class="text-center mb-4"><span class="reveal inline-block px-3 py-1 rounded-full bg-white border border-indigo-100 text-xs font-bold text-indigo-600">글 뽑는 도구가 아니라, 지켜보는 직원</span></div>
   <h2 class="reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900">글은 쓰는 날이 아니라 <span class="text-indigo-600">떨어지는 날</span>이 문제입니다</h2>
-  <p class="reveal text-center text-slate-500 mb-12 max-w-2xl mx-auto">대부분의 AI 툴은 글을 뱉고 끝나요. 올린다는 <b class="text-slate-800">발행한 뒤부터가 본편</b>입니다 — 매일 지켜보다가, 떨어지면 고친 글을 먼저 내밉니다.</p>
+  <p class="reveal text-center text-slate-500 mb-12 max-w-2xl mx-auto">대부분의 AI 툴은 글을 뱉고 끝나요. 올린다는 <b class="text-slate-800">발행한 뒤부터가 본편</b>입니다 — 매일 지켜보다가, 떨어지면 고친 글을 먼저 가져다드려요.</p>
   <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">{cards}</div>
   <p class="reveal text-center text-xs text-slate-400 mt-8">※ 정직 원칙: 가짜 순위·"무조건 1위" 보장은 하지 않습니다. 실측 순위와 사실 기반 제안만 드려요.</p>
  </div></section>"""
@@ -1583,9 +1584,10 @@ def _copy_compare() -> str:
     before = ("안녕하세요~ 저희 루마썬팅입니다 😊<br>오늘도 열심히 시공했어요!<br>"
               "저희는 좋은 필름으로 정성껏 작업합니다.<br>많은 관심 부탁드려요~")
     after = ("운전할 때 앞유리 햇빛에 눈 시리고, 신호 대기만 해도 얼굴 화끈거린 적 있으시죠?<br>"
-             "<span class='text-indigo-500'>(← 검색해서 들어온 손님 공감 = 이탈 방지)</span><br>"
+             ""
              "오늘 오신 검은 SUV 손님도 그 고민이었어요. 그래서 열차단 세라믹으로 시공한 과정, 그대로 보여드릴게요…<br>"
-             "<span class='text-indigo-500'>(← 손님 스토리 + 과정 = 신뢰·체류)</span>")
+             ""
+          )
     return f"""
 <section class="bg-[#F9FAFB] py-24">
  <div class="max-w-5xl mx-auto px-5">
@@ -1604,10 +1606,10 @@ def _copy_compare() -> str:
 
 def _honesty() -> str:
     """정직 원칙 — 신뢰 = 전환(#3)."""
-    badges = [("xcircle", "가격 날조 안 함", "20만원짜리를 3만원이라 안 씁니다"),
-              ("xcircle", "허위 스펙 안 함", "없는 성능·효능 지어내지 않습니다"),
-              ("xcircle", "가짜 후기 안 함", "‘내돈내산’ 사칭 없이 판매자 시연으로"),
-              ("shield", "표시광고법 안전", "믿고 배포해도 되는 콘텐츠")]
+    badges = [("xcircle", "가격 날조 안 함", "20만원짜리를 3만원이라고 안 씁니다"),
+              ("xcircle", "허위 스펙 안 함", "없는 성능을 있다고 안 씁니다"),
+              ("xcircle", "가짜 후기 안 함", "손님인 척 후기를 쓰지 않습니다"),
+              ("shield", "표시광고법 안전", "그대로 올리셔도 괜찮습니다")]
     cells = "".join(f"<div class='reveal text-center'>"
                     f"<div class='mx-auto w-11 h-11 rounded-xl bg-white border border-slate-200 text-slate-400 flex items-center justify-center mb-3'>{_icon(ic, 'w-5 h-5')}</div>"
                     f"<div class='font-bold text-sm mb-1 text-slate-800'>{t}</div><div class='text-xs text-slate-500'>{d}</div></div>"
@@ -1615,19 +1617,19 @@ def _honesty() -> str:
     return f"""
 <section class="bg-[#F9FAFB] py-24">
  <div class="max-w-4xl mx-auto px-5 text-center">
-  <h2 class="reveal text-3xl sm:text-4xl font-bold mb-3 text-slate-900">없는 건 <span class="text-indigo-600">지어내지 않습니다</span></h2>
-  <p class="reveal text-slate-500 mb-14 max-w-xl mx-auto">허위 콘텐츠는 차라리 안 만드는 게 낫습니다. 손님을 속이면 신뢰를 잃으니까요. <b class="text-slate-700">올린다는 사진과 사장님이 준 정보로만</b> 정직하게 씁니다.</p>
+  <h2 class="reveal text-3xl sm:text-4xl font-bold mb-3 text-slate-900">없는 얘기는 <span class="text-indigo-600">쓰지 않습니다</span></h2>
+  <p class="reveal text-slate-500 mb-14 max-w-xl mx-auto">거짓말로 쓴 글은 차라리 안 쓰는 게 낫습니다. 손님을 한 번 속이면 그걸로 끝이니까요. <b class="text-slate-700">올린다는 사진과 사장님이 준 정보로만</b> 정직하게 씁니다.</p>
   <div class="grid grid-cols-2 sm:grid-cols-4 gap-6">{cells}</div>
   <!-- ★ 2026-08-13: 경험 자산 약속(_experience_strip)을 여기로 압축했다. 섹션을 지우면서
        약속까지 지우면 안 된다 — 이건 꾸밈이 아니라 우리가 지키기로 한 계약이다. -->
   <div class="reveal card p-5 mt-12 flex items-center gap-4 text-left max-w-2xl mx-auto">
    <span class="shrink-0 w-11 h-11 rounded-xl bg-[#EEF2FF] text-indigo-600 flex items-center justify-center">{_icon('check', 'w-5 h-5')}</span>
-   <div><div class="font-bold text-sm text-slate-800">한 번 답하면, 계속 씁니다</div>
+   <div><div class="font-bold text-sm text-slate-800">한 번만 알려주시면, 계속 씁니다</div>
    <div class="text-xs text-slate-500 mt-0.5">글을 만들 때 그 주제로 딱 한 가지만 여쭤봐요. 답하신 경험은 다음 글에 자동으로 들어가고, 쌓일수록 질문이 줄어듭니다. 답이 없는 주제는 지어내지 않고 사실 기반 글로 먼저 나갑니다.</div></div>
   </div>
   <div class="reveal card p-5 mt-4 flex items-center gap-4 text-left max-w-2xl mx-auto">
    <span class="shrink-0 w-11 h-11 rounded-xl bg-[#EEF2FF] text-indigo-600 flex items-center justify-center">{_icon('shield', 'w-5 h-5')}</span>
-   <div><div class="font-bold text-sm text-slate-800">SNS 비밀번호는 받지 않습니다</div>
+   <div><div class="font-bold text-sm text-slate-800">비밀번호는 절대 안 받습니다</div>
    <div class="text-xs text-slate-500 mt-0.5">채널 연결은 공식 인증(OAuth)으로만 해요. 비밀번호를 달라는 마케팅 업체는 사장님 계정을 통째로 위험에 빠뜨립니다.</div></div>
   </div>
  </div></section>"""

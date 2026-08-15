@@ -175,11 +175,18 @@ def test_marketing_sections_present_and_honest():
     # 빈자리 글감 — 실제 기능(gapscout) 소개 + UI 재현임을 명시
     assert "아직 이 질문에 답한 글이 없어요" in h and "실제 화면 구성" in h
     # 관측-적응 루프 — 자동 발행 부인(발행은 사장님) 문구 필수
-    assert "떨어지는 날" in h and "자동 발행은 하지 않아요" in h
+    # ★ 2026-08-15: 말투를 사람 말로 다듬으면서 문구가 바뀌었다. 계약은 '정확한 문장'이 아니라
+    #   '그 약속이 화면에 있는가'다 — 뜻으로 문다(문구를 못 바꾸게 하면 개선이 막힌다).
+    assert "떨어지는 날" in h, "순위가 떨어지는 날이 문제라는 설명이 사라졌다"
+    assert ("자동 발행은 하지 않아요" in h or "마음대로 올리지 않아요" in h), \
+        "자동 발행 부인 약속이 사라졌다"
     # 경험 자산 — 지어내지 않음 병기
-    assert "한 번 답하면" in h and "지어내지 않습니다" in h
+    assert ("한 번 답하면" in h or "한 번만 알려주시면" in h), "경험 자산 약속이 사라졌다"
+    assert ("지어내지 않습니다" in h or "지어내지 않아요" in h or "쓰지 않습니다" in h), \
+        "없는 것을 지어내지 않는다는 약속이 사라졌다"
     # 비밀번호 신뢰
-    assert "비밀번호는 받지 않습니다" in h
+    assert ("비밀번호는 받지 않습니다" in h or "비밀번호는 절대 안 받습니다" in h), \
+        "비밀번호를 받지 않는다는 약속이 사라졌다"
     # 약한 기능-개수 스탯 제거 상태 유지(실측 숫자 생기기 전까지)
     assert "개 채널 동시" not in h, "기능 개수 스탯 회귀 — 실측 숫자로만 부활"
     # 순위 보장 문구 금지(금지선)
@@ -299,10 +306,11 @@ def test_first_screen_shows_the_whole_loop():
     """사장님 지시: 가입부터 글·영상 생성, 그 결과가 어떻게 실측되고, 다음에 무슨 글을
     쓰는지까지가 첫 화면에서 보여야 한다. 설명이 아니라 실물로."""
     f = landing._flow()
-    assert "사진만 올립니다" in f, "① 사진 단계 누락"
+    assert ("사진만 올립니다" in f or "사진만 올려주세요" in f), "① 사진 단계 누락"
     assert ".mp4" in f and "실제 생성된 글" in f, "② 실제 영상·글 결과물 누락"
     assert "1위" in f and "실측" in f, "③ 발행 후 실측 단계 누락"
     assert "다음에 쓸 글" in f, "④ 다음 글감 단계 누락 — 루프가 끊긴다"
+    assert (".mp4" in f), "② 실제 영상이 사라졌다"
 
 
 def test_second_screen_is_free_trial_with_ai_preview():
@@ -325,9 +333,10 @@ def test_landing_is_not_cluttered():
 def test_removed_sections_kept_their_promises():
     """섹션을 지우면서 '약속'까지 지우면 안 된다. 꾸밈이 아니라 지키기로 한 계약이다."""
     h = _html()
-    assert "자동 발행은 하지 않아요" in h, "자동 발행 부인 약속이 사라졌다"
+    assert ("자동 발행은 하지 않아요" in h or "마음대로 올리지 않아요" in h), \
+        "자동 발행 부인 약속이 사라졌다"
     assert "실제 화면 구성" in h, "목업 화면에 목업 표기가 사라졌다"
-    assert "한 번 답하면" in h, "경험 자산 약속이 사라졌다"
+    assert ("한 번 답하면" in h or "한 번만 알려주시면" in h), "경험 자산 약속이 사라졌다"
 
 
 def test_hero_has_shop_name_input_and_reuses_one_diagnosis_path():
@@ -537,3 +546,21 @@ def test_signup_entry_points_are_bounded():
     # 소스 기준 개수(JS 분기 포함). 지금 값에 못을 박는다 — 하나라도 더하면 실패한다.
     # 오늘 이 값이 조용히 늘어 결과 화면에 7개가 겹쳤다. 늘리기 전에 지울 것부터 찾아라.
     assert n <= 9, f"가입 진입로가 {n}개로 늘었다 — 늘리기 전에 지울 것부터 찾아라"
+
+
+def test_no_internal_notes_leak_to_visitors():
+    """2026-08-15 발견 — 손님 화면에 만드는 사람 메모가 그대로 떠 있었다:
+    '(← 검색 유입 손님 공감 = 이탈 방지)'. 예시 글 안에 주석을 넣어두고 안 뺐다.
+    화면에 보이는 것은 전부 손님에게 하는 말이어야 한다."""
+    t = _visible_text()
+    # 화살표 자체는 UI에 쓰인다 — '(← 설명)' 꼴의 메모 패턴만 막는다
+    assert "(←" not in t, "내부 메모('(← …)')가 손님 화면에 노출됐다"
+    for note in ("이탈 방지", "신뢰·체류", "TODO", "FIXME"):
+        assert note not in t, f"내부 메모가 손님 화면에 노출됐다: {note!r}"
+
+
+def test_speaker_is_the_shop_not_the_visitor():
+    """헌법: 화자는 가게(파는 쪽), 청자는 손님. '내가 쓴 글'이라고 하면 화자가 손님이 된다.
+    사장님께 말할 때는 '사장님 글'이라고 한다."""
+    t = _visible_text()
+    assert "내가 쓴 글" not in t, "화자가 뒤집혔다(사장님 화면인데 '내가')"
