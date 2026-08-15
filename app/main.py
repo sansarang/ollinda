@@ -355,7 +355,7 @@ def internal_published_posts(request: Request):
 def admin_gowatch_preview(request: Request, tenant_id: str):
     """W3/D1~D3 실물 캡처용 — 로그인 없이 특정 tenant의 D2 배너·D1 카드·D3 관측표 렌더(운영자 전용)."""
     from app.services import dashboard_gowatch as _dg
-    d2 = _dg.render_d2(tenant_id) or "<div class='text-xs text-slate-400 mb-4'>(D2 배너: 이상 없음 — 정상이면 배너 0)</div>"
+    d2 = _dg.render_d2(tenant_id, owner=False) or "<div class='text-xs text-slate-400 mb-4'>(D2 배너: 이상 없음 — 정상이면 배너 0)</div>"
     d1 = _dg.render_d1(tenant_id) or "<div class='text-xs text-slate-400 mb-4'>(D1 카드: 제안 없음)</div>"
     d3 = _dg.render_d3(tenant_id)
     page = ("<div class='max-w-2xl mx-auto px-4 py-6' style='font-family:system-ui'>"

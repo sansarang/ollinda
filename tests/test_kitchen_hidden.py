@@ -79,6 +79,31 @@ def test_no_kitchen_words_in_owner_facing_strings():
     assert "검색 밖" not in code, "'검색 밖' 단정이 코드에 살아 있다"
 
 
+def test_status_banner_hides_our_own_equipment_problems(monkeypatch):
+    """'순위 확인이 이틀째 안 되고 있어요'는 우리 워커 문제다 — 사장님 문제가 아니다.
+    사장님이 보실 배너는 '기다리시는 산출물이 늦다'뿐."""
+    from app.services import dashboard_gowatch as dg
+    from app.services import gowatch_client as gc
+    monkeypatch.setattr(gc, "configured", lambda: True)
+    monkeypatch.setattr(gc, "health", lambda: {"collect_stale": True})
+    monkeypatch.setattr(dg.db, "list_proposals", lambda *a, **k: [{"kind": "index_lost",
+                                                                  "adaptation_id": "a1"}])
+    owner_view = dg.render_d2("t1", owner=True)
+    assert "순위" not in owner_view, f"사장님 배너에 주방이 샜다: {owner_view}"
+    assert "색인" not in owner_view and "검색" not in owner_view, owner_view
+    op_view = dg.render_d2("t1", owner=False)
+    assert op_view, "운영자는 설비 이상을 볼 수 있어야 한다"
+
+
+def test_owner_home_calls_banner_in_owner_mode():
+    """운영자 프리뷰만 owner=False다. 사장님 홈이 실수로 운영자 모드로 부르면 주방이 샌다."""
+    src = _src("app/main.py")
+    i = src.find("banner = _dg.render_d2(")
+    assert i > 0
+    line = src[i:src.find("\n", i)]
+    assert "owner=False" not in line, f"사장님 홈이 운영자 모드로 배너를 부른다: {line}"
+
+
 # ── ② 키워드 표기 단일 관문 ──────────────────────────────────────────────
 
 def test_keyword_notation_is_normalized():

@@ -53,8 +53,14 @@ def render_d1(tenant_id: str) -> str:
 
 
 # ─────────────────────────── D2 상태 배너 ───────────────────────────
-def render_d2(tenant_id: str) -> str:
-    """이상 시에만. 정상이면 "". 원인+다음 행동만. 워커 생존은 gorender·gowatch /health 체크."""
+def render_d2(tenant_id: str, owner: bool = True) -> str:
+    """이상 시에만. 정상이면 "".
+
+    ★ owner=True(사장님 화면)면 **주방을 감춘다**(2026-08-16 사장님 지시).
+      사장님이 보실 것은 '기다리시는 산출물이 늦다' 뿐이다.
+      순위 확인 워커가 멈춘 것, 색인에서 빠진 것은 **우리 문제**이지 사장님 문제가 아니다
+      — 그건 운영자 감시(watchtower)와 이 함수의 owner=False 호출이 본다.
+    """
     def banner(color: str, text: str, btn_label: str = "", btn_href: str = "") -> str:
         b = ""
         if btn_label:
@@ -63,19 +69,20 @@ def render_d2(tenant_id: str) -> str:
         return (f"<div class='flex items-center gap-2 {color} p-3 rounded-xl mb-4 text-sm'>"
                 f"<span>{text}</span>{b}</div>")
 
-    # 1) 색인 소실 — 사장에게 가장 시급(제안 큐에 index_lost 있으면)
-    for p in db.list_proposals(tenant_id, status="proposed", limit=10):
-        if p.get("kind") == "index_lost":
-            return banner("bg-rose-50 text-rose-700", "글이 검색에서 빠졌어요", "재발행 키트",
-                          f"/me/proposal/{_esc(p.get('adaptation_id'))}")
+    if not owner:
+        # 1) 색인 소실 — 운영자 진단용(사장님께는 감춘다. 재발행은 글감 큐가 사장님 언어로 안내한다)
+        for p in db.list_proposals(tenant_id, status="proposed", limit=10):
+            if p.get("kind") == "index_lost":
+                return banner("bg-rose-50 text-rose-700", "색인 이탈 감지(운영자)", "제안 보기",
+                              f"/me/proposal/{_esc(p.get('adaptation_id'))}")
 
-    # 2) 순위 확인 워커(gowatch) 생존/지연
-    gh = gowatch_client.health()
-    if gowatch_client.configured():
-        if gh is None:
-            return banner("bg-amber-50 text-amber-700", "순위 확인이 잠시 멈춰 있어요 — 확인 중입니다")
-        if gh.get("collect_stale"):
-            return banner("bg-amber-50 text-amber-700", "순위 확인이 이틀째 안 되고 있어요 — 확인 중입니다")
+        # 2) 순위 확인 워커(gowatch) 생존/지연 — 우리 설비 문제다. 운영자만 본다.
+        gh = gowatch_client.health()
+        if gowatch_client.configured():
+            if gh is None:
+                return banner("bg-amber-50 text-amber-700", "순위 확인 워커 응답 없음(운영자)")
+            if gh.get("collect_stale"):
+                return banner("bg-amber-50 text-amber-700", "순위 확인 워커 이틀째 정체(운영자)")
 
     # 3) 영상 워커(gorender) 생존
     try:
