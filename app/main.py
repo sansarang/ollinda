@@ -5252,10 +5252,15 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             "}catch(e){}"
             "if(n>160){clearInterval(iv);location.reload();return;}"   # 안전 상한(~8분) — 진짜 멈춤 방지(가짜 2분 새로고침 폐지)
             "},3000);})();</script>")
-    # 트랙2 대시보드 — D2 상태 배너(이상 시만) + D1 개선 제안 카드(이벤트 시만)를 최상단에.
+    # 트랙2 대시보드 — D2 상태 배너(이상 시만)만 최상단에.
+    # ★ D1 '개선 제안 카드'는 사장님 화면에서 제거했다(2026-08-16 사장님 지시).
+    #   카드 문구가 전부 주방이었다 — "'부산광역시 동구 썬팅' 글이 검색에서 밀렸어요(1위→검색 밖)".
+    #   순위·키워드는 사장님이 보실 것이 아니고, 밀렸으면 **우리가 알아서 다음 글에 반영**하면 된다.
+    #   감지 결과는 무음 교훈으로 적재된다(services/adapt_consume.py) — 화면 0.
+    #   운영자 확인은 /admin/gowatch/preview/{tenant_id}에 그대로 남아 있다.
     try:
         from app.services import dashboard_gowatch as _dg
-        banner = _dg.render_d2(t.id) + _dg.render_d1(t.id) + banner
+        banner = _dg.render_d2(t.id) + banner
     except Exception:
         pass
     # 🔍 노출 현황 — 사장님 화면의 1번 숫자(CLAUDE.md 최상위 기준: 발행량이 아니라 노출 상태)

@@ -1,22 +1,29 @@
 """
-gowatch 적응 큐 소비(트랙2 PHASE2) — 본체 Python. gowatch가 감지한 변화를 '개선 제안 카드'로 변환.
+gowatch 적응 큐 소비(트랙2) — gowatch가 감지한 변화를 **무음 교훈**으로 적재한다.
 
-원칙: 산출물은 알림이 아니라 글/키트. 자동 발행 0(제안만 — 사용자가 게이트 경유 후 복붙 발행).
-업종 어휘 하드코딩 0 — 카드 문구·진단 지시문은 글 제목·키워드·측정 근거(순위 등)만 삽입.
-빈도 상한 가게당 주 N건(트랙 A 우선 불변). gowatch 미배포/불통이면 무동작(파이프라인 무영향).
+★ 2026-08-16 사장님 지시로 방향이 바뀌었다: **주방은 공개하지 않는다.**
+  전에는 이 모듈이 사장님 홈에 '개선 제안 카드'를 띄웠다 —
+  "'부산광역시 동구 썬팅' 글이 검색에서 밀렸어요 (1위→검색 밖)".
+  순위·키워드는 사장님이 보실 것이 아니고(헌법: 사장님 화면에 주방 용어 금지),
+  밀렸으면 **우리가 알아서 다음 글에 반영**하면 된다.
+  사장님이 하시는 것은 사진 올리기다. 노출되게 만드는 것은 우리 역할이다.
 
-kind별:
-- rank_drop   → 개선판 생성(revise_piece, '수정 발행용' 신규 조각, 원 발행이력 보존) + 카드
-- briefing_lost → 트랙B 신규 글 제안 카드(경험 게이트는 실제 생성 시 경유)
-- index_lost  → 재발행 안내 키트 카드
-- cross_signal → 생성 파라미터 '제안' 리포트 카드만(자동 반영 금지·승인 후)
+kind별 (전부 화면 0):
+- rank_drop     → 교훈 적재(다음 글 생성 브리프에 자동 반영). 미리 재작성하지 않는다.
+- briefing_lost → 교훈 적재
+- index_lost    → 교훈 적재
+- cross_signal  → **운영자** 공지만(가게 무관 정책 신호)
+
+같이 고친 계측 결함 2종:
+- 관측 키워드 표기를 `seo._kw_shorten` 단일 관문으로 통일(행정 풀네임 ↔ 구어형 갈라짐 사고)
+- `rank_after=None`은 조회 실패다 — '검색 밖'이라 단정하지 않는다(race.py와 같은 규칙)
+
+업종 어휘 하드코딩 0. gowatch 미배포/불통이면 무동작(파이프라인 무영향).
 """
 from __future__ import annotations
 
-import copy
 import logging
 import os
-import uuid
 
 from app import db
 from app.services import gowatch_client
@@ -100,92 +107,92 @@ def _post_label(a: dict, piece) -> str:
     return ev.get("keyword") or "발행하신 글"
 
 
-def _handle_rank_drop(a: dict) -> "tuple[dict | None, str]":
-    from app.domain.models import ContentKind
-    from app.services import revise
-    ev = a.get("evidence") or {}
-    pub = a.get("publish_id") or ""
-    piece = db.get_piece(pub) if pub else None
-    rb, ra = ev.get("rank_before"), ev.get("rank_after")
-    move = ""
+def _kw(ev: dict) -> str:
+    """관측 키워드 표기 단일 관문 — 행정 풀네임을 구어형으로 축약한다.
+
+    ★ 2026-08-16 실물 사고: gowatch는 '부산광역시 동구 썬팅'(행정 풀네임)으로 관측하고
+      우리 추적·표시 층은 `_kw_shorten`으로 '부산 동구 썬팅'을 쓴다. 사장님 화면에
+      같은 키워드가 위에서는 "검색 밖", 아래에서는 "첫 화면에 보이는 중"으로 동시에 떴다.
+      (실측: 구어형 blog_search 08-15 = 6위, 즉 '검색 밖'이 아니었다)
+      표기가 두 갈래면 판정도 두 갈래가 된다 — 관문을 하나로 둔다.
+    """
+    from app import seo
+    return " ".join(seo._kw_shorten((ev or {}).get("keyword") or "").split())
+
+
+def _move_text(rb, ra) -> str:
+    """순위 이동 문구.
+
+    ★ `rank_after`가 None인 것은 **조회 실패**이지 '검색 밖'이 아니다(2026-08-16 수정).
+      전에는 None을 그대로 "검색 밖"이라 단정해, 못 잰 것을 밀린 것으로 보고했다.
+      race.py에서 고친 것과 같은 계열이라 여기서도 같은 규칙을 쓴다 — 미측정과 미노출을 섞지 않는다.
+    """
     if isinstance(rb, int) and isinstance(ra, int):
-        move = f"{rb}위→{ra}위"
-    elif isinstance(rb, int):
-        move = f"{rb}위→검색 밖"
-    label = _post_label(a, piece)
-    piece_id = ""
-    if piece is not None and piece.kind == ContentKind.BLOG:
-        instr = (
-            f"이 글의 검색 순위가 하락했습니다({move or '하락'}). 검색 상위에 노출되는 같은 주제 글들과 "
-            "비교해 제목의 구체성, 도입부 후킹, 정보 밀도(단계·수치·사례), 핵심 키워드의 자연스러운 배치를 "
-            "보강해 다시 써라. 원문의 업종·맥락·사실은 그대로 유지하고 없는 정보를 지어내지 마라."
-        )
-        improved = revise.revise_piece(piece, instr)
-        newp = copy.copy(improved)
-        newp.id = "rev_" + uuid.uuid4().hex[:12]
-        pl = dict(improved.payload or {})
-        pl["revision_of"] = pub                 # 원 발행 조각 보존(이력 유지)
-        pl["revision_reason"] = "search_rank_drop"
-        pl["revision_label"] = "수정 발행용"
-        newp.payload = pl
-        db.save_piece(newp)
-        piece_id = newp.id
-    headline = f"'{label}' 글이 검색에서 밀렸어요" + (f" ({move})" if move else "")
-    sub = "상위 글과 비교해 보강한 글을 준비했어요. 확인하고 발행하세요." if piece_id \
-        else "이 글을 보강해 다시 올리면 회복에 도움이 돼요."
-    card = {
-        "kind": "rank_drop", "icon": "📉", "headline": headline, "sub": sub,
-        "preview": _preview_of(piece_id),
-        "action": {"label": "개선 글 보기", "href": f"/me/proposal/{a.get('id')}"} if piece_id
-        else {"label": "글 보강 안내", "href": "/me"},
-    }
-    return card, piece_id
+        return f"{rb}위→{ra}위" if ra >= 1 else f"{rb}위→상위 밖"
+    if isinstance(rb, int):
+        return f"{rb}위→확인 못 함"
+    return ""
+
+
+def _handle_rank_drop(a: dict) -> "tuple[dict | None, str]":
+    """순위 하락 — **사장님 화면에 아무것도 만들지 않는다**(2026-08-16 사장님 지시).
+
+    왜 카드를 없앴나: 카드 문구가 전부 주방이었다("'…썬팅' 글이 검색에서 밀렸어요(1위→검색 밖)").
+      순위·키워드는 사장님이 보실 것이 아니다. 사장님은 사진만 올리시고,
+      **노출되게 만드는 것은 우리 역할**이다.
+    왜 재작성도 없앴나: 아무도 안 보는 개선판을 LLM으로 미리 만드는 것은
+      '사용자가 고른 것만 만든다'(헌법) 위반이고 비용만 든다.
+    대신 무엇을 하나: 교훈으로 적재한다 → 다음 글 생성 브리프에 자동 반영된다(UI 0).
+    """
+    ev = a.get("evidence") or {}
+    kw = _kw(ev)
+    move = _move_text(ev.get("rank_before"), ev.get("rank_after"))
+    if kw:
+        db.add_lesson(
+            a.get("tenant_id") or "",
+            f"'{kw}' 순위 하락({move or '하락'}) — 같은 주제 글은 제목 구체성과 "
+            "질의별 답변 문단(수치·단계를 한 문단에 모으기)을 더 강하게 잡을 것.",
+            source_kw=kw, source_piece_id=a.get("publish_id") or "",
+            cause="search_rank_drop")
+    return None, ""                       # 카드 0 · 산출물 0
 
 
 def _handle_briefing_lost(a: dict) -> "tuple[dict | None, str]":
-    ev = a.get("evidence") or {}
-    label = ev.get("keyword") or "이 주제"
-    card = {
-        "kind": "briefing_lost", "icon": "💬",
-        "headline": f"'{label}' 관련 AI 브리핑 인용이 빠졌어요",
-        "sub": "이 주제로 경험이 담긴 새 글을 올리면 다시 인용될 가능성이 높아져요.",
-        "action": {"label": "새 글 제안 받기", "href": "/me"},
-    }
-    return card, ""
+    """AI 브리핑 인용 이탈 — 무음 교훈만(주방 비공개)."""
+    kw = _kw(a.get("evidence") or {})
+    if kw:
+        db.add_lesson(a.get("tenant_id") or "",
+                      f"'{kw}' 브리핑 인용 이탈 — 이 주제는 질문형 소제목·표·수치를 "
+                      "한 문단에 모아 인용 가능한 덩어리로 만들 것.",
+                      source_kw=kw, cause="briefing_lost")
+    return None, ""
 
 
 def _handle_index_lost(a: dict) -> "tuple[dict | None, str]":
-    ev = a.get("evidence") or {}
-    label = ev.get("keyword") or "발행하신 글"
-    card = {
-        "kind": "index_lost", "icon": "🔎",
-        "headline": f"'{label}' 글이 검색에서 빠졌어요",
-        "sub": "색인에서 사라졌어요. 재발행하면 다시 잡히는 경우가 많아요.",
-        "action": {"label": "재발행 키트", "href": "/me"},
-    }
-    return card, ""
+    """색인 이탈 — 무음 교훈만. 재발행이 필요하면 글감 큐가 사장님 언어로 안내한다."""
+    kw = _kw(a.get("evidence") or {})
+    if kw:
+        db.add_lesson(a.get("tenant_id") or "",
+                      f"'{kw}' 색인 이탈 — 같은 주제로 다시 쓸 때 원문 반복을 피하고 "
+                      "새 실값(사진·수치)을 넣어 유사문서 판정을 피할 것.",
+                      source_kw=kw, source_piece_id=a.get("publish_id") or "",
+                      cause="index_lost")
+    return None, ""
 
 
 def _handle_cross_signal(a: dict) -> "tuple[dict | None, str]":
+    """여러 가게 동시 하락 = 검색 정책 변화 신호 — **운영자**에게만 알린다(사장님 화면 0)."""
     ev = a.get("evidence") or {}
     kw = ev.get("keyword_group") or "여러 키워드"
     n = ev.get("n_tenants") or 0
-    card = {
-        "kind": "cross_signal", "icon": "📊",
-        "headline": f"'{kw}' 주제가 최근 여러 곳에서 동시에 밀렸어요",
-        "sub": f"검색 정책 변화 신호일 수 있어요(관측 {n}곳). 대응안을 제안으로만 준비했어요 — 확인 후 반영하세요.",
-        "action": {"label": "제안 리포트 보기", "href": "/me"},
-        "advisory_only": True,   # 자동 반영 금지 — 승인 후
-    }
-    return card, ""
+    try:
+        db.add_notice("", "adapt",              # tenant_id="" = 운영자 공지
+                      f"교차 신호 — '{kw}' 주제가 여러 곳에서 동시에 밀렸다(관측 {n}곳). "
+                      "검색 정책 변화 가능성. 자동 반영 없음 — 확인 후 판단할 것.")
+    except Exception:
+        _log.exception("[adapt] 교차 신호 운영자 공지 실패")
+    return None, ""
 
 
-def _preview_of(piece_id: str) -> dict:
-    if not piece_id:
-        return {}
-    p = db.get_piece(piece_id)
-    if not p:
-        return {}
-    pl = p.payload or {}
-    body = (pl.get("body") or "").strip().replace("\n", " ")
-    return {"title": pl.get("title") or "", "snippet": (body[:90] + "…") if len(body) > 90 else body}
+# (제거됨 2026-08-16) _preview_of — 카드 미리보기용이었다. 카드가 없어져 부르는 곳이 없다.
+#   옮기면 원위치를 비운다(규율 1). 필요해지면 git 이력에 있다.
