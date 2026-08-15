@@ -298,6 +298,18 @@ def _startup() -> None:
                     db.finish_gen_job(j.get("id") or "", "failed")
         import threading as _thj
         _thj.Thread(target=_resume_jobs, daemon=True).start()
+
+        # ★ 2026-08-16 — 네이버 공식 봇 IP 목록을 부팅 때 미리 받아둔다.
+        #   record()는 모든 요청마다 도는 미들웨어라 거기서 네트워크를 쓰면 안 된다.
+        #   미리 받아두면 요청 경로는 메모리 대조만 한다(실패해도 안전망 대역으로 계속).
+        def _warm_botnets():
+            try:
+                from app.services import botlog as _bl0
+                n = _bl0.official_nets(force=True)
+                _lgj.getLogger("shopcast").info("[botlog] 네이버 공식 봇 대역 %d개 적재", len(n))
+            except Exception:
+                _lgj.getLogger("shopcast").exception("[botlog] 공식 대역 적재 실패 — 안전망으로 계속")
+        _thj.Thread(target=_warm_botnets, daemon=True).start()
     except Exception:
         import logging
         logging.exception("[startup] 잡 복구 스레드 시작 실패")
