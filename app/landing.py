@@ -528,15 +528,22 @@ def _hero() -> str:
        예전엔 여기가 C-Rank·D.I.A.+·PAS 같은 만드는 사람 말이었고, 실측 1위 사례는
        스크롤 한참 아래(79번째 문단)에 있었다. 방문 40명 중 버튼을 누른 사람이 0명이었다.
        사장님이 가장 먼저 묻는 것은 "진짜 되나?"다 — 설명이 아니라 결과가 믿음을 만든다. -->
-  <div class="reveal mt-8 inline-flex flex-wrap items-center justify-center gap-x-3 gap-y-2
-              bg-white border-2 border-indigo-200 rounded-2xl px-5 py-4 text-left shadow-sm">
-   <div class="text-sm text-slate-500">‘부산 동구 썬팅업체’ 검색</div>
-   <div class="flex items-center gap-2 text-sm font-bold text-slate-700">
+  <!-- ★ 2026-08-15 정정 — 예전엔 여기가 "8/9 1위"에서 끝났다. 그런데 8/15 실측 결과
+       그 글은 10위로 내려와 있었다. 당시 실측은 맞았지만 오늘 여는 사람에겐 틀린 정보다.
+       사장님들은 검색해서 확인한다 — 열어봤을 때 맞아야 한다.
+       ★ 그리고 떨어진 것까지 보여주는 게 우리가 파는 것과 맞다.
+         우리 상품은 '1위를 만들어드립니다'가 아니라 '떨어지는 걸 잡아드립니다'다. -->
+  <div class="reveal mt-8 max-w-lg mx-auto bg-white border-2 border-indigo-200 rounded-2xl px-5 py-4 shadow-sm">
+   <div class="text-sm text-slate-500 text-center mb-2">‘부산 동구 썬팅’ 검색 · 실제 이용 가게</div>
+   <div class="flex items-center justify-center gap-2 text-sm font-bold text-slate-700 flex-wrap">
     <span class="text-slate-400">7/31 발행</span>
-    <span class="text-slate-300">→</span><span>8/2 12위</span>
-    <span class="text-slate-300">→</span>
-    <span class="text-indigo-600 text-xl font-extrabold">8/9 1위</span></div>
-   <div class="w-full text-xs text-slate-400">실제 이용 가게 · 2026년 8월 실측 · 개별 결과는 가게·키워드에 따라 달라요</div>
+    <span class="text-slate-300">→</span><span>8/2 <b>12위</b></span>
+    <span class="text-slate-300">→</span><span class="text-indigo-600">8/9 <b>1위</b></span>
+    <span class="text-slate-300">→</span><span class="text-amber-600">8/15 <b>10위</b></span></div>
+   <div class="text-center text-[13px] text-slate-600 mt-2.5 leading-snug">
+    올라갔다가 <b class="text-slate-800">다시 내려왔어요.</b> 글은 쓰는 날보다 <b class="text-slate-800">떨어지는 날</b>이 문제입니다.<br>
+    올린다는 <b class="text-slate-800">매일 확인해서 내려가면 고친 글을 만들어</b> 드려요.</div>
+   <div class="text-center text-[11px] text-slate-400 mt-2">2026년 8월 15일 확인 · 개별 결과는 가게·검색어에 따라 달라요</div>
   </div>
 
   <!-- ★ 2026-08-14 사장님 지시: 첫 화면에 상호 입력칸.
@@ -849,14 +856,17 @@ def _flow() -> str:
     s3 = (f"<div class='reveal card-hi p-5'>"
           f"<div class='flex items-center gap-2 mb-3'>{step.format(3)}"
           f"<div class='font-bold text-slate-900'>매일 순위를 확인해요</div></div>"
-          f"<div class='text-sm text-slate-500 mb-2'>‘부산 동구 썬팅업체’ 검색</div>"
+          # ★ 2026-08-15 정정 — 히어로와 같은 사례이므로 같은 숫자를 쓴다.
+          #   8/9 1위에서 끊으면 오늘 여는 사람에게 틀린 정보가 된다(8/15 실측 10위).
+          f"<div class='text-sm text-slate-500 mb-2'>‘부산 동구 썬팅’ 검색</div>"
           f"<div class='border-l-2 border-indigo-100 ml-1 pl-3'>"
           + _tl("7/31", "글 발행")
-          + _tl("8/2", "네이버 블로그검색 <b>12위</b>")
-          + _tl("8/9", "<span class='text-indigo-600 text-lg'>1위</span>", hot=True)
+          + _tl("8/2", "블로그검색 <b>12위</b>")
+          + _tl("8/9", "<span class='text-indigo-600'>1위</span>")
+          + _tl("8/15", "<span class='text-amber-600 text-lg'>10위</span> — 내려왔어요", hot=True)
           + f"</div>"
-          f"<p class='text-slate-500 text-sm mt-3'>올린 지 9일 만에 1위가 됐어요. 글은 쓰는 날보다 "
-          f"<b class='text-slate-700'>떨어지는 날</b>이 문제라, 떨어지면 고친 글을 먼저 가져다드려요.</p>"
+          f"<p class='text-slate-500 text-sm mt-3'>순위는 <b class='text-slate-700'>올라갔다 내려갑니다.</b> "
+          f"그래서 매일 확인하고, 내려가면 고친 글을 먼저 가져다드려요.</p>"
           f"<p class='text-[11px] text-slate-400 mt-1'>저희가 마음대로 올리지 않아요 — 올리기 버튼은 사장님이 누르십니다</p>"
           f"<p class='text-[11px] text-slate-400 mt-1'>실제 이용 가게 · 2026년 8월 실측 · "
           f"결과는 가게·검색어에 따라 달라요</p></div>")
@@ -1055,15 +1065,18 @@ def _results() -> str:
                 f"<span class='text-sm {txt}'>{label}</span></div>")
     c1 = ("<div class='reveal card-hi p-6'>"
           "<div class='text-xs font-bold text-indigo-500 mb-3'>실측 사례 — 실제 이용 가게의 한 글</div>"
-          "<div class='font-semibold text-slate-800 mb-2'>‘부산 동구 썬팅업체’ 검색</div>"
+          # ★ 2026-08-15 — 지금은 렌더에서 빠진 섹션이지만 숫자는 같이 고친다.
+          #   되살렸을 때 옛 숫자가 튀어나오면 그게 다음 사고다(표면 하나만 고치지 않는다).
+          "<div class='font-semibold text-slate-800 mb-2'>‘부산 동구 썬팅’ 검색</div>"
           "<div class='border-l-2 border-indigo-100 ml-1 pl-3'>"
           + _tl("7/31", "글 발행 (올린다 생성)")
-          + _tl("8/2", "네이버 블로그검색 <b>12위</b> 첫 실측")
-          + _tl("8/9", "<span class='text-indigo-600 text-xl'>1위</span>", hot=True)
+          + _tl("8/2", "블로그검색 <b>12위</b> 첫 실측")
+          + _tl("8/9", "<span class='text-indigo-600'>1위</span>")
+          + _tl("8/15", "<span class='text-amber-600 text-xl'>10위</span> — 내려왔어요", hot=True)
           + "</div>"
-          "<p class='text-slate-500 text-sm mt-3'>부산 동구의 썬팅 전문점 — 발행 9일 만에 "
-          "<b class='text-slate-800'>네이버 블로그검색 1위</b>. 올린다는 이 여정을 매일 실측으로 지켜봅니다.</p>"
-          "<p class='text-[11px] text-slate-400 mt-2'>2026년 8월 실측 · 개별 결과는 가게·키워드에 따라 달라요</p></div>")
+          "<p class='text-slate-500 text-sm mt-3'>순위는 <b class='text-slate-800'>올라갔다 내려갑니다.</b> "
+          "올린다는 이 여정을 매일 실측으로 지켜보고, 내려가면 고친 글을 먼저 가져다드려요.</p>"
+          "<p class='text-[11px] text-slate-400 mt-2'>2026년 8월 15일 확인 · 개별 결과는 가게·키워드에 따라 달라요</p></div>")
     c2 = ("<div class='reveal card p-6'>"
           "<div class='text-xs font-bold text-slate-400 mb-3'>경쟁 추월</div>"
           "<div class='space-y-2'>"

@@ -564,3 +564,31 @@ def test_speaker_is_the_shop_not_the_visitor():
     사장님께 말할 때는 '사장님 글'이라고 한다."""
     t = _visible_text()
     assert "내가 쓴 글" not in t, "화자가 뒤집혔다(사장님 화면인데 '내가')"
+
+
+def test_case_study_shows_the_drop_not_just_the_peak():
+    """2026-08-15 — 랜딩이 "8/9 1위"에서 끊겨 있었다. 그런데 그날 실측하니 그 글은 10위였다.
+    당시 실측은 맞았지만 오늘 여는 사람에겐 틀린 정보다 — 사장님들은 검색해서 확인한다.
+
+    ★ 그리고 떨어진 것까지 보여주는 게 우리가 파는 것과 맞다:
+      우리 상품은 '1위를 만들어드립니다'가 아니라 '떨어지는 걸 잡아드립니다'다.
+    """
+    t = _visible_text()
+    assert "8/9" in t, "성과 사례가 사라졌다"
+    # 최고점에서 끊으면 안 된다 — 그 뒤 실측이 함께 있어야 한다
+    i_peak = t.find("8/9")
+    seg = t[i_peak:i_peak + 260]
+    assert "8/15" in seg, "최고점만 보여주고 그 뒤 실측을 감췄다"
+    assert ("내려" in seg or "떨어" in seg), "순위가 내려온 사실을 말하지 않는다"
+    assert "확인" in seg or "실측" in seg, "언제 잰 값인지 밝히지 않는다"
+
+
+def test_case_numbers_are_consistent_across_surfaces():
+    """같은 사례가 히어로·흐름 두 곳에 나온다. 한쪽만 고치면 화면끼리 어긋난다
+    (표면 하나만 고치는 것이 오늘까지 반복한 사고의 모양)."""
+    h = landing.render()
+    # 옛 주장이 어느 표면에도 남아 있으면 안 된다
+    import re as _re
+    vis = _re.sub(r"<!--.*?-->", " ", h, flags=_re.S)
+    assert "발행 9일 만에" not in vis, "옛 사례 문구가 어딘가에 남아 있다"
+    assert vis.count("8/15") >= 2, "정정한 숫자가 한 표면에만 반영됐다"
