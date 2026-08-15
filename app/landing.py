@@ -650,6 +650,7 @@ def _hero() -> str:
    }}
    pick.classList.add('hidden');
    var o=document.getElementById('rc_out');o.textContent='조회 중…';
+   try{{ trackEv('diagnose_submit',{{m:(document.getElementById('rc_name').value||'').slice(0,40)}}); }}catch(e){{}}
    var fd=new FormData();fd.append('region',document.getElementById('rc_region').value);
    fd.append('industry',document.getElementById('rc_ind').value);fd.append('name',document.getElementById('rc_name').value);
    if(window.__rcAddr)fd.append('addr',window.__rcAddr);
@@ -723,9 +724,10 @@ def _hero() -> str:
      +'<button onclick="sendReport()" class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-sm whitespace-nowrap">받기</button></div>'
      +'<div id="rc_leadmsg" class="text-xs text-emerald-600 mt-1.5"></div></div>'
      + mk
-     +'<div class="text-center mt-3"><button type="button" onclick="fillDemo()" class="text-xs text-slate-400 underline">아직 결심 안 되셨으면 — 가입 없이 맛보기</button></div>'
+     +'<div class="text-center mt-3"><button type="button" onclick="trackEv(\\'demo_exit\\',{{}});fillDemo()" class="text-xs text-slate-400 underline">아직 결심 안 되셨으면 — 가입 없이 맛보기</button></div>'
      +(d.estimated?' <span class="text-slate-400 text-xs">(추정)</span>':'');
    document.body.classList.add('has-result');   // 중복 가입 버튼 감추기(hide-on-result)
+   try{{ trackEv('diagnose_result',{{m:((d.caught||[]).length?'has_post':(d.no_blog?'no_blog':'none'))}}); }}catch(e){{}}
    // 가게를 못 찾은 경우에만 지역·업종을 묻는다(찾았으면 물을 이유가 없다)
    try{{ if((d.headline||'').indexOf('찾지 못했')>=0 && typeof rcNeedMore==='function') rcNeedMore(); }}catch(e){{}}
    // ⚡ 진단이 끝나면 곧바로 '내 가게용 제목'을 AI가 지어 이어 붙인다(2026-08-13).
@@ -936,7 +938,7 @@ def _try() -> str:
      var tx=t.replace(/[<>]/g,'');
      _u.searchParams.set('kw', tx);          // set = 있으면 갈아끼운다
      var href=_u.pathname+'?'+_u.searchParams.toString();
-     return '<a href="'+href+'" class="flex items-start gap-2 bg-white border border-slate-200 '
+     return '<a href="'+href+'" onclick="trackEv(\\'title_click\\',{{m:\\''+tx.replace(/\\'/g,'').slice(0,40)+'\\'}})" class="flex items-start gap-2 bg-white border border-slate-200 '
        +'hover:border-indigo-400 hover:bg-indigo-50 rounded-xl px-3 py-2.5 cursor-pointer transition">'
        +'<span class="text-indigo-500 mt-0.5">✎</span>'
        +'<span class="text-sm text-slate-800 font-semibold flex-1">'+tx+'</span>'
@@ -1412,7 +1414,14 @@ def _ga() -> str:
         ga = (f'<script async src="https://www.googletagmanager.com/gtag/js?id={gid}"></script>'
               '<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}'
               f'gtag("js",new Date());gtag("config","{gid}");</script>')
-    tracker = ("<script>function trackEv(n,p){try{if(window.gtag)gtag('event',n,p||{});}catch(e){}}"
+    # ★ 2026-08-15 — trackEv가 구글 애널리틱스로만 보내 서버엔 기록이 0이었다.
+    #   그래서 '진단을 몇 명이 눌렀는지'를 셀 수 없었다. 같은 함수에 서버 기록을 더한다
+    #   (호출부를 안 바꾼다 — 기록 경로를 두 벌로 만들면 한쪽만 붙게 된다).
+    tracker = ("<script>function trackEv(n,p){try{if(window.gtag)gtag('event',n,p||{});}catch(e){}"
+               "try{var f=new FormData();f.append('n',n);"
+               "f.append('m',p&&p.m?String(p.m).slice(0,120):'');"
+               "if(navigator.sendBeacon)navigator.sendBeacon('/api/ev',f);"
+               "else fetch('/api/ev',{method:'POST',body:f,keepalive:true});}catch(e){}}"
                "document.addEventListener('click',function(e){var a=e.target.closest&&e.target.closest('a[href^=\"/login\"]');"
                "if(a){var m=a.href.indexOf('kakao')>-1?'kakao':(a.href.indexOf('google')>-1?'google':'login');trackEv('signup_click',{method:m});}});"
                "document.addEventListener('submit',function(e){if(e.target&&e.target.id==='demoForm')trackEv('demo_submit',{});});</script>")

@@ -1090,6 +1090,30 @@ def landing_leads(limit: int = 200) -> list[dict]:
         return []
 
 
+def log_event(name: str, ip: str = "", ua: str = "", ref: str = "", meta: str = "") -> None:
+    """방문·행동 1건 기록 (2026-08-15 사장님 지시).
+
+    왜 만들었나: 방문 수만 세고 있어서 "8명 왔다"까지만 말할 수 있었다.
+      · 그중 몇이 사람인지 모른다(user-agent를 안 남겼다 — 클라우드 스캐너가 섞인다)
+      · 진단을 실제로 눌러본 사람이 0명인지 10명인지 모른다(행동 기록이 없었다)
+      그 상태로 랜딩을 계속 고치는 건 눈 감고 고치는 것이다.
+    trackEv는 구글 애널리틱스로만 보내고 서버에는 아무것도 안 남겼다.
+
+    실패해도 화면을 막지 않는다 — 계측이 서비스를 멈추면 안 된다.
+    """
+    try:
+        with _conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS events("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, name TEXT,"
+                      "ip TEXT, ua TEXT, ref TEXT, meta TEXT)")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts)")
+            c.execute("INSERT INTO events(ts,name,ip,ua,ref,meta) VALUES(?,?,?,?,?,?)",
+                      (_now(), (name or "")[:40], (ip or "")[:45], (ua or "")[:220],
+                       (ref or "")[:200], (meta or "")[:200]))
+    except Exception:
+        pass
+
+
 def bump_counter(key: str, n: int = 1) -> int:
     """단순 누적 카운터(랜딩 방문수 등) +n 후 현재값 반환. 원자적 UPSERT."""
     try:

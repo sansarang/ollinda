@@ -1800,8 +1800,33 @@ def admin_ops_summary(days: int = 7):
                     f"SELECT COUNT(*) n FROM {tb} WHERE {col} >= ?", (since,)).fetchone()["n"])
         except Exception:
             act[key] = None                    # 모르면 빈칸 — 0으로 때우지 않는다
+    # ── 깔때기 + 봇 분류(2026-08-15) ────────────────────────────────
+    #   방문 수만으로는 "8명 왔다"까지밖에 못 말한다. 그중 몇이 사람인지,
+    #   진단을 실제로 눌렀는지가 없으면 랜딩을 눈 감고 고치게 된다.
+    _BOTS = ("bot", "crawl", "spider", "slurp", "yeti", "preview", "facebookexternalhit",
+             "curl", "wget", "python", "headless", "monitor", "scan")
+    funnel, bots = {}, {"human": 0, "bot": 0}
+    try:
+        with db._conn() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS events("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, name TEXT,"
+                      "ip TEXT, ua TEXT, ref TEXT, meta TEXT)")
+            _since = (_dt.utcnow() - _td(hours=33)).isoformat()   # KST 오늘을 넉넉히 덮는다
+            for r in c.execute("SELECT ts, name, ip, ua FROM events WHERE ts>=?",
+                               (_since,)).fetchall():
+                if db.fmt_kst(r["ts"], date_only=True) != today:
+                    continue
+                nm = r["name"] or ""
+                if nm == "view":
+                    _isbot = any(b in (r["ua"] or "").lower() for b in _BOTS)
+                    bots["bot" if _isbot else "human"] += 1
+                funnel[nm] = funnel.get(nm, 0) + 1
+    except Exception:
+        logging.getLogger("shopcast").exception("[ops] 깔때기 집계 실패")
     return JSONResponse({"ok": True, "today": today, "days": days,
-                         "visitors": visitors, "signups": signups, "activity": act})
+                         "visitors": visitors, "signups": signups, "activity": act,
+                         # 오늘의 행동 수(한국 날짜). 계측 시작 2026-08-15 — 그 전은 기록 없음.
+                         "funnel": funnel, "views_by_kind": bots})
 
 
 @app.get("/admin/scout-plan")
@@ -3223,12 +3248,20 @@ def root(request: Request):
     visits = db.get_counter("landing_visits")
     today = db.get_counter(f"visits_day:{_today}")
     try:
-        ua = (request.headers.get("user-agent") or "").lower()
+        _ua_raw = request.headers.get("user-agent") or ""
+        ua = _ua_raw.lower()
         is_bot = any(b in ua for b in ("bot", "crawl", "spider", "slurp", "yeti", "preview",
                                        "facebookexternalhit", "curl", "wget", "python", "headless", "monitor"))
+        ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \
+            or (request.client.host if request.client else "?")
+        # ★ 2026-08-15 사장님 지시 — 방문에 user-agent·유입경로를 남긴다.
+        #   그전까지 IP만 저장해서 "8명 왔다"까지만 말할 수 있었고, 그중 몇이 사람인지
+        #   사후에 구분할 방법이 없었다(클라우드 스캐너가 섞여 있었다).
+        #   봇도 기록한다 — 걸러내려면 무엇이 봇이었는지 남아 있어야 한다.
+        db.log_event("view", ip=ip, ua=_ua_raw,
+                     ref=(request.headers.get("referer") or ""),
+                     meta="bot" if is_bot else "")
         if not is_bot:
-            ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \
-                or (request.client.host if request.client else "?")
             if db.claim_once(f"visit:{_today}:{ip}"):      # IP당 하루 1회(순방문)
                 visits = db.bump_counter("landing_visits")
                 today = db.bump_counter(f"visits_day:{_today}")
@@ -4126,6 +4159,31 @@ def unsub(e: str = "", t: str = ""):
         "<div style='font-family:sans-serif;max-width:480px;margin:80px auto;text-align:center;color:#334'>"
         f"<h2 style='color:#6366F1'>올린다</h2><p>{esc(msg)}</p>"
         "<a href='/' style='color:#6366F1'>← 홈으로</a></div>")
+
+
+@app.post("/api/ev")
+async def api_ev(request: Request):
+    """행동 1건 기록 (2026-08-15 사장님 지시 — 깔때기 계측).
+
+    그전까지 trackEv가 구글 애널리틱스로만 보내 서버엔 아무 기록이 없었다.
+    그래서 '진단을 실제로 눌러본 사람이 0명인지 10명인지' 모르는 채로 랜딩을 고쳤다.
+    IP·UA·유입경로는 서버가 붙인다 — 화면이 보낸 값을 믿지 않는다.
+    """
+    try:
+        form = await request.form()
+        name = (form.get("n") or "").strip()[:40]
+        meta = (form.get("m") or "").strip()[:200]
+    except Exception:
+        return JSONResponse({"ok": False})
+    if not name:
+        return JSONResponse({"ok": False})
+    ip = _client_ip(request)
+    from app import ratelimit as _rl
+    if not _is_dev_ip(ip) and not _rl.allow(f"ev:{ip}", per_min=60, per_hour=600):
+        return JSONResponse({"ok": True})          # 넘치면 조용히 버린다(화면 방해 금지)
+    db.log_event(name, ip=ip, ua=(request.headers.get("user-agent") or ""),
+                 ref=(request.headers.get("referer") or ""), meta=meta)
+    return JSONResponse({"ok": True})
 
 
 @app.post("/api/instant-titles")
