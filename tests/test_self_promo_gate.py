@@ -69,3 +69,42 @@ def test_score_label_does_not_claim_to_predict_ranking():
     assert "상위노출 점검:" not in body, "점검 패널이 아직 노출을 주장한다"
     assert "글 구조 {sc}점" in body, "사실에 맞는 이름이 없다"
     assert "순위를 예측하는 점수가 아니에요" in body, "예측이 아니라는 고지가 없다"
+
+
+# ── 검사만으로는 안 지워진다 — 기계 삭제 (2026-08-16 실물 재발) ──────────
+
+def test_self_promo_is_actually_removed_not_just_detected():
+    """실물 재발: 게이트가 잡았는데 글에는 그대로 남았다.
+    자체 수정 대상(_FIXABLE_KEYS)이 '금지 클리셰·어미 다양성' 둘뿐이라
+    새 항목은 **잡히기만 하고 지워지지 않았다.** 프롬프트 지시도 모델이 계속 어겼다.
+    이건 문장 재작성이 아니라 한 줄 삭제라 기계가 해야 한다."""
+    from app.services.qualitycheck import strip_self_promo as strip
+    body = ("본문 마지막 문단입니다.\n\n함께 보면 좋은 글\n\n"
+            "부산 썬팅 정리\nhttps://blog.naver.com/x/1\n\n---\n"
+            "이 글은 사진 몇 장으로 AI가 25분 만에 완성했습니다 · 올린다 ollinda.kr")
+    out = strip(body)
+    assert not hits(out), f"삭제 후에도 신호가 남았다: {hits(out)}"
+
+
+def test_removal_preserves_the_article():
+    """서명만 지워야 한다 — 본문·링크가 함께 사라지면 그게 더 큰 사고다."""
+    from app.services.qualitycheck import strip_self_promo as strip
+    body = ("본문입니다.\n\n부산 썬팅 정리\nhttps://blog.naver.com/x/1\n\n---\n"
+            "이 글은 AI가 25분 만에 완성했습니다 · ollinda.kr")
+    out = strip(body)
+    assert "부산 썬팅 정리" in out and "blog.naver.com/x/1" in out, "본문·링크가 지워졌다"
+    assert not out.rstrip().endswith("---"), "구분선 꼬리가 남았다"
+
+
+def test_clean_body_is_untouched():
+    from app.services.qualitycheck import strip_self_promo as strip
+    clean = "아무 문제 없는 본문입니다.\n\n두 번째 문단."
+    assert strip(clean) == clean, "깨끗한 글을 건드렸다"
+
+
+def test_removal_is_wired_into_the_mechanical_pass():
+    """지시·검사만 있으면 또 새어 나간다 — 기계 수선 경로에 걸려 있어야 한다."""
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "app", "services", "qualitycheck.py"), encoding="utf-8").read()
+    assert "strip_self_promo(fix_orphan_parens(" in src, "기계 수선 패스에 안 걸렸다"

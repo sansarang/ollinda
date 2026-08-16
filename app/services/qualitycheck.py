@@ -188,6 +188,27 @@ GATE_BUDGET_SEC = int(os.environ.get("SHOPCAST_GATE_BUDGET", "300"))
 from app.seo import _EMOJI_RE          # ★ 판정 단일 소스 — 채점기와 같은 목록으로 지운다
 
 
+def strip_self_promo(body: str) -> str:
+    """자기 광고·제작시간 주장 줄을 **기계로 삭제**한다(비용 0, LLM 불필요).
+
+    ★ 2026-08-16 실물: 검사만 넣고 제거를 안 했다. 게이트가 잡았는데 글에는 그대로 남았다
+      — 자체 수정 대상(_FIXABLE_KEYS)이 '금지 클리셰·어미 다양성' 둘뿐이라 새 항목은
+      잡히기만 하고 지워지지 않았다. 프롬프트 지시도 모델이 계속 어겼다.
+      이건 문장 재작성이 아니라 **한 줄 삭제**라 기계가 하면 된다(이모지 정리와 같은 방식).
+    """
+    out, dropped = [], False
+    for line in (body or "").splitlines():
+        if _self_promo_hits(line):
+            dropped = True
+            continue                          # 그 줄만 통째로 버린다(본문 손상 없음)
+        out.append(line)
+    if not dropped:
+        return body
+    txt = "\n".join(out)
+    txt = re.sub(r"\n{3,}", "\n\n", txt)        # 줄이 빠진 자리의 빈 줄 정리
+    return re.sub(r"(?:\s*-{3,}\s*)+$", "", txt).rstrip()   # 남은 구분선(---) 꼬리 제거
+
+
 def _trim_emoji(body: str, keep: int = 1) -> str:
     """이모지 초과분 기계 삭제(0원) — 채점 기준(네이버 0~1개)에 맞춤. 언어 원리, 업종 무관."""
     seen = [0]
@@ -359,7 +380,7 @@ def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
             and _time.monotonic() < _deadline:
         try:
             _body0 = pl.get("body") or ""
-            _fixed = fix_orphan_parens(_trim_emoji(_body0, keep=1))
+            _fixed = strip_self_promo(fix_orphan_parens(_trim_emoji(_body0, keep=1)))
             if _fixed != _body0:
                 pl["body"] = _fixed
             # 수선 대상 = '문장·구조만 손보면 되는' 감점(사실·수치 불변). 실측 반복 3종 포함:
