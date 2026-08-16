@@ -823,7 +823,11 @@ def _semantic_photo_placement(body: str, note: str, n: int) -> str:
     # ★ 2026-08-04 실물: 20장 중 9장이 도입부에 연달아 붙었다. 상한은 있었지만
     #   허용 문단이 사진 수보다 적으면 폴백이 상한을 무시하고(or allowed_idx) 앞으로 몰았다.
     #   상한은 고정값이 아니라 '사진 수 ÷ 담을 문단 수'다 — 그래야 어떤 글 길이에서도 고르게 퍼진다.
-    MAX_PER = max(2, -(-n // len(allowed_idx)))
+    # ★ 2026-08-16 실물: 사진 17장·산문 문단 19개(사진이 더 적다)인데도 6곳에서 2장씩 붙었다.
+    #   원인은 이 줄의 하한 2였다 — ceil(17/허용문단)=1이어도 max(2,1)이 2로 올려버려,
+    #   한 장씩 고르게 퍼질 수 있는 글에서도 상한이 2로 남아 뭉쳤다.
+    #   하한을 1로 내린다. 사진이 문단보다 많으면 ceil이 알아서 2 이상을 준다(넘침 대응은 그대로).
+    MAX_PER = max(1, -(-n // len(allowed_idx)))
     assign: dict[int, int] = {}
     # 정보량 많은 사진부터 배정(강한 신호 우선 선점)
     order = sorted(range(1, n + 1), key=lambda i: -len(ptoks.get(i) or set()))
