@@ -24,6 +24,27 @@ BANNED_PHRASES = ("호구", "안녕하세요~", "알아보겠습니다", "도움
 _ENDING_VARIETY = ("요.", "죠.", "거든요", "더라고", "더군요", "습니다.")
 
 
+#: 사장님 글에 들어가면 안 되는 것 — 우리 제품 홍보와 '만드는 데 걸린 시간' 주장.
+#: 업종어가 아니라 **우리 서비스 식별자와 언어 패턴**이라 업종 중립이다.
+_SELF_PROMO = (
+    re.compile(r"ollinda", re.I),                       # 우리 도메인·제품명(영문)
+    re.compile(r"올린다\s*(?:·|ollinda|\.kr|에서)"),      # '올린다' 동사와 구분되는 제품명 용법
+    re.compile(r"AI\s*가?\s*(?:이\s*글을)?\s*\d+\s*[분초시간]"),  # 'AI가 25분 만에'
+    re.compile(r"\d+\s*[분초]\s*만에\s*(?:완성|작성|만들)"),        # 'N분 만에 완성'
+    re.compile(r"이\s*글은.{0,12}AI가"),                  # 'AI가 썼다' 고지
+)
+
+
+def _self_promo_hits(text: str) -> list:
+    """자기 광고·제작 시간 주장 검출. 잡힌 조각을 돌려준다(빈 목록=깨끗)."""
+    out = []
+    for rx in _SELF_PROMO:
+        m = rx.search(text or "")
+        if m:
+            out.append(m.group(0)[:40])
+    return out
+
+
 def _get(pieces, kind):
     return next((p for p in pieces if p.kind == kind), None)
 
@@ -52,6 +73,10 @@ def run_checks(asset_id: str) -> dict:
         _chk(checks, "블로그 분량(공백 제외 1200자+)", n_chars >= 1200, f"{n_chars}자")
         _bad = [w for w in BANNED_PHRASES if w in title or w in body]
         _chk(checks, "블로그 금지 클리셰 없음", not _bad, ",".join(_bad))
+        # 🚫 자기 광고·제작 시간 주장(2026-08-16 실물): 모델이 글 끝에 스스로 붙였다.
+        #   "AI가 25분 만에 완성"(실제 3.8분) + 우리 도메인 — 날조이자 사장님 블로그에 붙는 우리 광고다.
+        _selfad = _self_promo_hits(body) + _self_promo_hits(title)
+        _chk(checks, "자기 광고·제작시간 주장 없음", not _selfad, ",".join(_selfad))
         # 체류 3장치(발현률 게이트와 동일 검사기 재사용)
         try:
             from app.generators.text_claude import _audit_dwell_devices
