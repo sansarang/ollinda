@@ -3370,6 +3370,11 @@ def robots():
     return Response(body, media_type="text/plain")
 
 
+#: 약관·개인정보·환불 문서를 마지막으로 **개정한 날**. 문안을 고칠 때 같이 고친다.
+#: (코드 파일 mtime을 쓰면 안 고친 날도 고쳤다고 신고하게 된다 — 2026-08-17 결함)
+LEGAL_REVISED = "2026-08-10"
+
+
 @app.get("/sitemap.xml")
 def sitemap():
     """사이트맵 — 네이버·구글 봇의 유일한 진입로.
@@ -3381,23 +3386,42 @@ def sitemap():
       · 이틀 주기로 재방문한다. `lastmod`가 없으면 무엇이 바뀌었는지 판단할 근거가 없어
         매번 헛걸음한다 — 실제로 그랬다.
 
-    ★ `lastmod`는 지어내지 않는다(정직 게이트). 이 페이지들을 실제로 렌더하는 코드
-      (`app/landing.py`)의 수정 시각을 쓴다 — 내용이 바뀔 수 있었던 유일한 시점이다.
-      매일 오늘 날짜를 찍는 것은 변경 신호 위조다.
+    ★ `lastmod`는 지어내지 않는다(정직 게이트).
+
+    2026-08-17 결함 수정 — 외부 SEO 진단이 지적했고 사실이었다.
+      예전에는 5개 URL 전부에 `app/landing.py`의 파일 수정 시각을 찍었다. 의도는
+      '지어내지 않기'였지만, 랜딩 코드를 거의 매일 고치니 **약관·환불 페이지까지 매일
+      "오늘 바뀜"**이라고 신고한 꼴이 됐다. 매번 다 바뀌었다는 사이트맵은 아무것도 안
+      바뀌었다는 사이트맵과 같다 — 봇이 신호로 쓰지 못한다.
+      → 이제 페이지마다 **자기 날짜**를 갖는다. 가이드는 `guides.GUIDES[*]["updated"]`,
+        법적 문서는 개정일 상수, 홈은 랜딩 코드 수정일(여기만 실제로 매일 바뀐다).
     """
     base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
-    urls = ["/", "/intro", "/privacy", "/terms", "/refund"]
-    lastmod = ""
+    home_lm = ""
     try:
         import datetime as _dtm
         from app import landing as _lp
         _mt = os.path.getmtime(_lp.__file__)
-        lastmod = _dtm.datetime.utcfromtimestamp(_mt).strftime("%Y-%m-%d")
+        home_lm = _dtm.datetime.utcfromtimestamp(_mt).strftime("%Y-%m-%d")
     except Exception:
-        lastmod = ""                      # 모르면 비운다 — 없는 정보는 빈칸(헌법)
-    _lm = f"<lastmod>{lastmod}</lastmod>" if lastmod else ""
-    items = "".join(f"<url><loc>{base}{u}</loc>{_lm}<changefreq>weekly</changefreq>"
-                    f"<priority>{'1.0' if u == '/' else '0.5'}</priority></url>" for u in urls)
+        home_lm = ""                      # 모르면 비운다 — 없는 정보는 빈칸(헌법)
+
+    # (path, lastmod, priority) — 법적 문서 날짜는 그 문서를 실제로 개정한 날이다.
+    rows = [("/", home_lm, "1.0"), ("/intro", home_lm, "0.5"),
+            ("/privacy", LEGAL_REVISED, "0.3"), ("/terms", LEGAL_REVISED, "0.3"),
+            ("/refund", LEGAL_REVISED, "0.3")]
+    try:
+        from app import guides as _gd
+        rows += [(u.replace(base, ""), lm, "0.8") for u, lm in _gd.sitemap_entries(base)]
+    except Exception:
+        logging.exception("[sitemap] 가이드 편입 실패")
+
+    def _one(u, lm, pr):
+        _lm = f"<lastmod>{lm}</lastmod>" if lm else ""
+        return (f"<url><loc>{base}{u}</loc>{_lm}<changefreq>weekly</changefreq>"
+                f"<priority>{pr}</priority></url>")
+
+    items = "".join(_one(u, lm, pr) for u, lm, pr in rows)
     xml = ('<?xml version="1.0" encoding="UTF-8"?>'
            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + items + '</urlset>')
     return Response(xml, media_type="application/xml")
@@ -3425,6 +3449,22 @@ def refund():
 def intro():
     from app import landing
     return landing.intro()
+
+
+@app.get("/guide", response_class=HTMLResponse)
+def guide_index():
+    from app import landing
+    return landing.guide_index()
+
+
+@app.get("/guide/{slug}", response_class=HTMLResponse)
+def guide_page(slug: str):
+    """실측 기록 개별 페이지. 없는 slug는 404 — 빈 페이지를 200으로 주면 그것이 얇은 색인이다."""
+    from app import landing
+    html = landing.guide_page(slug)
+    if not html:
+        return HTMLResponse("<h1>404</h1>", status_code=404)
+    return HTMLResponse(html)
 
 
 _STATIC_MEDIA = {"css": "text/css", "svg": "image/svg+xml", "png": "image/png",

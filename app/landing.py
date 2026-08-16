@@ -1386,6 +1386,7 @@ def _footer() -> str:
       <p class="text-slate-500 text-xs">썬팅집·중고차 매장 사장님들이 실제로 필요하다고 하신 것에서 시작했습니다. 검색에 잘 뜨게 만드는 방법을 AI에 붙여 만들었어요.</p>
      </div>
     <div class="mt-4 flex flex-wrap gap-3 text-sm">
+     <a href="/guide" class="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:border-slate-300">실측 기록</a>
      <a href="#contact" class="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:border-slate-300">문의하기</a>
      <a href="mailto:{CONTACT_EMAIL}" class="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:border-slate-300">이메일</a>
      <a href="/terms" class="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:border-slate-300">이용약관</a>
@@ -1727,6 +1728,105 @@ def intro() -> str:
  </div>
 </div>"""
     return _HEAD_META + _ga() + _BODY_OPEN + body + _FOOT
+
+
+def _head_for(title: str, desc: str, path: str) -> str:
+    """페이지별 <head> — 제목·설명·canonical만 갈아끼운다.
+
+    ★ 여기가 없어서 /intro까지 홈 제목을 달고 있었다. 검색엔진에게 같은 제목·같은 canonical을
+      가진 페이지 여럿은 '한 페이지의 복제'다 — 색인에서 하나만 남기고 버린다.
+    """
+    h = _HEAD_META
+    h = h.replace("<title>올린다 — 사진만 올리면 글·영상까지, 검색에 잘 뜨는 콘텐츠</title>",
+                  f"<title>{title}</title>")
+    h = h.replace('<meta name=description content="사진만 올리면 AI가 네이버 블로그·플레이스 '
+                  '상위노출에 유리한 글을 씁니다. 인스타·유튜브·릴스·X까지 자동 생성'
+                  '(네이버는 초안 반자동 발행). 소상공인 AI 마케팅 올린다.">',
+                  f'<meta name=description content="{desc}">')
+    h = h.replace(f'<link rel=canonical href="{BASE}/">',
+                  f'<link rel=canonical href="{BASE}{path}">')
+    h = h.replace('<meta property=og:title content="올린다 — 사진만 올리면 글·영상까지, '
+                  '검색에 잘 뜨는 콘텐츠">', f'<meta property=og:title content="{title}">')
+    h = h.replace(f'<meta property=og:url content="{BASE}/">',
+                  f'<meta property=og:url content="{BASE}{path}">')
+    return h
+
+
+def _guide_nav(cur: str = "") -> str:
+    """가이드끼리 서로 링크 — 봇은 링크 없는 페이지를 찍어보지 않는다(404 0건 실측)."""
+    from app import guides as _g
+    items = "".join(
+        f'<a href="/guide/{x["slug"]}" class="block py-2 text-sm '
+        f'{"text-slate-400" if x["slug"] == cur else "text-indigo-600 hover:underline"}">'
+        f'{x["title"]}</a>' for x in _g.all_guides())
+    return (f'<div class="mt-14 pt-8 border-t border-slate-200">'
+            f'<div class="text-xs text-slate-400 mb-2">실측 기록 전체</div>{items}</div>')
+
+
+def guide_index() -> str:
+    """/guide — 실측 기록 목록.
+
+    왜 만들었나(2026-08-17): 사이트맵에 실질 콘텐츠가 홈 하나뿐이었다. 검색 노출을 파는
+    회사의 사이트가 정작 검색에 걸릴 내용이 없었다. 여기 글은 전부 우리가 직접 잰 것이다.
+    """
+    from app import guides as _g
+    cards = "".join(
+        f'<a href="/guide/{x["slug"]}" class="card p-5 block hover:border-indigo-300 transition">'
+        f'<div class="text-xs text-slate-400 mb-1">{x["updated"]} 측정</div>'
+        f'<h2 class="font-bold text-slate-900 mb-2 leading-snug">{x["title"]}</h2>'
+        f'<p class="text-sm text-slate-500 leading-relaxed">{x["desc"]}</p></a>'
+        for x in _g.all_guides())
+    body = f"""
+<div class="max-w-3xl mx-auto px-5 py-14">
+ <a href="/" class="text-indigo-600 text-sm">← 홈</a>
+ <h1 class="text-3xl font-bold mt-4 mb-3 text-slate-900">실측 기록</h1>
+ <p class="text-slate-500 mb-8 leading-relaxed">네이버가 어떻게 노출을 시키는지, 추측이 아니라
+  직접 재서 남긴 기록입니다. 상위 글 339개 대조, 서버 로그 전수 분석, 순위 일일 추적.
+  <b class="text-slate-700">숫자는 전부 저희가 잰 값이고, 재보지 않은 것은 재보지 않았다고 적었습니다.</b></p>
+ <div class="grid gap-4">{cards}</div>
+</div>"""
+    return (_head_for("실측 기록 — 네이버 검색 노출을 직접 재봤습니다 | 올린다",
+                      "네이버 상위 글 339개 대조, 크롤러 로그 전수 분석, 순위 일일 추적. "
+                      "추측이 아니라 직접 잰 값만 기록합니다.", "/guide")
+            + _ga() + _BODY_OPEN + _nav() + body + _footer() + _FOOT)
+
+
+def guide_page(slug: str) -> str:
+    """/guide/{slug} — 개별 실측 기록."""
+    from app import guides as _g
+    import json as _json
+    g = _g.get(slug)
+    if not g:
+        return ""
+    secs = "".join(
+        f'<h2 class="text-xl font-bold text-slate-900 mt-10 mb-3">{h}</h2>'
+        f'<p class="text-slate-600 leading-loose">{p}</p>' for h, p in g["body"])
+    ld = _json.dumps({
+        "@context": "https://schema.org", "@type": "Article",
+        "headline": g["title"], "description": g["desc"],
+        "datePublished": g["updated"], "dateModified": g["updated"],
+        "author": {"@type": "Organization", "name": "올린다"},
+        "publisher": {"@type": "Organization", "name": "올린다"},
+        "mainEntityOfPage": f"{BASE}/guide/{slug}",
+    }, ensure_ascii=False)
+    body = f"""
+<div class="max-w-3xl mx-auto px-5 py-14">
+ <a href="/guide" class="text-indigo-600 text-sm">← 실측 기록</a>
+ <div class="text-xs text-slate-400 mt-4">{g["updated"]} 측정 · 올린다</div>
+ <h1 class="text-2xl sm:text-3xl font-bold mt-2 mb-4 text-slate-900 leading-snug">{g["title"]}</h1>
+ <p class="text-slate-500 leading-relaxed">{g["desc"]}</p>
+ {secs}
+ <div class="card p-5 mt-12">
+  <p class="font-bold text-slate-900 mb-1">이걸 직접 하실 필요는 없습니다</p>
+  <p class="text-sm text-slate-500 leading-relaxed">사진만 보내주시면 위 기준대로 글을 쓰고,
+   순위를 매일 재서 리포트로 보내드립니다.</p>
+  <a href="/#pricing" class="inline-block mt-3 px-5 py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-sm">대행 서비스 보기</a>
+ </div>
+ {_guide_nav(slug)}
+</div>
+<script type="application/ld+json">{ld}</script>"""
+    return (_head_for(f'{g["title"]} | 올린다', g["desc"], f"/guide/{slug}")
+            + _ga() + _BODY_OPEN + _nav() + body + _footer() + _FOOT)
 
 
 def refund() -> str:
