@@ -241,15 +241,22 @@ def test_generator_forbids_writing_prices():
 
 def test_format_is_fewer_sections_thicker_paragraphs():
     """형식 개편(2026-08-16 ②): 섹션을 줄이고 문단을 두껍게.
-    근거 — 상위글 소제목 중간값 2개(우리는 6~9개), 표 0%(우리는 필수)."""
+    근거 — 상위글 소제목 중간값 2개(우리는 6~9개), 표 0%(우리는 필수).
+
+    ★ 통폐합 3-4로 이 규칙들은 answerblock.prompt_rule로 옮겨졌다.
+      규칙이 '지금 사는 곳'을 확인한다 — 옛 위치를 물면 통폐합마다 골든이 깨진다.
+    """
     import os
+    rule = ab.prompt_rule(["부산 동구 썬팅", "썬팅 과정"], core="부산 동구 썬팅")
+    assert "소제목은 **2~3개만**" in rule, "줄인 소제목 규칙이 없다"
+    assert "표는 **필수가 아니다.**" in rule, "표 필수 해제가 안 됐다"
+    assert "180자 이상" in rule, "문단 두께 규칙이 없다"
     p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                      "app", "generators", "text_claude.py")
     src = open(p, encoding="utf-8").read()
     assert "소제목 3~5개" not in src, "옛 형식(소제목 3~5개 강제)이 남아 있다"
-    assert "소제목은 **2~3개만**" in src, "줄인 소제목 규칙이 없다"
-    assert "두꺼운 답변 문단" in src, "문단을 두껍게 쓰라는 규칙이 없다"
-    assert "표는 **필수가 아니다.**" in src, "표 필수 해제가 안 됐다"
+    body = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
+    assert "[본문 구조 — 적게, 두껍게]" not in body, "구조 블록이 아직 따로 서 있다(중복)"
 
 
 # ── 문단 두께 (2026-08-16) ───────────────────────────────────────────────
