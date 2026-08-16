@@ -9,7 +9,11 @@ from __future__ import annotations
 import re
 
 # 검색 의도 수식어(구매 직전 키워드 = 전환율 높음). 3어절 롱테일 = 경쟁↓·전환↑(검색량 500~5,000 구간 노림).
-_INTENTS = ["추천", "후기", "가격", "비용", "잘하는곳", "예약", "위치", "실력"]
+# ★ 앞 4개만 지역 변형과 결합된다(target_keywords의 `_INTENTS[:4]`).
+#   2026-08-16 재배치: 가격·비용은 EXCLUDE_PRICE_KEYWORDS로 걸러지므로 앞자리에 두면
+#   실제로는 '추천·후기' 둘만 남는다 — 노릴 속성 축이 비교 하나로 줄었다(실측).
+#   그 자리에 과정·시간을 올린다. answerblock의 과정/시간 축과 짝이 맞는 말이다.
+_INTENTS = ["추천", "후기", "과정", "시간", "가격", "비용", "잘하는곳", "예약", "위치", "실력"]
 
 #: 가격 의도 키워드를 타깃 후보에서 뺀다(2026-08-16 사장님 지시로 본문 금액 표기 중단).
 #: 되돌릴 때는 이 값만 False로. 판정은 언어 규칙만 쓴다 — 업종어를 박지 않는다.
@@ -851,7 +855,8 @@ def target_keywords(industry_name: str, region: str, note: str = "", limit: int 
             for it in _INTENTS[:4]:
                 kws.append(f"{v} {ind} {it}")
     if ind:
-        kws += [f"{ind} 추천", f"{ind} 가격"]
+        # 업종 단독 축 — 가격은 뺀다(본문에 금액을 안 쓴다). 대신 과정·시간을 둔다.
+        kws += [f"{ind} 추천", f"{ind} 과정", f"{ind} 시간"]
     # 메모에서 핵심 명사 추출(신메뉴/차종/시술명 등)
     for w in re.findall(r"[가-힣A-Za-z0-9]{2,}", note or ""):
         if w not in ("추천", "이벤트", "할인") and len(w) <= 12:

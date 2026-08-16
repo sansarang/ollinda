@@ -284,3 +284,33 @@ def test_query_coverage_needs_thickness_not_just_mention():
     plan = {"core": "부산 동구 썬팅업체", "attrs": []}
     body = "## 안내\n부산 동구 썬팅업체입니다."
     assert not ab.query_coverage(body, plan)[0]["covered"]
+
+
+# ── 노릴 축 확보 (2026-08-16) ────────────────────────────────────────────
+
+def test_candidate_keywords_supply_time_and_process_axes():
+    """가격을 뺐더니 노릴 속성 축이 '비교' 하나로 줄었다(실측).
+    _INTENTS[:4]만 지역 변형과 결합되는데 그 앞자리를 가격·비용이 차지하고 있었고,
+    그 둘은 EXCLUDE_PRICE_KEYWORDS로 걸러져 실제로는 추천·후기만 남았다."""
+    from app import seo
+    kws = seo.target_keywords("썬팅", "부산 동구", "신차 시공", limit=12)
+    joined = " ".join(kws)
+    assert "과정" in joined, "과정 축 후보가 없다"
+    assert "시간" in joined, "시간 축 후보가 없다"
+    assert not [k for k in kws if any(x in k for x in ("가격", "비용", "견적", "시세"))], \
+        "가격 의도 키워드가 후보에 남았다"
+
+
+def test_plan_picks_up_the_new_axes():
+    """후보만 늘고 계획에 안 잡히면 의미가 없다."""
+    from app import seo
+    kws = seo.target_keywords("썬팅", "부산 동구", "신차 시공", limit=12)
+    got = {a["intent"] for a in ab.plan(kws[0], kws)["attrs"]}
+    assert {"시간", "과정"} <= got, f"새 축이 계획에 안 잡혔다: {got}"
+
+
+def test_price_axis_never_returns_via_candidates():
+    """축 제외와 후보 배제가 따로 놀면 한쪽만 고쳐진다."""
+    from app import seo
+    kws = seo.target_keywords("네일", "서울 강남", "젤네일", limit=12)
+    assert all(a["intent"] != "가격" for a in ab.plan(kws[0], kws)["attrs"])
