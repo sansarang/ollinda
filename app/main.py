@@ -6502,7 +6502,13 @@ def _photo_captions(tenant, blog, n: int, _diag: list = None) -> list[str]:
         else:
             _seen[_key] = True
     if _fails:
-        _lg.getLogger("shopcast.caption").warning("[caption] vision 분석 실패 사진 %s/%d → 최소 캡션(전수 보장)", _fails, n)
+        # ★ 문구 정정(2026-08-16): 여기는 **vision 실패가 아니다.** 묘사는 나왔는데
+        #   다른 사진과 **중복**이고 대체 묘사도 없어 빈칸으로 둔 경우다(때움 금지).
+        #   'vision 분석 실패'로 찍는 바람에 나흘 내내 원인을 잘못 보고했다 —
+        #   로그는 진단서다. 사실과 다르면 그 위에 쌓은 판단이 전부 틀어진다.
+        _lg.getLogger("shopcast.caption").warning(
+            "[caption] 묘사 중복(대체 없음) 사진 %s/%d → 빈칸 유지(지어내지 않음). "
+            "사진 분석 자체는 성공했다", _fails, n)
     if _patched:
         try:
             blog.payload["gen_source"] = srcnote[:8000]
@@ -6611,11 +6617,15 @@ def _caption_box(tenant, blog, n: int, caps=None) -> str:
     import re as _rg
     import logging as _lg
 
+    _why: dict = {}                                      # 사진번호 → 빈칸이 된 이유(진단 정확도)
+
     def _clean(i, c):
         if not c or not c.strip():
-            return ""                                    # PHASE 2: 빈칸(분석 실패) — UI가 '직접 적어주세요' 표시
+            _why[i + 1] = "묘사 없음"                     # UI가 '직접 적어주세요' 표시
+            return ""
         bad = _caption_gate(c)
         if bad:
+            _why[i + 1] = f"게이트 차단({bad})"
             _lg.getLogger("shopcast.kit").warning("[캡션게이트] 사진%d 차단(%s): %r", i + 1, bad, c[:60])
             return ""
         return c
@@ -6624,7 +6634,10 @@ def _caption_box(tenant, blog, n: int, caps=None) -> str:
     caps = [_clean(i, c) for i, c in enumerate(caps)]
     _fail_n = sorted(i + 1 for i, c in enumerate(caps) if not c)
     if _fail_n:
-        _lg.getLogger("shopcast.kit").warning("[캡션] 분석 실패 사진 %s/%d → 빈칸+직접입력 안내(때움 금지)", _fail_n, n)
+        # ★ 원인을 함께 남긴다 — '분석 실패'로 뭉뚱그리면 진단이 틀어진다(2026-08-16 정정).
+        _lg.getLogger("shopcast.kit").warning(
+            "[캡션] 빈칸 사진 %s/%d → 직접입력 안내(때움 금지). 사유: %s", _fail_n, n,
+            ", ".join(f"사진{k}:{v}" for k, v in sorted(_why.items())) or "미상")
     rows = "".join(
         (f"<div class='flex items-start gap-2 py-1.5 border-b border-slate-100'>"
          f"<span class='text-xs font-bold text-slate-400 flex-shrink-0 mt-0.5'>사진{i + 1}</span>"

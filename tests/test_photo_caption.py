@@ -577,3 +577,20 @@ def test_H31_크레딧_회복은_스스로_확인한다():
     # 감지 직후에는 곧바로 다시 찌르지 않는다(막 실패한 것을 즉시 재확인해봐야 소용없다)
     assert "_LAST_PROBE_TS = CREDIT_OUT_TS" in inspect.getsource(llm.note_credit_out), \
         "감지 직후 차단이 곧바로 풀릴 수 있다"
+
+
+def test_빈칸_사유가_사실대로_기록된다():
+    """2026-08-16 정정: 로그가 'vision 분석 실패'라고 찍혀 있었는데 실제로는
+    **묘사 중복(대체 없음)**이었다. vision은 성공했다.
+
+    그 문구 때문에 나흘간 원인을 잘못 보고했다 — 로그는 진단서다.
+    사실과 다르면 그 위에 쌓은 판단이 전부 틀어진다.
+    """
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "app", "main.py"), encoding="utf-8").read()
+    body = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
+    assert "vision 분석 실패 사진" not in body, "실패 원인을 사실과 다르게 찍는다"
+    assert "묘사 중복(대체 없음)" in body, "실제 원인이 로그에 없다"
+    assert "분석 실패 사진 %s/%d" not in body, "빈칸을 전부 '분석 실패'로 뭉뚱그린다"
+    assert "사유:" in body, "빈칸 사유(묘사 없음·게이트 차단)를 구분해 남기지 않는다"
