@@ -358,7 +358,14 @@ def test_H21_사진이_한곳에_뭉치지_않는다():
     import inspect
     from app.generators import text_claude as tc
     src = inspect.getsource(tc._semantic_photo_placement)
-    assert "MAX_PER = max(2, -(-n // len(allowed_idx)))" in src, "상한이 글 길이에 안 맞춘다"
+    # ★ 2026-08-16: 상한 '식의 문자열'을 물고 있어서 값을 고치자 깨졌다(브리틀 골든).
+    #   무는 것은 문구가 아니라 **뜻**이어야 한다 — 상한이 글 길이에 따라 움직이는가.
+    import re as _re
+    m = _re.search(r"MAX_PER\s*=\s*max\((\d+),\s*-\(-n\s*//\s*len\(allowed_idx\)\)\)", src)
+    assert m, "상한이 '사진 수 ÷ 담을 문단 수'로 계산되지 않는다(고정값이면 뭉친다)"
+    assert int(m.group(1)) == 1, (
+        "하한이 1이 아니다 — 하한 2는 사진이 문단보다 적어도 2장씩 뭉치게 만든다"
+        "(2026-08-16 실물: 사진 17장·문단 19개인데 6곳에서 2장씩 붙었다)")
     assert "or [j for j in allowed_idx if used[j] < MAX_PER] or allowed_idx" not in src, \
         "폴백이 상한을 무시한다"
     assert "min(cand, key=lambda j: (used[j]" in src, "폴백이 덜 찬 문단을 안 고른다"
