@@ -48,3 +48,24 @@ def test_gate_is_wired_into_self_check():
     gen = open(os.path.join(root, "app", "generators", "text_claude.py"), encoding="utf-8").read()
     assert "글 끝에 서명·출처를 붙이지 마라" in gen, "생성 지시가 없다"
     assert "너는 그 시간을 모른다" in gen, "시간 주장 금지 근거가 없다"
+
+
+# ── 점수 이름 정직화 (2026-08-16 사장님 질문) ────────────────────────────
+
+def test_score_label_does_not_claim_to_predict_ranking():
+    """사장님 질문: "상위노출 66점은 어디서 측정한 거니? 실제로 근거가 있는 점수니?"
+
+    실체: seo.quality_audit()이 100에서 항목별로 빼는 **구조 체크리스트**다.
+      · 감점 폭(-15·-12·-6·-5·-4)은 손으로 정한 값이고 실측에서 나오지 않았다
+      · **실제 순위와 대조된 적이 없다**(발행 글 6건뿐이라 지금은 대조도 불가)
+      · 게다가 이 점수는 글 전체 구조만 본다 — 네이버는 문단을 뽑아 노출한다(2026-08-16 실측)
+    그런데 이름이 '상위노출 점수'라 노출을 예측한다는 뜻으로 읽혔다. 검증 안 된 주장이다.
+    """
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "app", "main.py"), encoding="utf-8").read()
+    body = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
+    assert "상위노출 {sc}점" not in body, "배지가 아직 노출을 예측한다고 주장한다"
+    assert "상위노출 점검:" not in body, "점검 패널이 아직 노출을 주장한다"
+    assert "글 구조 {sc}점" in body, "사실에 맞는 이름이 없다"
+    assert "순위를 예측하는 점수가 아니에요" in body, "예측이 아니라는 고지가 없다"

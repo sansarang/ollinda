@@ -834,8 +834,14 @@ def _semantic_photo_placement(body: str, note: str, n: int) -> str:
     for i in order:
         pt = ptoks.get(i) or set()
         is_hero = any(h in (descs.get(i, "")) for h in _HERO_HINT)
+        # ★ 2026-08-16 실물: 사진 19장·허용 문단 13개(상한 2)인데 2장 붙은 곳이 **9곳** 나왔다.
+        #   고루 넣으면 2장짜리는 6곳이면 된다 — 빈 문단을 두고 '잘 맞는 문단'에 2장씩 몰았기 때문이다.
+        #   감점(used*0.6)만으로는 강한 매칭을 못 이긴다.
+        #   → 2단계 배분: **빈 문단(used==0)을 먼저 전부 채우고**, 남는 사진만 두 번째 자리로 간다.
+        #     상한 계산은 그대로 두고 '순서'만 강제한다 — 어떤 장수에서도 뭉침이 최소가 된다.
+        _room = [j for j in allowed_idx if used[j] == 0] or [j for j in allowed_idx if used[j] < MAX_PER]
         best, best_score = None, -1e9
-        for j in allowed_idx:
+        for j in _room:
             if used[j] >= MAX_PER:                    # 하드 상한 — 뭉텅이 원천 차단
                 continue
             overlap = len(pt & (jtoks[j]))
@@ -845,9 +851,14 @@ def _semantic_photo_placement(body: str, note: str, n: int) -> str:
             if score > best_score:
                 best_score, best = score, j
         if best is None or best_score <= 0:           # 매칭 실패 → 가장 덜 찬 문단으로(앞쪽 몰림 금지)
-            cand = [j for j in allowed_idx if used[j] < MAX_PER] or allowed_idx
+            # ★ 상한을 무시하는 마지막 폴백(or allowed_idx)은 두지 않는다 —
+            #   2026-08-04 사고가 그 폴백 때문에 20장 중 9장을 앞으로 몰았다.
+            #   총 수용량(허용문단 × 상한) ≥ 사진 수라 여기가 비는 일은 없다.
+            cand = _room or [j for j in allowed_idx if used[j] < MAX_PER]
             _tgt = int((i - 1) / max(1, n) * len(paras))
             best = min(cand, key=lambda j: (used[j], abs(j - _tgt)))
+        if best is None:                              # 도달 불가(수용량 보장) — 방어적 유지
+            best = min(allowed_idx, key=lambda j: used[j])
         assign[i] = best
         used[best] += 1
     # 3) 재조립 — 각 문단 뒤에 배정된 사진 마커(사진번호 오름차순)

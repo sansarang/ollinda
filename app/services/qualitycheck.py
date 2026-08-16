@@ -106,6 +106,14 @@ def run_checks(asset_id: str) -> dict:
             from app.services import answerblock as _ab
             _abd = _ab.detail(body, pl.get("target_keywords") or [], title)
             _chk(checks, "질의별 답변 문단", not _abd, _abd)
+            # ★ 커버리지를 게이트에 연결(2026-08-16) — 만들어만 두고 안 걸어서
+            #   '커버 0/2인데 판정 통과'가 실제로 나왔다. 축 신호는 대리 지표이고,
+            #   진짜 질문은 "노린 그 질의에 답하는 문단이 있는가"다.
+            _cov = _ab.query_coverage(body, pl.get("query_plan") or {})
+            _miss_q = [c["query"] for c in _cov if not c["covered"]]
+            _chk(checks, "노린 질의 커버리지", not _miss_q,
+                 (f"{len(_cov) - len(_miss_q)}/{len(_cov)} · 빈 질의: " + ", ".join(_miss_q[:3]))
+                 if _cov else "계획 없음")
         except Exception:
             _chk(checks, "질의별 답변 문단", False, "검사기 로드 실패")
 
@@ -332,6 +340,13 @@ def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
             au.setdefault("warnings", []).append(
                 f"질의별 답변 문단 — 소제목으로 {', '.join(_abr['missing'])}을(를) 약속해놓고 "
                 "그 답이 되는 덩어리가 없다. 약속을 지키거나 그 소제목을 빼라.")
+        _cv = _abg.query_coverage(pl.get("body") or "", pl.get("query_plan") or {})
+        _nc = [c["query"] for c in _cv if not c["covered"]]
+        if _nc:
+            au.setdefault("warnings", []).append(
+                f"노린 질의에 답 문단이 없다 — {', '.join(_nc[:3])}. "
+                "그 검색어가 들어 있고 충분히 두꺼운 문단이 글 안에 서 있어야 "
+                "네이버가 그 검색어로 뽑아갈 단위가 생긴다(문단 안에 그 말을 자연스럽게 쓰라).")
         _th = _abr.get("thick") or {}
         if _th and not _th.get("ok"):
             au.setdefault("warnings", []).append(

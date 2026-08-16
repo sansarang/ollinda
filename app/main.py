@@ -8785,7 +8785,11 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
         if sc:
             cls = ("bg-emerald-100 text-emerald-700" if sc >= 85 else
                    "bg-amber-100 text-amber-700" if sc >= 70 else "bg-slate-100 text-slate-600")
-            badge = f"<span class='ml-2 text-[11px] font-bold px-2 py-0.5 rounded-full {cls}'>상위노출 {sc}점</span>"
+            # ★ 이름을 사실대로(2026-08-16 사장님 질문: "실제로 근거가 있는 점수니?").
+            #   이 점수는 100에서 항목별로 빼는 **구조 체크리스트**다. 감점 폭(-15·-12·-6…)은
+            #   손으로 정한 값이고, **실제 순위와 대조된 적이 없다**. 그런데 이름이
+            #   '상위노출 점수'라 노출을 예측한다는 뜻으로 읽혔다 — 검증 안 된 주장이다.
+            badge = f"<span class='ml-2 text-[11px] font-bold px-2 py-0.5 rounded-full {cls}'>글 구조 {sc}점</span>"
             # ⚡ 품질 보정은 백그라운드(2026-08-01) — 글은 먼저 열리고 점수는 뒤에서 올라간다.
             #   끝나면 자동 새로고침해서 최종 점수를 보여준다(사장님이 새로고침할 필요 없음).
             if ((pl or {}).get("polish_job") or {}).get("status") == "running":
@@ -8881,7 +8885,7 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
                          "<button class='block w-full text-center py-3 rounded-xl text-white text-sm font-extrabold "
                          "bg-amber-500 hover:brightness-110 active:scale-[.99] transition shadow-md'>"
                          "🔧 품질 기준 미달 — AI가 다시 쓰기</button>"
-                         "<div class='text-[11px] text-slate-400 text-center mt-1.5'>상위노출 기준(80점)에 못 미쳐 "
+                         "<div class='text-[11px] text-slate-400 text-center mt-1.5'>글 구조 기준(80점)에 못 미쳐 "
                          "발행을 잠시 막아뒀어요. 버튼을 누르면 AI가 다시 씁니다 (1~2분)</div></form>")
                         if (pl or {}).get("publish_blocked_score") else
                         # ⏳ 품질 보정이 아직 도는 중이면 발행 판정이 안 끝났다(2026-08-01 검토 지적).
@@ -13400,7 +13404,11 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
 
 # ── 검수 (채널/종류별) ───────────────────────────────────
 def _audit_box(audit: dict | None) -> str:
-    """상위노출 점검 결과(점수+경고) 표시."""
+    """글 구조 점검 결과(점수+경고) 표시.
+
+    ★ '상위노출 점검'이 아니다(2026-08-16 정정). 이 점수는 우리가 정한 구조 항목을
+      몇 개 지켰는지일 뿐, 실제 순위와 대조된 적이 없다. 이름이 예측을 주장하면 안 된다.
+    """
     if not audit:
         return ""
     score = audit.get("score", 0)
@@ -13409,7 +13417,8 @@ def _audit_box(audit: dict | None) -> str:
     warns = audit.get("warnings", [])
     items = "".join(f"<li>⚠️ {esc(w)}</li>" for w in warns) or "<li>✅ 주요 이슈 없음</li>"
     return (f"<div class='text-xs bg-{color}-50 text-{color}-700 rounded-lg p-2 mb-3'>"
-            f"<b>📊 상위노출 점검: {score}/100 ({esc(grade)})</b>"
+            f"<b>📊 글 구조 점검: {score}/100 ({esc(grade)})</b>"
+            "<div class='text-[10px] opacity-70 mt-0.5'>구조 항목 점검 결과예요 — 순위를 예측하는 점수가 아니에요.</div>"
             f"<ul class='mt-1 space-y-0.5'>{items}</ul></div>")
 
 
