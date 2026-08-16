@@ -13141,11 +13141,19 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
           "var url=(aid?('/me?view='+aid):'/me?tab=content')+'&done='+Date.now();"
           "setBar(100);setLabel('✅ 콘텐츠 완성!');setDetail('영상은 목록에서 원하는 플랫폼을 골라 만들 수 있어요');setSlow('');"
           "var tm=document.getElementById('gTeam');if(tm)tm.textContent='3초 뒤 자동으로 이동해요';"
-          "var go=document.getElementById('gGo');if(go){go.href=url;go.classList.remove('hidden');}"
+          # ★ 2026-08-16 사장님: "지금 보러가기 했을 때 바로 이동해야 한다 — 한참 후 이동한다."
+          #   원인은 내 방어 코드였다. 버튼을 눌러 이동이 시작돼도 3초 타이머가 살아 있다가
+          #   다시 replace를 걸고, 그 뒤 1.5초 새로고침까지 걸어 이동이 겹쳤다.
+          #   → 누르는 순간 예약된 타이머를 **전부 끄고** 즉시 보낸다.
+          "var go=document.getElementById('gGo');if(go){go.href=url;go.classList.remove('hidden');"
+          "go.onclick=function(ev){ev.preventDefault();"
+          "try{if(window.__goT)clearTimeout(window.__goT);if(window.__goR)clearTimeout(window.__goR);}catch(_){}"
+          "go.textContent='여는 중…';location.href=url;return false;};}"
           "try{if(document.hidden&&window.Notification&&Notification.permission==='granted')"
           "new Notification('올린다 — 콘텐츠 완성!',{body:'글과 사진이 준비됐어요. 눌러서 확인하세요.'});}catch(_){}"
-          "setTimeout(function(){try{location.replace(url);}catch(_){location.href=url;}"
-          "setTimeout(function(){location.reload();},1500);},3000);return;}}"
+          # 자동 이동은 '안 누르셨을 때'의 보조수단이다 — 타이머 손잡이를 남겨 클릭이 끌 수 있게 한다.
+          "window.__goT=setTimeout(function(){try{location.replace(url);}catch(_){location.href=url;}"
+          "window.__goR=setTimeout(function(){location.reload();},1500);},3000);return;}}"
           "if(!aid){var d=await (await fetch('/me/sets/count')).json();if(d.n>base){aid=d.latest;}}"
           "}catch(_){}"
           "},2000);return false;}"

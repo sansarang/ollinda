@@ -592,3 +592,22 @@ def test_case_numbers_are_consistent_across_surfaces():
     vis = _re.sub(r"<!--.*?-->", " ", h, flags=_re.S)
     assert "발행 9일 만에" not in vis, "옛 사례 문구가 어딘가에 남아 있다"
     assert vis.count("8/15") >= 2, "정정한 숫자가 한 표면에만 반영됐다"
+
+
+def test_go_button_cancels_pending_auto_navigation():
+    """사장님 실물 신고(2026-08-16): "지금 보러가기 했을 때 바로 이동해야 한다 — 한참 후 이동한다."
+
+    원인은 내 방어 코드였다. '안 넘어간다'를 고치려고 3초 자동 이동 + 1.5초 새로고침을
+    겹겹이 넣었는데, 버튼을 눌러 이동이 시작돼도 그 타이머들이 살아남아 다시 이동을 걸었다.
+    → 누르는 순간 예약된 타이머를 전부 끄고 즉시 보낸다.
+    """
+    import os
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "main.py")
+    src = open(p, encoding="utf-8").read()
+    i = src.find("var go=document.getElementById('gGo')")
+    assert i > 0, "완성 모달의 이동 버튼을 못 찾았다"
+    seg = src[i:i + 700]
+    assert "go.onclick" in seg, "버튼에 클릭 처리기가 없다(타이머를 못 끈다)"
+    assert "clearTimeout(window.__goT)" in seg, "자동 이동 타이머를 안 끈다"
+    assert "clearTimeout(window.__goR)" in seg, "새로고침 타이머를 안 끈다"
+    assert "__goT=setTimeout" in src, "자동 이동 타이머에 손잡이가 없다(클릭이 끌 수 없다)"
