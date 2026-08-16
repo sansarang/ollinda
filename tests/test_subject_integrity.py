@@ -128,3 +128,36 @@ def test_script_token_budget_is_not_tight():
     src = _code("app/generators/video.py")
     assert "max_tokens=800" not in src, "대본 생성 상한이 다시 800으로 내려갔다"
     assert "max_tokens=600" not in src, "구어화 상한이 다시 600으로 내려갔다"
+
+
+# ── ⑥ 제목 표기 — 사람들이 검색하는 말로 (2026-08-16) ────────────────────
+
+def test_title_pipeline_uses_spoken_region_form():
+    """사장님 지적: "부산광역시 동구라고 사람들이 검색하지 않는다. 부산동구라고 검색한다."
+
+    실물: 제목이 '부산 동구 …' → '부산광역시 동구 …'로 굳었다.
+    원인 두 곳 —
+      ① 프롬프트가 제목 후보를 kw0(행정 풀네임)로 만들라고 지시
+      ② _pick_title이 kw0 포함 후보만 통과시킴 → 풀네임 제목만 살아남음
+      게다가 같은 지시문이 바로 다음 줄에서 "풀네임 대신 구어형"이라고 모순되게 경고했다.
+    """
+    src = _code("app/generators/text_claude.py")
+    for marker, why in (
+        ("[제목후보]", "제목 후보 생성"),
+        ("[1글 1키워드]", "소제목 지시"),
+    ):
+        i = src.find(marker)
+        assert i > 0, f"{why} 지시문을 못 찾았다"
+        seg = src[max(0, i - 200):i + 200]
+        assert "_kw_shorten(kw0)" in seg, f"{why}가 아직 행정 풀네임을 쓴다"
+    i = src.find("_pick_title(title_cands")
+    assert i > 0
+    assert "_kw_title" in src[i:i + 120], "제목 게이트가 구어형을 안 쓴다"
+
+
+def test_keyword_directive_is_not_self_contradictory():
+    """제목엔 풀네임을 넣으라 해놓고 본문엔 구어형을 쓰라고 하면 모델이 갈린다."""
+    from app.generators.text_claude import _kw_natural_directive
+    d = _kw_natural_directive("부산광역시 동구 썬팅업체", "부산광역시 동구")
+    assert "'부산 동구 썬팅업체' 원형은 제목에서만" in d, d
+    assert "'부산광역시 동구 썬팅업체' 원형" not in d, "제목에 풀네임을 요구하는 문구가 남았다"
