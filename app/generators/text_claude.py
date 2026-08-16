@@ -371,8 +371,12 @@ class BlogDraftGenerator(Generator):
         try:      # 🎯 질의별 답변 문단 규칙(2026-08-16 실측) — 게이트와 같은 모듈이 문장을 만든다.
             #   핵심(kw0)은 seo.resolve_target_keyword가 정한 canonical 값을 그대로 넘긴다.
             from app.services import answerblock as _abm
-            _ab_plan = _abm.plan(kw0, kws)
-            _ab_rule = _abm.prompt_rule(kws, core=kw0)
+            # ★ 표기 통일(2026-08-16) — kw0는 행정 풀네임일 수 있다('부산광역시 동구 …').
+            #   검색자는 구어형으로 친다(seo.py:829). 계획·프롬프트도 같은 표기를 써야
+            #   나중에 실제로 잡힌 검색어와 대조가 된다.
+            _core_nat = " ".join(seo._kw_shorten(kw0).split()) or kw0
+            _ab_plan = _abm.plan(_core_nat, kws)
+            _ab_rule = _abm.prompt_rule(kws, core=_core_nat)
         except Exception:
             _ab_plan, _ab_rule = {}, ""
         prompt = (

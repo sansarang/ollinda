@@ -545,7 +545,8 @@ def _to_spoken(sentences: list, source: str) -> list:
               "- 입력과 같은 개수의 줄로, 순서 그대로, 번호·라벨·따옴표 없이 한 줄씩만 출력.\n\n"
               + "\n".join(f"{i + 1}. {s}" for i, s in enumerate(sentences)))
     try:
-        raw = _llm.call_task("spoken", prompt, max_tokens=600)   # 기본 Claude Haiku(제약 준수형) → 실패 시 Gemini 역폴백
+        # 상한 600에서도 stop_reason=max_tokens 빈 응답이 관측됐다(2026-08-16). 같은 이유로 올린다.
+        raw = _llm.call_task("spoken", prompt, max_tokens=1200)   # 기본 Claude Haiku(제약 준수형) → 실패 시 Gemini 역폴백
     except Exception as e:
         log.warning("[spoken] 변환 호출 실패 — 발췌 원문 유지: %r", repr(e)[:100])
         return sentences
@@ -823,7 +824,10 @@ def _script_from_body(body: str, n: int, kw_nat: str, source: str, tone: str = "
     feedback = ""
     for attempt in (1, 2):
         try:
-            raw = _llm.call_task("spoken", base + feedback, max_tokens=800)
+            # ★ 2026-08-16 실측: max_tokens=800에서 stop_reason=max_tokens로 **빈 응답**이 나와
+            #   대본 생성이 실패하고 씬별 발췌 폴백으로 떨어졌다(사장님 생성 중 로그로 포착).
+            #   씬 9개 분량 자막에 800은 빠듯하다. 상한은 실제 출력분만 과금되므로 올려도 비용은 안 는다.
+            raw = _llm.call_task("spoken", base + feedback, max_tokens=1600)
         except Exception as e:
             log.warning("[script] 대본 생성 호출 실패: %r", repr(e)[:100])
             return None
@@ -2224,9 +2228,18 @@ class ShortVideoGenerator(Generator):
                 else:
                     _nlog.warning("[naver-video] 재빌드도 미달 %s — 원본 유지(사유 기록)", _spec2)
         blog_title = (pl.get("title") or "").strip()
-        vtitle = f"{kw0} 핵심만 정리했어요"                       # 글 제목과 중복되지 않는 변형
+        # 🎬 영상 제목은 **이 영상의 내용**에서 뽑는다(2026-08-16 사장님 지적).
+        #   전에는 f"{kw0} 핵심만 정리했어요" 고정 템플릿이라 같은 가게면 매번 똑같았고,
+        #   차종·소재가 들어갈 자리가 아예 없었다(쇼츠는 이미 내용에서 뽑고 있었다 — 경로 이중화).
+        #   opening(이 영상이 실제로 쓴 훅)은 글마다 달라서 제목이 내용을 따라간다.
+        #   ★ 표기는 kw_nat(구어형)로 통일한다 — kw0는 행정 풀네임이라 '부산광역시…'가 새던 자리다.
+        _hook_t = _r.sub(r"\s+", " ", (opening or "")).strip().rstrip("?!.…")
+        if 6 <= len(_hook_t) <= 40:
+            vtitle = f"{_hook_t} | {kw_nat}"
+        else:
+            vtitle = f"{kw_nat} 핵심만 정리했어요"
         if vtitle == blog_title:
-            vtitle = f"{kw0} — 영상으로 보는 핵심"
+            vtitle = f"{kw_nat} — 영상으로 보는 핵심"
         desc = (f"{kw_nat} 관련 내용을 영상으로 정리했어요.\n"
                 f"{tenant.name} · {region_short}\n"
                 "자세한 과정과 안내는 블로그 본문에 있어요.")
@@ -2249,7 +2262,7 @@ class ShortVideoGenerator(Generator):
         desc = desc + "\n" + " ".join(hashtags)       # 설명 복사에 포함(클립 업로드용)
         from app.seo import natural_kr_number as _nkn2
         vtitle, desc = _nkn2(vtitle), _nkn2(desc)   # 영상 제목·설명도 같은 표기 규칙
-        meta = {"path": final, "title": vtitle, "desc": desc, "filename": fname,
+        meta = {"path": final, "title": vtitle, "title_src": "content", "desc": desc, "filename": fname,
                 "hashtags": hashtags, "quality": _spec,
                 "duration_sec": dur, "opening": opening, "scene_texts": [opening] + sent + [outro],
                 # 🎬 화면-자막 짝을 기록한다(2026-08-02). 자막만 남기면 '일치했는가'를 영상을 눈으로

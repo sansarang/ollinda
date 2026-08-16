@@ -303,12 +303,16 @@ def _startup() -> None:
         #   record()는 모든 요청마다 도는 미들웨어라 거기서 네트워크를 쓰면 안 된다.
         #   미리 받아두면 요청 경로는 메모리 대조만 한다(실패해도 안전망 대역으로 계속).
         def _warm_botnets():
+            # ★ 2026-08-16 수정: `_lgj`가 이 스코프에 없어 NameError가 났다(부팅마다 Sentry에 가짜 예외).
+            #   대역 적재 자체는 성공했고 **로그 문장에서만** 터졌는데, except 블록도 같은 이름을 써서
+            #   두 번 터졌다. import 누락으로 낸 같은 계열 사고가 세 번째다 — 지역 import로 못 박는다.
+            import logging as _lgw
             try:
                 from app.services import botlog as _bl0
                 n = _bl0.official_nets(force=True)
-                _lgj.getLogger("shopcast").info("[botlog] 네이버 공식 봇 대역 %d개 적재", len(n))
+                _lgw.getLogger("shopcast").info("[botlog] 네이버 공식 봇 대역 %d개 적재", len(n))
             except Exception:
-                _lgj.getLogger("shopcast").exception("[botlog] 공식 대역 적재 실패 — 안전망으로 계속")
+                _lgw.getLogger("shopcast").exception("[botlog] 공식 대역 적재 실패 — 안전망으로 계속")
         _thj.Thread(target=_warm_botnets, daemon=True).start()
     except Exception:
         import logging
@@ -10010,7 +10014,14 @@ def _nv_canonical(tenant, blog, nv: dict) -> dict:
         except Exception:
             region = ""
     region = region or ""
-    title = f"{canon} 핵심만 정리했어요".strip()
+    # ★ 표기 통일(2026-08-16) — canon이 행정 풀네임이면 제목에 '부산광역시…'가 그대로 샜다.
+    #   설명·해시태그는 구어형인데 제목만 풀네임이라 같은 영상 안에서 표기가 갈라져 있었다.
+    canon = " ".join(seo._kw_shorten(canon).split()) or canon
+    # 🎬 생성기가 **내용에서 뽑은** 제목이면 살린다(2026-08-16 사장님 지적: 영상 제목이 항상 동일).
+    #   이 함수는 낡은 저장값 오염을 씻어내려고 제목을 재유도했는데, 그 과정에서 내용 기반 제목까지
+    #   고정 템플릿으로 덮어써 매번 같은 제목이 나왔다. 오염 제거와 제목 고정은 다른 문제다.
+    _kept = (nv.get("title") or "").strip() if nv.get("title_src") == "content" else ""
+    title = _kept or f"{canon} 핵심만 정리했어요".strip()
     desc = (f"{canon} 관련 내용을 영상으로 정리했어요.\n{getattr(tenant,'name','')} · {region}\n"
             "자세한 내용은 블로그 본문에 있어요.")
     seeds = [canon.replace(" ", ""), (region + ind).replace(" ", ""), ind,

@@ -204,8 +204,13 @@ def improving_keywords(tenant_id: str, limit: int = 5) -> list[dict]:
                     (tenant_id, k, surfaces.REGION_LEGACY, kind)).fetchall()
                 if len(rows) < 2:
                     continue
-                first = surfaces.rank_for_compare(rows[0]["rank"], miss=6)   # 0(밖)=최하 취급
-                last = surfaces.rank_for_compare(rows[-1]["rank"], miss=6)
+                # ★ 미노출(0)은 **최하위**다(2026-08-16 실사고 수정).
+                #   전에는 0을 '6위'로 눕혔다. 그래서 24위 → 27 → 28 → 미노출로 **죽어간** 키워드가
+                #   gain=18의 '가장 많이 오른 키워드'로 집계됐고, 그 값이 생성 브리프에
+                #   "제목·첫문장·본문에 더 강하게 반영하라"로 주입돼 **테슬라 사진 글이 GV80 글로** 바뀌었다.
+                #   미노출을 실제 순위처럼 다루면 안 된다 — 오늘만 세 번째로 만난 같은 계열 결함이다.
+                first = surfaces.rank_for_compare(rows[0]["rank"])
+                last = surfaces.rank_for_compare(rows[-1]["rank"])
                 gain = first - last                    # +면 순위 상승(숫자 작아짐)
                 if gain > 0:
                     out.append({"keyword": k, "kind": kind,
