@@ -232,3 +232,20 @@ def test_script_gate_does_not_block_particle_forms():
     # ★ 위험 비대칭 유지 — 본문에 없는 고유명사는 조사가 붙어도 걸린다
     for bad in ("제네시스 출고했습니다.", "카이엔부터 보세요.", "람보르기니로 왔습니다."):
         assert _ur(bad, src), f"날조를 통과시켰다: {bad}"
+
+
+def test_ai_clip_duration_is_within_api_bounds():
+    """2026-08-16 실물: 8/09에 4→3초로 내린 뒤 **모든 AI 클립 요청이 400으로 거부**돼 왔다.
+    "durationSeconds is out of bound. Please provide a value between 4 and 8, inclusive."
+    경고 로그만 남아 일주일간 아무도 못 봤다 — 값이 범위를 벗어나면 요청 자체가 죽는다.
+    """
+    from app.media import ai_clip as c
+    assert c.DUR_MIN <= c.DUR_SEC <= c.DUR_MAX, (
+        f"클립 길이 {c.DUR_SEC}초가 API 허용 범위({c.DUR_MIN}~{c.DUR_MAX}) 밖이다 — 400으로 전량 실패한다")
+
+
+def test_script_token_budget_is_generous_enough():
+    """1200에서도 stop_reason=max_tokens 빈 응답이 관측됐다.
+    잘려서 폴백으로 떨어지는 손해가 상한을 넉넉히 주는 것보다 크다(상한은 실제 출력분만 과금)."""
+    src = _code("app/generators/video.py")
+    assert "max_tokens=1200" not in src, "구어화 상한이 다시 1200으로 내려갔다"

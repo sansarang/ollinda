@@ -27,8 +27,12 @@ log = logging.getLogger("shopcast.aiclip")
 
 MODEL = os.environ.get("VEO_CLIP_MODEL", "veo-3.1-fast-generate-preview")
 _API = "https://generativelanguage.googleapis.com/v1beta"
-DUR_SEC = 3                      # 생성 길이(초) — 초당 과금이라 최소로, 씬이 더 길면 호출부가 슬로모로 늘림
-                                 # (4→3초, 2026-08-09 비용 절감 승인 — 화질 손실 없음: 슬로모 확장 로직 기존)
+# ★ 2026-08-16 실물: 8/09에 4→3초로 내린 뒤 **모든 요청이 400으로 거부돼 왔다.**
+#   "The number value for `durationSeconds` is out of bound. Please provide a value
+#    between 4 and 8, inclusive." — API 허용 최소가 4초다. 3은 애초에 불가능한 값이었다.
+#   경고 로그만 남아 일주일간 아무도 못 봤다(조용한 실패). 최소 허용값으로 되돌린다.
+DUR_MIN, DUR_MAX = 4, 8          # API 허용 범위 — 벗어나면 400(요청 자체가 거부된다)
+DUR_SEC = DUR_MIN                # 초당 과금이라 허용 범위의 최소로. 씬이 더 길면 호출부가 슬로모로 늘림
 POLL_CAP = 180                   # 생성 대기 상한(초) — 초과 시 포기(파이프라인 보호)
 
 

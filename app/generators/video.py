@@ -568,7 +568,9 @@ def _to_spoken(sentences: list, source: str) -> list:
               + "\n".join(f"{i + 1}. {s}" for i, s in enumerate(sentences)))
     try:
         # 상한 600에서도 stop_reason=max_tokens 빈 응답이 관측됐다(2026-08-16). 같은 이유로 올린다.
-        raw = _llm.call_task("spoken", prompt, max_tokens=1200)   # 기본 Claude Haiku(제약 준수형) → 실패 시 Gemini 역폴백
+        # 1200에서도 stop_reason=max_tokens 빈 응답이 계속 관측됐다(2026-08-16 실물).
+        #   상한은 실제 출력분만 과금되므로 넉넉히 준다 — 잘려서 폴백으로 떨어지는 손해가 더 크다.
+        raw = _llm.call_task("spoken", prompt, max_tokens=2400)   # 기본 Claude Haiku(제약 준수형) → 실패 시 Gemini 역폴백
     except Exception as e:
         log.warning("[spoken] 변환 호출 실패 — 발췌 원문 유지: %r", repr(e)[:100])
         return sentences
