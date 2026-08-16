@@ -118,3 +118,42 @@ def test_owner_voice_habits_are_not_overlapping_fragments(monkeypatch):
 def test_owner_voice_is_wired_into_generator():
     src = _src("app/generators/text_claude.py")
     assert "ownervoice" in src and "_voice_rule" in src
+
+
+# ── ①-보강: 지시문끼리 부딪히지 않는가 (2026-08-16 실패 원인) ────────────
+
+def test_question_instruction_does_not_contradict_the_ban():
+    """실패 원인: 말 걸기 예시가 '이거 궁금하셨죠?'였는데,
+    seo.HOOK_STYLES가 "수사 의문 '~하셨죠?' 말고 진짜 질문문"으로 그걸 금지하고 있었다.
+    모델은 충돌하면 금지 쪽을 따른다(어기면 감점) → 물음표 0개가 됐다."""
+    src = _src("app/generators/text_claude.py")
+    i = src.find("[독자에게 말을 걸어라]")
+    assert i > 0
+    seg = src[i:i + 600]
+    # 예시 부분(넣어라 ~ 상투 질문 사이)에 금지 패턴이 있으면 안 된다
+    ex = seg.split("넣어라", 1)[1].split("상투 질문", 1)[0]
+    assert "하셨죠" not in ex, f"말 걸기 예시가 금지 대상(수사 의문)을 쓰고 있다: {ex[:120]}"
+    assert "진짜 묻는 질문은 본문 어디서든" in seg, "허용 범위를 밝히지 않았다"
+
+
+def test_rhetorical_ban_is_scoped_to_the_opening():
+    """금지가 본문 전체로 읽히면 모델이 질문 자체를 회피한다."""
+    from app import seo
+    q = dict(seo.HOOK_STYLES)["질문형"]
+    assert "첫 문장" in q, "수사 의문 금지가 도입부 한정임을 밝히지 않았다"
+
+
+def test_cliche_ban_does_not_suppress_all_questions():
+    from app import seo
+    assert "진짜 궁금증을 묻는 질문 문장은 권장" in seo.HUMAN_TOUCH
+
+
+# ── ②: 두께 규칙이 리듬을 죽이지 않는가 ─────────────────────────────────
+
+def test_thickness_rule_keeps_rhythm():
+    """실측: 두께만 요구했더니 모든 문단이 길어져 길이편차 54→45, 쉼표 47%→58%로
+    오히려 AI 쪽으로 갔다. 사람 글의 표식은 두께가 아니라 들쭉날쭉함이다."""
+    from app.services import answerblock as ab
+    rule = ab.prompt_rule(["부산 동구 썬팅", "썬팅 과정"], core="부산 동구 썬팅")
+    assert "모든 문단이 길 필요는 없다" in rule
+    assert "다 비슷하면" in rule, "길이 균일이 기계 표식이라는 경고가 없다"
