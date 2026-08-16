@@ -3,16 +3,16 @@
  "months": [
   {
    "month": "2026-08",
-   "commits": 502,
+   "commits": 499,
    "user_found": 10,
    "system_found": 4,
    "unknown": 63,
-   "per100": 1.99,
+   "per100": 2.0,
    "note": "발견 주체 미상 63건 — 이 수치는 하한이다"
   },
   {
    "month": "2026-07",
-   "commits": 682,
+   "commits": 687,
    "user_found": 0,
    "system_found": 0,
    "unknown": 25,
