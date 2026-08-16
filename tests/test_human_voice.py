@@ -184,3 +184,30 @@ def test_faq_fallback_uses_this_articles_name():
     seg = src[i:i + 500]
     assert "_sec_names['faq']" in seg, "폴백이 이번 글의 섹션 이름을 안 쓴다"
     assert "has_faq" in seg, "존재 판정이 관문을 안 거친다"
+
+
+# ── 3-2: 화자 선언 중복 제거 (2026-08-16) ────────────────────────────────
+
+def test_speaker_declaration_is_not_repeated():
+    """seo.speaker_frame이 이미 "너는 사장 본인이다"를 선언한다.
+    블로그 프롬프트가 같은 말을 다시 하면 지시만 늘고 새 지시가 묻힌다
+    (실물 프롬프트 12,019자·54블록·금지표현 96회)."""
+    src = _src("app/generators/text_claude.py")
+    body = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
+    assert "이 글을 쓰는 사람은 '가게 사장'이다" not in body, "화자 선언이 중복으로 남아 있다"
+    assert "[청자 — 손님 말로 불러라]" in body, "청자 규칙(블로그 전용)이 사라졌다"
+
+
+def test_blog_only_rules_survive_the_merge():
+    """통폐합은 '중복 제거'지 '기능 삭제'가 아니다 — 고유 규칙은 남아야 한다."""
+    src = _src("app/generators/text_claude.py")
+    for rule in ("손님이 쓰는 말로 불러라", "'후기'는 손님이 쓴 경험담", "사전에 없는 조어"):
+        assert rule in src, f"통폐합으로 고유 규칙이 사라졌다: {rule}"
+
+
+def test_shared_frame_stays_generic():
+    """speaker_frame은 캡션·영상도 쓴다 — 블로그 전용 규칙이 새면 다른 산출물이 오염된다."""
+    from app import seo
+    f = seo.speaker_frame("local")
+    for blog_only in ("소제목", "[사진", "한눈 요약", "FAQ"):
+        assert blog_only not in f, f"공유 프레임에 블로그 전용 규칙이 샜다: {blog_only}"
