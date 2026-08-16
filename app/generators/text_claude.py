@@ -368,6 +368,16 @@ class BlogDraftGenerator(Generator):
             _anat_line = _anat_line + _bp_line
         except Exception:
             pass
+        try:      # 📛 이번 글의 관리 섹션 이름(글 단위 결정적 — 같은 글은 항상 같은 이름)
+            from app.services import sections as _secm
+            _sec_names = _secm.prompt_names(getattr(asset, "id", "") or tenant.id)
+        except Exception:
+            _sec_names = {"summary": "한눈 요약", "faq": "자주 묻는 질문", "related": "함께 보면 좋은 글"}
+        try:      # 🗣 사장님 말투(A안) — 사장님이 직접 쓰신 문장에서만. 표본이 얇으면 빈 문자열.
+            from app.services import ownervoice as _ovm
+            _voice_rule = _ovm.directive(tenant.id)
+        except Exception:
+            _voice_rule = ""
         try:      # 🎯 질의별 답변 문단 규칙(2026-08-16 실측) — 게이트와 같은 모듈이 문장을 만든다.
             #   핵심(kw0)은 seo.resolve_target_keyword가 정한 canonical 값을 그대로 넘긴다.
             from app.services import answerblock as _abm
@@ -427,8 +437,21 @@ class BlogDraftGenerator(Generator):
               "단계·수치·근거를 **한 문단 안에 모아** 써라. 한 줄짜리 문단으로 흩뿌리지 마라.\n"
               "· 그 문단만 따로 읽어도 뜻이 통해야 한다(앞 문단을 가리키는 말 금지).\n"
               "· 표는 **필수가 아니다.** 항목이 정말 표로 볼 때 더 명확한 경우에만 1개 쓴다.\n"
-            + "[필수 섹션] ① '## 자주 묻는 질문'(Q&A 정확히 3쌍) ② '## 한눈 요약'(핵심 3줄 목록 — GEO).\n"
-              "  이 둘만 필수다. 그 외 관리용 섹션을 임의로 늘리지 마라.\n"
+            # 📛 섹션 이름은 글마다 바뀐다(2026-08-16) — 실물 6편에서 '## 한눈 요약'·'## 자주 묻는 질문'이
+            #   6/6 글자 하나 안 틀리고 같았다. 수십 편 쌓이면 사람 눈에도 기계 티가 나고
+            #   유사문서 위험도 커진다. 이름은 services/sections.py 단일 관문이 정한다(검사기도 같은 관문을 본다).
+            + f"[필수 섹션] ① '## {_sec_names['faq']}'(Q&A 정확히 3쌍) ② '## {_sec_names['summary']}'(핵심 3줄 목록 — GEO).\n"
+              "  이 둘만 필수다. **소제목 이름은 위에 준 그대로 써라**(다른 말로 바꾸지 마라). "
+              "그 외 관리용 섹션을 임의로 늘리지 마라.\n"
+            # 💬 말 걸기(2026-08-16) — 논문 지표로 재보니 우리 글의 물음표가 **0개**였다.
+            #   사람 글과 AI 글을 가르는 강한 신호가 engagement marker(질문·개인적 곁말)인데
+            #   우리 글엔 전무했다. 단, 개수를 못 박으면 그 자체가 새로운 기계 패턴이 된다.
+            + "[독자에게 말을 걸어라] 글 안에서 손님에게 직접 묻는 문장을 자연스럽게 넣어라"
+              "('이거 궁금하셨죠?', '어느 쪽이 나을까요?'). 몇 개를 넣으라는 규칙은 없다 — "
+              "말하다 보면 나오는 만큼만. 매 소제목마다 기계적으로 넣으면 그게 더 티가 난다.\n"
+              "· 문장 길이를 일부러 들쭉날쭉하게 써라. 짧은 문장 하나로 끊고 가는 대목도 있어야 한다. "
+              "처음부터 끝까지 같은 호흡이면 기계가 쓴 티가 난다.\n"
+            + _voice_rule
             # 💰 2026-08-16 사장님 지시: **가격대는 넣지 않는다.**
             #   실측 배경: '가격' 소제목만 걸고 금액을 못 써서 2회 연속 '약속미이행'으로 걸렸다.
             #   실제 단가를 받은 적이 없으니 쓸 수 없고, 없는 값을 지어내면 정직 게이트 위반이다.
@@ -770,7 +793,9 @@ def _semantic_photo_placement(body: str, note: str, n: int) -> str:
     used = [0] * len(paras)                   # 문단별 배정 수(과밀 방지)
     # ★ 금지 구역(실측 결함 수정: 요약·FAQ 사이에 사진이 꽂히고 서두에 6장 뭉텅이):
     #   소제목 단독·요약·FAQ·표·목록·고정정보·지도 마커 문단엔 사진 배정 금지 + 문단당 최대 2장.
-    _FORBID = ("한눈 요약", "자주 묻는", "찾아오는 길", "함께 보면 좋은", "[여기 네이버")
+    from app.services import sections as _sec
+    # 관리 섹션 문구는 글마다 변형된다 — 목록을 여기 복사하지 않고 관문에서 받는다
+    _FORBID = tuple(_sec.ALL) + ("찾아오는 길", "[여기 네이버")
     MAX_PER = 2                                # 허용 문단 수를 센 뒤 아래에서 다시 계산한다
 
     def _allowed(j: int) -> bool:

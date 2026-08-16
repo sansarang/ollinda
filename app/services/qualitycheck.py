@@ -60,8 +60,10 @@ def run_checks(asset_id: str) -> dict:
         except Exception:
             _chk(checks, "체류 3장치 발현", False, "검사기 로드 실패")
         _chk(checks, "표 존재", "|" in body)
-        _chk(checks, "FAQ 존재", ("자주 묻는" in body) or ("자주묻는" in body))
-        _chk(checks, "한눈 요약 존재", "한눈 요약" in body)
+        # 섹션 문구는 글마다 변형된다 — 판정은 services/sections.py 단일 관문으로(2026-08-16)
+        from app.services import sections as _sec
+        _chk(checks, "FAQ 존재", _sec.has_faq(body))
+        _chk(checks, "한눈 요약 존재", _sec.has_summary(body))
         _mk = re.findall(r"\[사진(\d+)\]", body)
         _chk(checks, "사진 마커 존재·중복 없음", bool(_mk) and len(_mk) == len(set(_mk)),
              f"{len(_mk)}개")

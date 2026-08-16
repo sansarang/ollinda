@@ -1950,7 +1950,10 @@ class ShortVideoGenerator(Generator):
         # 핵심 답 3 = 글 소제목 축약(구조 섹션 제외 — 정보 소제목만)
         heads = [ln.lstrip("#").strip().strip('"“”') for ln in body.splitlines()
                  if ln.strip().startswith("##")]
-        heads = [h for h in heads if not any(x in h for x in ("한눈 요약", "자주 묻", "가격", "영업 안내", "마무리"))][:3]
+        from app.services import sections as _sec
+        heads = [h for h in heads
+                 if not _sec.is_admin_head(h)
+                 and not any(x in h for x in ("가격", "영업 안내", "마무리"))][:3]
         if not heads:
             _nlog.warning("[naver-video] 중단: 소제목 0 (본문 구조 확인 필요)")
             return None, {}

@@ -1015,11 +1015,12 @@ def geo_audit(kind: str, payload: dict, name: str = "", industry: str = "",
         hits.append("정의문(첫 문단에 상호+업종/지역)")
     else:
         misses.append("첫 문단 정의문 없음")
-    if "한눈 요약" in text or "한 눈 요약" in text:
+    from app.services import sections as _sec
+    if _sec.has_summary(text):
         hits.append("한눈 요약")
     else:
         misses.append("'## 한눈 요약' 없음")
-    if any(s in text for s in ("자주 묻는", "Q&A", "Q.")):
+    if _sec.has_faq(text):
         hits.append("Q&A")
     else:
         misses.append("Q&A 없음")
@@ -1774,7 +1775,8 @@ def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> d
         if len(_fulls) >= 3:
             warnings.append(f"행정구역 풀네임 {len(_fulls)}회('{_fulls[0]}' 등) — 기계 삽입 티, 구어형으로")
             score -= 6
-        if not any(s in text for s in ("자주 묻는", "Q&A", "Q.", "Q1")):
+        from app.services import sections as _sec2
+        if not _sec2.has_faq(text):
             warnings.append("FAQ(자주 묻는 질문) 없음 → Q&A·체류 가점 놓침")
             score -= 4
         if len(text) < 1000:
