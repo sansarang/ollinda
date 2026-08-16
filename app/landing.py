@@ -537,17 +537,25 @@ def _hero() -> str:
        사장님들은 검색해서 확인한다 — 열어봤을 때 맞아야 한다.
        ★ 그리고 떨어진 것까지 보여주는 게 우리가 파는 것과 맞다.
          우리 상품은 '1위를 만들어드립니다'가 아니라 '떨어지는 걸 잡아드립니다'다. -->
+  <!-- ★ 2026-08-17 정정 + 사장님 동의로 실명 공개.
+       옛 표기는 우리 기록과 어긋났다: '8/2 12위'로 적혀 있었지만 실측은 3위,
+       '8/15 10위'였지만 실측은 6위였다. 사장님들은 검색해서 확인한다 — 숫자는 기록과 같아야 한다.
+       아래는 전부 rank_snapshots(blog_search) 실측값이고, 오늘 값은 발행 직전 재확인했다. -->
   <div class="reveal mt-8 max-w-lg mx-auto bg-white border-2 border-indigo-200 rounded-2xl px-5 py-4 shadow-sm">
-   <div class="text-sm text-slate-500 text-center mb-2">‘부산 동구 썬팅’ 검색 · 실제 이용 가게</div>
+   <div class="text-sm text-slate-500 text-center mb-2">
+    ‘부산 동구 썬팅’ 검색 · <b class="text-slate-700">루마썬팅 현대상사</b>(실제 이용 가게)</div>
    <div class="flex items-center justify-center gap-2 text-sm font-bold text-slate-700 flex-wrap">
-    <span class="text-slate-400">7/31 발행</span>
-    <span class="text-slate-300">→</span><span>8/2 <b>12위</b></span>
-    <span class="text-slate-300">→</span><span class="text-indigo-600">8/9 <b>1위</b></span>
-    <span class="text-slate-300">→</span><span class="text-amber-600">8/15 <b>10위</b></span></div>
+    <span class="text-indigo-600">7/31 <b>1위</b></span>
+    <span class="text-slate-300">→</span><span class="text-amber-600">8/3 <b>4위</b></span>
+    <span class="text-slate-300">→</span><span class="text-indigo-600">8/12 <b>1위</b></span>
+    <span class="text-slate-300">→</span><span class="text-amber-600">8/17 <b>7위</b></span></div>
    <div class="text-center text-[13px] text-slate-600 mt-2.5 leading-snug">
-    올라갔다가 <b class="text-slate-800">다시 내려왔어요.</b> 글은 쓰는 날보다 <b class="text-slate-800">떨어지는 날</b>이 문제입니다.<br>
-    올린다는 <b class="text-slate-800">매일 확인해서 내려가면 고친 글을 만들어</b> 드려요.</div>
-   <div class="text-center text-[11px] text-slate-400 mt-2">2026년 8월 15일 확인 · 개별 결과는 가게·검색어에 따라 달라요</div>
+    1위였다가 밀렸고, 글을 더 올려 <b class="text-slate-800">다시 1위</b>로 올라갔다가 또 내려왔어요.<br>
+    글은 쓰는 날보다 <b class="text-slate-800">떨어지는 날</b>이 문제입니다 —
+    올린다는 <b class="text-slate-800">매일 확인해서 내려가면 원인을 찾아 다시</b> 씁니다.</div>
+   <div class="text-center text-[11px] text-slate-400 mt-2">
+    2026년 8월 17일 확인 · 같은 가게 ‘부산광역시 동구 썬팅’ 10위 ·
+    개별 결과는 가게·검색어에 따라 달라요</div>
   </div>
 
   <!-- ★ 2026-08-14 사장님 지시: 첫 화면에 상호 입력칸.
@@ -860,14 +868,15 @@ def _flow() -> str:
     s3 = (f"<div class='reveal card-hi p-5'>"
           f"<div class='flex items-center gap-2 mb-3'>{step.format(3)}"
           f"<div class='font-bold text-slate-900'>매일 순위를 확인해요</div></div>"
-          # ★ 2026-08-15 정정 — 히어로와 같은 사례이므로 같은 숫자를 쓴다.
-          #   8/9 1위에서 끊으면 오늘 여는 사람에게 틀린 정보가 된다(8/15 실측 10위).
-          f"<div class='text-sm text-slate-500 mb-2'>‘부산 동구 썬팅’ 검색</div>"
+          # ★ 2026-08-17 정정 — 히어로와 **같은 사례**라 같은 숫자를 쓴다.
+          #   한쪽만 고치면 화면끼리 어긋난다(오늘까지 반복한 사고의 모양).
+          #   옛 표기(8/2 12위·8/15 10위)는 우리 rank_snapshots와 달랐다 — 실측은 3위·6위였다.
+          f"<div class='text-sm text-slate-500 mb-2'>‘부산 동구 썬팅’ 검색 · 루마썬팅 현대상사</div>"
           f"<div class='border-l-2 border-indigo-100 ml-1 pl-3'>"
-          + _tl("7/31", "글 발행")
-          + _tl("8/2", "블로그검색 <b>12위</b>")
-          + _tl("8/9", "<span class='text-indigo-600'>1위</span>")
-          + _tl("8/15", "<span class='text-amber-600 text-lg'>10위</span> — 내려왔어요", hot=True)
+          + _tl("7/31", "<span class='text-indigo-600'>1위</span>")
+          + _tl("8/3", "<span class='text-amber-600'>4위</span> — 밀렸어요")
+          + _tl("8/12", "<span class='text-indigo-600'>1위</span> — 글을 더 올려 회복")
+          + _tl("8/17", "<span class='text-amber-600 text-lg'>7위</span> — 또 내려왔어요", hot=True)
           + f"</div>"
           f"<p class='text-slate-500 text-sm mt-3'>순위는 <b class='text-slate-700'>올라갔다 내려갑니다.</b> "
           f"그래서 매일 확인하고, 내려가면 고친 글을 먼저 가져다드려요.</p>"

@@ -588,15 +588,17 @@ def test_case_study_shows_the_drop_not_just_the_peak():
 
     ★ 그리고 떨어진 것까지 보여주는 게 우리가 파는 것과 맞다:
       우리 상품은 '1위를 만들어드립니다'가 아니라 '떨어지는 걸 잡아드립니다'다.
+
+    ★ 골든은 **날짜가 아니라 뜻**을 문다(2026-08-17). 특정 날짜를 박아두면
+      실측이 갱신될 때마다 깨지고, 사람을 옛 숫자에 묶는다.
     """
     t = _visible_text()
-    assert "8/9" in t, "성과 사례가 사라졌다"
-    # 최고점에서 끊으면 안 된다 — 그 뒤 실측이 함께 있어야 한다
-    i_peak = t.find("8/9")
-    seg = t[i_peak:i_peak + 260]
-    assert "8/15" in seg, "최고점만 보여주고 그 뒤 실측을 감췄다"
-    assert ("내려" in seg or "떨어" in seg), "순위가 내려온 사실을 말하지 않는다"
-    assert "확인" in seg or "실측" in seg, "언제 잰 값인지 밝히지 않는다"
+    assert "1위" in t, "성과 사례가 사라졌다"
+    i_peak = t.find("1위")
+    seg = t[i_peak:i_peak + 320]
+    # 최고점 뒤에 '지금 값'이 함께 있어야 한다 — 최고점에서 끊으면 오늘 여는 사람에게 틀린 정보다
+    assert ("내려" in seg or "떨어" in seg or "밀렸" in seg), "순위가 내려온 사실을 말하지 않는다"
+    assert "확인" in t or "실측" in t, "언제 잰 값인지 밝히지 않는다"
 
 
 def test_case_numbers_are_consistent_across_surfaces():
@@ -607,7 +609,11 @@ def test_case_numbers_are_consistent_across_surfaces():
     import re as _re
     vis = _re.sub(r"<!--.*?-->", " ", h, flags=_re.S)
     assert "발행 9일 만에" not in vis, "옛 사례 문구가 어딘가에 남아 있다"
-    assert vis.count("8/15") >= 2, "정정한 숫자가 한 표면에만 반영됐다"
+    # 옛 숫자(우리 rank_snapshots와 어긋났던 값)가 남으면 안 된다 — 사장님들은 검색해서 확인한다
+    for stale in ("12위", "8/9"):
+        assert stale not in vis, f"기록과 어긋나던 옛 사례 숫자가 남아 있다: {stale}"
+    assert vis.count("8/17") >= 2, "정정한 숫자가 한 표면에만 반영됐다(표면 하나만 고치기)"
+    assert vis.count("루마썬팅 현대상사") >= 2, "사례 주체가 한 표면에만 있다"
 
 
 def test_go_button_cancels_pending_auto_navigation():
