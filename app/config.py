@@ -9,12 +9,18 @@ import os
 # ── 월 요금(원) ─────────────────────────────────────────
 PRICE_BASIC = int(os.environ.get("SHOPCAST_PRICE_BASIC", "129000"))   # 라이트(2026-07-29 원가 실측 기반 개편)
 PRICE_PRO = int(os.environ.get("SHOPCAST_PRICE_PRO", "199000"))       # 스탠다드(주력) · 순위추적·성과실측
-AGENCY_FROM = int(os.environ.get("SHOPCAST_PRICE_AGENCY", "299000"))  # 프로(최상위) — 대행 포지션 흡수
+# ★ 2026-08-17 사장님 결정 — 대행 단일 상품으로 전환.
+#   왜: 월 12.9만원은 시세의 1/3이면서 **고객이 도구를 배워야 하는** 구조였다.
+#       소상공인 사장님은 도구를 배울 시간이 없다. 그래서 안 팔렸다(유료 1건).
+#   무엇으로: 월 39만원 대행 — 사진만 보내면 우리가 돌리고 리포트를 드린다.
+#       크몽 블로그 대행 실판매가 38~77만원 안이라 비싸지 않고, 고객은 배울 게 없다.
+#       한 곳 = 옛 SaaS 고객 3명분. 5곳이면 월 195만원.
+AGENCY_FROM = int(os.environ.get("SHOPCAST_PRICE_AGENCY", "390000"))  # 대행(주력 · 단일 상품)
 # 정가(표시용, 2026-07-30 AI 무빙 전면 적용 개편) — 판매가(PRICE_*)는 '런칭가'로 표기.
 # 나중에 인상할 땐 PRICE_*를 LIST_*로 올리기만 하면 됨(기존 구독자는 결제 시점 가격 유지).
 LIST_BASIC = int(os.environ.get("SHOPCAST_LIST_BASIC", "149000"))
 LIST_PRO = int(os.environ.get("SHOPCAST_LIST_PRO", "249000"))
-LIST_AGENCY = int(os.environ.get("SHOPCAST_LIST_AGENCY", "399000"))
+LIST_AGENCY = int(os.environ.get("SHOPCAST_LIST_AGENCY", "590000"))   # 정가(시세 중간값 근처)
 AGENCY_TO = int(os.environ.get("SHOPCAST_PRICE_AGENCY_TO", "250000"))
 
 YEARLY_DISCOUNT = 0.30    # 연 결제 할인율(약 30%)

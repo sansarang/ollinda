@@ -520,9 +520,13 @@ def _hero() -> str:
    카센터 · 정비 · 디테일링 · 썬팅 · 중고차 사장님을 위해</div>
   <h1 class="reveal text-4xl sm:text-6xl font-bold tracking-tight leading-[1.12] text-slate-900">
    광고비 쓰셨는데,<br><span class="text-indigo-600">효과가 있긴 한 걸까요?</span></h1>
-  <p class="reveal mt-7 text-lg text-slate-500 max-w-2xl mx-auto">사진만 올려주시면 글과 영상을 만들어 드려요.
-   그리고 <b class="text-slate-800">그 글이 검색에서 몇 위인지 매일 확인해</b> 알려드립니다.
-   <b class="text-slate-800">순위가 떨어지면 고친 글을 먼저</b> 가져다드려요.</p>
+  <!-- ★ 2026-08-17 대행 전환 — 사장님이 배울 것이 없다는 점을 첫 문단에서 못 박는다.
+       옛 문구는 '올려주시면'이라 사장님이 도구를 다루는 그림이었다. 그래서 안 팔렸다. -->
+  <p class="reveal mt-7 text-lg text-slate-500 max-w-2xl mx-auto">사진만 보내주시면 <b class="text-slate-800">저희가 다 합니다.</b>
+   글·사진 보정·영상까지 만들어 올리고,
+   <b class="text-slate-800">그 글이 검색에서 몇 위인지 매일 확인해</b> 리포트로 보내드립니다.
+   <b class="text-slate-800">순위가 떨어지면 원인을 찾아 다시 씁니다.</b>
+   사장님이 배우실 프로그램은 없습니다.</p>
 
   <!-- ★ 2026-08-13 사장님 지시: 증거를 첫 화면으로.
        예전엔 여기가 C-Rank·D.I.A.+·PAS 같은 만드는 사람 말이었고, 실측 1위 사례는
@@ -1192,84 +1196,52 @@ def _new_features() -> str:
 
 
 def _pricing() -> str:
+    """요금 — 대행 단일 상품(2026-08-17 사장님 결정).
+
+    왜 바꿨나: 월 12.9만원 SaaS는 시세의 1/3이면서 **고객이 도구를 배워야 하는** 구조였다.
+      소상공인 사장님은 도구를 배울 시간이 없다. 그래서 안 팔렸다(유료 1건).
+      → 사진만 보내면 우리가 돌리고 리포트를 드리는 대행으로. 고객은 배울 게 없다.
+    정직: 시세는 2026년 8월 공개 마켓 실판매가. 없는 실적·인기 배지는 쓰지 않는다.
+    """
     from app import config as _cfg
-    b, p = _cfg.PRICE_BASIC, _cfg.PRICE_PRO
-    by, py = _cfg.yearly_monthly_equiv(b), _cfg.yearly_monthly_equiv(p)   # 연결제 월 환산가(약 30%↓)
-    af = _cfg.AGENCY_FROM
-    lb, lp, la = _cfg.LIST_BASIC, _cfg.LIST_PRO, _cfg.LIST_AGENCY        # 정가(취소선) — 판매가는 런칭가
-    L = _cfg.PLAN_LIMITS
-    def _flim(plan):   # 신규기능 한도 표기(-1=무제한)
-        d = L.get(plan, L["free"])
-        cm = "무제한" if d["competitors_max"] == -1 else f"{d['competitors_max']}개"
-        pi = "무제한" if d["print_items"] == -1 else f"월 {d['print_items']}장"
-        _ = (cm, pi)                     # (UI 정리) 경쟁사·인쇄물 행 제거 — 백엔드 한도는 유지
-        return []
-    def _pr(list_won: int, sale_won: int) -> str:      # 정가 취소선 + 런칭가(2026-07-30 개편)
-        return (f"<span class='line-through text-slate-300 text-lg font-semibold mr-1.5'>{list_won:,}원</span>"
-                f"월 {sale_won:,}원")
-    plans = [("라이트", _pr(lb, b), f"월 6세트 · 처음 시작용 · 연결제 시 월 {by:,}원",
-              ["월 콘텐츠 6세트(블로그+인스타+X)", "영상 2편 (사진이 촬영한 것처럼 움직여요)",
-               "검색에 잘 뜨는 형태로 + 내보내기 전 자동 점검",
-               "사진 자동 보정 + 번호판·개인정보 가림"] + _flim("basic"),
-              "basic", False),
-             ("스탠다드", _pr(lp, p), f"월 12세트 · 성과까지 · 연결제 시 월 {py:,}원",
-              ["월 콘텐츠 12세트 + 영상 8편", "네이버 클립용 영상(검색 첫 화면에 뜨는 자리)",
-               "사람 목소리 같은 나레이션 + 말에 맞춰 뜨는 자막",
-               "순위 변화 추적 · 안 뜨면 고친 글 제안",
-               "QR로 실제 손님 수 확인", "이길 만한 검색어를 골라드림"] + _flim("pro"),
-              "pro", True),
-             ("프로", _pr(la, af), "월 20세트 · 영상 무제한 · 최우선",
-              ["월 콘텐츠 20세트 + 영상 무제한", "네이버 클립용 영상(검색 첫 화면에 뜨는 자리)",
-               "우선 생성 · 다중 가게",
-               "전담 지원(카톡 우선 응대)"] + _flim("agency"),
-              "agency", False)]
-    cards = ""
-    for name, price, sub, feats, key, hot in plans:
-        wrap = "relative border-2 border-indigo-500" if hot else "border border-slate-200"
-        # ★ 2026-08-13 정직 게이트: 예전엔 '가장 인기' 배지였다. 유료 고객이 0명인데
-        #   인기라고 쓰는 것은 날조된 사회적 증거다(헌법: 날조로 게이트를 통과시키지 않는다).
-        #   실제로 팔린 뒤에 데이터로 붙일 배지다. 그 전까지는 '구성'만 사실대로 말한다.
-        tag = ("<div class='absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-xs font-bold px-3 py-1 rounded-full'>성과 추적 포함</div>"
-               if hot else "")
-        lis = "".join(f"<li class='flex gap-2 items-start'><span class='text-indigo-500 mt-0.5'>{_icon('check', 'w-4 h-4')}</span><span>{f}</span></li>" for f in feats)
-        btn = "bg-indigo-600 hover:bg-indigo-700 text-white" if hot else "bg-slate-100 hover:bg-slate-200 text-slate-700"
-        href = f"/billing?plan={key}"
-        cta = "구독 시작"
-        # 연결제(약 30%↓) 보조 링크 — basic/pro만
-        annual = ("" if False else
-                  f"<a href='/billing?plan={key}_yearly' class='block text-center text-xs text-indigo-600 font-bold mt-2 hover:underline'>연 결제로 30% 아끼기 →</a>")
-        cards += (f"<div class='reveal {wrap} bg-white rounded-2xl p-8 flex flex-col'>{tag}"
-                  f"<div class='font-bold text-lg text-slate-500'>{name}</div>"
-                  f"<div class='text-3xl font-bold mt-3 mb-1 text-slate-900'>{price}</div>"
-                  f"<div class='text-xs text-slate-400 mb-3'>{sub}</div>"
-                  f"<ul class='space-y-2.5 text-sm text-slate-600 flex-1 mt-2'>{lis}</ul>"
-                  f"<a href='{href}' class='{btn} mt-7 text-center px-4 py-3.5 rounded-xl font-bold transition'>{cta}</a>{annual}</div>")
-    return (f"<section id='pricing' class='bg-[#F9FAFB] py-24'><div class='max-w-5xl mx-auto px-5'>"
-            f"<h2 class='reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900'>요금 <span class='text-indigo-600 text-xl align-middle'>시작 기념 할인</span></h2>"
-            # ★ 2026-08-14 가격 앵커(조사 근거): 크몽 블로그 대행 실판매가 38만/58만/77만원
-            #   (한 서비스만 856건 거래). 지불 의사는 이미 있다 — 비싸서 안 사는 게 아니다.
-            #   '월 13만원'만 있으면 비싸고, 대행가 옆에 두면 싸다. 앵커가 있어야 판단이 선다.
-            f"<div class='reveal max-w-2xl mx-auto mb-8 bg-white border border-slate-200 rounded-2xl p-5 text-center'>"
-            f"<div class='text-sm text-slate-400 mb-2'>지금 시장에서 같은 일을 맡기면</div>"
-            f"<div class='flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-slate-500'>"
-            f"<span>블로그 대행 <b class='text-slate-700 line-through decoration-slate-300'>월 38~77만원</b></span>"
-            f"<span class='text-slate-300'>+</span>"
-            f"<span>홍보 영상 <b class='text-slate-700 line-through decoration-slate-300'>편당 5~15만원</b></span></div>"
-            f"<div class='text-lg font-bold text-slate-900 mt-3'>올린다는 둘 다 포함해 "
-            f"<span class='text-indigo-600'>월 12만 9천원부터</span></div>"
-            f"<div class='text-[11px] text-slate-400 mt-2'>대행 시세는 2026년 8월 공개 마켓 실판매가 기준</div></div>"
-            f"<p class='reveal text-center text-slate-500 mb-8'>"
-            f"영상까지 전부 포함된 가격이고, 지금 금액은 시작 기념 할인가예요.</p>"
-            # ★ C. 요금표 접기(2026-08-14) — 가입자 0명인 상태에서 첫 방문자에게
-            #   결제 버튼 3개를 펼쳐 보이는 건 이르다. 업계 권장도 '점진적 공개'다.
-            #   앵커(위 한 줄)는 늘 보이고, 상세 표는 궁금한 사람만 편다.
-            f"<details class='reveal'>"
-            f"<summary class='cursor-pointer list-none text-center text-sm font-bold text-indigo-600 "
-            f"hover:underline py-3'>요금제 3가지 자세히 보기 ▾</summary>"
-            f"<div class='grid sm:grid-cols-3 gap-6 items-stretch pt-6'>{cards}</div>"
-            f"</details>"
-            f"<p class='reveal text-center text-xs text-slate-400 mt-8'>언제든 해지 가능 — 해지 후 다음 결제일부터 청구되지 않아요 · 남은 기간은 그대로 이용</p>"
-            f"</div></section>")
+    a, la = _cfg.AGENCY_FROM, _cfg.LIST_AGENCY
+    feats = [
+        "사장님은 <b>사진만 보내시면 됩니다</b> — 나머지는 저희가 합니다",
+        "네이버 블로그 글 작성 · 사진 보정 · 개인정보 가림",
+        "검색에 뜨는 형태로 다듬고, 내보내기 전 자동 점검",
+        "홍보 영상 제작(자막·나레이션 포함)",
+        "<b>순위를 매일 실측</b>해 월 리포트로 보내드립니다",
+        "안 뜨는 검색어는 원인을 찾아 다시 씁니다",
+    ]
+    lis = "".join(
+        f"<li class='flex gap-2'><span class='text-indigo-500 flex-shrink-0'>✓</span>"
+        f"<span>{f}</span></li>" for f in feats)
+    return (
+        f"<section id='pricing' class='bg-[#F9FAFB] py-24'><div class='max-w-3xl mx-auto px-5'>"
+        f"<h2 class='reveal text-3xl sm:text-4xl font-bold text-center mb-3 text-slate-900'>요금</h2>"
+        f"<p class='reveal text-center text-slate-500 mb-8'>맡기시면 저희가 다 합니다. "
+        f"사장님이 배우실 것은 없습니다.</p>"
+        # 시세 앵커 — 같은 일을 맡길 때의 공개 마켓 실판매가(근거 명시)
+        f"<div class='reveal bg-white border border-slate-200 rounded-2xl p-5 text-center mb-6'>"
+        f"<div class='text-sm text-slate-400 mb-2'>같은 일을 맡기면</div>"
+        f"<div class='flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-slate-500'>"
+        f"<span>블로그 대행 <b class='text-slate-700'>월 38~77만원</b></span>"
+        f"<span class='text-slate-300'>+</span>"
+        f"<span>홍보 영상 <b class='text-slate-700'>편당 5~15만원</b></span></div>"
+        f"<div class='text-[11px] text-slate-400 mt-2'>2026년 8월 공개 마켓 실판매가 기준</div></div>"
+        f"<div class='reveal border-2 border-indigo-500 bg-white rounded-2xl p-8'>"
+        f"<div class='font-bold text-lg text-slate-500'>대행 (한 가게)</div>"
+        f"<div class='text-4xl font-bold mt-3 mb-1 text-slate-900'>"
+        f"<span class='line-through text-slate-300 text-2xl font-semibold mr-2'>{la:,}원</span>"
+        f"월 {a:,}원</div>"
+        f"<div class='text-xs text-slate-400 mb-5'>영상까지 전부 포함 · 첫 달 해지 가능</div>"
+        f"<ul class='space-y-2.5 text-sm text-slate-600'>{lis}</ul>"
+        f"<a href='/billing?plan=agency' class='block mt-7 text-center px-4 py-4 rounded-xl "
+        f"font-extrabold text-white bg-indigo-600 hover:bg-indigo-700 transition'>맡기고 시작하기</a>"
+        f"</div>"
+        f"<p class='reveal text-center text-xs text-slate-400 mt-8'>언제든 해지 가능 — "
+        f"해지 후 다음 결제일부터 청구되지 않아요 · 남은 기간은 그대로 이용</p>"
+        f"</div></section>")
 
 
 _QA = [("정말 사진만 올리면 되나요?", "네. 사진이랑 한 줄 설명만 주시면 됩니다. 사진 한 장만 있어도 자막과 목소리가 들어간 세로 영상까지 만들어 드려요."),

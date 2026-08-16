@@ -482,15 +482,31 @@ def test_email_capture_sits_right_after_result():
         f"마찰 순서(결과→가입→이메일→출구)가 어긋났다: {order}"
 
 
-def test_pricing_table_is_collapsed_until_asked():
-    """가입자 0명인 상태에서 첫 방문자에게 결제 버튼 3개를 펼쳐 보이는 건 이르다.
-    앵커(대행 시세 대비)는 늘 보이고, 상세 표는 궁금한 사람만 편다(점진적 공개)."""
+def test_pricing_is_a_single_agency_offer():
+    """2026-08-17 사장님 결정 — 대행 단일 상품으로 전환.
+
+    왜: 월 12.9만원 SaaS는 시세의 1/3이면서 **고객이 도구를 배워야 하는** 구조였다.
+      소상공인 사장님은 도구를 배울 시간이 없다 → 안 팔렸다(유료 1건).
+      요금제를 3개 늘어놓고 고르게 하는 것 자체가 '배우라'는 요구다.
+    """
+    from app import config as _cfg
     h = landing.render()
-    assert "요금제 3가지 자세히 보기" in h, "요금표가 펼쳐진 채로 돌아왔다"
-    assert "월 38~77만원" in h, "가격 앵커가 사라졌다 — 앵커 없이는 12.9만원이 비싸 보인다"
-    i_anchor = h.find("월 38~77만원")
-    i_details = h.find("요금제 3가지 자세히 보기")
-    assert 0 < i_anchor < i_details, "앵커가 요금표보다 뒤에 있다"
+    assert f"월 {_cfg.AGENCY_FROM:,}원" in h, "대행 가격이 안 보인다"
+    assert "요금제 3가지" not in h, "옛 3단 요금표가 남아 있다"
+    for gone in ("라이트", "스탠다드"):
+        assert f">{gone}<" not in h, f"옛 플랜이 남아 있다: {gone}"
+    # 시세 앵커는 유지 — 없으면 39만원이 비싸 보인다(근거 표기도 함께)
+    assert "월 38~77만원" in h, "가격 앵커가 사라졌다"
+    assert "공개 마켓 실판매가" in h, "앵커 근거 표기가 없다(정직 게이트)"
+    i_anchor, i_price = h.find("월 38~77만원"), h.find(f"월 {_cfg.AGENCY_FROM:,}원")
+    assert 0 < i_anchor < i_price, "앵커가 우리 가격보다 뒤에 있다"
+
+
+def test_pricing_promises_no_learning():
+    """대행의 핵심 약속 — 사장님은 아무것도 배우지 않는다."""
+    h = landing.render()
+    assert "사진만 보내시면" in h, "대행 약속(사진만)이 없다"
+    assert "배우실 것은 없습니다" in h, "'배울 게 없다'는 약속이 없다"
 
 
 def test_ai_titles_are_clickable_and_carry_that_title():
