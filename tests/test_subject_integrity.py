@@ -161,3 +161,43 @@ def test_keyword_directive_is_not_self_contradictory():
     d = _kw_natural_directive("부산광역시 동구 썬팅업체", "부산광역시 동구")
     assert "'부산 동구 썬팅업체' 원형은 제목에서만" in d, d
     assert "'부산광역시 동구 썬팅업체' 원형" not in d, "제목에 풀네임을 요구하는 문구가 남았다"
+
+
+# ── ⑦ 기계 조합 키워드 금지 (2026-08-16 사장님 지적) ─────────────────────
+
+def test_no_machine_assembled_keywords():
+    """사장님 지적: "'부산 동구 썬팅업체 시간' 어휘가 하나도 안 맞다."
+
+    지역+업종에 아무 의도어나 붙이면 아무도 안 치는 말이 나오고,
+    그게 그대로 소제목이 돼 AI 티가 난다(헌법: 키워드는 손님이 치는 말로).
+    과정·시간은 업종 단독으로만 붙인다 — '썬팅 과정'은 되고 '부산 동구 썬팅업체 과정'은 안 된다.
+    """
+    from app import seo
+    for ind, reg in (("썬팅", "부산 동구"), ("네일", "서울 강남")):
+        kws = seo.target_keywords(ind, reg, "신차 시공", limit=14)
+        bad = [k for k in kws
+               if any(x in k for x in seo._SOLO_INTENTS) and reg.split()[0] in k]
+        assert not bad, f"지역과 붙으면 어색한 조합이 생겼다: {bad}"
+        assert any(k == f"{ind} {it}" for it in seo._SOLO_INTENTS for k in kws), \
+            "업종 단독 축이 사라졌다"
+
+
+def test_price_blocked_at_the_single_exit_gate():
+    """경로마다 막으면 다음 경로에서 또 뚫린다 — gapscout 빈자리 승격이 실제로 뚫었다.
+    결정이 끝나는 한 자리에서만 막는다."""
+    from app import seo
+    kw0, kws = seo._strip_price_keywords("부산 썬팅 가격",
+                                         ["부산 썬팅 가격", "부산 동구 썬팅", "썬팅 과정"])
+    assert kw0 == "부산 동구 썬팅", kw0
+    assert not [k for k in kws if "가격" in k]
+    # 대체 후보가 없으면 조용히 빈손을 만들지 않는다
+    kw2, _ = seo._strip_price_keywords("썬팅 가격", ["썬팅 가격", "썬팅 비용"])
+    assert kw2 == "썬팅 가격"
+
+
+def test_subheading_must_not_be_keyword_stuffed():
+    """소제목에 검색어를 그대로 박게 시킨 지시가 AI 티의 직접 원인이었다."""
+    from app.services import answerblock as ab
+    rule = ab.prompt_rule(["부산 동구 썬팅", "썬팅 과정"], core="부산 동구 썬팅")
+    assert "소제목에 검색어를 그대로 박지 마라" in rule
+    assert "사람이 말하듯" in rule

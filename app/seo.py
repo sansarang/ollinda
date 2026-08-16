@@ -9,11 +9,15 @@ from __future__ import annotations
 import re
 
 # 검색 의도 수식어(구매 직전 키워드 = 전환율 높음). 3어절 롱테일 = 경쟁↓·전환↑(검색량 500~5,000 구간 노림).
-# ★ 앞 4개만 지역 변형과 결합된다(target_keywords의 `_INTENTS[:4]`).
-#   2026-08-16 재배치: 가격·비용은 EXCLUDE_PRICE_KEYWORDS로 걸러지므로 앞자리에 두면
-#   실제로는 '추천·후기' 둘만 남는다 — 노릴 속성 축이 비교 하나로 줄었다(실측).
-#   그 자리에 과정·시간을 올린다. answerblock의 과정/시간 축과 짝이 맞는 말이다.
-_INTENTS = ["추천", "후기", "과정", "시간", "가격", "비용", "잘하는곳", "예약", "위치", "실력"]
+# ★ 앞 4개만 **지역과 결합**된다(target_keywords의 `_INTENTS[:4]`).
+#   여기에는 '지역+업종'과 붙여도 한국어가 되는 말만 둔다.
+#   2026-08-16 실사고: 과정·시간을 여기 올렸더니 '부산 동구 썬팅업체 시간' 같은
+#   **아무도 안 치는 조합**이 나왔고, 그게 그대로 소제목이 돼 AI 티가 났다.
+#   헌법: 키워드는 손님이 치는 말로. 기계 조합은 키워드가 아니다.
+_INTENTS = ["추천", "후기", "잘하는곳", "실력", "가격", "비용", "예약", "위치"]
+
+#: 지역과 붙이면 어색한 축 — **업종 단독으로만** 쓴다('썬팅 과정'은 되고 '부산 동구 썬팅업체 과정'은 안 된다).
+_SOLO_INTENTS = ["과정", "시간"]
 
 #: 가격 의도 키워드를 타깃 후보에서 뺀다(2026-08-16 사장님 지시로 본문 금액 표기 중단).
 #: 되돌릴 때는 이 값만 False로. 판정은 언어 규칙만 쓴다 — 업종어를 박지 않는다.
@@ -771,7 +775,36 @@ def resolve_target_keyword(industry: str, region: str, note: str, biz: str = "lo
         kw0, kws = _drop_dead_surfaces(kw0, kws, tenant_id)
     except Exception:
         _lgk.getLogger("shopcast.seo").exception("[resolve-kw] 지면 게이트 실패 — 원래 키워드 유지")
+    # 💰 가격 키워드 최종 차단 — **결정이 끝나는 이 한 자리에서만** 막는다(2026-08-16).
+    #   target_keywords에서 한 번 걸렀는데 gapscout '빈자리 승격'이 다른 목록에서 끌어와
+    #   '부산 썬팅 가격'을 핵심으로 다시 밀어 올렸다(실측). 경로마다 막으면 다음 경로에서 또 뚫린다
+    #   — 헌법: 같은 계열 2회째부터는 표면별 수정 금지, 전 표면 공통 규칙으로만.
+    kw0, kws = _strip_price_keywords(kw0, kws)
     return kw0, kws
+
+
+def _strip_price_keywords(kw0: str, kws: list) -> tuple:
+    """가격 의도 키워드를 타깃에서 제거한다 — 본문에 금액을 쓰지 않기로 했기 때문.
+
+    핵심(kw0)이 가격 키워드면 가격 아닌 첫 후보로 갈아탄다.
+    후보가 전부 가격뿐이면 **바꾸지 않고 크게 로그를 남긴다** — 조용히 빈손을 만들지 않는다.
+    """
+    # ★ 로거는 지역 import로 못 박는다 — 상위 스코프의 `_lgk`를 빌려 쓰다 NameError를 낸 게
+    #   오늘만 세 번째다(main._warm_botnets · 여기). 함수가 자기 것만 쓰게 한다.
+    import logging as _lg
+    if not EXCLUDE_PRICE_KEYWORDS:
+        return kw0, kws
+    clean = [k for k in (kws or []) if k and not _PRICE_KW.search(k)]
+    if _PRICE_KW.search(kw0 or ""):
+        if clean:
+            _lg.getLogger("shopcast.seo").warning(
+                "[resolve-kw] 가격 키워드 차단: %r → %r", kw0, clean[0])
+            kw0 = clean[0]
+        else:
+            _lg.getLogger("shopcast.seo").warning(
+                "[resolve-kw] 가격 키워드 %r뿐 — 대체 후보가 없어 유지한다(본문 금액 금지와 충돌)", kw0)
+            return kw0, list(kws or [])
+    return kw0, list(dict.fromkeys([kw0] + clean))[:10]
 
 
 def _surface_verdict(tenant_id: str, kw: str) -> "bool | None":
@@ -855,8 +888,10 @@ def target_keywords(industry_name: str, region: str, note: str = "", limit: int 
             for it in _INTENTS[:4]:
                 kws.append(f"{v} {ind} {it}")
     if ind:
-        # 업종 단독 축 — 가격은 뺀다(본문에 금액을 안 쓴다). 대신 과정·시간을 둔다.
-        kws += [f"{ind} 추천", f"{ind} 과정", f"{ind} 시간"]
+        # 업종 단독 축 — 가격은 뺀다(본문에 금액을 안 쓴다).
+        #   과정·시간은 **지역과 붙이지 않는다**: '썬팅 과정'은 사람 말이지만
+        #   '부산 동구 썬팅업체 과정'은 아무도 안 치는 기계 조합이다(2026-08-16 실사고).
+        kws += [f"{ind} 추천"] + [f"{ind} {it}" for it in _SOLO_INTENTS]
     # 메모에서 핵심 명사 추출(신메뉴/차종/시술명 등)
     for w in re.findall(r"[가-힣A-Za-z0-9]{2,}", note or ""):
         if w not in ("추천", "이벤트", "할인") and len(w) <= 12:
