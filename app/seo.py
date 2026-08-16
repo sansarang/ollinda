@@ -1574,6 +1574,7 @@ def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> d
     source(입력 메모+사진분석) 제공 시 입력에 없는 금액·수치 날조를 기계적으로 탐지(PHASE 7·9)."""
     text = (payload.get("body") or payload.get("text") or "")
     warnings: list[str] = []
+    para_penalty = 0                              # 문단 단위 감점(게이트와 분리 — 표시 전용)
     score = 100
 
     # 사실 검증: 출력의 금액·%·수치가 입력에 존재하는지 대조(LLM 0콜 날조 탐지)
@@ -1813,6 +1814,38 @@ def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> d
         if _np < 4:                               # 이미지 4장 미만 → 정합·체류 신호 약함(PHASE 9)
             warnings.append(f"이미지 {_np}장 < 4 → 이미지 정합·체류 신호 약함")
             score -= 4
+        # 📐 문단 단위 채점(2026-08-16 사장님 지적: "점수 로직도 문단으로 채점해야 하는 거 아니야?")
+        #   위 항목들은 전부 **글 전체 세기**라 흩어져 있어도 개수만 채우면 통과한다.
+        #   실물: 투싼 글은 '2,990만원'이 다섯 문단에 하나씩 흩어져 '구체 수치 충분'으로 통과했지만
+        #        한 문단에 모인 게 없어 네이버가 뽑아갈 단위는 0이었다.
+        #   더 결정적: 90점 글이 두꺼운 문단 0개(최장 111자), 66점 글이 3개(최장 308자)로 뒤집혔다.
+        #   ★ 이 감점은 **발행 게이트를 건드리지 않는다**(para_penalty로 따로 센다).
+        #     기준선을 실측으로 다시 잡기 전에 봉인하면 대부분의 글이 막힌다 — 표시만 한다.
+        try:
+            from app.services import answerblock as _abq
+            _th = _abq.thickness(text)
+            if not _th["ok"]:
+                warnings.append(
+                    f"문단이 얇다 — {_abq.MIN_THICK_CHARS}자 이상 문단 {_th['n_thick']}개"
+                    f"(최장 {_th['longest']}자). 네이버는 문단 하나를 뽑아 노출한다")
+                para_penalty += 15
+            _paras = _abq.paragraphs(text)
+            # ★ 숫자 '글자'가 아니라 '수'를 센다 — \d로 세면 '30만원' 하나가 2로 잡혀
+            #   흩어진 글도 통과했다(골든이 잡음, 2026-08-16).
+            if not any(len(re.findall(r"\d[\d,]*", _p)) >= 2 for _p in _paras):
+                warnings.append("수치가 한 문단에 모인 곳이 없다 → 그 질문의 답이 되는 덩어리 부재")
+                para_penalty += 6
+            if not any(any(w in _p for w in _EXPERIENCE_WORDS) and
+                       len(re.sub(r"\s", "", _p)) >= _abq.MIN_THICK_CHARS for _p in _paras):
+                warnings.append("경험 서술이 한 덩어리로 서 있지 않다 → D.I.A. 인용 단위 부재")
+                para_penalty += 8
+            _cov = _abq.query_coverage(text, payload.get("query_plan") or {})
+            _nc = [c["query"] for c in _cov if not c["covered"]]
+            if _nc:
+                warnings.append(f"노린 질의에 답 문단 없음 — {', '.join(_nc[:2])}")
+                para_penalty += 10 * len(_nc)
+        except Exception:
+            pass                                  # 채점 실패가 생성을 막지 않는다
     elif kind in ("short",):
         if not payload.get("hook_strategy"):
             warnings.append("0~3초 훅 없음 → 시청유지↓")
@@ -1838,5 +1871,9 @@ def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> d
             score -= 10
 
     score = max(0, min(100, score))
+    # ★ 문단 점수는 따로 낸다 — 발행 게이트(PUBLISH_MIN)는 기존 score만 본다.
+    #   기준선을 실측으로 다시 잡기 전까지 봉인하지 않는다(2026-08-16 사장님 승인 순서).
+    score_para = max(0, min(100, score - para_penalty))
     grade = "우수" if score >= 85 else ("양호" if score >= 70 else "개선필요")
-    return {"score": score, "grade": grade, "warnings": warnings}
+    return {"score": score, "grade": grade, "warnings": warnings,
+            "score_para": score_para, "para_penalty": para_penalty}
