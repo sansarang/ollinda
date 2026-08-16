@@ -211,3 +211,33 @@ def test_shared_frame_stays_generic():
     f = seo.speaker_frame("local")
     for blog_only in ("소제목", "[사진", "한눈 요약", "FAQ"):
         assert blog_only not in f, f"공유 프레임에 블로그 전용 규칙이 샜다: {blog_only}"
+
+
+# ── 3-3: 체류 3장치를 체류시간 블록으로 흡수 (2026-08-16) ────────────────
+
+def test_dwell_devices_are_instructed_exactly_once():
+    """같은 목적('체류시간')을 두 블록이 각각 지시하고 있었다.
+    합치되 장치는 남긴다 — 세 장치는 기계 검사 대상이라 지시가 사라지면
+    게이트가 매번 걸려 LLM 보충 콜이 돈다."""
+    src = _src("app/generators/text_claude.py")
+    body = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
+    assert "[체류 설계 — 3장치 필수]" not in body, "3장치 블록이 아직 따로 서 있다"
+    from app import seo
+    r = seo.RETENTION_DENSITY
+    assert "①… ②… ③…" in r, "번호 나열 예고(itemized_preview) 지시가 사라졌다"
+    assert "이정표" in r, "중간 이정표(bridge) 지시가 사라졌다"
+
+
+def test_merged_block_still_induces_every_audited_device():
+    """검사기가 보는 표지어가 지시문 안에 살아 있어야 한다(규율 4: 검사기와 지시를 맞춘다)."""
+    from app import seo
+    from app.generators.text_claude import _DWELL_PROMISE, _DWELL_BRIDGE
+    r = seo.RETENTION_DENSITY
+    assert any(w in r for w in _DWELL_PROMISE), "답 예고 표지어가 지시문에 없다"
+    assert any(w in r for w in _DWELL_BRIDGE), "중간 이정표 표지어가 지시문에 없다"
+
+
+def test_mid_article_question_survives():
+    """중반 '새 질문 던지기'는 engagement marker다 — 통폐합으로 잃으면 안 된다."""
+    from app import seo
+    assert "새 질문을 던져" in seo.RETENTION_DENSITY
