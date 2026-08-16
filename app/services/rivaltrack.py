@@ -75,16 +75,41 @@ def snapshot(keyword: str, top_n: int = TOP_N) -> int:
 
 
 def _keywords() -> list:
-    """관측 키워드 — 우리 가게들이 실제로 추적 중인 키워드에서 모은다(수동 등록 0)."""
-    out: list = []
-    for u in db.list_users():
-        tid = u.get("tenant_id")
-        if not tid:
+    """관측 키워드 — 우리 가게들이 실제로 추적 중인 키워드에서 모은다(수동 등록 0).
+
+    ★ 2026-08-16 실물: 첫 수집 8개가 **전부 썬팅**이었다(사장님 지적: "한 직종에 국한되면 안 된다").
+      원인 둘 —
+        ① `list_users()`로 돌아서 **소유자 계정이 붙은 tenant만** 잡혔다(루마썬팅뿐).
+           주안모터스(중고차)는 관측에서 통째로 빠졌다.
+        ② 한 가게 것을 먼저 다 담아 상한(24)을 채우면 뒤 업종은 자리가 없다.
+      한 업종만 보면 거기서 나온 규칙이 다른 업종에서 깨진다(규율 6: 최소 2개 업종 교차).
+    → 모든 가게를 돌되 **가게별로 한 개씩 돌아가며** 담는다(라운드로빈) — 업종이 고루 섞인다.
+    """
+    per: list = []
+    for t in (db.list_tenants() or []):
+        tid = t.id if hasattr(t, "id") else (t.get("id") if isinstance(t, dict) else "")
+        ind = (getattr(t, "industry", "") or "").strip()
+        if not (tid and ind):                       # 업종 미설정 가게는 관측 대상이 아니다
             continue
-        for kw in db.tracked_keywords(tid, limit=8):
-            k = (kw or "").strip()
-            if k and k not in out:
-                out.append(k)
+        kws = [(k or "").strip() for k in db.tracked_keywords(tid, limit=12)]
+        kws = [k for k in kws if k]
+        if kws:
+            per.append(kws)
+    out: list = []
+    i = 0
+    while per and len(out) < MAX_KEYWORDS:
+        moved = False
+        for kws in per:                             # 한 바퀴에 가게당 1개씩
+            if i < len(kws):
+                moved = True
+                k = kws[i]
+                if k not in out:
+                    out.append(k)
+                if len(out) >= MAX_KEYWORDS:
+                    break
+        if not moved:
+            break
+        i += 1
     return out[:MAX_KEYWORDS]
 
 

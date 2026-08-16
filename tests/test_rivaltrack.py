@@ -132,3 +132,62 @@ def test_wired_into_scheduler():
                      "app", "scheduler.py")
     src = open(p, encoding="utf-8").read()
     assert "rivaltrack" in src, "스케줄러에 안 걸렸다"
+
+
+# ── 업종 편중 방지 (2026-08-16 사장님 지적) ──────────────────────────────
+
+def test_keywords_are_drawn_from_every_tenant(monkeypatch):
+    """사장님: "어디 한 직종에 국한되어서는 안 된다."
+
+    실물: 첫 수집 8개가 전부 썬팅이었다. 원인 둘 —
+      ① list_users()로 돌아 **소유자 계정이 붙은 tenant만** 잡혔다(중고차 가게는 통째로 누락)
+      ② 한 가게 것을 먼저 다 담으면 상한(24)이 차서 뒤 업종은 자리가 없다
+    한 업종만 보면 거기서 나온 규칙이 다른 업종에서 깨진다(규율 6).
+    """
+    from app.services import rivaltrack as rt
+
+    class T:
+        def __init__(self, i, ind):
+            self.id, self.industry = i, ind
+
+    tenants = [T("a", "썬팅"), T("b", "중고차"), T("c", "")]      # c는 업종 미설정
+    kws = {"a": [f"썬팅{i}" for i in range(12)],
+           "b": [f"중고차{i}" for i in range(12)], "c": ["무시"]}
+    monkeypatch.setattr(rt.db, "list_tenants", lambda: tenants)
+    monkeypatch.setattr(rt.db, "tracked_keywords", lambda tid, limit=12: kws[tid])
+    got = rt._keywords()
+    assert any(k.startswith("썬팅") for k in got), "썬팅 업종이 빠졌다"
+    assert any(k.startswith("중고차") for k in got), "다른 업종이 관측에서 통째로 빠졌다"
+    assert not any(k == "무시" for k in got), "업종 미설정 가게가 섞였다"
+    # 앞쪽이 한 업종으로 독점되면 안 된다(라운드로빈)
+    assert len({k[:3] for k in got[:4]}) >= 2, f"앞부분이 한 업종에 쏠렸다: {got[:4]}"
+
+
+def test_keyword_cap_is_respected_with_many_tenants(monkeypatch):
+    """가게가 늘어도 쿼터 상한은 지켜져야 한다."""
+    from app.services import rivaltrack as rt
+
+    class T:
+        def __init__(self, i):
+            self.id, self.industry = i, "업종"
+
+    ts = [T(str(i)) for i in range(20)]
+    monkeypatch.setattr(rt.db, "list_tenants", lambda: ts)
+    monkeypatch.setattr(rt.db, "tracked_keywords",
+                        lambda tid, limit=12: [f"{tid}-{j}" for j in range(12)])
+    assert len(rt._keywords()) <= rt.MAX_KEYWORDS
+
+
+def test_does_not_depend_on_owner_accounts(monkeypatch):
+    """소유자 계정이 없는 가게도 관측 대상이다 — list_users()에 의존하면 통째로 빠진다."""
+    import ast
+    tree = ast.parse(_src())
+    for node in ast.walk(tree):          # 독스트링(사고 기록)은 검사 대상이 아니다
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if (node.body and isinstance(node.body[0], ast.Expr)
+                    and isinstance(node.body[0].value, ast.Constant)
+                    and isinstance(node.body[0].value.value, str)):
+                node.body[0].value.value = ""
+    code = ast.unparse(tree)
+    assert "list_users()" not in code, "소유자 계정이 붙은 가게만 관측하고 있다"
+    assert "list_tenants()" in code, "전체 가게를 돌지 않는다"
