@@ -201,3 +201,16 @@ def test_subheading_must_not_be_keyword_stuffed():
     rule = ab.prompt_rule(["부산 동구 썬팅", "썬팅 과정"], core="부산 동구 썬팅")
     assert "소제목에 검색어를 그대로 박지 마라" in rule
     assert "사람이 말하듯" in rule
+
+
+def test_script_retry_feedback_is_actionable():
+    """2026-08-16 실물: 같은 표현('후에도')에 2회 연속 걸려 재시도를 다 썼다.
+    피드백이 '무엇이 걸렸는지'만 말하고 '무엇을 하라'가 없어 모델이 같은 말을 다시 썼다.
+    본문에 없는 말은 고쳐 쓸 수 없다 — 빼라고 명시해야 한다."""
+    src = _code("app/generators/video.py")
+    i = src.find("[재작성 — 직전 대본이 검증에서 차단됨")   # 초기화(feedback = "")가 아니라 실제 피드백문
+    assert i > 0, "대본 재시도 피드백을 못 찾았다"
+    seg = src[i:i + 700]
+    assert "빼라" in seg, "제거하라는 지시가 없다(모델이 같은 말을 다시 쓴다)"
+    assert "본문에 실제로 있는 단어만" in seg, "대체 기준이 없다"
+    assert "두 번 나오면" in seg, "반복 차단 시 탈출구가 없다"
