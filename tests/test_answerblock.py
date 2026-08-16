@@ -12,6 +12,12 @@
 """
 from app.services import answerblock as ab
 
+
+def axis_detail(body, kws, title):
+    """축(흩어짐·약속미이행)만 본다 — 두께는 별도 검사에서 다룬다."""
+    return " · ".join(x for x in ab.detail(body, kws, title).split(" · ")
+                      if x and not x.startswith("문단얇음")).strip()
+
 GATHERED = """## 소요 시간
 전면만 하면 40분, 측후면까지 더하면 90분, 유리막코팅까지 같이 하면 3시간 정도 걸립니다.
 
@@ -41,10 +47,10 @@ PROCESS = """## 과정
 def test_meter_separates_three_states():
     """모아둠 / 흩어짐 / 재료없음이 서로 다른 판정이어야 한다."""
     kw = ["썬팅 소요 시간"]
-    assert ab.detail(GATHERED, kw, "썬팅 시간") == "", "모은 글이 걸렸다"
-    assert "흩어짐" in ab.detail(SCATTERED, kw, "썬팅 시간")
+    assert axis_detail(GATHERED, kw, "썬팅 시간") == "", "모은 글이 걸렸다"
+    assert "흩어짐" in axis_detail(SCATTERED, kw, "썬팅 시간")
     # 재료가 아예 없는 경우는 '실패'가 아니라 '관찰'이다(아래 정직 게이트 테스트 참조)
-    assert ab.detail(ABSENT, kw, "썬팅 시간") == ""
+    assert axis_detail(ABSENT, kw, "썬팅 시간") == ""
     assert "재료없음" in ab.note(ABSENT, kw, "썬팅 시간")
 
 
@@ -221,7 +227,7 @@ def test_price_axis_is_excluded_everywhere():
     body = "## 가격 안내\n금액은 실물 보고 안내드려요."
     r = ab.audit(body, kws, "부산 동구 썬팅 가격")
     assert "가격" not in r["missing"] and "가격" not in r["scattered"]
-    assert ab.detail(body, kws, "부산 동구 썬팅 가격") == ""
+    assert axis_detail(body, kws, "부산 동구 썬팅 가격") == ""
 
 
 def test_generator_forbids_writing_prices():
@@ -244,3 +250,37 @@ def test_format_is_fewer_sections_thicker_paragraphs():
     assert "소제목은 **2~3개만**" in src, "줄인 소제목 규칙이 없다"
     assert "두꺼운 답변 문단" in src, "문단을 두껍게 쓰라는 규칙이 없다"
     assert "표는 **필수가 아니다.**" in src, "표 필수 해제가 안 됐다"
+
+
+# ── 문단 두께 (2026-08-16) ───────────────────────────────────────────────
+
+def test_thin_paragraphs_are_caught():
+    """실측: 우리 글 문단 262개 중 180자 넘는 것이 0개(중간값 70·최장 164)였다.
+    축 판정만으로는 '그냥 짧아진 글'을 못 잡는다 — 두께는 따로 재야 한다."""
+    thin = "## 소개\n짧은 문단.\n\n또 짧은 문단.\n\n계속 짧다."
+    assert not ab.thickness(thin)["ok"]
+    assert "문단얇음" in ab.detail(thin, ["부산 썬팅"], "부산 썬팅")
+
+
+def test_thick_paragraphs_pass():
+    para = "가" * ab.MIN_THICK_CHARS
+    body = f"## 하나\n{para}\n\n## 둘\n{para}"
+    t = ab.thickness(body)
+    assert t["ok"] and t["n_thick"] >= ab.MIN_THICK_PARAS
+
+
+def test_query_coverage_measures_the_real_thing():
+    """★ 핵심 — 축 신호가 아니라 '노린 그 질의에 답하는 문단이 있는가'를 잰다."""
+    plan = {"core": "부산 동구 썬팅업체", "attrs": [{"intent": "과정", "query": "썬팅 시공 과정"}]}
+    filler = "구체적인 설명을 이어서 씁니다. " * 12          # 180자 넘김
+    good = f"## 안내\n부산 동구 썬팅업체 고르실 때 보실 것을 정리했습니다. {filler}"
+    cov = {c["query"]: c for c in ab.query_coverage(good, plan)}
+    assert cov["부산 동구 썬팅업체"]["covered"], cov
+    assert not cov["썬팅 시공 과정"]["covered"], "글에 없는 질의가 커버로 잡혔다"
+
+
+def test_query_coverage_needs_thickness_not_just_mention():
+    """질의어가 한 줄 스쳐 지나간 것은 '답'이 아니다."""
+    plan = {"core": "부산 동구 썬팅업체", "attrs": []}
+    body = "## 안내\n부산 동구 썬팅업체입니다."
+    assert not ab.query_coverage(body, plan)[0]["covered"]

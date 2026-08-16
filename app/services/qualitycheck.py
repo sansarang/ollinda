@@ -305,6 +305,12 @@ def score_gate(asset_id: str, source: str = "", max_rounds: int = 2) -> dict:
             au.setdefault("warnings", []).append(
                 f"질의별 답변 문단 — 소제목으로 {', '.join(_abr['missing'])}을(를) 약속해놓고 "
                 "그 답이 되는 덩어리가 없다. 약속을 지키거나 그 소제목을 빼라.")
+        _th = _abr.get("thick") or {}
+        if _th and not _th.get("ok"):
+            au.setdefault("warnings", []).append(
+                f"문단이 얇다 — {_abg.MIN_THICK_CHARS}자 이상 문단이 {_th.get('n_thick')}개"
+                f"(최장 {_th.get('longest')}자). 네이버는 문단 하나를 뽑아 노출하므로 "
+                "한두 문장으로 끊어 나열하면 뽑아갈 덩어리가 없다. 근거·단계·수치를 이어서 한 문단에 담아라.")
     except Exception:
         pass                                    # 경고 생성 실패가 게이트를 막지 않는다
     if (_pref or (isinstance(score, int) and score < POLISH_TARGET)) \

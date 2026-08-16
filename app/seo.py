@@ -11,6 +11,11 @@ import re
 # 검색 의도 수식어(구매 직전 키워드 = 전환율 높음). 3어절 롱테일 = 경쟁↓·전환↑(검색량 500~5,000 구간 노림).
 _INTENTS = ["추천", "후기", "가격", "비용", "잘하는곳", "예약", "위치", "실력"]
 
+#: 가격 의도 키워드를 타깃 후보에서 뺀다(2026-08-16 사장님 지시로 본문 금액 표기 중단).
+#: 되돌릴 때는 이 값만 False로. 판정은 언어 규칙만 쓴다 — 업종어를 박지 않는다.
+EXCLUDE_PRICE_KEYWORDS = True
+_PRICE_KW = re.compile(r"가격|비용|얼마|요금|견적|시세|단가")
+
 
 # 온라인 셀러용 구매 직전 검색 의도(상품축)
 _PRODUCT_INTENTS = ["추천", "후기", "내돈내산", "사용기", "단점", "비교", "가성비"]
@@ -853,6 +858,13 @@ def target_keywords(industry_name: str, region: str, note: str = "", limit: int 
             cand = f"{reg} {w}".strip()
             if cand and cand not in kws:
                 kws.append(cand)
+    # 💰 가격 의도 키워드 배제(2026-08-16 사장님 지시) — 본문에 금액을 쓰지 않기로 했다.
+    #   가격을 안 쓰면서 가격 키워드를 노리면 모순이다: 검색자는 금액을 보러 오는데 글에 없다.
+    #   실물 사고: 본문 가격 금지 직후 핵심 키워드가 '부산 썬팅 가격'으로 승격돼
+    #   제목이 '부산 썬팅 가격 궁금하다면…'이 됐다(약속하고 못 지키는 글).
+    #   ★ 되돌리려면 이 상수만 False로. 언어 규칙만 쓴다(업종어 하드코딩 0).
+    if EXCLUDE_PRICE_KEYWORDS:
+        kws = [k for k in kws if not _PRICE_KW.search(k)]
     # 중복 제거(순서 유지)
     seen, out = set(), []
     for k in kws:

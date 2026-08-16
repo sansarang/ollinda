@@ -45,6 +45,15 @@ MIN_SIGNALS = 2          # 한 문단이 '답변 덩어리'로 인정받는 최�
 SCATTER_TOTAL = 3        # 이 이상 신호가 있는데 한 문단에 모이지 않으면 '흩어짐'
 MAX_ATTRS = 3            # 한 글이 노리는 속성 축 상한(겹침 0.8~4.2% — 다중 타깃은 환상)
 
+#: '답변 덩어리'로 인정할 최소 문단 길이(공백 제외).
+#: 실측 근거(2026-08-16, 우리 글 10편 문단 262개):
+#:   중간값 70자 · 상위25% 89자 · **최장 164자** · 200자 넘는 문단 **0개**.
+#:   즉 우리 글은 1~2문장짜리 조각의 나열이라 네이버가 뽑아갈 덩어리가 애초에 없었다.
+#:   섹션만 줄이면 글이 그냥 짧아진다(실측: 소제목 8→5로 줄이자 비교 축 4→2로 얇아짐).
+#:   180자 = 3~4문장 = '그 문단만 읽어도 답이 되는' 최소치. 현재 최장(164)보다 조금 위다.
+MIN_THICK_CHARS = 180
+MIN_THICK_PARAS = 2      # 본문 소제목 2~3개에 대응 — 답변 덩어리도 최소 2개
+
 #: 노리지 않는 축 — 답할 재료가 구조적으로 없는 축은 아예 겨냥하지 않는다.
 #: '가격'은 2026-08-16 사장님 지시로 제외한다. 실제 단가를 받은 적이 없어 쓸 수 없고,
 #: 소제목만 걸고 금액을 못 써서 두 번 연속 '약속미이행'으로 걸렸다.
@@ -97,6 +106,58 @@ def paragraphs(body: str) -> list:
     return out
 
 
+def thickness(body: str) -> dict:
+    """문단 두께 — 뽑아갈 덩어리가 실제로 있는가.
+
+    ★ 축(가격·시간·과정·비교) 판정만으로는 '그냥 짧아진 글'을 못 잡는다(2026-08-16 실측).
+      섹션을 줄였더니 내용이 같이 빠졌는데 축 판정은 통과했다. 두께는 따로 재야 한다.
+    반환 {"n_thick", "longest", "ok"}
+    """
+    lens = [len(re.sub(r"\s", "", p)) for p in paragraphs(body)]
+    n_thick = sum(1 for x in lens if x >= MIN_THICK_CHARS)
+    return {"n_thick": n_thick, "longest": (max(lens) if lens else 0),
+            "ok": n_thick >= MIN_THICK_PARAS}
+
+
+_TOK_STOP = {"추천", "후기", "곳", "업체", "전문점", "가게", "매장"}
+
+
+def _tokens(q: str) -> list:
+    """질의를 대조용 토큰으로. 언어 규칙만 — 업종어를 박지 않는다."""
+    ws = [w for w in re.split(r"\s+", (q or "").strip()) if len(w) >= 2]
+    return [w for w in ws if w not in _TOK_STOP]
+
+
+def query_coverage(body: str, plan_d: dict) -> list:
+    """★ 핵심 판정 — **노린 질의마다 그 질의에 답하는 문단이 실제로 있는가.**
+
+    축(가격·시간·과정·비교) 신호를 세는 것은 대리 지표다. 진짜 질문은 이것이다:
+    '부산 동구 썬팅업체 추천'을 노렸다면, **그 말이 들어 있고 충분히 두꺼운 문단**이
+    글 안에 서 있는가? 없으면 네이버가 그 검색어로 뽑아갈 단위가 없다.
+
+    반환 [{"query","role","hit_chars","covered"}]
+      · covered = 질의 토큰이 과반 이상 들어 있고 MIN_THICK_CHARS를 넘는 문단이 하나라도 있음
+    """
+    paras = paragraphs(body)
+    out = []
+    items = []
+    if (plan_d or {}).get("core"):
+        items.append(("핵심", plan_d["core"]))
+    for a in (plan_d or {}).get("attrs") or []:
+        items.append(("속성", a.get("query") or ""))
+    for role, q in items:
+        toks = _tokens(q)
+        need = max(1, (len(toks) + 1) // 2)          # 토큰 과반
+        best = 0
+        for p in paras:
+            flat = re.sub(r"\s", "", p)
+            if sum(1 for t in toks if t in p) >= need:
+                best = max(best, len(flat))
+        out.append({"query": q, "role": role, "hit_chars": best,
+                    "covered": best >= MIN_THICK_CHARS})
+    return out
+
+
 def _wanted(intent_re, *texts) -> bool:
     """이 글이 그 의도를 노리고 있는가 — 타깃 키워드·제목·소제목에서 찾는다."""
     return any(intent_re.search(t or "") for t in texts)
@@ -141,8 +202,9 @@ def audit(body: str, keywords=None, title: str = "") -> dict:
             missing.append(name)                   # 약속했는데 덩어리 없음 → 약속 위반
         else:
             unfilled.append(name)                  # 재료 없음 → 지어내게 하지 않는다
+    thick = thickness(body)
     return {"intents": intents, "missing": missing, "scattered": scattered,
-            "unfilled": unfilled, "n_paras": len(paras)}
+            "unfilled": unfilled, "n_paras": len(paras), "thick": thick}
 
 
 def ok(body: str, keywords=None, title: str = "") -> bool:
@@ -158,7 +220,11 @@ def detail(body: str, keywords=None, title: str = "") -> str:
         parts.append("흩어짐:" + ",".join(r["scattered"]))
     if r["missing"]:
         parts.append("약속미이행:" + ",".join(r["missing"]))
-    return " ".join(parts)
+    if not r["thick"]["ok"]:
+        parts.append(f"문단얇음:{MIN_THICK_CHARS}자이상 {r['thick']['n_thick']}개"
+                     f"/최장{r['thick']['longest']}자")
+    # 사유는 ' · '로 구분한다 — 공백으로 이으면 사유 하나가 여러 조각으로 잘려 읽힌다.
+    return " · ".join(parts)
 
 
 def note(body: str, keywords=None, title: str = "") -> str:
@@ -194,6 +260,11 @@ def prompt_rule(keywords=None, core: str = "") -> str:
         lines.append(f"· **속성 질의 '{a['query']}'** — 이 질의만 답하는 **전용 문단 하나**를 두어라. "
                      f"{_AXIS_HOWTO.get(a['intent'], '관련 내용을 한 문단에 모아라')}.")
     lines += [
+        # ★ 숫자로 못 박는다(2026-08-16). "두껍게"라고만 썼더니 섹션만 줄고 내용이 같이 빠졌다.
+        #   실측: 우리 글 문단 262개 중 200자 넘는 것이 0개(중간값 70자·최장 164자)였다.
+        f"· **답변 문단은 최소 {MIN_THICK_CHARS}자 이상**(공백 제외)으로, 그런 문단이 "
+        f"**{MIN_THICK_PARAS}개 이상** 있어야 한다. 한두 문장 쓰고 줄바꿈하지 마라 — "
+        "그 문단 하나가 그 질문의 답 전체가 되도록 근거·단계·수치를 이어서 써라.",
         "· 각 문단은 그 문단만 읽어도 뜻이 통해야 한다 — 앞 문단을 가리키는 말('위에서 말한 그것') 금지.",
         "· 그 질의어가 해당 문단 **안에** 들어 있어야 한다(제목에만 있으면 안 된다).",
         "· 소제목이 그 질의를 그대로 말하게 하라(문단 경계 표지).",
