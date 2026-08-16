@@ -13078,13 +13078,19 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
           "if(!aid&&pr.asset_id)aid=pr.asset_id;"
           "if(!aid){try{var d0=await (await fetch('/me/sets/count')).json();if(d0.n>base)aid=d0.latest;}catch(_){}}"
           # 그래도 못 구하면 목록으로 — '/me'는 지금 있는 화면과 같아서 눌러도 아무 일이 없다.
-          "var url=aid?('/me?view='+aid):'/me?tab=content';"
+          # ★ 2026-08-16 사장님 2회 신고: '3초 뒤 이동'인데 화면이 안 넘어간다.
+          #   원인을 화면 없이 한 곳으로 특정하지 못했다. 그래서 실패할 수 있는 길을 전부 막는다:
+          #   ① 지금 주소와 **같은 URL이면 브라우저가 이동하지 않는다** → 매번 다른 파라미터를 붙인다
+          #   ② location.href 대입보다 replace가 확실하다(히스토리 남지 않아 뒤로가기 루프도 없음)
+          #   ③ 그래도 1.5초 안에 안 떠나면 마지막 수단으로 강제 새로고침
+          "var url=(aid?('/me?view='+aid):'/me?tab=content')+'&done='+Date.now();"
           "setBar(100);setLabel('✅ 콘텐츠 완성!');setDetail('영상은 목록에서 원하는 플랫폼을 골라 만들 수 있어요');setSlow('');"
           "var tm=document.getElementById('gTeam');if(tm)tm.textContent='3초 뒤 자동으로 이동해요';"
           "var go=document.getElementById('gGo');if(go){go.href=url;go.classList.remove('hidden');}"
           "try{if(document.hidden&&window.Notification&&Notification.permission==='granted')"
           "new Notification('올린다 — 콘텐츠 완성!',{body:'글과 사진이 준비됐어요. 눌러서 확인하세요.'});}catch(_){}"
-          "setTimeout(function(){location.href=url;},3000);return;}}"
+          "setTimeout(function(){try{location.replace(url);}catch(_){location.href=url;}"
+          "setTimeout(function(){location.reload();},1500);},3000);return;}}"
           "if(!aid){var d=await (await fetch('/me/sets/count')).json();if(d.n>base){aid=d.latest;}}"
           "}catch(_){}"
           "},2000);return false;}"

@@ -6,29 +6,28 @@
 한 곳에 모여 있어야 하고, 흩어지면 뽑아갈 단위가 없다.
 
 ★ 규율 4(계측기부터 극단값으로 검증한다)를 여기서 실제로 지켰다:
-  첫 구현은 소제목이 붙은 문단을 통째로 버려서 '가격을 한 문단에 모은 글'이
+  첫 구현은 소제목이 붙은 문단을 통째로 버려서 '수치를 한 문단에 모은 글'이
   0문단으로 잡혔고, 세 극단값이 전부 같은 판정을 냈다. 그 상태로 게이트에 걸었다면
   모든 글이 같은 사유로 걸렸을 것이다.
 """
 from app.services import answerblock as ab
 
-GATHERED = """## 가격
-신차 썬팅 가격은 필름 등급으로 갈립니다. 중저가 필름은 30만원대, 중고가 필름은 50만원대,
-프리미엄 필름은 80만원대에 시공하실 수 있습니다.
+GATHERED = """## 소요 시간
+전면만 하면 40분, 측후면까지 더하면 90분, 유리막코팅까지 같이 하면 3시간 정도 걸립니다.
 
 ## 후기
 정말 만족스러웠습니다."""
 
 SCATTERED = """## 이야기
-중저가는 30만원대입니다.
+전면만 하면 40분입니다.
 
 다른 문단입니다.
 
-중고가는 50만원대예요.
+측후면까지는 90분이에요.
 
 또 다른 문단.
 
-프리미엄은 80만원대고요."""
+코팅까지면 3시간 걸립니다."""
 
 ABSENT = """## 소개
 저희는 정성껏 시공합니다. 오래 하셨어요."""
@@ -41,37 +40,37 @@ PROCESS = """## 과정
 
 def test_meter_separates_three_states():
     """모아둠 / 흩어짐 / 재료없음이 서로 다른 판정이어야 한다."""
-    kw = ["부산 썬팅 가격"]
-    assert ab.detail(GATHERED, kw, "썬팅 가격") == "", "모은 글이 걸렸다"
-    assert "흩어짐" in ab.detail(SCATTERED, kw, "썬팅 가격")
+    kw = ["썬팅 소요 시간"]
+    assert ab.detail(GATHERED, kw, "썬팅 시간") == "", "모은 글이 걸렸다"
+    assert "흩어짐" in ab.detail(SCATTERED, kw, "썬팅 시간")
     # 재료가 아예 없는 경우는 '실패'가 아니라 '관찰'이다(아래 정직 게이트 테스트 참조)
-    assert ab.detail(ABSENT, kw, "썬팅 가격") == ""
-    assert "재료없음" in ab.note(ABSENT, kw, "썬팅 가격")
+    assert ab.detail(ABSENT, kw, "썬팅 시간") == ""
+    assert "재료없음" in ab.note(ABSENT, kw, "썬팅 시간")
 
 
 def test_gate_never_forces_fabrication():
     """★ seo.target_keywords는 모든 가게에 '{업종} 가격'을 항상 붙인다.
     노린 축을 그대로 요구하면 가격을 공개 안 하는 가게는 **가격을 지어내야** 통과한다.
     게이트가 날조를 강요하면 안 된다(정직 게이트)."""
-    kw = ["부산 썬팅", "썬팅 추천", "썬팅 가격"]      # 실제 target_keywords가 만드는 모양
+    kw = ["부산 썬팅", "썬팅 추천", "썬팅 소요 시간"]   # 실제 target_keywords가 만드는 모양
     assert ab.ok(ABSENT, kw, "부산 썬팅"), \
         f"재료 없는 축 때문에 글이 막혔다 — 날조 압력: {ab.detail(ABSENT, kw, '부산 썬팅')}"
     r = ab.audit(ABSENT, kw, "부산 썬팅")
-    assert "가격" in r["unfilled"] and "가격" not in r["missing"]
+    assert "시간" in r["unfilled"] and "시간" not in r["missing"]
 
 
 def test_promise_in_heading_must_be_kept():
-    """소제목으로 '가격'을 약속했으면 덩어리가 있어야 한다 — 약속 위반은 실패."""
-    body = "## 가격 안내\n저희는 정성껏 시공합니다. 문의 주세요."
+    """소제목으로 어떤 축을 약속했으면 덩어리가 있어야 한다 — 약속 위반은 실패."""
+    body = "## 소요 시간 안내\n저희는 정성껏 시공합니다. 문의 주세요."
     r = ab.audit(body, ["부산 썬팅"], "부산 썬팅")
-    assert "가격" in r["missing"], r
+    assert "시간" in r["missing"], r
     assert "약속미이행" in ab.detail(body, ["부산 썬팅"], "부산 썬팅")
 
 
 def test_heading_does_not_swallow_its_paragraph():
     """소제목 바로 아래 붙은 본문이 사라지면 안 된다 — 첫 구현의 실제 결함."""
     assert ab.paragraphs(GATHERED), "소제목이 붙은 문단이 통째로 버려졌다"
-    assert any("30만원대" in p for p in ab.paragraphs(GATHERED))
+    assert any("40분" in p for p in ab.paragraphs(GATHERED))
 
 
 def test_table_rows_are_not_counted_as_prose():
@@ -82,14 +81,14 @@ def test_table_rows_are_not_counted_as_prose():
 
 # ── 의도별 판정 ──────────────────────────────────────────────────────────
 
-def test_gathered_price_paragraph_passes():
-    assert ab.ok(GATHERED, ["부산 썬팅 가격"], "썬팅 가격")
+def test_gathered_paragraph_passes():
+    assert ab.ok(GATHERED, ["썬팅 소요 시간"], "썬팅 시간")
 
 
-def test_scattered_price_is_caught():
+def test_scattered_material_is_caught():
     """재료는 충분한데 흩어진 경우 — 모으면 뽑힌다. '없음'과 다른 진단이어야 한다."""
-    r = ab.audit(SCATTERED, ["부산 썬팅 가격"], "썬팅 가격")
-    assert "가격" in r["scattered"] and "가격" not in r["missing"]
+    r = ab.audit(SCATTERED, ["썬팅 소요 시간"], "썬팅 시간")
+    assert "시간" in r["scattered"] and "시간" not in r["missing"]
 
 
 def test_process_intent_works_too():
@@ -108,11 +107,11 @@ def test_unwanted_intent_is_not_demanded():
 
 def test_plan_splits_core_and_attributes():
     """실측: 검색어마다 판이 분리(겹침 0.8~4.2%) → 핵심은 하나, 속성만 함께 딴다."""
-    kws = ["부산 동구 썬팅", "부산 동구 썬팅 가격", "썬팅 시공 과정", "썬팅 추천"]
+    kws = ["부산 동구 썬팅", "썬팅 소요 시간", "썬팅 시공 과정", "썬팅 추천"]
     p = ab.plan("부산 동구 썬팅", kws)
     assert p["core"] == "부산 동구 썬팅"
     got = {a["intent"] for a in p["attrs"]}
-    assert "가격" in got and "과정" in got
+    assert "시간" in got and "과정" in got
     assert all(a["query"] != p["core"] for a in p["attrs"]), "핵심이 속성으로도 잡혔다"
 
 
@@ -130,7 +129,7 @@ def test_plan_does_not_invent_axes():
 
 def test_prompt_states_core_and_attribute_roles():
     """평평한 목록만 주면 모델이 무엇을 글 전체로 답할지 모른다."""
-    rule = ab.prompt_rule(["부산 동구 썬팅", "부산 동구 썬팅 가격"], core="부산 동구 썬팅")
+    rule = ab.prompt_rule(["부산 동구 썬팅", "썬팅 소요 시간"], core="부산 동구 썬팅")
     assert "핵심 질의" in rule and "속성 질의" in rule
     assert "전용 문단" in rule
 
@@ -205,6 +204,43 @@ def test_prompt_rule_forbids_fabrication():
     ★ 뜻으로 검사한다 — 문구를 다듬을 때마다 깨지는 골든은 사람을 문구에 묶는다
       (2026-08-14에 약속 골든 6개가 그렇게 깨졌다).
     """
-    rule = ab.prompt_rule(["부산 동구 썬팅", "부산 동구 썬팅 가격"], core="부산 동구 썬팅")
+    rule = ab.prompt_rule(["부산 동구 썬팅", "썬팅 소요 시간"], core="부산 동구 썬팅")
     assert "지어내" in rule and "빈칸" in rule, "날조 금지 문장이 없다"
     assert "문단" in rule, "문단 단위 원칙이 안 들어갔다"
+
+
+# ── 가격 축 제외 (2026-08-16 사장님 지시) ────────────────────────────────
+
+def test_price_axis_is_excluded_everywhere():
+    """가격은 노리지도 요구하지도 않는다.
+    실제 단가를 받은 적이 없어 쓸 수 없고, 소제목만 걸고 금액을 못 써서 2회 연속 걸렸다.
+    답할 수 없는 축을 노리면 게이트가 날조를 압박하게 된다."""
+    assert "가격" in ab.EXCLUDED_INTENTS
+    kws = ["부산 동구 썬팅", "부산 동구 썬팅 가격"]
+    assert all(a["intent"] != "가격" for a in ab.plan("부산 동구 썬팅", kws)["attrs"])
+    body = "## 가격 안내\n금액은 실물 보고 안내드려요."
+    r = ab.audit(body, kws, "부산 동구 썬팅 가격")
+    assert "가격" not in r["missing"] and "가격" not in r["scattered"]
+    assert ab.detail(body, kws, "부산 동구 썬팅 가격") == ""
+
+
+def test_generator_forbids_writing_prices():
+    """본문·표·소제목·FAQ 어디에도 금액을 쓰지 말라는 지시가 있어야 한다."""
+    import os
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "app", "generators", "text_claude.py")
+    src = open(p, encoding="utf-8").read()
+    assert "[가격 — 쓰지 마라]" in src
+
+
+def test_format_is_fewer_sections_thicker_paragraphs():
+    """형식 개편(2026-08-16 ②): 섹션을 줄이고 문단을 두껍게.
+    근거 — 상위글 소제목 중간값 2개(우리는 6~9개), 표 0%(우리는 필수)."""
+    import os
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "app", "generators", "text_claude.py")
+    src = open(p, encoding="utf-8").read()
+    assert "소제목 3~5개" not in src, "옛 형식(소제목 3~5개 강제)이 남아 있다"
+    assert "소제목은 **2~3개만**" in src, "줄인 소제목 규칙이 없다"
+    assert "두꺼운 답변 문단" in src, "문단을 두껍게 쓰라는 규칙이 없다"
+    assert "표는 **필수가 아니다.**" in src, "표 필수 해제가 안 됐다"

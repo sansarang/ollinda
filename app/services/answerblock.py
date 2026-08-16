@@ -45,6 +45,12 @@ MIN_SIGNALS = 2          # 한 문단이 '답변 덩어리'로 인정받는 최�
 SCATTER_TOTAL = 3        # 이 이상 신호가 있는데 한 문단에 모이지 않으면 '흩어짐'
 MAX_ATTRS = 3            # 한 글이 노리는 속성 축 상한(겹침 0.8~4.2% — 다중 타깃은 환상)
 
+#: 노리지 않는 축 — 답할 재료가 구조적으로 없는 축은 아예 겨냥하지 않는다.
+#: '가격'은 2026-08-16 사장님 지시로 제외한다. 실제 단가를 받은 적이 없어 쓸 수 없고,
+#: 소제목만 걸고 금액을 못 써서 두 번 연속 '약속미이행'으로 걸렸다.
+#: 답할 수 없는 축을 노리면 게이트가 날조를 압박하게 된다(정직 게이트).
+EXCLUDED_INTENTS = ("가격",)
+
 
 def plan(core: str = "", keywords=None) -> dict:
     """노리는 질의를 [핵심 1개 + 속성 축 2~3개]로 나눈다.
@@ -62,7 +68,7 @@ def plan(core: str = "", keywords=None) -> dict:
     core = (core or "").strip() or (kws[0] if kws else "")
     attrs, seen = [], set()
     for name, (qre, _sre) in INTENTS.items():
-        if name in seen:
+        if name in seen or name in EXCLUDED_INTENTS:
             continue
         hit = next((k for k in kws if k != core and qre.search(k)), "")
         if hit:
@@ -125,6 +131,8 @@ def audit(body: str, keywords=None, title: str = "") -> dict:
         ok_ = best >= MIN_SIGNALS
         intents[name] = {"aimed": aimed, "promised": promised,
                          "best": best, "total": total, "ok": ok_}
+        if name in EXCLUDED_INTENTS:
+            continue                               # 노리지 않는 축은 요구도 하지 않는다
         if ok_ or not (aimed or promised):
             continue
         if total >= SCATTER_TOTAL:
