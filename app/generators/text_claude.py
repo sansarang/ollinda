@@ -492,7 +492,7 @@ class BlogDraftGenerator(Generator):
             + _kw_natural_directive(kw0, _creg)
             + (f"[상위 확장 키워드] '{_parent_kw}' — 이 정확 구문(연속 그대로)을 글에 1회 이상 담되 "
                "**자연스러운 자리에만**: ①검색 인용형(\"'" + _parent_kw + "' 검색하고 들어오셨다면\") "
-               f"②명사구 두괄(\"{_parent_kw}, 어디에 맡길지 고민이라면\") ③'## 한눈 요약' 줄 안 ④제목 후보 1개. "
+               f"②명사구 두괄(\"{_parent_kw}, 어디에 맡길지 고민이라면\") ③'## {_sec_names['summary']}' 줄 안 ④제목 후보 1개. "
                f"★키워드를 동사에 그대로 붙인 어색한 문장 금지(나쁜 예: '{_parent_kw} 맡기실 때') — 그런 자리엔 "
                "조사를 넣은 자연형(예: '부산에서 썬팅 맡기실 때')을 쓰고, 정확 구문은 위 ①~④ 자리에서 채워라. "
                "본문 1~2회 추가도 같은 원칙(도배 금지). 소제목(##)에는 쓰지 마라(1글 1키워드 유지).\n"
@@ -554,7 +554,7 @@ class BlogDraftGenerator(Generator):
             + (f"첫 문단에 '{_parent_kw}' 정확 구문 1회 — 단 [상위 확장 키워드]의 자연 프레임(①~④)으로만"
                "(동사 직결 금지, 어색하면 조사 넣은 자연형 + 요약줄에서 정확 구문 충족), " if _parent_kw else "")
             # 📐 형식 개편(2026-08-16) — 위 [본문 구조]와 같은 규칙. 두 곳이 어긋나면 모델이 많은 쪽을 따른다.
-            + "## 소제목 2~3개(두꺼운 답변 문단) + '## 자주 묻는 질문'(Q&A 3쌍), 표는 필요할 때만, "
+            + f"## 소제목 2~3개(두꺼운 답변 문단) + '## {_sec_names['faq']}'(Q&A 3쌍), 표는 필요할 때만, "
             f"{_target_len}자, [사진N] 마커 배치)\n"
             "[이미지배치]\n(- 각 사진을 어디에 왜)\n"
             "[키워드]\n(쉼표로 5~8개, 타겟 키워드 우선)"
@@ -628,9 +628,11 @@ class BlogDraftGenerator(Generator):
         except Exception:
             pass
         # ③ FAQ 섹션 누락 대비 최소 보강(스마트블록·체류 신호)
-        if "자주 묻는 질문" not in body and "자주묻는" not in body:
+        # 섹션 이름은 글마다 변형된다 — 판정·삽입 모두 관문을 거친다(2026-08-16)
+        from app.services import sections as _secf
+        if not _secf.has_faq(body):
             body = body.rstrip() + (
-                "\n\n## 자주 묻는 질문\n"
+                f"\n\n## {_sec_names['faq']}\n"
                 f"Q. {kw0} 예약이나 문의는 어떻게 하나요?\n"
                 f"A. 네이버에서 '{tenant.name}' 검색 후 플레이스에서 예약·문의하시면 가장 빠릅니다.\n"
                 f"Q. {prof.name} 상담도 가능한가요?\n"

@@ -952,7 +952,7 @@ BLOG_DIRECTIVES = (
     "- 제목: **핵심 키워드를 맨 앞**에(예: '지역+업종+추천/후기'), 25~35자 롱테일. 숫자·연도·혜택 넣으면 클릭↑.\n"
     "- **첫 문장에 핵심 키워드 1회**(검색 의도 즉시 충족, 2~3문장 인트로).\n"
     "- **연관 검색어**(같은 의도의 변형어 2~3개)를 자연스럽게 본문에 녹여라 → D.I.A+ 가점.\n"
-    "- **'## 자주 묻는 질문' 섹션 1개**(Q&A 2~3쌍, '저장각' 정보) → 네이버 Q&A·체류 가점.\n"
+    "- **'## 자주 묻는 질문'(이번 글의 질문 섹션 이름) 1개**(Q&A 2~3쌍, '저장각' 정보) → 네이버 Q&A·체류 가점.\n"
     "- 분량 1200~1800자, 소제목(##) 3~5개, 타겟 키워드 4~6회(남발 금지).\n"
     "- 신뢰·체류↑: 가격대·찾아오는길·영업시간·주차·예약을 표/목록으로.\n"
     "- [사진N] 마커를 본문 곳곳(체류↑). 마지막 방문/예약 CTA+연락 안내.\n"
@@ -978,14 +978,21 @@ def geo_questions(industry: str, region: str = "", pain_points: str = "") -> lis
 
 def geo_directive(biz_type: str, name: str, industry: str, region: str = "",
                   brand: str = "", questions: list[str] | None = None) -> str:
-    """블로그 프롬프트 주입용 GEO 구조 지시 — 매장(NAP)/셀러(SPU) 분기."""
+    """블로그 프롬프트 주입용 GEO 구조 지시 — 매장(NAP)/셀러(SPU) 분기.
+
+    ★ 섹션 이름은 글마다 변형된다(services/sections.py). 여기서는 글 시드를 모르므로
+      기준형을 쓰되 관문을 거친다 — 이름 목록을 여기 복사하면 한쪽만 고쳐진다.
+      호출부(text_claude)가 이번 글의 이름을 따로 지시하므로 모델은 그쪽을 따른다.
+    """
+    from app.services import sections as _sec
+    _sm = _sec.SUMMARY[0]
     qline = " / ".join(questions or [])
     if (biz_type or "local") == "seller":
         pname = f"{brand} {name}".strip() if brand and brand not in (name or "") else (name or "")
         return (
             "[GEO — AI 검색(ChatGPT·Perplexity 등)이 인용하기 쉬운 구조로]\n"
             f"- 첫 문단에 상품 정의문 한 문장: \"{pname}은(는) ~한 {industry}다\" 꼴로 자연스럽게(무엇인지 한 문장으로 규정).\n"
-            "- '## 한눈 요약' 소제목 1개: 핵심 3줄(- 목록) — 검색자가 답만 뽑아가게.\n"
+            f"- '## {_sm}' 소제목 1개: 핵심 3줄(- 목록) — 검색자가 답만 뽑아가게.\n"
             "- '## 솔직 장단점' 소제목 1개: 입력에 근거한 장점 2~3개 + 아쉬운 점 1개(솔직함이 AI 인용 신뢰를 높인다. 없는 단점 지어내기 금지).\n"
             f"- 비교 질문 Q&A 1개: \"{name} 비슷한 제품과 차이는?\" — 입력 정보로만 답하고 타사 비방·비교 우위 날조 금지.\n"
             + (f"- FAQ 질문은 실제 검색 질문형으로: {qline}\n" if qline else "")
@@ -994,7 +1001,7 @@ def geo_directive(biz_type: str, name: str, industry: str, region: str = "",
     return (
         "[GEO — AI 검색(ChatGPT·Perplexity 등)이 인용하기 쉬운 구조로]\n"
         f"- 첫 문단에 정의문 한 문장: \"{name}은(는) {place} 전문점이다\" 꼴로 자연스럽게(무엇을 하는 곳인지 한 문장으로 규정).\n"
-        "- '## 한눈 요약' 소제목 1개: 핵심 3줄(- 목록) — 검색자·AI가 답만 뽑아가게.\n"
+        f"- '## {_sm}' 소제목 1개: 핵심 3줄(- 목록) — 검색자·AI가 답만 뽑아가게.\n"
         + (f"- FAQ 질문은 실제 검색 질문형으로: {qline}\n" if qline else "")
         + f"- 상호는 항상 '{name}', 지역은 '{region}'으로 본문 전체 일관 표기(NAP 일관 = 인용 신뢰 신호).\n")
 
@@ -1019,7 +1026,7 @@ def geo_audit(kind: str, payload: dict, name: str = "", industry: str = "",
     if _sec.has_summary(text):
         hits.append("한눈 요약")
     else:
-        misses.append("'## 한눈 요약' 없음")
+        misses.append("요약 섹션 없음")   # 이름은 글마다 다르다 — 특정 변형을 진단문에 박지 않는다
     if _sec.has_faq(text):
         hits.append("Q&A")
     else:

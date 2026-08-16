@@ -157,3 +157,30 @@ def test_thickness_rule_keeps_rhythm():
     rule = ab.prompt_rule(["부산 동구 썬팅", "썬팅 과정"], core="부산 동구 썬팅")
     assert "모든 문단이 길 필요는 없다" in rule
     assert "다 비슷하면" in rule, "길이 균일이 기계 표식이라는 경고가 없다"
+
+
+# ── 3-1: 섹션 이름을 박아둔 자리가 남아 있지 않은가 (2026-08-16) ─────────
+
+def test_no_prompt_hardcodes_a_section_name():
+    """섹션 이름을 글마다 변형하게 만들면서, 이름을 박아둔 자리를 다 훑지 않았다.
+    '## 한눈 요약 줄 안에 키워드를 넣어라'고 시켜놓고 실제 섹션은 '짧게 정리'가 되면
+    모델이 갈린다 — 내가 만든 모순이다(규율 9: 완료 전 전체 훑기)."""
+    for rel in ("app/generators/text_claude.py", "app/seo.py"):
+        src = _src(rel)
+        for i, line in enumerate(src.splitlines(), 1):
+            l = line.lstrip()
+            if l.startswith("#") or l.startswith('"""'):
+                continue
+            if "'## 한눈 요약'" in line or '"## 한눈 요약"' in line:
+                assert "_sm" in line or "_sec" in line, \
+                    f"섹션 이름이 박혀 있다: {rel}:{i}"
+
+
+def test_faq_fallback_uses_this_articles_name():
+    """FAQ 누락 폴백이 기준형을 박으면, 변형 이름을 쓴 글에 다른 이름 섹션이 하나 더 붙는다."""
+    src = _src("app/generators/text_claude.py")
+    i = src.find("FAQ 섹션 누락 대비")
+    assert i > 0
+    seg = src[i:i + 500]
+    assert "_sec_names['faq']" in seg, "폴백이 이번 글의 섹션 이름을 안 쓴다"
+    assert "has_faq" in seg, "존재 판정이 관문을 안 거친다"
