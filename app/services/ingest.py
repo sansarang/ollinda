@@ -960,7 +960,15 @@ def _text_channel_watchdog(log) -> None:
 CHANNELS = ("naver", "shorts", "reels", "insta", "x")   # 5채널 완전성 기준(전 채널 보장)
 # 동기 생성 채널의 단일 정의 — 업종·biz_type 무관 전 세트 공통(분기별로 달라질 수 없음).
 # biz_type은 글 구조·CTA·앵글에만 영향. SHORT(쇼츠·릴스·네이버 영상)는 비동기 번들, MARKETPLACE는 셀러 부가.
-CORE_KINDS = (ContentKind.CAPTION, ContentKind.BLOG, ContentKind.X_POST)
+# 🎯 기본 생성 = **네이버 글 하나뿐**(2026-08-16 사장님 지시).
+#   "인스타 캡션은 사용자의 동의가 있을 때만 생성한다. 네이버 글만 생성을 하면 되고."
+#   헌법에도 "사용자가 고른 것만 만든다 — 요청하지 않은 산출물을 만들지 않는다"가 있는데,
+#   지금까지 매 생성마다 캡션·X를 같이 만들어 비용을 쓰고 있었다(영상은 이미 온디맨드였다).
+#   → 나머지는 미리보기의 '만들기' 버튼으로 요청받아 만든다(영상과 같은 경로).
+CORE_KINDS = (ContentKind.BLOG,)
+
+#: 온디맨드로 요청받아 만드는 텍스트 종류(영상은 request_video_bundle이 따로 맡는다).
+ONDEMAND_KINDS = {"caption": ContentKind.CAPTION, "x": ContentKind.X_POST}
 KIND_TO_CHANNEL = {ContentKind.CAPTION: "insta", ContentKind.X_POST: "x"}   # 텍스트 채널(동기 생성)
 
 
@@ -1051,6 +1059,50 @@ VIDEO_PLATFORMS = ("shorts", "reels", "naver", "clip")
 
 
 _VIDEO_MAX_PHOTOS = int(os.environ.get("SHOPCAST_VIDEO_MAX_PHOTOS", "9"))   # 씬 상한과 동일(초과분 미사용)
+
+
+def request_text_bundle(tenant: Tenant, asset_id: str, want: set) -> tuple:
+    """텍스트 온디맨드 — 미리보기에서 '인스타 캡션·X 글' 요청을 받아 만든다(2026-08-16 사장님 지시).
+
+    왜: 기본 생성은 네이버 글 하나뿐이다. 나머지는 **사장님이 고르셨을 때만** 만든다
+      (헌법: 사용자가 고른 것만 만든다). 영상이 이미 온디맨드였고, 같은 모양으로 맞춘다.
+
+    ★ 생성은 기존 공용 경로 generate_for()만 쓴다 — 새 생성 경로를 만들면 한쪽만 고쳐진다.
+    """
+    want = {w for w in (want or set()) if w in ONDEMAND_KINDS}
+    if not want:
+        return False, "만들 것을 선택해 주세요"
+    from app import llm as _llmt              # 💳 크레딧 소진이면 즉시 중지(헛 생성 방지)
+    if _llmt.credit_out():
+        return False, _llmt.CREDIT_MSG
+    pieces = db.get_set_pieces(asset_id)
+    blog = next((p for p in pieces if p.kind == ContentKind.BLOG), None)
+    if not blog:
+        return False, "글이 아직 없는 콘텐츠예요"
+    have = {p.kind for p in pieces}
+    kinds = [ONDEMAND_KINDS[w] for w in want if ONDEMAND_KINDS[w] not in have]
+    if not kinds:
+        return False, "이미 만들어 둔 것이에요"
+    asset = db.get_asset(asset_id)
+    if not asset:
+        return False, "콘텐츠를 찾을 수 없어요"
+    paths = _restore_media(tenant.id, blog.payload.get("image_paths") or [])
+    if not paths:
+        return False, "사진 원본을 찾을 수 없어요"
+
+    def _run():
+        try:
+            generate_for(tenant, asset, kinds, images=paths)
+            _lgt = __import__("logging").getLogger("shopcast.ingest")
+            _lgt.info("[ondemand-text] 생성 완료 asset=%s kinds=%s", asset_id,
+                      [k.value for k in kinds])
+        except Exception:
+            __import__("logging").getLogger("shopcast.ingest").exception(
+                "[ondemand-text] 생성 실패 asset=%s", asset_id)
+
+    import threading as _tht
+    _tht.Thread(target=_run, daemon=True).start()
+    return True, ""
 
 
 def request_video_bundle(tenant: Tenant, asset_id: str, want: set[str]) -> tuple[bool, str]:

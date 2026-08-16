@@ -3095,6 +3095,22 @@ def me_gen_progress(request: Request):
     return JSONResponse(_progress_payload(t))
 
 
+@app.post("/me/text/make")
+async def me_text_make(request: Request, asset_id: str = Form(""), kinds: str = Form("")):
+    """텍스트 온디맨드 — 미리보기에서 '인스타 캡션·X 글'을 고르셨을 때만 만든다(2026-08-16 사장님 지시).
+    기본 생성은 네이버 글 하나뿐이다(헌법: 사용자가 고른 것만 만든다)."""
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"ok": False, "error": "로그인이 필요해요"}, status_code=401)
+    t = _ensure_user_tenant(u)
+    a = db.get_asset(asset_id)
+    if not a or getattr(a, "tenant_id", None) != t.id:
+        return JSONResponse({"ok": False, "error": "내 콘텐츠가 아니에요"}, status_code=404)
+    from app.services.ingest import request_text_bundle
+    ok2, err2 = request_text_bundle(t, asset_id, {x.strip() for x in kinds.split(",") if x.strip()})
+    return JSONResponse({"ok": bool(ok2), "error": err2})
+
+
 @app.post("/me/video/make")
 async def me_video_make(request: Request, asset_id: str = Form(""), platforms: str = Form(""),
                         hero: str = Form(""), photos: str = Form("")):
@@ -5431,6 +5447,34 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             return (f"<a href='/me#blog' title='실측 기준 · 위치·기기별 차이' "
                     f"class='inline-block text-[11px] font-bold px-2 py-0.5 rounded-full {cls}'>"
                     f"{esc(kw)}{vtxt} · {body}</a>")
+        def _text_row(aid: str, ps) -> str:
+            """(텍스트 온디맨드, 2026-08-16 사장님 지시) 인스타 캡션·X 글은 **고르셨을 때만** 만든다.
+            기본 생성은 네이버 글 하나뿐이라, 나머지는 여기서 요청받는다(영상과 같은 모양)."""
+            _bp = next((p for p in ps if p.kind.value == "blog"), None)
+            if not _bp:
+                return ""
+            have = {p.kind.value for p in ps}
+            opts = [("caption", "인스타 캡션"), ("x", "X 글")]
+            chips = ""
+            pick = False
+            for key, lab in opts:
+                kind_v = {"caption": "caption", "x": "x_post"}[key]
+                if kind_v in have:
+                    chips += ("<span class='text-[10px] font-bold text-emerald-600 bg-emerald-50 "
+                              f"px-1.5 py-0.5 rounded-full'>{lab} ✓</span>")
+                else:
+                    pick = True
+                    chips += ("<label class='text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 "
+                              "rounded-full cursor-pointer inline-flex items-center gap-1'>"
+                              f"<input type='checkbox' name='tp_{aid}' value='{key}' "
+                              f"class='w-3 h-3 accent-indigo-600'>{lab}</label>")
+            if not pick:
+                return ""
+            btn = ("<button type='button' onclick=\"tdMake('" + aid + "')\" "
+                   "class='text-[10px] font-bold text-white bg-slate-800 hover:bg-slate-900 "
+                   "px-2 py-1 rounded-full transition'>✍️ 만들기</button>")
+            return ("<div class='mt-1.5 flex flex-wrap items-center gap-1'>" + chips + btn + "</div>")
+
         def _video_row(aid: str, ps) -> tuple[str, bool]:
             """(영상 온디맨드) 카드 내 플랫폼 선택·상태 행 — 반환: (HTML, 생성중 여부)."""
             _bp = next((p for p in ps if p.kind.value == "blog"), None)
@@ -5466,6 +5510,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         for s in sets:
             ps = _pieces_by_asset.get(s["asset_id"], [])
             _vrow, _ = _video_row(s["asset_id"], ps)
+            _vrow = _text_row(s["asset_id"], ps) + _vrow
             _nclk = sum(_ccounts.get(p.id[:8], 0) for p in ps)
             _ebadge = _expose_badge(ps)
             # 진행 중 판정(삭제 잠금용) — 다시쓰기 running 또는 영상 잡 진행 중
@@ -5520,7 +5565,17 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 "var sel=[].slice.call(document.querySelectorAll(\"input[name=vp_\"+aid+\"]:checked\"))"
                 ".map(function(x){return x.value;});"
                 "if(!sel.length){alert('만들 플랫폼을 선택해 주세요');return;}"
-                "window.vmPick(null,aid,sel.join(','));}"     # ⭐ 대표 사진 고르기 모달 경유(구세트 포함)
+                "window.vmPick(null,aid,sel.join(','));}"
+                # ✍️ 텍스트 온디맨드(2026-08-16) — 고른 것만 만든다
+                "async function tdMake(aid){"
+                "var sel=[].slice.call(document.querySelectorAll(\"input[name=tp_\"+aid+\"]:checked\"))"
+                ".map(function(x){return x.value;});"
+                "if(!sel.length){alert('만들 것을 선택해 주세요');return;}"
+                "var fd=new FormData();fd.append('asset_id',aid);fd.append('kinds',sel.join(','));"
+                "try{var d=await (await fetch('/me/text/make',{method:'POST',body:fd})).json();"
+                "if(!d.ok){alert(d.error||'만들지 못했어요');return;}"
+                "alert('만들고 있어요 — 잠시 뒤 새로고침하면 보입니다');}"
+                "catch(e){alert('만들지 못했어요');}}"     # ⭐ 대표 사진 고르기 모달 경유(구세트 포함)
                 "(function(){var rows=document.querySelectorAll('[data-vgenrow]');if(!rows.length)return;"
                 "var iv=setInterval(async function(){var busy=false;"
                 "for(var i=0;i<rows.length;i++){var aid=rows[i].getAttribute('data-vgenrow');"

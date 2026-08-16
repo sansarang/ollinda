@@ -35,7 +35,11 @@ def test_ingest_generate_publish_flow(tiny_png_bytes, monkeypatch):
     monkeypatch.setattr(_cfg, "PRODUCTION_TENANTS", tuple(_cfg.PRODUCTION_TENANTS) + (tenant.id,))
 
     # ingest → generate (키 없음 → 더미 생성기). 크래시 없이 초안 생성돼야 함
-    pieces = ingest_upload(tenant, [(tiny_png_bytes, "photo.png")], "신메뉴 라떼 출시")
+    # ★ 2026-08-16부터 기본 생성은 **네이버 글 하나뿐**이다(사장님 지시: 인스타는 동의 시에만).
+    #   이 테스트가 보는 것은 '발행 흐름'이므로 캡션을 **명시적으로 요청**해서 만든다 —
+    #   그게 새 계약(고른 것만 만든다)에서 캡션이 생기는 유일한 길이다.
+    pieces = ingest_upload(tenant, [(tiny_png_bytes, "photo.png")], "신메뉴 라떼 출시",
+                           kinds=[ContentKind.BLOG, ContentKind.CAPTION])
     assert pieces, "생성된 콘텐츠 초안이 없음"
     assert all(p.payload for p in pieces), "payload 비어있는 초안 존재"
 
