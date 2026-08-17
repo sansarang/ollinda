@@ -425,6 +425,11 @@ class BlogDraftGenerator(Generator):
         try:
             from app.services import research as _rsh2
             _fact_block = _rsh2.as_material(_research)
+            if _mkt_terms:
+                # 판의 언어 자체도 준다 — '무엇을 다룰지'는 알려주되 '재료에 없는 브랜드는
+                # 언급 금지'를 같은 블록에서 못 박는다(레이노·솔라가드가 목록에 섞여 있다).
+                from app.services import marketterms as _mkt2
+                _fact_block = _mkt2.directive(kw0, region=_rg) + _fact_block
         except Exception:
             _fact_block = ""
         prompt = (
@@ -735,6 +740,11 @@ class BlogDraftGenerator(Generator):
                      "market_terms": _mkt_terms,
                      "term_coverage": (__import__("app.services.marketterms", fromlist=["x"])
                                        .coverage(body, _mkt_terms) if _mkt_terms else {}),
+                     # 재료에 없는데 글에 나온 판의 언어 = 남의 브랜드 언급 위험(2026-08-17).
+                     # 코드가 브랜드를 판별하지 않는다 — 재료 대조로 가른다.
+                     "outsider_terms": (__import__("app.services.marketterms", fromlist=["x"])
+                                        .outsider_mentions(body, _mkt_terms, asset.note or "")
+                                        if _mkt_terms else []),
                      "researched": [{"term": f["term"], "source": f["source"]}
                                     for f in (_research.get("facts") or [])],
                      "recommended_image_placement": d.get("이미지배치", ""),

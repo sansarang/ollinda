@@ -114,3 +114,40 @@ def test_생성기가_지역을_넘긴다():
     from app.generators import text_claude as tc
     src = inspect.getsource(tc.BlogDraftGenerator.generate)
     assert "region=_rg" in src, "지역을 안 넘겨 지역명이 주제어로 샌다"
+
+
+def test_교차출현_규칙은_폐기됐다():
+    """★ 실측이 반증했다 — 레이노 4 · 솔라가드 4(브랜드) vs 투과율 1(주제어).
+    유명 브랜드일수록 여러 판에 나온다. 이 신호로 거르면 브랜드는 통과하고
+    진짜 주제어가 죽는다. 되살리면 안 된다."""
+    from app.services import marketterms as mt
+    assert not hasattr(mt, "MIN_CROSS"), "반증된 교차출현 규칙이 되살아났다"
+
+
+def test_재료에_없는_브랜드_언급을_잡는다():
+    """코드가 '무엇이 브랜드인가'를 판별하지 않는다(불가능함이 실측으로 드러남).
+    '우리 재료에 있느냐'로 가른다 — 업종을 몰라도 성립한다."""
+    from app.services import marketterms as mt
+    terms = ["열차단", "레이노", "솔라가드"]
+    material = "글로벌리맥 XS 프리미엄 썬팅, 열차단 시공"
+    body = "열차단 성능을 봤습니다. 레이노 같은 제품도 있지만 저희는 다릅니다."
+    out = mt.outsider_mentions(body, terms, material)
+    assert "레이노" in out, "재료에 없는 브랜드 언급을 놓쳤다"
+    assert "열차단" not in out, "재료에 있는 말을 외부 브랜드로 오인했다"
+    assert "솔라가드" not in out, "글에 없는 말까지 잡았다"
+
+
+def test_지시문이_브랜드_언급을_금지한다(monkeypatch):
+    from app.services import marketterms as mt
+    monkeypatch.setattr(mt, "topic_terms", lambda *a, **k: ["열차단", "레이노"])
+    d = mt.directive("썬팅업체")
+    assert "브랜드는 언급 자체를 하지 마라" in d or "언급 자체를 하지 마라" in d
+
+
+def test_생성기가_브랜드_게이트를_쓴다():
+    import inspect
+
+    from app.generators import text_claude as tc
+    src = inspect.getsource(tc.BlogDraftGenerator.generate)
+    assert "outsider_mentions" in src, "브랜드 언급 게이트가 생성 경로에 없다"
+    assert "directive" in src, "판의 언어 지시문이 프롬프트에 안 들어간다"
