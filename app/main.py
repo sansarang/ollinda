@@ -13670,7 +13670,9 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
             except Exception:
                 pass
     from app import llm as _llmu          # 💳 크레딧 소진이면 생성 자체를 시작하지 않는다(사장님 지시)
-    if _llmu.credit_out():
+    # ★ 2026-08-17 — '크레딧이 없는가'가 아니라 '그것이 필요한가'로 판정한다.
+    #   본문이 Solar, 사진 분석이 Gemini로 가면 Anthropic 없이도 만들 수 있다.
+    if _llmu.blocked():
         try:
             db.set_gen_progress(tenant.id, "failed", "AI 사용량 소진",
                                 _llmu.CREDIT_MSG, None, status="failed", error="credit_out")

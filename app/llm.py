@@ -110,6 +110,30 @@ def credit_out() -> bool:
     return True
 
 
+#: 생성 한 세트가 반드시 거치는 작업들 — 이 중 하나라도 anthropic이면 크레딧이 필요하다.
+_CORE_TASKS = ("body", "caption", "spoken", "vision")
+
+
+def anthropic_needed() -> bool:
+    """지금 라우팅에서 Anthropic이 실제로 필요한가.
+
+    ★ 2026-08-17 실사고 — 크레딧이 소진되자 **생성 자체가 전면 차단**됐다.
+      그런데 그날 본문은 Solar, 사진 분석은 Gemini로 가고 있었다.
+      Anthropic 없이도 만들 수 있는데 "Anthropic만 쓰던 시절"의 차단 로직이 전부를 막았다.
+      실제로 프로덕션 로그에 크레딧 오류가 20건 넘게 쌓이는 동안 글이 한 건도 안 나왔다.
+      → 차단 여부는 '크레딧이 없는가'가 아니라 **'그것이 필요한가'**로 판정한다.
+    """
+    try:
+        return any(route(t)[0] == "anthropic" for t in _CORE_TASKS)
+    except Exception:
+        return True                    # 판정 못 하면 막는다(모르면 보수적으로)
+
+
+def blocked() -> bool:
+    """새 생성을 막아야 하는가 — 크레딧이 없고 **그것이 실제로 필요할 때만**."""
+    return credit_out() and anthropic_needed()
+
+
 def _retryable(e) -> bool:
     """재시도 가치 판정 — 429·5xx·연결오류·타임아웃만 True. 400·401·크레딧부족은 False(헛 재시도 금지)."""
     s = repr(e).lower()

@@ -831,8 +831,8 @@ def video_watchdog() -> None:
                 # ★ 사용자가 요청했던 플랫폼만 재시도한다(2026-08-01 사장님 지적).
                 #   want를 안 넘겨 기본값(쇼츠·릴스·네이버 전부)으로 돌면서, 누른 적 없는
                 #   인스타 릴스가 워치독에 의해 계속 다시 만들어졌다.
-                if _llm.credit_out():
-                    log.info("[video-watchdog] 크레딧 소진 — 재시도 전면 보류")
+                if _llm.blocked():
+                    log.info("[video-watchdog] 크레딧 소진 + Anthropic 필요 — 재시도 보류")
                     break
                 _wprev = {ch for ch, info in (blog.payload.get("channel_status") or {}).items()
                           if ch in VIDEO_PLATFORMS and (info or {}).get("status") != "not_requested"}

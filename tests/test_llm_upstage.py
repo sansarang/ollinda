@@ -190,3 +190,42 @@ def test_품질고정이_비었는지_확인한다():
     """caption 고정을 풀었다. 되살리면 크레딧 소진 시 캡션이 통째로 막힌다 —
     2026-07-28 고정 사유(캐스퍼 날조)의 진짜 원인은 cache_prefix 누락이었고 이미 막혔다."""
     assert "caption" not in llm.QUALITY_PIN, "caption이 다시 특정 모델에 고정됐다"
+
+
+def test_크레딧이_없어도_필요없으면_막지_않는다(monkeypatch):
+    """★ 2026-08-17 실사고 — 크레딧 소진에 생성이 **전면 차단**됐다.
+    그때 본문은 Solar, 사진은 Gemini로 가고 있어서 Anthropic 없이도 만들 수 있었다.
+    프로덕션 로그에 크레딧 오류가 20건 쌓이는 동안 글이 한 건도 안 나왔다.
+    차단은 '크레딧이 없는가'가 아니라 '그것이 필요한가'로 판정해야 한다."""
+    monkeypatch.setattr(llm, "credit_out", lambda: True)
+    monkeypatch.setenv("LLM_BODY", "upstage:solar-pro4")
+    monkeypatch.setenv("LLM_VISION", "gemini:gemini-flash-latest")
+    monkeypatch.setenv("LLM_CAPTION", "upstage:solar-pro4")
+    monkeypatch.setenv("LLM_SPOKEN", "upstage:solar-pro4")
+    monkeypatch.setattr(llm, "QUALITY_PIN", {})
+    assert not llm.anthropic_needed(), "전부 비-Anthropic인데 필요하다고 판정했다"
+    assert not llm.blocked(), "Anthropic이 필요 없는데 생성을 막았다"
+
+
+def test_하나라도_anthropic이면_막는다(monkeypatch):
+    monkeypatch.setattr(llm, "credit_out", lambda: True)
+    monkeypatch.setenv("LLM_BODY", "upstage:solar-pro4")
+    monkeypatch.delenv("LLM_VISION", raising=False)      # vision이 기본(anthropic)으로 떨어진다
+    monkeypatch.setattr(llm, "QUALITY_PIN", {})
+    assert llm.anthropic_needed()
+    assert llm.blocked(), "Anthropic이 필요한데 안 막았다"
+
+
+def test_판정_불가면_막는다(monkeypatch):
+    """모르면 보수적으로 — 크레딧 없이 돌려 전부 실패시키는 것보다 낫다."""
+    monkeypatch.setattr(llm, "credit_out", lambda: True)
+    monkeypatch.setattr(llm, "route", lambda t: (_ for _ in ()).throw(RuntimeError("x")))
+    assert llm.anthropic_needed() and llm.blocked()
+
+
+def test_생성_진입점이_blocked를_쓴다():
+    import inspect
+
+    from app import main
+    src = inspect.getsource(main)
+    assert "_llmu.blocked()" in src, "생성 진입점이 여전히 credit_out으로 전면 차단한다"
