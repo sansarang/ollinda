@@ -2425,7 +2425,8 @@ def admin_win_score(tenant_id: str = "", kw: str = ""):
 
 
 @app.api_route("/admin/quality-check", methods=["GET", "POST"])
-def admin_quality_check(request: Request, tenant_id: str = "", src_asset: str = "", video: int = 0):
+def admin_quality_check(request: Request, tenant_id: str = "", src_asset: str = "", video: int = 0,
+                        n: int = 8, bg: int = 0):
     """📏 품질 회귀 검사(골든세트) — src_asset 세트의 사진으로 '실제 생성'을 동기 실행하고
     산출물을 결정적 규칙으로 채점(services.qualitycheck). video=1이면 네이버 영상까지 온디맨드 요청.
     배포 후 이걸 돌려 품질 후퇴를 사장님보다 먼저 발견한다(사장님=QA 구조 종식, 2026-07-28)."""
@@ -2437,7 +2438,10 @@ def admin_quality_check(request: Request, tenant_id: str = "", src_asset: str = 
     if not _src:
         return JSONResponse({"ok": False, "error": "src_asset에 사진 없음"}, status_code=404)
     from app.services.ingest import _restore_media, ingest_upload, request_video_bundle
-    paths = _restore_media(t.id, list(_src.payload.get("image_paths") or [])[:8])
+    # n: 쓸 사진 수(기본 8). ★ 모델·프롬프트를 A/B 할 때는 **사진 수가 같아야** 비교가 성립한다 —
+    #    2026-08-17 Solar 검증에서 16장 대 25장으로 돌려 '사진 뭉침 1곳 → 9곳'이 나왔는데
+    #    그게 모델 탓인지 사진 수 탓인지 못 갈랐다. 조건을 맞추라고 파라미터로 연다.
+    paths = _restore_media(t.id, list(_src.payload.get("image_paths") or [])[:max(1, min(n, 40))])
     if not paths:
         return JSONResponse({"ok": False, "error": "골든 사진 복원 실패"}, status_code=500)
     files = []
@@ -2447,6 +2451,21 @@ def admin_quality_check(request: Request, tenant_id: str = "", src_asset: str = 
                 files.append((f.read(), os.path.basename(p)))
         except Exception:
             continue
+
+    # bg=1: 백그라운드 실행. ★ 2026-08-17 실사고 — 이 엔드포인트는 동기라 워커를 300초 넘게
+    #   점유했고, 헬스체크가 막혀 컨테이너가 재시작되며 생성 스레드가 통째로 죽었다.
+    #   추론 모델(Solar medium)처럼 느린 경로를 검증할 때는 반드시 bg=1로 돈다.
+    if bg:
+        import threading as _thqc
+
+        def _bgrun():
+            try:
+                ingest_upload(t, files, "[품질검사 골든세트]", intake={})
+            except Exception:
+                logging.getLogger("shopcast.ingest").exception("[quality-check bg] 실패 tenant=%s", t.id)
+        _thqc.Thread(target=_bgrun, daemon=True).start()
+        return JSONResponse({"ok": True, "bg": True, "photos": len(files),
+                             "note": "백그라운드 실행 — /admin/gen-progress 로 확인"})
     try:
         made = ingest_upload(t, files, "[품질검사 골든세트]", intake={})
     except Exception:
