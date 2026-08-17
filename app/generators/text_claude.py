@@ -576,9 +576,12 @@ class BlogDraftGenerator(Generator):
                                       getattr(asset, "angle", "howto") or "howto",
                                       asset.note or "", len(imgs),
                                       trust=_trust, experiences=_exp)
+        # task="body" — 여기만 라우팅을 탄다(LLM_BODY). 본문이 전체 원가의 대부분이고,
+        # 짧은 보조 호출까지 추론 모델로 보내면 파이프라인이 느려진다.
         raw = _call_llm(prompt, self.model,
                         7500 if _len_competitive else (5500 if _ctype == "info" else 5000),
-                        cache_prefix=(cache_prefix_for(asset) if _ctype != "info" else ""))
+                        cache_prefix=(cache_prefix_for(asset) if _ctype != "info" else ""),
+                        task="body")
         _body_finish = _last_finish()   # ★ 본문 호출 '직후' 절단 기록(2026-07-31 실사고: 뒤의 소형
         #   판단 호출 stop_reason이 덮어써 '본문 미완결' 오탐 → 채점 감점·재작성 루프 유발)
         d = _parse_sections(raw, ["제목후보", "제목", "메타설명", "본문", "이미지배치", "키워드"])
@@ -934,10 +937,24 @@ def _parse_sections(raw: str, headers: list[str]) -> dict:
     return out
 
 
-def _call_llm(prompt: str, model: str = MODEL, max_tokens: int = 1200, cache_prefix: str = "") -> str:
-    """공용 Claude 호출 — app.llm.call로 위임(리팩토링 #2, 동작 불변).
-    9개 모듈이 이 이름을 역수입하므로 시그니처·이름은 유지(cache_prefix 기본값이라 하위호환)."""
+def _call_llm(prompt: str, model: str = MODEL, max_tokens: int = 1200, cache_prefix: str = "",
+              task: str = "") -> str:
+    """공용 Claude 호출 — app.llm로 위임.
+    9개 모듈이 이 이름을 역수입하므로 시그니처·이름은 유지(추가 인자는 전부 기본값).
+
+    ★ 2026-08-17 결함 수정 — 이 함수가 `llm.call`(anthropic 직행)만 불러서
+      **작업별 라우팅(`LLM_BODY` 등)을 통째로 우회하고 있었다.**
+      그래서 `LLM_BODY=upstage:solar-pro4`를 넣어도 본문은 계속 오퍼스로 갔다.
+      env를 넣고 "적용됐다"고 착각한 채 502를 Solar 탓으로 오진했다.
+      → task를 주면 `call_task`로 라우팅을 태운다. task가 비면 기존 동작 그대로(하위호환).
+
+    ★ task는 **본문 호출에만** 준다. 제목 조각·YES/NO 판정 같은 짧은 보조 호출까지
+      추론 모델로 보내면 응답이 수십 초씩 늘어 파이프라인이 느려진다(속도가 곧 사고다).
+    """
     from app import llm
+    if task:
+        return llm.call_task(task, prompt, max_tokens, default_model=model,
+                             cache_prefix=cache_prefix)
     return llm.call(prompt, model, max_tokens, cache_prefix=cache_prefix)
 
 

@@ -113,3 +113,44 @@ def test_solar_실패는_anthropic으로_폴백된다(monkeypatch):
     monkeypatch.setattr(llm, "call", lambda *a, **k: "anthropic-text")
     assert llm.call_task("body", "p") == "anthropic-text"
     assert llm.LAST_ROUTE["body"]["fallback"] is True, "폴백이 기록되지 않았다(원가 추적 불가)"
+
+
+def test_본문_생성이_라우팅을_실제로_탄다(monkeypatch):
+    """★ 2026-08-17 실사고 — text_claude._call_llm이 llm.call(anthropic 직행)만 불러
+    LLM_BODY 라우팅을 통째로 우회했다. env를 넣고 '적용됐다'고 믿은 채 다른 원인을
+    Solar 탓으로 오진했다. 설정이 조용히 무시되는 것이 가장 비싼 결함이다.
+
+    여기서 막는 것: 본문 호출이 다시 call_task를 안 타게 되는 것.
+    """
+    import inspect
+
+    from app.generators import text_claude as tc
+    src = inspect.getsource(tc.BlogDraftGenerator.generate)
+    assert 'task="body"' in src, "본문 호출이 라우팅 태스크를 잃었다(LLM_BODY가 무시된다)"
+
+    # _call_llm 자체가 task를 call_task로 넘기는지(task 없으면 기존 경로 — 하위호환)
+    called = {}
+
+    def _fake_task(t, *a, **k):
+        called["task"] = t
+        return "routed"
+
+    monkeypatch.setattr(llm, "call_task", _fake_task)
+    monkeypatch.setattr(llm, "call", lambda *a, **k: "direct")
+    assert tc._call_llm("p", task="body") == "routed", "task를 줬는데 라우팅을 안 탔다"
+    assert called["task"] == "body"
+    assert tc._call_llm("p") == "direct", "task 없이 부르면 기존 경로여야 한다(하위호환)"
+
+
+def test_짧은_보조호출은_라우팅을_타지_않는다():
+    """제목 조각·YES/NO 판정까지 추론 모델로 보내면 파이프라인이 수십 초씩 늘어난다."""
+    import inspect
+
+    from app.generators import text_claude as tc
+    src = inspect.getsource(tc)
+    # YES/NO 판정 호출에 task 인자가 붙지 않았는지(해당 줄에 task= 가 없어야 한다)
+    for line in src.splitlines():
+        if "YES 또는 NO" in line:
+            idx = src.splitlines().index(line)
+            seg = "\n".join(src.splitlines()[idx:idx + 4])
+            assert "task=" not in seg, "짧은 판정 호출이 라우팅을 탄다(느려진다)"
