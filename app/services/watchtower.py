@@ -24,21 +24,43 @@ def configured() -> bool:
     return bool(os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"))
 
 
-def send(text: str) -> bool:
-    """텔레그램 발송(미설정 시 로그만) — 실패해도 예외 전파 안 함."""
-    if not configured():
-        _log.warning("[watchtower] (알림 미설정) %s", text[:200])
-        return False
+def _mail_fallback(text: str) -> bool:
+    """텔레그램이 없거나 실패하면 **메일로 보낸다**.
+
+    ★ 2026-08-17 — 이날 Anthropic 크레딧이 두 번 소진됐는데 두 번 다 사장님께 안 갔다.
+      텔레그램 토큰이 설정된 적이 없어서 경보가 서버 로그에만 찍혔다("(알림 미설정)").
+      대행으로 가면 이건 치명적이다 — 고객 글이 안 만들어지는데 아무도 모른다.
+      SMTP는 이미 설정돼 있었다. 있는 경로를 안 쓰고 없는 경로만 보고 있었던 것이다.
+    """
     try:
-        import requests
-        r = requests.post(
-            f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}/sendMessage",
-            json={"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text,
-                  "disable_web_page_preview": True}, timeout=10)
-        return r.status_code == 200
+        from app.services import mailer
+        to = (os.environ.get("ALERT_EMAIL") or os.environ.get("SMTP_USER") or "").strip()
+        if not to:
+            return False
+        return bool(mailer.send(to, "[올린다] 시스템 경보", text))
     except Exception:
-        _log.exception("[watchtower] 텔레그램 발송 실패")
+        _log.exception("[watchtower] 메일 폴백 실패")
         return False
+
+
+def send(text: str) -> bool:
+    """경보 발송 — 텔레그램 → 메일 순. **어느 하나라도 나가야 한다**(침묵 금지)."""
+    if configured():
+        try:
+            import requests
+            r = requests.post(
+                f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}/sendMessage",
+                json={"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text,
+                      "disable_web_page_preview": True}, timeout=10)
+            if r.status_code == 200:
+                return True
+            _log.warning("[watchtower] 텔레그램 %s — 메일로 넘긴다", r.status_code)
+        except Exception:
+            _log.exception("[watchtower] 텔레그램 발송 실패 — 메일로 넘긴다")
+    if _mail_fallback(text):
+        return True
+    _log.error("[watchtower] 경보를 어디로도 못 보냈다: %s", text[:200])
+    return False
 
 
 def _ensure(c):
