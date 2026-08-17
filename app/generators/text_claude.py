@@ -402,6 +402,29 @@ class BlogDraftGenerator(Generator):
             _ab_rule = _abm.prompt_rule(kws, core=_core_nat)
         except Exception:
             _ab_plan, _ab_rule = {}, ""
+        # 🔎 판의 언어 + 웹 취재(2026-08-17 사장님 제안) — 상위글이 공통으로 다루는 주제어 중
+        #   우리 재료에 없는 것을 **공신력 있는 출처에서만** 가져온다.
+        #   실측 커버율이 '차량 썬팅' 16%였다 — '투과율'·'재시공'이 한 번도 안 나왔다.
+        #   사장님께 물을 일이 아니다: 제품 스펙·법령은 검색하면 나온다(헌법 "검색은 취재다").
+        #   ★ 경쟁 업체 블로그는 research.trusted가 막는다 — 그건 베끼기이자 금지선이다.
+        _research = {}
+        _mkt_terms = []
+        try:
+            from app.services import marketterms as _mkt
+            from app.services import research as _rsh
+            _mkt_terms = _mkt.topic_terms(kw0) or _mkt.topic_terms(_core_nat)
+            if _mkt_terms:
+                _research = _rsh.gather(_mkt_terms, context=prof.name,
+                                        material=(asset.note or ""), per_term=1)
+        except Exception:
+            import logging as _lgr
+            _lgr.getLogger("shopcast.gen").warning("[취재] 실패 — 재료 없이 계속", exc_info=True)
+        _fact_block = ""
+        try:
+            from app.services import research as _rsh2
+            _fact_block = _rsh2.as_material(_research)
+        except Exception:
+            _fact_block = ""
         prompt = (
             f"[가게] {tenant.name} (업종: {prof.name}, 지역: {_reg_txt})\n"
             f"[사업형태] {strat.label} — {strat.goal}\n"
@@ -477,6 +500,9 @@ class BlogDraftGenerator(Generator):
             #   같은 글이 검색어에 따라 다른 대목을 요약으로 받았다(3업종 84%).
             #   업종 무관한 글 구조 규칙이라 어떤 업종에도 그대로 적용된다.
             + _ab_rule
+            # 🔎 취재 재료 — 재료 옆에 인칭 위조 금지를 같이 둔다(멀리 두면 모델이 잊는다).
+            #   비면 아무것도 붙지 않는다(빈칸 원칙).
+            + _fact_block
             # ★ 채점기가 기계적으로 세는 항목은 처음부터 맞춘다(2026-08-01 실측). 이 네 가지가
             #   매 글 반복해서 깎였고(-8·-6·-5·-3), 뒤에서 재작성으로 되돌리느라 8분을 썼다.
             #   전부 업종·가게 무관한 '글 구조' 규칙이라 어떤 업종에도 그대로 적용된다.
@@ -703,6 +729,12 @@ class BlogDraftGenerator(Generator):
                      "body": seo.natural_kr_number(body), "photo_markers": markers,
                      "photo_placement": _place_audit,      # 사진↔문단 일치 검증(2026-08-17)
                      "photo_capped": {"uploaded": len(_all_imgs), "in_body": len(imgs)},
+                     # 판의 언어 커버율 + 취재 출처(2026-08-17) — 전후 비교의 기준선이 된다
+                     "market_terms": _mkt_terms,
+                     "term_coverage": (__import__("app.services.marketterms", fromlist=["x"])
+                                       .coverage(body, _mkt_terms) if _mkt_terms else {}),
+                     "researched": [{"term": f["term"], "source": f["source"]}
+                                    for f in (_research.get("facts") or [])],
                      "recommended_image_placement": d.get("이미지배치", ""),
                      "tags": tags, "seo_keywords": tags, "target_keywords": kws,
                      # 🎯 노린 질의 구조[핵심 1 + 속성 2~3] — 발행 후 queryscout 실측과 대조해
