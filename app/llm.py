@@ -251,12 +251,20 @@ def ping() -> bool:
 # ── 작업 유형별 provider 라우팅(비용 이원화) ────────────────────────
 # env: LLM_VISION / LLM_CAPTION / LLM_BODY = "provider:model" (예: gemini:gemini-flash-latest)
 # 미설정 시 기본값 = 현행 Anthropic 경로 그대로(변수 없어도 기존과 동일 동작 — 배포 안전).
-USAGE = {"gemini": {"n": 0, "in": 0, "out": 0}, "anthropic": {"n": 0}}
+USAGE = {"gemini": {"n": 0, "in": 0, "out": 0}, "anthropic": {"n": 0},
+         "upstage": {"n": 0, "in": 0, "out": 0}}
+
+# Upstage Solar — 추론 강도(2026-08-17 A/B 실측).
+#   API 기본값은 "minimal"이고, 그대로 두면 다단계 지시를 최소 추론으로 처리한다.
+#   같은 프롬프트로 실측: minimal → 노린 질의 커버 0/2 · medium → 2/2 · high → 1/2(사진 7곳 뭉침).
+#   **medium이 최적점**이라 코드에서 고정한다. env로만 실험적으로 바꾼다.
+SOLAR_EFFORT = os.environ.get("SOLAR_REASONING", "medium").strip() or "medium"
 
 # 💰 세트별 비용 계측(2026-07-29 실측 $4/세트 사고 후) — 모델 단가($/M tokens)로 근사 집계.
 #   ingest가 세트 시작 시 reset, 종료 시 snapshot을 blog payload(api_cost)에 기록.
 _PRICES = {"claude-opus": (15.0, 75.0), "claude-sonnet": (3.0, 15.0),
-           "claude-haiku": (1.0, 5.0), "gemini": (0.30, 2.50)}
+           "claude-haiku": (1.0, 5.0), "gemini": (0.30, 2.50),
+           "solar": (0.30, 1.20)}    # Upstage Solar Pro 4(2026-08 공식가)
 COST = {"usd": 0.0, "calls": 0}
 
 
@@ -299,7 +307,7 @@ def route(task: str) -> tuple[str, str]:
     v = (os.environ.get(f"LLM_{task.upper()}") or "").strip()
     if ":" in v:
         p, m = v.split(":", 1)
-        if p.strip().lower() in ("gemini", "anthropic") and m.strip():
+        if p.strip().lower() in ("gemini", "anthropic", "upstage") and m.strip():
             return p.strip().lower(), m.strip()
     return TASK_DEFAULTS.get(task, ("anthropic", MODEL))
 
@@ -330,6 +338,44 @@ def _gemini_generate(parts: list, model: str, max_tokens: int) -> str:
         raise RuntimeError(f"gemini 응답 파싱 실패: {str(d)[:160]}")
 
 
+def _upstage_generate(prompt: str, model: str, max_tokens: int) -> str:
+    """Upstage Solar REST 호출(OpenAI 호환). 실패 시 예외 — 상위에서 anthropic 폴백.
+
+    2026-08-17 도입 근거(A/B 실측, 같은 재료·같은 프롬프트):
+      본문 품질이 오퍼스 발행글과 동급 이상이면서 원가가 1/180이었다.
+        · 노린 질의 커버 2/2(오퍼스 초안 1회는 1/2) · 사진 뭉침 0곳(오퍼스 초안 5곳)
+        · 두꺼운 문단 5개(발행글 3개) · 날조 0건(발행글엔 '25분' 1건)
+        · 세트 원가 $0.5435 → $0.0030
+      ★ 텍스트 전용이다. 이미지는 이 경로로 보내지 않는다(비전은 gemini 유지).
+    """
+    import requests as _rq
+    key = os.environ.get("UPSTAGE_API_KEY", "")
+    if not key:
+        raise RuntimeError("UPSTAGE_API_KEY 미설정")
+    r = _rq.post("https://api.upstage.ai/v1/chat/completions",
+                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                 json={"model": model, "max_tokens": max(max_tokens * 3, 6000),  # 추론 토큰이 출력에 포함
+                       "reasoning_effort": SOLAR_EFFORT,
+                       "messages": [{"role": "user", "content": prompt}]},
+                 timeout=300)          # 추론 모드는 느리다(실측 60~150초)
+    d = r.json()
+    if r.status_code != 200:
+        raise RuntimeError(f"upstage {r.status_code}: {str(d)[:160]}")
+    u = d.get("usage") or {}
+    tin, tout = u.get("prompt_tokens", 0), u.get("completion_tokens", 0)
+    USAGE["upstage"]["n"] += 1
+    USAGE["upstage"]["in"] += tin
+    USAGE["upstage"]["out"] += tout
+    _track_cost("solar", tin, tout)
+    try:
+        txt = (d["choices"][0]["message"].get("content") or "").strip()
+    except Exception:
+        raise RuntimeError(f"upstage 응답 파싱 실패: {str(d)[:160]}")
+    if not txt:                        # 추론만 하고 본문을 안 낸 경우 — 침묵 폴백 금지
+        raise RuntimeError(f"upstage 빈 응답(reasoning={(u.get('completion_tokens_details') or {}).get('reasoning_tokens')})")
+    return txt
+
+
 def call_task(task: str, prompt: str, max_tokens: int = 1200,
               default_model: str | None = None,
               images: list | None = None, cache_prefix: str = "") -> str:
@@ -344,7 +390,28 @@ def call_task(task: str, prompt: str, max_tokens: int = 1200,
     # ★ cache_prefix(브리프·사진 분석)는 Gemini 경로에도 반드시 포함 — 누락 시 캡션이 사진을 전혀
     #   못 보고 소재를 지어냄(실사고 2026-07-27: 토레스 세트 캡션이 '오늘 들여온 캐스퍼' 날조의 진짜 원인).
     _full_prompt = (cache_prefix + prompt) if cache_prefix else prompt
-    if provider == "gemini":
+    # Upstage Solar — 텍스트 전용. 이미지가 있으면 태우지 않고 기존 경로로 넘긴다
+    # (비전은 gemini가 이미 싸고 검증됐다 — 여기서 바꾸지 않는다).
+    if provider == "upstage" and not images:
+        for attempt in (1, 2):                        # 1회 재시도(gemini 경로와 같은 규율)
+            try:
+                out = _upstage_generate(_full_prompt, model, max_tokens)
+                LAST_ROUTE[task] = info
+                return out
+            except Exception as e:
+                log.warning("[llm] upstage %s 실패(%d/2): %s", task, attempt, repr(e)[:120])
+                info["error"] = repr(e)[:150]
+                if attempt == 1:
+                    time.sleep(2)
+        info["fallback"] = True                       # → Anthropic 폴백(원가 추적용 기록)
+        LAST_ROUTE[task] = info
+        log.warning("[llm] upstage %s → anthropic 폴백", task)
+    elif provider == "upstage":                       # 이미지 동반 — Solar는 텍스트 전용
+        info["fallback"] = True
+        info["fallback_to"] = "anthropic(images)"
+        LAST_ROUTE[task] = info
+        log.info("[llm] upstage %s: 이미지 동반이라 기존 경로 사용", task)
+    elif provider == "gemini":
         parts = ([{"inline_data": {"mime_type": mt, "data": b64}} for mt, b64 in (images or [])]
                  + [{"text": _full_prompt}])
         for attempt in (1, 2):                        # 1회 재시도(rate limit 폭주 금지)
