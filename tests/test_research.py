@@ -151,3 +151,15 @@ def test_생성기가_브랜드_게이트를_쓴다():
     src = inspect.getsource(tc.BlogDraftGenerator.generate)
     assert "outsider_mentions" in src, "브랜드 언급 게이트가 생성 경로에 없다"
     assert "directive" in src, "판의 언어 지시문이 프롬프트에 안 들어간다"
+
+
+def test_도로명주소도_주제어가_아니다():
+    """★ 2026-08-17 실물 — '중앙대로274번길'이 판의 언어로 잡혀 outsider_terms에 떴다.
+    주소는 재료(고정정보 블록)에 있으니 주제어로 다룰 이유가 없다.
+    업종 중립이라 특정 지명을 박지 않고 도로명 '형태'로 판정한다."""
+    from app.services import marketterms as mt
+    for bad in ("중앙대로274번길", "반룡산단3로", "테헤란로", "종로3가", "강남대로"):
+        assert not mt._usable(bad), f"주소가 주제어로 통과했다: {bad}"
+    # 과하게 막으면 진짜 주제어가 죽는다
+    for good in ("열차단", "투과율", "시인성", "재시공", "유리막코팅", "차단율"):
+        assert mt._usable(good), f"주제어가 막혔다: {good}"
