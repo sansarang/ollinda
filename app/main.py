@@ -3365,8 +3365,10 @@ def root(request: Request):
 @app.get("/robots.txt")
 def robots():
     base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
+    # Sitemap 지시자는 RSS/Atom 피드도 받는다(구글은 피드를 사이트맵으로 인정).
+    # 진입로를 둘 다 알려준다 — 목록(사이트맵) + 최신순(RSS).
     body = (f"User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /me\nDisallow: /u/\n"
-            f"Sitemap: {base}/sitemap.xml\n")
+            f"Sitemap: {base}/sitemap.xml\nSitemap: {base}/rss.xml\n")
     return Response(body, media_type="text/plain")
 
 
@@ -3425,6 +3427,53 @@ def sitemap():
     xml = ('<?xml version="1.0" encoding="UTF-8"?>'
            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + items + '</urlset>')
     return Response(xml, media_type="application/xml")
+
+
+@app.get("/rss.xml")
+def rss():
+    """RSS 2.0 — 네이버 서치어드바이저의 **사이트맵과 별개인** 수집 채널.
+
+    왜 만들었나(2026-08-17): 자체 로그 실측상 Yeti 방문이 총 20건뿐이고
+    네이버 웹문서 색인은 0건이다. 사이트맵은 "이런 페이지가 있다"는 목록이라
+    무엇이 **새 글**인지 말해주지 않는다. RSS는 최신순 발행 피드라 새 글 수집이 빠르고,
+    서치어드바이저에 사이트맵과 따로 등록할 수 있다 — 진입로를 하나 더 여는 것이다.
+
+    ★ 날짜는 지어내지 않는다. 각 글의 `updated`를 그대로 쓴다(사이트맵 lastmod와 같은 소스).
+    """
+    import email.utils as _eut
+    import datetime as _dt
+    from xml.sax.saxutils import escape as _esc
+    base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
+
+    def _rfc822(ymd: str) -> str:
+        """'2026-08-17' → RFC-822. 파싱 실패면 빈칸(없는 정보는 빈칸 — 헌법)."""
+        try:
+            d = _dt.datetime.strptime(ymd, "%Y-%m-%d").replace(tzinfo=_dt.timezone.utc)
+            return _eut.format_datetime(d)
+        except Exception:
+            return ""
+
+    items = ""
+    try:
+        from app import guides as _gd
+        for g in _gd.all_guides():
+            link = f"{base}/guide/{g['slug']}"
+            pub = _rfc822(g["updated"])
+            items += (f"<item><title>{_esc(g['title'])}</title><link>{link}</link>"
+                      f"<guid isPermaLink=\"true\">{link}</guid>"
+                      f"<description>{_esc(g['desc'])}</description>"
+                      + (f"<pubDate>{pub}</pubDate>" if pub else "") + "</item>")
+    except Exception:
+        logging.exception("[rss] 가이드 적재 실패")
+
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>'
+           '<rss version="2.0"><channel>'
+           '<title>올린다 — 실측 기록</title>'
+           f'<link>{base}/guide</link>'
+           '<description>네이버 검색 노출을 직접 재서 남긴 기록. '
+           '상위 글 대조, 크롤러 로그 분석, 순위 추적.</description>'
+           '<language>ko</language>' + items + '</channel></rss>')
+    return Response(xml, media_type="application/rss+xml")
 
 
 @app.get("/privacy", response_class=HTMLResponse)

@@ -62,6 +62,32 @@ def test_사이트맵에_가이드가_들어가고_lastmod가_한_값으로_뭉�
     assert len(set(lms)) >= 2, f"lastmod가 한 값으로 뭉개졌다: {set(lms)}"
 
 
+def test_rss가_유효하고_가이드를_전부_싣는다():
+    """네이버 서치어드바이저의 사이트맵과 별개인 수집 채널. 깨진 XML이면 통째로 무시된다."""
+    import xml.etree.ElementTree as ET
+
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    r = TestClient(app).get("/rss.xml")
+    assert r.status_code == 200 and "rss" in r.headers.get("content-type", "")
+    root = ET.fromstring(r.text)                    # 형식 검증 — 깨졌으면 여기서 터진다
+    items = root.findall(".//item")
+    assert len(items) == len(guides.all_guides())
+    links = {it.findtext("link") for it in items}
+    for g in guides.all_guides():
+        assert f"https://ollinda.kr/guide/{g['slug']}" in links
+    assert all(it.findtext("pubDate") for it in items), "발행일 없는 항목이 있다"
+
+
+def test_robots가_사이트맵과_rss를_모두_알린다():
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    body = TestClient(app).get("/robots.txt").text
+    assert "/sitemap.xml" in body and "/rss.xml" in body
+
+
 def test_없는_slug는_404다():
     """빈 페이지를 200으로 주면 그것이 곧 얇은 색인이다."""
     from fastapi.testclient import TestClient
