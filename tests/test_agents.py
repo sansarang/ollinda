@@ -123,3 +123,60 @@ def test_생성기가_tenant를_넘긴다():
     from app.generators import text_claude as tc
     src = inspect.getsource(tc.BlogDraftGenerator.generate)
     assert "tenant_id=tenant.id" in src, "학습값이 가게별로 갈리지 않는다"
+
+
+# ── 코드 수정 사령관 ──────────────────────────────────────
+def test_사령관은_헌법과_게이트를_못_건드린다():
+    """★ 파라미터는 틀려도 1건을 잃지만, 코드는 틀리면 금지선이 열린다.
+    게이트를 끄는 한 줄이면 충분하고, 테스트도 같이 고치면 안 보인다."""
+    from app.agents import commander as cm
+    for p in ("CLAUDE.md", "docs/DISCIPLINE.md", "app/services/qualitycheck.py",
+              "app/seo.py", "scripts/safe-push.sh"):
+        assert cm.forbidden_hit([p]), f"금지 구역이 뚫렸다: {p}"
+
+
+def test_사령관은_테스트를_못_고친다():
+    """자기 검증을 무력화할 수 있으면 이 구조 전체가 무의미해진다."""
+    from app.agents import commander as cm
+    assert cm.forbidden_hit(["tests/test_agents.py"])
+    assert cm.forbidden_hit(["tests/"])
+
+
+def test_사령관은_자기_안전장치를_못_고친다():
+    from app.agents import commander as cm
+    assert cm.forbidden_hit(["app/agents/commander.py"])
+    assert cm.forbidden_hit(["app/agents/params.py"])
+
+
+def test_경로를_모르면_막는다():
+    """막는 쪽이 기본값이어야 한다."""
+    from app.agents import commander as cm
+    assert cm.forbidden_hit([""]), "빈 경로가 통과했다"
+
+
+def test_일반코드는_제안_가능하다():
+    """과하게 막으면 사령관이 아무것도 못 한다."""
+    from app.agents import commander as cm
+    assert not cm.forbidden_hit(["app/services/photocap.py"])
+    assert not cm.forbidden_hit(["app/generators/video.py"])
+
+
+def test_자동적용은_기본_꺼짐():
+    from app.agents import commander as cm
+    import os
+    assert cm.AUTO_APPLY == (os.environ.get("COMMANDER_AUTO") == "1")
+    assert not cm.AUTO_APPLY, "자동 코드 수정이 기본으로 켜져 있다"
+
+
+def test_금지구역_수정안은_등록조차_안된다():
+    from app.agents import commander as cm
+    r = cm.order("게이트 완화", "빠르게 통과시키자", ["app/services/qualitycheck.py"], "patch")
+    assert not r["ok"] and r["error"] == "금지 구역"
+
+
+def test_너무_넓은_수정안은_거부된다():
+    """넓으면 원인 추적이 죽는다."""
+    from app.agents import commander as cm
+    many = [f"app/services/x{i}.py" for i in range(cm.MAX_FILES + 2)]
+    r = cm.order("대공사", "리팩토링", many, "patch")
+    assert not r["ok"]

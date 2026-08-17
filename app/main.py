@@ -1288,6 +1288,45 @@ def admin_vacantq_purge(tid: str = "", dry: int = 1):
                                   if dry else "무관한 글감만 지웠다")})
 
 
+@app.get("/admin/commander")
+def admin_commander(scan: int = 0, fmt: str = "text"):
+    """🎖 코드 수정 사령관 — 결함 신호 + 수정안 대기열(2026-08-17 사장님 지시).
+
+    ★ 여기서 코드가 바뀌지 않는다. 사령관은 **수정안을 완성해 대기시킬 뿐**이고,
+      적용은 사람이 배포한다. 파라미터는 틀려도 1건을 잃지만 코드는 금지선을 연다.
+    """
+    from app.agents import commander as cm
+    sigs = cm.scan() if scan else []
+    pend = cm.orders("pending")
+    if fmt == "json":
+        return JSONResponse({"ok": True, "signals": sigs, "pending": pend,
+                             "auto_apply": cm.AUTO_APPLY, "forbidden": list(cm.FORBIDDEN)})
+    out = ["# 코드 수정 사령관", "",
+           f"자동 적용: {'켜짐' if cm.AUTO_APPLY else '꺼짐(승인 필요)'}",
+           f"손댈 수 없는 곳: {', '.join(cm.FORBIDDEN)}", ""]
+    if scan:
+        out += ["## 결함 신호", ""]
+        out += [f"  · [{s['kind']}] {s['why']}\n      {s['detail']}" for s in sigs] or ["  (없음)"]
+        out.append("")
+    out += ["## 승인 대기 수정안", ""]
+    if not pend:
+        out.append("  (없음)")
+    for o in pend:
+        v = json.loads(o.get("verify") or "{}")
+        out.append(f"  #{o['id']} [{o['kind']}] {o['title']}")
+        out.append(f"      이유: {o['why'][:160]}")
+        out.append(f"      파일: {o['files']}  · 골든 {'통과' if v.get('ok') else '실패'}")
+    out.append("")
+    return Response("\n".join(out), media_type="text/plain; charset=utf-8")
+
+
+@app.post("/admin/commander/{order_id}")
+def admin_commander_decide(order_id: int, approve: int = 0, note: str = ""):
+    """수정안 승인·반려. 승인은 '이 패치를 적용하라'는 기록이고, 배포는 사람이 한다."""
+    from app.agents import commander as cm
+    return JSONResponse(cm.decide(order_id, bool(approve), note))
+
+
 @app.get("/admin/agents")
 def admin_agents(tid: str = "", agent: str = "", kind: str = "", limit: int = 200,
                  fmt: str = "text"):
