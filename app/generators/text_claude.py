@@ -412,7 +412,9 @@ class BlogDraftGenerator(Generator):
         try:
             from app.services import marketterms as _mkt
             from app.services import research as _rsh
-            _mkt_terms = _mkt.topic_terms(kw0) or _mkt.topic_terms(_core_nat)
+            _rg = getattr(tenant, "region", "") or ""
+            _mkt_terms = (_mkt.topic_terms(kw0, region=_rg)
+                          or _mkt.topic_terms(_core_nat, region=_rg))
             if _mkt_terms:
                 _research = _rsh.gather(_mkt_terms, context=prof.name,
                                         material=(asset.note or ""), per_term=1)

@@ -64,25 +64,44 @@ def _phrases(data_json: str) -> list:
         return []
 
 
-def _usable(term: str) -> bool:
+#: 행정구역 신호 — 지역명은 주제어가 아니다(업종 중립: 특정 지명을 박지 않고 형태로 판정).
+#: 2026-08-17 실측 결함: '부산광역시'가 판의 언어로 뽑혀 그걸로 취재했더니
+#: '부산광역시 자동차매매사업조합'(중고차 조합)이 썬팅 글 재료로 들어왔다.
+_REGION = re.compile(r"(특별시|광역시|특별자치시|특별자치도|[가-힣]{1,3}시$|[가-힣]{1,3}군$|"
+                     r"[가-힣]{1,3}구$|[가-힣]{2,4}동$|[가-힣]{2,4}읍$|[가-힣]{2,4}면$)")
+
+
+def _usable(term: str, region: str = "") -> bool:
     if not term or len(term) < 2 or len(term) > 12:
         return False
     if term in STOP or _TAIL.search(term):
         return False
+    if _REGION.search(term):                     # 지역명 — 주제어가 아니다
+        return False
+    if region:
+        # 그 가게의 지역명이 섞인 말도 뺀다('부산썬팅'). 행정 풀네임과 구어형이 다르므로
+        # (부산광역시 ↔ 부산) canonical 축약 함수를 거친다 — 규칙이 두 곳에 살면 안 된다.
+        try:
+            from app import seo as _seo
+            toks = set(region.split()) | set(_seo._kw_shorten(region).split())
+        except Exception:
+            toks = set(region.split())
+        if any(len(t) >= 2 and t in term for t in toks):
+            return False
     return bool(re.fullmatch(r"[가-힣A-Za-z0-9 ]+", term))
 
 
-def cross_counts() -> dict:
+def cross_counts(region: str = "") -> dict:
     """용어 → 그 용어가 등장한 **검색어 수**. 브랜드·특수어를 가르는 근거."""
     out: dict = {}
     for r in _rows():
-        seen = {t for t, b in _phrases(r.get("data")) if b >= MIN_BLOGS and _usable(t)}
+        seen = {t for t, b in _phrases(r.get("data")) if b >= MIN_BLOGS and _usable(t, region)}
         for t in seen:
             out[t] = out.get(t, 0) + 1
     return out
 
 
-def topic_terms(keyword: str, limit: int = TOP_N) -> list:
+def topic_terms(keyword: str, limit: int = TOP_N, region: str = "") -> list:
     """그 검색어의 '판의 언어' — 업종 전반에 두루 쓰이는 주제어만.
 
     한 검색어에만 나오는 말(브랜드·특수 상품명 가능성)은 뺀다. 사전 없이 데이터로 가른다.
@@ -93,10 +112,10 @@ def topic_terms(keyword: str, limit: int = TOP_N) -> list:
     row = next((r for r in _rows() if r.get("keyword") == kw), None)
     if not row:
         return []
-    cross = cross_counts()
+    cross = cross_counts(region)
     picked = []
     for t, blogs in _phrases(row.get("data")):
-        if blogs < MIN_BLOGS or not _usable(t):
+        if blogs < MIN_BLOGS or not _usable(t, region):
             continue
         if cross.get(t, 0) < MIN_CROSS:      # 이 판에서만 보이는 말 — 브랜드 위험, 뺀다
             continue
@@ -115,9 +134,9 @@ def coverage(body: str, terms: list) -> dict:
             "covered": hit, "missing": [t for t in ts if t not in (body or "")]}
 
 
-def directive(keyword: str, limit: int = TOP_N) -> str:
+def directive(keyword: str, limit: int = TOP_N, region: str = "") -> str:
     """프롬프트 한 조각 — '손님이 궁금해하는 것'. 없으면 빈 문자열(빈칸 원칙)."""
-    terms = topic_terms(keyword, limit)
+    terms = topic_terms(keyword, limit, region)
     if not terms:
         return ""
     return ("[손님이 이 검색어를 칠 때 궁금해하는 것들]\n"

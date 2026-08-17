@@ -89,3 +89,28 @@ def test_생성기가_취재를_실제로_쓴다():
     body = src[src.find("prompt = ("):]
     assert "_fact_block" in body, "재료를 만들어놓고 프롬프트에 안 붙였다"
     assert "term_coverage" in src, "커버율이 payload에 안 남는다(전후 비교 불가)"
+
+
+def test_지역명은_주제어가_아니다():
+    """★ 2026-08-17 실측 결함 — '부산광역시'가 판의 언어로 뽑혔고, 그걸로 취재했더니
+    '부산광역시 자동차매매사업조합'(중고차 조합)이 썬팅 글 재료로 들어왔다.
+    업종 중립이라 지명을 코드에 박지 않고 행정구역 '형태'로 판정한다."""
+    from app.services import marketterms as mt
+    for bad in ("부산광역시", "서울특별시", "동구", "기장군", "초량동", "제주특별자치도"):
+        assert not mt._usable(bad), f"지역명이 주제어로 통과했다: {bad}"
+    for good in ("투과율", "열차단", "재시공", "시인성", "가시광선"):
+        assert mt._usable(good), f"주제어가 막혔다: {good}"
+
+
+def test_그_가게의_지역토큰도_뺀다():
+    from app.services import marketterms as mt
+    assert not mt._usable("부산썬팅", region="부산광역시 동구")
+    assert mt._usable("부산썬팅", region="")      # 지역을 모르면 막지 않는다
+
+
+def test_생성기가_지역을_넘긴다():
+    import inspect
+
+    from app.generators import text_claude as tc
+    src = inspect.getsource(tc.BlogDraftGenerator.generate)
+    assert "region=_rg" in src, "지역을 안 넘겨 지역명이 주제어로 샌다"
