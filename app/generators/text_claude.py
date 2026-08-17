@@ -143,7 +143,7 @@ def _ensure_dwell_devices(body: str, kw0: str) -> tuple[str, dict]:
         raw = _call_llm(
             "아래 블로그 글에서 빠진 장치만 만들어라. 글을 다시 쓰지 마라 — 요청된 조각만 출력.\n"
             f"[핵심 키워드] {kw0}\n\n[본문]\n{body[:6000]}\n\n출력 형식(요청된 항목만, 머리표 유지):\n"
-            + "\n".join(_need), model="claude-sonnet-5", max_tokens=700)
+            + "\n".join(_need), model="claude-sonnet-5", max_tokens=700, task="aux")
         d = _parse_sections(raw, ["첫문단", "예고", "이정표"])
         paras = re.split(r"(\n\s*\n)", body)               # 구분자 보존 분할(재조립 무손실)
         texts = [p for p in paras if p.strip()]
@@ -747,7 +747,7 @@ class BlogDraftGenerator(Generator):
             try:
                 _v = _call_llm("사용자 요청이 아래 글에 반영됐는지만 판단해 YES 또는 NO 한 단어로 답하라.\n"
                                f"요청: {_rq.group(1).strip()}\n글 제목: {title}\n글 앞부분:\n{body[:900]}",
-                               "claude-haiku-4-5-20251001", 400)
+                               "claude-haiku-4-5-20251001", 400, task="aux")
                 request_check = "ok" if "YES" in (_v or "").upper() else "miss"
             except Exception:
                 request_check = ""
@@ -1120,7 +1120,8 @@ class MarketplaceGenerator(Generator):
             "'입력된 스펙 없음' 한 줄만 — 지어내기 금지)\n"
             "[태그]\n(쉼표로 10개, 마켓 검색 노출용 키워드 — 상품종류·용도·타겟·시즌 등)"
         )
-        raw = _call_llm(prompt, self.model, 3000, cache_prefix=cache_prefix_for(asset))
+        raw = _call_llm(prompt, self.model, 3000, cache_prefix=cache_prefix_for(asset),
+                        task="aux")
         d = _parse_sections(raw, ["상품명", "상세페이지", "요약본", "스펙표", "태그"])
         names = [n.strip().lstrip("-*·0123456789.) ").strip()
                  for n in (d.get("상품명", "")).split("\n") if n.strip()][:3]

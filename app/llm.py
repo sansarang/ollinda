@@ -287,7 +287,8 @@ SOLAR_EFFORT = os.environ.get("SOLAR_REASONING", "medium").strip() or "medium"
 #: 작업별 추론 강도 — **짧은 출력에 medium을 주면 추론이 예산을 다 먹고 빈 응답이 나온다.**
 #: 2026-08-17 실측: 영상 자막(spoken)을 medium으로 부르니 0자, low로 부르니 361자 정상.
 #: 본문처럼 긴 글은 medium이 필요하다(minimal이면 노린 질의 커버가 0/2로 죽는다).
-SOLAR_EFFORT_BY_TASK = {"spoken": "low", "caption": "low", "x": "low", "title": "low"}
+SOLAR_EFFORT_BY_TASK = {"spoken": "low", "caption": "low", "x": "low", "title": "low",
+                        "aux": "low"}
 
 
 def solar_effort(task: str = "") -> str:
@@ -332,9 +333,14 @@ SONNET = "claude-sonnet-5"
 #:   effort=medium은 추론이 예산을 다 먹어 **0자 빈 응답**이 났다 — 짧은 출력엔 low다.
 #:   원가: Sonnet 대비 1/10 수준이고, 무엇보다 Anthropic 크레딧과 무관하게 돈다.
 SOLAR = "solar-pro4"
+#: aux — 제목 조각·YES/NO 판정 같은 **짧은 보조 호출**.
+#:   2026-08-17 실사고: 본문을 Solar로 옮겨놓고도 생성이 계속 실패했다. 원인은 이 보조
+#:   호출들이 anthropic 직행이라 크레딧 0에서 터진 것이다. 본문만 옮겨서는 소용이 없다 —
+#:   한 세트가 완성되려면 그 세트의 **모든 호출**이 살아 있는 경로여야 한다.
 TASK_DEFAULTS = {"spoken": ("upstage", SOLAR),
                  "caption": ("upstage", SOLAR),
-                 "x": ("upstage", SOLAR)}
+                 "x": ("upstage", SOLAR),
+                 "aux": ("upstage", SOLAR)}
 
 # 품질 표면 고정(2026-07-28 사장님 결정: 품질 우선, 비용 절감 라우팅 폐지) — env LLM_* 보다 우선.
 # 캡션 제미나이 절감 라우팅은 사진 분석 미전달 실사고(캐스퍼 날조)의 온상이었음. 절감 실험은

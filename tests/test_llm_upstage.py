@@ -142,18 +142,26 @@ def test_본문_생성이_라우팅을_실제로_탄다(monkeypatch):
     assert tc._call_llm("p") == "direct", "task 없이 부르면 기존 경로여야 한다(하위호환)"
 
 
-def test_짧은_보조호출은_라우팅을_타지_않는다():
-    """제목 조각·YES/NO 판정까지 추론 모델로 보내면 파이프라인이 수십 초씩 늘어난다."""
+def test_짧은_보조호출은_추론을_낮춘다():
+    """★ 이 골든은 원래 '보조 호출은 라우팅을 타지 않는다'였다 — **그 판단이 틀렸다.**
+
+    당시 이유는 "추론 모델로 보내면 느려진다"였다. 속도는 맞는 걱정이었지만,
+    2026-08-17 실사고가 더 큰 것을 드러냈다: 본문만 Solar로 옮기고 보조 호출을
+    anthropic에 남겨두니 **크레딧 0에서 세트가 통째로 실패**했다.
+    한 세트가 완성되려면 그 세트의 모든 호출이 살아 있는 경로여야 한다.
+
+    속도 걱정은 라우팅을 막는 대신 **추론 강도를 낮춰서** 푼다(aux → low).
+    """
     import inspect
 
     from app.generators import text_claude as tc
     src = inspect.getsource(tc)
-    # YES/NO 판정 호출에 task 인자가 붙지 않았는지(해당 줄에 task= 가 없어야 한다)
     for line in src.splitlines():
         if "YES 또는 NO" in line:
             idx = src.splitlines().index(line)
             seg = "\n".join(src.splitlines()[idx:idx + 4])
-            assert "task=" not in seg, "짧은 판정 호출이 라우팅을 탄다(느려진다)"
+            assert 'task="aux"' in seg, "짧은 판정이 라우팅을 안 탄다(크레딧 0에서 죽는다)"
+    assert llm.solar_effort("aux") == "low", "보조 호출에 추론을 많이 주면 느려지고 빈 응답이 난다"
 
 
 def test_본문_경로가_payload에_기록된다():
@@ -229,3 +237,16 @@ def test_생성_진입점이_blocked를_쓴다():
     from app import main
     src = inspect.getsource(main)
     assert "_llmu.blocked()" in src, "생성 진입점이 여전히 credit_out으로 전면 차단한다"
+
+
+def test_보조호출도_라우팅을_탄다():
+    """★ 2026-08-17 실사고 — 본문을 Solar로 옮겨놓고도 생성이 계속 실패했다.
+    제목 조각·YES/NO 판정 같은 짧은 보조 호출이 anthropic 직행이라 크레딧 0에서 터졌다.
+    한 세트가 완성되려면 그 세트의 **모든 호출**이 살아 있는 경로여야 한다."""
+    import inspect
+
+    from app.generators import text_claude as tc
+    src = inspect.getsource(tc)
+    assert src.count('task="aux"') >= 3, "보조 호출이 여전히 anthropic 직행이다"
+    assert llm.route("aux")[0] == "upstage"
+    assert llm.solar_effort("aux") == "low", "짧은 호출에 추론을 많이 주면 빈 응답이 난다"
