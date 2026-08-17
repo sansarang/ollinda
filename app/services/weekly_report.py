@@ -78,6 +78,27 @@ def build_report(tenant, weekly_target: int | None = None) -> dict:
         coach = "블로그 발행 현황 집계중 — 블로그 연결 상태를 확인해 주세요."
     if entered:
         coach += f" 🎉 '{entered[0]['keyword']}' 검색결과 진입!"
+    # ⑤ 판 판정(2026-08-17) — **안 뜬 검색어의 이유**를 말한다.
+    #   대행사는 "이번 달 N편 올렸습니다"로 끝낸다. 우리는 "그 자리는 10년 된 글이
+    #   지켜서 못 뚫습니다"를 숫자로 말할 수 있다 — 그게 재계약을 만든다.
+    #   판정은 코드가 한다(board.judge — LLM 없음). 지어낸 이유를 말하지 않기 위해서다.
+    try:
+        from app.services import board as _bd
+        _kws = db.tracked_keywords(tenant.id, limit=30)
+        if _kws:
+            _b = _bd.scan(tenant.id, _kws, blog_id=getattr(tenant, "blog_id", "") or "")
+            out["board"] = _b
+            _blocked = [r for r in _b["rows"] if r["verdict"] in (_bd.HARD, _bd.NO_SURFACE)]
+            if _blocked:
+                r0 = _blocked[0]
+                out["blocked_reason"] = f"'{r0['keyword']}'는 지금 노려도 어렵습니다 — {r0['why']}."
+                coach += " " + out["blocked_reason"]
+            if _b["attack"]:
+                out["next_target"] = _b["attack"][0]
+                coach += f" 대신 '{_b['attack'][0]}' 쪽이 지금 들어갈 자리가 있어 보여요."
+    except Exception:
+        import logging as _lgb
+        _lgb.getLogger("shopcast.report").exception("[report] 판 판정 실패 — 리포트는 계속")
     out["coaching"] = coach
     return out
 
@@ -95,6 +116,11 @@ def _email_body(rep: dict) -> str:
         from app.services import surfaces as _sf
         src = _sf.label(c["kind"])
         lines.append(f"🔎 {c['keyword']} ({src}): {b} → {a} {arrow}")
+    # 판 판정 — 안 뜬 이유와 다음 자리(2026-08-17). 없으면 줄을 아예 넣지 않는다(빈칸 원칙).
+    if rep.get("blocked_reason"):
+        lines += ["", "🚧 " + rep["blocked_reason"]]
+    if rep.get("next_target"):
+        lines.append(f"🎯 다음에 노릴 곳: {rep['next_target']}")
     lines += ["", rep.get("coaching", ""), "", "자세히 보기: https://ollinda.kr/me?tab=report"]
     return "\n".join(lines)
 

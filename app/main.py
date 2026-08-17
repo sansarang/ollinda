@@ -1288,6 +1288,27 @@ def admin_vacantq_purge(tid: str = "", dry: int = 1):
                                   if dry else "무관한 글감만 지웠다")})
 
 
+@app.get("/admin/board")
+def admin_board(tid: str = "", kws: str = "", live: int = 0):
+    """🗺 판 스캔표 — 글을 쓰기 전에 '이길 수 있는 자리'부터 고른다(2026-08-17).
+
+    kws 미지정이면 그 tenant의 추적 키워드를 쓴다. live=1이면 순위까지 실조회.
+    판정 근거는 전부 저장된 실측이다(상위글 나이·블로그 지면 유무) — 여기서 크롤하지 않는다.
+    """
+    t = db.get_tenant(tid)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    from app.services import board as _bd
+    keywords = [k.strip() for k in kws.split(",") if k.strip()] or db.tracked_keywords(tid, limit=40)
+    if not keywords:
+        return JSONResponse({"ok": False, "error": "판정할 검색어가 없습니다"}, status_code=409)
+    b = _bd.scan(tid, keywords, blog_id=(getattr(t, "blog_id", "") or ""), live=bool(live))
+    b["ok"] = True
+    b["tenant"] = t.name
+    b["line"] = _bd.summary_line(b)
+    return JSONResponse(b)
+
+
 @app.get("/admin/kw-resolve")
 def admin_kw_resolve(tid: str = "", kw: str = "", ctype: str = "info"):
     """(진단) 키워드 단일 관문을 실제로 돌려 본다 — 큐 키워드가 왜 바뀌는지."""
