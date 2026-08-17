@@ -5682,6 +5682,31 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                    "px-2 py-1 rounded-full transition'>✍️ 만들기</button>")
             return ("<div class='mt-1.5 flex flex-wrap items-center gap-1'>" + chips + btn + "</div>")
 
+        def _publish_row(aid: str, ps) -> str:
+            """네이버 발행 줄 (2026-08-17 사장님 지시).
+
+            왜 여기 필요한가 — 발행 UI가 `/kit/{asset}/naver` 안에만 있어서 대시보드에서
+            바로 누를 수가 없었다. 그런데 **발행 확인이 학습 에이전트의 출발 신호**다
+            (pipesync.confirm_publish → learner.on_publish). 버튼이 묻혀 있으면
+            에이전트가 영영 깨어나지 않는다.
+
+            네이버는 공식 발행 API가 없어 복붙이 필수다(반자동).
+            그래서 두 단계로 둔다: ① 복붙하러 간다 ② 올린 뒤 '발행했어요'를 누른다.
+            """
+            _bp = next((p for p in ps if p.kind.value == "blog"), None)
+            if not _bp:
+                return ""
+            if _bp.status.value == "published":
+                return ("<div class='mt-1.5'><span class='text-[10px] font-bold text-emerald-700 "
+                        "bg-emerald-50 px-2 py-0.5 rounded-full'>네이버 발행됨 · 순위 추적 중</span></div>")
+            go = (f"<a href='/kit/{aid}/naver' class='text-[10px] font-bold text-white "
+                  "bg-emerald-600 hover:bg-emerald-700 px-2 py-1 rounded-full transition'>"
+                  "📤 네이버에 올리기</a>")
+            done = (f"<button type='button' onclick=\"pubDone('{_bp.id}')\" "
+                    "class='text-[10px] font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 "
+                    "px-2 py-1 rounded-full transition'>올렸어요 ✓</button>")
+            return ("<div class='mt-1.5 flex flex-wrap items-center gap-1'>" + go + done + "</div>")
+
         def _video_row(aid: str, ps) -> tuple[str, bool]:
             """(영상 온디맨드) 카드 내 플랫폼 선택·상태 행 — 반환: (HTML, 생성중 여부)."""
             _bp = next((p for p in ps if p.kind.value == "blog"), None)
@@ -5717,7 +5742,8 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         for s in sets:
             ps = _pieces_by_asset.get(s["asset_id"], [])
             _vrow, _ = _video_row(s["asset_id"], ps)
-            _vrow = _text_row(s["asset_id"], ps) + _vrow
+            # 발행 줄이 맨 위 — 이걸 눌러야 순위 추적과 학습 에이전트가 시작된다.
+            _vrow = _publish_row(s["asset_id"], ps) + _text_row(s["asset_id"], ps) + _vrow
             _nclk = sum(_ccounts.get(p.id[:8], 0) for p in ps)
             _ebadge = _expose_badge(ps)
             # 진행 중 판정(삭제 잠금용) — 다시쓰기 running 또는 영상 잡 진행 중
@@ -5782,7 +5808,19 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 "try{var d=await (await fetch('/me/text/make',{method:'POST',body:fd})).json();"
                 "if(!d.ok){alert(d.error||'만들지 못했어요');return;}"
                 "alert('만들고 있어요 — 잠시 뒤 새로고침하면 보입니다');}"
-                "catch(e){alert('만들지 못했어요');}}"     # ⭐ 대표 사진 고르기 모달 경유(구세트 포함)
+                "catch(e){alert('만들지 못했어요');}}"
+                # 📤 발행 확인(2026-08-17) — 이걸 눌러야 순위 추적과 학습 에이전트가 시작된다.
+                #   RSS 자동 감지를 먼저 시도하고(붙여넣기 없이 끝나는 게 최선), 못 잡으면 주소를 묻는다.
+                "async function pubDone(pid){"
+                "try{var d=await (await fetch('/api/blog/check-published',{method:'POST'})).json();"
+                "if(d&&d.synced){alert('발행 확인! 지금부터 순위를 매일 확인합니다.');location.reload();return;}}"
+                "catch(e){}"
+                "var u=prompt('네이버에 올리신 글 주소를 붙여넣어 주세요\\n(https://blog.naver.com/...)');"
+                "if(!u)return;"
+                "var f=document.createElement('form');f.method='post';f.action='/me/blog/published';"
+                "var a=document.createElement('input');a.name='piece_id';a.value=pid;f.appendChild(a);"
+                "var b=document.createElement('input');b.name='url';b.value=u;f.appendChild(b);"
+                "document.body.appendChild(f);f.submit();}"     # ⭐ 대표 사진 고르기 모달 경유(구세트 포함)
                 "(function(){var rows=document.querySelectorAll('[data-vgenrow]');if(!rows.length)return;"
                 "var iv=setInterval(async function(){var busy=false;"
                 "for(var i=0;i<rows.length;i++){var aid=rows[i].getAttribute('data-vgenrow');"

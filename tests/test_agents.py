@@ -180,3 +180,29 @@ def test_너무_넓은_수정안은_거부된다():
     many = [f"app/services/x{i}.py" for i in range(cm.MAX_FILES + 2)]
     r = cm.order("대공사", "리팩토링", many, "patch")
     assert not r["ok"]
+
+
+def test_대시보드에_발행버튼이_있다():
+    """★ 2026-08-17 사장님 지시 — 발행 확인이 학습 에이전트의 출발 신호다
+    (pipesync.confirm_publish → learner.on_publish).
+    발행 UI가 /kit 안에만 있어 대시보드에서 못 눌렀고, 그러면 에이전트가 영영 안 깨어난다."""
+    import inspect
+
+    from app import main
+    src = inspect.getsource(main)
+    assert "_publish_row" in src, "대시보드에 발행 줄이 없다"
+    assert "pubDone" in src, "발행 확인 스크립트가 없다"
+    assert "/me/blog/published" in src and "check-published" in src, \
+        "발행 확인이 실제 엔드포인트로 안 간다"
+
+
+def test_발행줄이_카드에_실제로_붙는다():
+    """만들어놓고 안 붙이면 화면에 안 나온다 — 오늘 이미 그 실수를 했다."""
+    import inspect
+
+    from app import main
+    src = inspect.getsource(main)
+    i = src.find("_vrow = ")
+    assert i > 0
+    seg = src[i:i + 200]
+    assert "_publish_row(" in seg, "발행 줄을 만들어놓고 카드에 안 붙였다"
