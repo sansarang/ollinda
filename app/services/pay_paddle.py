@@ -31,7 +31,15 @@ def client_token() -> str:
 
 
 def price_id(plan: str) -> str:
-    return os.environ.get("PADDLE_PRICE_" + (plan or "self").upper(), "") or os.environ.get("PADDLE_PRICE_SELF", "")
+    """그 플랜의 가격 ID. **없으면 빈 문자열** — 다른 플랜 가격으로 대신하지 않는다.
+
+    ★ 2026-08-17 결함 제거(침묵 폴백 금지).
+      전에는 `... or PADDLE_PRICE_SELF`로 떨어졌다. 그러면 `PADDLE_PRICE_AGENCY`가
+      비어 있을 때 **화면엔 39만원이 뜨는데 결제는 스탠다드 금액으로** 나간다.
+      표시가와 청구액이 갈리는 것은 기능 결함이 아니라 신뢰 사고다.
+      호출부는 빈 값을 받으면 결제를 열지 말고 사유를 보여줘야 한다.
+    """
+    return os.environ.get("PADDLE_PRICE_" + (plan or "self").upper(), "").strip()
 
 
 def plan_for_price_id(pid: str) -> str | None:

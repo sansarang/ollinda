@@ -10999,13 +10999,25 @@ def billing(request: Request, plan: str = "pro"):
     u = auth.current_user(request)
     if not u:
         return RedirectResponse("/login", status_code=303)
-    plan = plan if plan in pay.PLANS else "pro"
+    # 2026-08-17 대행 단일 전환 — 판매 상품은 대행이다. 알 수 없는 plan은 대행으로 받는다.
+    plan = plan if plan in pay.PLANS else "agency"
     info = pay.PLANS[plan]
     base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
     # 패들(Paddle) 우선 — 설정돼 있으면 오버레이 체크아웃
     if pay_paddle.configured():
         token = pay_paddle.client_token()
         pid = pay_paddle.price_id(plan)
+        if not pid:
+            # 침묵 폴백 금지 — 다른 플랜 가격으로 대신 긁지 않는다(표시가 ≠ 청구액 = 신뢰 사고).
+            logging.error("[billing] %s 플랜 가격 ID 없음(PADDLE_PRICE_%s 미설정) — 결제 차단",
+                          plan, plan.upper())
+            return HTMLResponse(_subscriber_page(
+                "결제 준비 중",
+                "<div class='bg-white rounded-2xl border p-6 max-w-md mx-auto text-center'>"
+                "<div class='text-lg font-bold mb-2'>지금은 결제를 열 수 없습니다</div>"
+                "<p class='text-slate-500 text-sm'>결제 상품 설정이 끝나지 않았습니다. "
+                "잘못된 금액이 청구되지 않도록 결제를 막아두었습니다.<br>"
+                "잠시 뒤 다시 시도하시거나 문의해 주세요.</p></div>"))
         envset = "Paddle.Environment.set('sandbox');" if pay_paddle.env() == "sandbox" else ""
         email = esc((u.get("email") or "").replace("'", ""))
         inner = (

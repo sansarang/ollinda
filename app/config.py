@@ -47,7 +47,9 @@ PLANS = {
     "basic":  {"name": "라이트", "price": PRICE_BASIC, "monthly": 6},     # 월 6세트 + 영상 2
     "pro":    {"name": "스탠다드", "price": PRICE_PRO, "monthly": 12},    # 월 12세트 + 영상 8(주력)
     "self":   {"name": "스탠다드", "price": PRICE_PRO, "monthly": 12},
-    "agency": {"name": "프로", "price": AGENCY_FROM, "monthly": 20},      # 월 20세트 + 영상 무제한 + 우선
+    # 2026-08-17 대행 단일 전환 — 랜딩은 "대행"이라 부르는데 결제창엔 "프로 구독"이 떴다.
+    # 누른 버튼과 결제창의 상품명이 다르면 그 자체로 결제를 멈추게 만든다.
+    "agency": {"name": "대행", "price": AGENCY_FROM, "monthly": 20},      # 월 20세트 + 영상 무제한 + 우선
 }
 
 # 성과형(1페이지 진입 시 과금) — 스텁: 임계 순위 도달 이벤트 기록용
