@@ -80,16 +80,25 @@ def scan() -> list:
     """
     sigs = []
     # ① 골든 실패 — 가장 강한 신호
+    #   ★ 2026-08-17 실측 결함: 골든 실행이 600초 타임아웃으로 죽었는데 signals=0을 반환했다.
+    #     그러면 일지에 "이상 없음 — 골든 전체 통과"가 찍힌다. **거짓 안심**이다.
+    #     못 돌린 것과 통과한 것은 다르다 — 침묵 폴백 금지(헌법).
     try:
-        r = subprocess.run(["python", "-m", "pytest", "tests/", "-q", "--tb=no"],
-                           capture_output=True, text=True, timeout=600,
+        r = subprocess.run(["python", "-m", "pytest", "tests/", "-q", "--tb=no", "-x", "-p", "no:cacheprovider"],
+                           capture_output=True, text=True, timeout=1800,
                            env={**os.environ, "SHOPCAST_SECRET": os.environ.get("SHOPCAST_SECRET", "t")})
         fails = re.findall(r"FAILED (\S+)", r.stdout or "")
         if fails:
             sigs.append({"kind": "golden_fail", "detail": fails[:10],
                          "why": f"골든 {len(fails)}건 실패 — 계약이 깨졌다"})
+        elif r.returncode != 0:
+            sigs.append({"kind": "golden_unknown", "detail": [(r.stdout or "")[-200:]],
+                         "why": f"골든이 비정상 종료(코드 {r.returncode}) — 통과를 확인 못 했다"})
     except Exception as e:
-        _log.warning("[commander] 골든 실행 실패: %s", repr(e)[:120])
+        # 실행 자체를 못 했다 → 그것이 신호다. 조용히 넘기면 '이상 없음'으로 둔갑한다.
+        sigs.append({"kind": "golden_unknown", "detail": [repr(e)[:150]],
+                     "why": "골든을 돌리지 못했다 — 계약 상태를 모른다(이상 없음이 아니다)"})
+        _log.error("[commander] 골든 실행 실패: %s", repr(e)[:150])
     # ② 에이전트 경보
     try:
         alerts = journal.recent(limit=100, kind="alert")
@@ -204,10 +213,17 @@ def sweep() -> dict:
     """
     sigs = scan()
     if not sigs:
+        # ★ 여기 오려면 골든이 **실제로 끝까지 돌아 통과**했어야 한다.
+        #   못 돌린 경우는 scan이 golden_unknown 신호를 넣으므로 여기 오지 않는다.
         journal.write(AGENT, "이상 없음 — 골든 전체 통과", kind="note")
         return {"ok": True, "signals": 0, "drafted": 0}
     made = 0
     for s in sigs:
+        if s.get("kind") == "golden_unknown":
+            # 계약 상태를 모르는 것은 '이상 없음'이 아니다. 사람이 봐야 한다.
+            journal.write(AGENT, "⚠ 골든을 돌리지 못했다 — 계약 상태 불명",
+                          why=f"{s['why']} · {str(s.get('detail'))[:150]}", kind="alert")
+            continue
         if s.get("kind") != "golden_fail":
             journal.write(AGENT, f"신호 감지 — {s['why']}",
                           why=str(s.get("detail"))[:200], kind="alert")

@@ -243,3 +243,37 @@ def test_완료했는데_산출물이_없으면_잡는다():
     src = inspect.getsource(main.admin_gen_progress)
     assert "ghost" in src, "유령 완료(done인데 산출물 0)를 감지하지 않는다"
     assert "스레드 사망" in src or "글이 없다" in src
+
+
+def test_골든을_못돌리면_이상없음이라고_하지_않는다(monkeypatch):
+    """★ 2026-08-17 실측 결함 — 골든 실행이 600초 타임아웃으로 죽었는데
+    signals=0을 반환했고, 일지에 "이상 없음 — 골든 전체 통과"가 찍혔다.
+    **거짓 안심**이다. 못 돌린 것과 통과한 것은 다르다(침묵 폴백 금지)."""
+    import subprocess
+
+    from app.agents import commander as cm
+
+    def _boom(*a, **k):
+        raise subprocess.TimeoutExpired(a[0] if a else "pytest", 60)
+
+    monkeypatch.setattr(subprocess, "run", _boom)
+    monkeypatch.setattr(cm.journal, "recent", lambda **k: [])
+    sigs = cm.scan()
+    kinds = {s["kind"] for s in sigs}
+    assert "golden_unknown" in kinds, "골든을 못 돌렸는데 신호가 없다(이상 없음으로 둔갑)"
+    why = next(s["why"] for s in sigs if s["kind"] == "golden_unknown")
+    assert "모른다" in why or "확인 못" in why
+
+
+def test_비정상종료도_신호가_된다(monkeypatch):
+    import subprocess
+
+    from app.agents import commander as cm
+
+    class _R:
+        returncode = 2
+        stdout = "collection error"
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _R())
+    monkeypatch.setattr(cm.journal, "recent", lambda **k: [])
+    assert any(s["kind"] == "golden_unknown" for s in cm.scan()), \
+        "골든이 비정상 종료했는데 통과로 봤다"
