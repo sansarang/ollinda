@@ -101,3 +101,14 @@ def test_리포트가_안뜬_이유를_말한다(monkeypatch):
     assert rep.get("next_target") == "초량 테슬라 썬팅", "다음에 노릴 자리를 제시하지 않는다"
     body = wr._email_body(rep)
     assert "🚧" in body and "🎯" in body, "메일 본문에 판정이 안 실린다"
+
+
+def test_live_조회에_상한이_있다(monkeypatch):
+    """★ 2026-08-17 실측 — 12개 검색어를 실조회하다 요청 전체가 502로 죽었다.
+    화면이 빈손으로 돌아오느니 몇 개만 재고 나머지는 '모름'으로 남기는 게 낫다."""
+    calls = []
+    import app.services.blogrank as br
+    monkeypatch.setattr(br, "blog_rank", lambda kw, bid: calls.append(kw) or {"rank": 5})
+    kws = [f"검색어{i}" for i in range(20)]
+    board.scan("tid", kws, blog_id="x", live=True)
+    assert len(calls) <= board.LIVE_MAX, f"상한 없이 {len(calls)}번 조회했다(타임아웃 재발)"

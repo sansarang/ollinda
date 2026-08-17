@@ -25,6 +25,9 @@ _log = logging.getLogger("shopcast.board")
 YOUNG_DAYS = 60      # 상위글 나이 중간값이 이 아래면 새 글이 들어갈 자리가 있다
 OLD_DAYS = 730       # 2년 넘게 버티는 판은 새 글로 못 뚫는다(실측 최대 3,599일)
 TOP_PAGE = 10        # 1페이지 기준
+#: live=1일 때 순위를 실조회할 최대 검색어 수. 조회 1건당 네트워크 1회라 상한이 없으면
+#: 요청 전체가 타임아웃된다(2026-08-17 실측: 12개에서 502). 넘는 것은 '모름'으로 남는다.
+LIVE_MAX = 6
 
 # 판정 코드 — 화면·리포트가 이 값만 쓴다(문구가 두 곳에 살면 그 자체가 결함)
 WIN = "확보"          # 이미 1페이지 안 — 지킨다
@@ -76,7 +79,10 @@ def scan(tenant_id: str, keywords: list, blog_id: str = "", live: bool = False) 
         has_surface = None if surface is None else bool(surface)
 
         rank = None
-        if live and blog_id:
+        if live and blog_id and len(rows) < LIVE_MAX:
+            # ★ 순위 조회는 검색어당 네트워크 1회다. 상한 없이 돌면 요청이 통째로 타임아웃되고
+            #   (2026-08-17 실측: 12개 조회에 502) 화면이 빈손으로 돌아온다.
+            #   여기서 못 잰 것은 '모름'으로 남는다 — 빈칸이 거짓보다 낫다.
             try:
                 from app.services import blogrank as _br
                 r = _br.blog_rank(kw, blog_id) or {}
