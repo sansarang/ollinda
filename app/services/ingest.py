@@ -365,7 +365,14 @@ def ingest_upload(tenant: Tenant, files: list[tuple[bytes, str]], note: str,
                 p.payload["pattern_learning"] = _pattern_used   # 패턴 사용 여부·신호(효과 비교용 P4)
             from app import llm as _llm
             if _llm.LAST_ROUTE.get("vision"):
-                p.payload["vision_route"] = dict(_llm.LAST_ROUTE["vision"])   # 폴백 기록(원가 추적)                          # GEO(AI검색 준비) 점수 — 블로그만(B2)
+                p.payload["vision_route"] = dict(_llm.LAST_ROUTE["vision"])   # 폴백 기록(원가 추적)
+            # ★ 2026-08-17 — 본문 경로도 남긴다. 이게 없어서 '어느 모델이 이 글을 썼는지'를
+            #   사후에 확인할 수 없었다. Solar 전환 검증 중에 발견 — 라우팅을 바꿔놓고도
+            #   실제로 그 경로로 갔는지 증명할 방법이 payload에 없으면 대조가 성립하지 않는다
+            #   (헌법 2번: 존재가 아니라 '사용' 기준으로 대조한다).
+            if _llm.LAST_ROUTE.get("body"):
+                p.payload["body_route"] = dict(_llm.LAST_ROUTE["body"])
+                                                                              # GEO(AI검색 준비) 점수 — 블로그만(B2)
             p.payload["geo_audit"] = seo.geo_audit(
                 "blog", p.payload, name=tenant.name, industry=tenant.industry,
                 region=tenant.region or "", biz_type=getattr(tenant, "biz_type", "local") or "local")

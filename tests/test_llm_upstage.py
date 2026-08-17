@@ -154,3 +154,16 @@ def test_짧은_보조호출은_라우팅을_타지_않는다():
             idx = src.splitlines().index(line)
             seg = "\n".join(src.splitlines()[idx:idx + 4])
             assert "task=" not in seg, "짧은 판정 호출이 라우팅을 탄다(느려진다)"
+
+
+def test_본문_경로가_payload에_기록된다():
+    """★ 라우팅을 바꿔놓고도 '실제로 그 경로로 갔는지'를 증명할 수 없으면 대조가 성립하지 않는다.
+    2026-08-17 Solar 검증 중 발견 — vision_route만 남고 body_route가 없어
+    어느 모델이 그 글을 썼는지 사후 확인이 불가능했다(헌법 2번: 사용 기준 대조).
+    """
+    import inspect
+
+    from app.services import ingest
+    src = inspect.getsource(ingest)
+    assert 'payload["body_route"]' in src, "본문 경로가 payload에 안 남는다(사후 검증 불가)"
+    assert 'LAST_ROUTE.get("body")' in src
