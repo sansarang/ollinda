@@ -69,6 +69,12 @@ def start() -> None:
         #     아침 생성을 죽이는 것이 면역계가 만드는 새 사고다.
         sch.add_job(_immune_nightscan, "cron", hour=3, minute=0,
                     id="immune_nightscan", replace_existing=True)
+        # 🎖 코드 수정 사령관(2026-08-17 사장님 지시) — 새벽 3시 30분, 면역 스캔 직후.
+        #   골든을 돌려 계약이 깨졌는지 보고, 깨졌으면 **수정안을 만들어 대기시킨다.**
+        #   코드는 바뀌지 않는다 — 사람이 승인하고 배포할 때만 바뀐다(L3 영구 금지).
+        #   생성이 도는 낮 시간을 피한다: 골든 전체 실행이 CPU를 오래 잡는다.
+        sch.add_job(_commander_sweep, "cron", hour=3, minute=30,
+                    id="commander_sweep", replace_existing=True)
         # 🎯 빈 질문 선점(2026-08-06) — 새벽 5시. 지면 정찰(4시) 뒤, 빈자리 판정(6시) 앞.
         #   빈자리는 시간이 지나면 남이 채운다 — 주기적으로 다시 훑어야 의미가 있다.
         sch.add_job(_vacantq_nightly, "cron", hour=5, minute=0,
@@ -184,6 +190,26 @@ def _fresh_index_check() -> None:
             watchtower.daily_summary()
     except Exception:
         logging.getLogger("shopcast.watchtower").exception("[watchtower] 크론 실패")
+
+
+def _commander_sweep() -> None:
+    """🎖 사령관 주기 — 골든이 깨졌으면 수정안을 만들어 대기시킨다(코드는 안 바뀐다).
+
+    ★ 생성 중이면 건너뛴다. 골든 전체 실행이 CPU를 오래 잡아 진행 중 생성을 느리게 한다
+      (배포가 생성을 죽인 것과 같은 계열 — 무거운 작업은 한가할 때만).
+    """
+    try:
+        from app.agents import commander as _cm
+        for t in db.list_tenants():
+            pr = db.get_gen_progress(getattr(t, "id", "")) or {}
+            if (pr.get("status") or "") == "running":
+                logging.getLogger("shopcast.agents").info("[commander] 생성 중 — 이번 주기 건너뜀")
+                return
+        r = _cm.sweep()
+        logging.getLogger("shopcast.agents").info(
+            "[commander] 신호 %s건 · 수정안 %s건", r.get("signals"), r.get("drafted"))
+    except Exception:
+        logging.getLogger("shopcast.agents").exception("[commander] 주기 실패")
 
 
 def _immune_nightscan() -> None:

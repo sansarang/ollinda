@@ -127,6 +127,98 @@ def verify() -> dict:
         return {"ok": False, "output": repr(e)[:300]}
 
 
+def _test_target(test_id: str) -> str:
+    """실패한 테스트 → 고쳐야 할 소스 파일 추정. tests/test_X.py → app/**/X.py
+
+    ★ 추정이 틀리면 제안이 엉뚱해진다. 그래서 **찾은 파일만** 돌려주고,
+      못 찾으면 빈 문자열을 준다(추측으로 아무 파일이나 고르지 않는다).
+    """
+    import glob
+    m = re.match(r"tests/test_([a-z0-9_]+)\.py", (test_id or "").split("::")[0])
+    if not m:
+        return ""
+    stem = m.group(1)
+    for pat in (f"app/services/{stem}.py", f"app/agents/{stem}.py",
+                f"app/generators/{stem}.py", f"app/{stem}.py"):
+        if os.path.exists(pat):
+            return pat
+    hits = [p for p in glob.glob(f"app/**/{stem}.py", recursive=True)]
+    return hits[0] if len(hits) == 1 else ""
+
+
+def draft(signal: dict) -> dict:
+    """결함 신호 → 수정안 초안. **LLM은 여기서만 쓴다.**
+
+    ★ 실제 파일을 고치지 않는다. 패치 텍스트만 만들어 대기열에 올린다.
+      코드가 바뀌는 순간은 사람이 승인하고 배포할 때뿐이다.
+    ★ 실패한 테스트 본문을 같이 준다 — '무엇을 지켜야 하는지'가 테스트에 적혀 있고,
+      그걸 안 보면 게이트를 끄는 방향으로 고치게 된다(가장 위험한 실패 모드).
+    """
+    if (signal or {}).get("kind") != "golden_fail":
+        return {"ok": False, "error": "지금은 골든 실패만 다룬다"}
+    tid = (signal.get("detail") or [""])[0]
+    src_path = _test_target(tid)
+    if not src_path:
+        journal.write(AGENT, f"수정안 보류 — 대상 파일을 특정 못 함({tid})",
+                      why="추측으로 아무 파일이나 고치지 않는다.", kind="note")
+        return {"ok": False, "error": "대상 파일 불명"}
+    if forbidden_hit([src_path]):
+        journal.write(AGENT, f"수정안 거부 — 금지 구역 {src_path}", why=tid, kind="alert")
+        return {"ok": False, "error": "금지 구역"}
+    test_path = tid.split("::")[0]
+    try:
+        src = open(src_path, encoding="utf-8").read()[:12000]
+        tst = open(test_path, encoding="utf-8").read()[:8000]
+    except Exception as e:
+        return {"ok": False, "error": f"읽기 실패 {repr(e)[:80]}"}
+
+    prompt = (
+        "아래 골든 테스트가 실패한다. **테스트가 지키려는 계약을 그대로 지키면서** 소스를 고쳐라.\n\n"
+        "[절대 금지]\n"
+        "- 테스트를 고치는 것(테스트는 계약이다 — 계약을 바꿔 통과시키면 그건 수정이 아니다)\n"
+        "- 게이트·검증을 끄거나 느슨하게 만드는 것\n"
+        "- 요청과 무관한 부분을 손대는 것\n\n"
+        "[출력 형식] 다음 두 줄만. 설명·머리말 금지.\n"
+        "이유: (한 문장 — 무엇이 왜 틀렸나)\n"
+        "수정: (바꿀 코드 전체가 아니라 **바뀌는 줄만**, 앞뒤 한 줄씩 문맥 포함)\n\n"
+        f"[실패한 테스트] {tid}\n```python\n{tst}\n```\n\n"
+        f"[소스 {src_path}]\n```python\n{src}\n```\n")
+    try:
+        from app import llm as _llm
+        out = _llm.call_task("aux", prompt, max_tokens=1500)
+    except Exception as e:
+        journal.write(AGENT, "수정안 작성 실패", why=repr(e)[:150], kind="alert")
+        return {"ok": False, "error": repr(e)[:150]}
+    if not (out or "").strip():
+        return {"ok": False, "error": "빈 응답"}
+    m = re.search(r"이유\s*:\s*(.+)", out)
+    why = (m.group(1).strip() if m else tid)[:300]
+    return order(title=f"골든 실패 수정 — {tid.split('::')[-1]}",
+                 why=why, files=[src_path], patch=out, kind="golden_fix")
+
+
+def sweep() -> dict:
+    """결함을 훑고 수정안까지 만든다 — 사령관의 한 주기.
+
+    ★ 한 번에 하나만 만든다. 여러 제안이 동시에 대기하면 사람이 판단을 못 한다.
+    """
+    sigs = scan()
+    if not sigs:
+        journal.write(AGENT, "이상 없음 — 골든 전체 통과", kind="note")
+        return {"ok": True, "signals": 0, "drafted": 0}
+    made = 0
+    for s in sigs:
+        if s.get("kind") != "golden_fail":
+            journal.write(AGENT, f"신호 감지 — {s['why']}",
+                          why=str(s.get("detail"))[:200], kind="alert")
+            continue
+        r = draft(s)
+        if r.get("ok"):
+            made += 1
+            break                       # 한 주기에 하나만
+    return {"ok": True, "signals": len(sigs), "drafted": made}
+
+
 def order(title: str, why: str, files: list, patch: str, kind: str = "fix") -> dict:
     """수정안을 승인 대기열에 올린다. 금지 구역·크기 제한을 여기서 강제한다."""
     hit = forbidden_hit(files)
