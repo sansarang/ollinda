@@ -5867,7 +5867,11 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 if ic not in seen:
                     seen.add(ic)
                     badges += f"<span>{ic}</span>"
-            thumb_html = (f"<img src='{thumb}' onerror=\"this.onerror=null;this.outerHTML='<div class=\\'w-14 h-14 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center text-2xl text-white flex-shrink-0\\'>✨</div>'\" class='w-14 h-14 rounded-xl object-cover flex-shrink-0 bg-slate-100'>" if thumb
+            # ★ 2026-08-18 사장님: "보기가 안 열린다" — 서버 렌더는 0.119초로 빨랐다(실측).
+            #   병목은 브라우저였다: 세트가 36개까지 쌓였는데 썸네일에 지연로드가 없어
+            #   화면 밖 카드까지 전부 한꺼번에 받았다(브라우저 동시연결 6개 → 긴 대기 줄).
+            #   보이는 것만 받게 하면 첫 화면이 즉시 뜬다.
+            thumb_html = (f"<img src='{thumb}' loading='lazy' decoding='async' width='56' height='56' onerror=\"this.onerror=null;this.outerHTML='<div class=\\'w-14 h-14 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center text-2xl text-white flex-shrink-0\\'>✨</div>'\" class='w-14 h-14 rounded-xl object-cover flex-shrink-0 bg-slate-100'>" if thumb
                           else "<div class='w-14 h-14 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center text-2xl text-white flex-shrink-0'>✨</div>")
             _cards.append(
                 "<div class='group flex items-center gap-3 p-2.5 rounded-2xl border border-slate-100 bg-white hover:shadow-md hover:border-indigo-200 hover:-translate-y-0.5 transition-all'>"
@@ -9085,7 +9089,10 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
     tenant = db.get_tenant(pieces[0].tenant_id)
     sname = (tenant.name if tenant else "내 가게")
     handle = (_re.sub(r"[^a-zA-Z0-9]", "", sname) or "mystore").lower()[:15]
-    first_img = next((f"/dl/{asset_id}/{os.path.basename(im)}" for im in imgs if im), "")
+    # ★ 2026-08-18 — 대표 이미지가 /dl(원본 4~5MB)이었다. derived.py가 "원본을 화면에 쓰지
+    #   않는다"고 못 박아놓고 이 자리만 원본을 썼다. 인스타·X 미리보기 카드가 전부 이걸 쓴다.
+    #   /web은 1400px 파생본이고 없으면 그 자리에서 만든다.
+    first_img = next((f"/web/{asset_id}/{os.path.basename(im)}" for im in imgs if im), "")
     wrap = "bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg transition-shadow"
 
     def _av():

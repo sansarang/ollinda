@@ -130,3 +130,34 @@ def test_bulk_query_returns_same_shape():
     finally:
         with db._conn() as c:
             c.execute("DELETE FROM content_pieces WHERE tenant_id=?", (tid,))
+
+
+def test_목록_썸네일이_지연로드된다():
+    """★ 2026-08-18 사장님: "내 콘텐츠 보기가 안 열린다."
+    서버 렌더는 0.119초로 빨랐다(실측: list_sets 0.004 · 카드쿼리 36건 0.083 · 상세 0.021).
+    병목은 브라우저였다 — 세트가 36개인데 썸네일에 지연로드가 없어 화면 밖 카드까지
+    전부 한꺼번에 받았다(브라우저 동시연결 6개 → 대기 줄).
+    """
+    import inspect
+
+    from app import main
+    src = inspect.getsource(main)
+    i = src.find("thumb_html = ")
+    assert i > 0
+    seg = src[i:i + 400]
+    assert "loading='lazy'" in seg, "목록 썸네일이 지연로드되지 않는다(36개를 한꺼번에 받는다)"
+    assert "width=" in seg and "height=" in seg, "치수가 없어 레이아웃이 흔들린다(CLS)"
+
+
+def test_상세_대표이미지가_원본이_아니다():
+    """derived.py가 'WEB_PX=1400 — 원본(4~5MB)을 화면에 쓰지 않는다'고 못 박아놨는데
+    대표 이미지만 /dl(원본)을 쓰고 있었다. 인스타·X 미리보기가 전부 이걸 쓴다."""
+    import inspect
+
+    from app import main
+    src = inspect.getsource(main._result_html)
+    i = src.find("first_img = ")
+    assert i > 0
+    seg = src[i:i + 200]
+    assert "/web/" in seg, "대표 이미지가 원본(/dl)이다 — 폰 사진은 4~5MB다"
+    assert "/dl/" not in seg.split("\n")[0]
