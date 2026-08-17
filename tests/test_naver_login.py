@@ -49,10 +49,13 @@ def test_unconfigured_hides_all_naver_buttons(monkeypatch):
 
 
 def test_configured_shows_buttons_kakao_first(monkeypatch):
+    """★ 2026-08-17 대행 단일 전환 — 랜딩 히어로·최종 CTA에서 소셜 로그인 버튼을 통째로
+    뺐다(주 행동이 가입에서 상담으로 바뀜). 그래서 '랜딩에 네이버 버튼 2개' 계약은
+    더 이상 성립하지 않는다. 로그인·가입 **페이지**의 계약은 그대로 지킨다 —
+    거기는 기존 회원이 들어오는 문이고, 순서(카카오 → 네이버 → 구글)가 살아 있어야 한다."""
     _set(monkeypatch)
-    h = landing.render()
-    assert h.count("/login/naver") >= 2, "히어로·최종 CTA에 네이버 버튼이 있어야 한다"
-    assert h.index("/login/kakao") < h.index("/login/naver"), "순서는 카카오 → 네이버"
+    assert "/login/naver" not in landing.render(), \
+        "랜딩에 소셜 로그인 버튼이 되살아났다(대행 전환 회귀)"
     lg = client.get("/login").text
     assert "/login/naver" in lg and lg.index("/login/kakao") < lg.index("/login/naver")
     su = client.get("/signup").text

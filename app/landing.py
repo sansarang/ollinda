@@ -144,7 +144,7 @@ _BODY_OPEN = """</head><body class="bg-white text-slate-800 overflow-x-hidden pb
 _HEAD_META = _HEAD
 _HEAD = _HEAD_META + _BODY_OPEN
 
-_FOOT = """
+_FOOT_TPL = """
 <script>
 function omCopy(text){if(navigator.clipboard&&navigator.clipboard.writeText){return navigator.clipboard.writeText(text);}
  return new Promise(function(res,rej){var ta=document.createElement('textarea');ta.value=text;ta.setAttribute('readonly','');ta.style.position='fixed';ta.style.top='0';ta.style.opacity='0';document.body.appendChild(ta);ta.focus();ta.select();try{ta.setSelectionRange(0,text.length);}catch(e){}var ok=false;try{ok=document.execCommand('copy');}catch(e){}document.body.removeChild(ta);ok?res():rej();});}
@@ -414,14 +414,14 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
      box.innerHTML='<div class="card p-5 text-center">'
       +'<div class="inline-block bg-amber-50 text-amber-700 text-[11px] font-bold px-2.5 py-1 rounded-full mb-2">안내</div>'
       +'<p class="text-slate-900 font-extrabold text-base mb-1">무료 미리보기 2회를 모두 사용하셨어요</p>'
-      +'<p class="text-slate-500 text-xs mb-4">이 기기(네트워크)에서 이미 2번 만들어보셨어요. 가입하시면 <b class="text-slate-700">무료 2회가 새로</b> 생기고, 글과 영상 전부 받으실 수 있어요.</p>'
-      +'<a href="/login/kakao" class="block py-3 rounded-xl font-extrabold mb-2" style="background:#FEE500;color:#191600">카카오로 3초 가입</a>'
-      +'<a href="/login/google" class="block py-3 rounded-xl font-bold bg-white border border-slate-200 text-slate-700">구글로 가입</a></div>';
+      +'<p class="text-slate-500 text-xs mb-4">이 기기(네트워크)에서 이미 2번 만들어보셨어요. 맛보기는 여기까지고, <b class="text-slate-700">완성본과 영상은 맡겨주시면</b> 저희가 만들어 보내드려요.</p>'
+      +'<a href="__CONSULT__" class="block py-3 rounded-xl font-extrabold text-white bg-indigo-600">__CONSULT_LABEL__</a>'
+      +'<p class="text-xs text-slate-400 mt-2">__CONSULT_SUB__</p></div>';
      box.scrollIntoView({behavior:'smooth',block:'nearest'});return;}
    let cta;
-   if(d.limit){cta='<a href="#pricing" class="block py-3 rounded-xl font-bold bg-indigo-600 text-white">요금제 보기 →</a>';}
-   else{cta='<a href="/login/kakao" class="block py-3 rounded-xl font-extrabold mb-2" style="background:#FEE500;color:#191600">카카오로 3초 가입</a>'
-        +'<a href="/login/google" class="block py-3 rounded-xl font-bold bg-white border border-slate-200 text-slate-700">구글로 가입</a>';}
+   if(d.limit){cta='<a href="#pricing" class="block py-3 rounded-xl font-bold bg-indigo-600 text-white">요금 보기 →</a>';}
+   else{cta='<a href="__CONSULT__" class="block py-3 rounded-xl font-extrabold text-white bg-indigo-600">__CONSULT_LABEL__</a>'
+        +'<p class="text-xs text-slate-400 mt-2">__CONSULT_SUB__</p>';}
    box.innerHTML='<div class="card p-5 text-center">'
     +'<p class="text-slate-900 font-bold mb-1">'+esc(d.message||'가입하면 바로 만들어드려요!')+'</p>'
     +'<p class="text-slate-500 text-xs mb-4">가입하시고 사진만 올리시면 글과 영상이 함께 만들어집니다.</p>'
@@ -438,6 +438,19 @@ document.querySelectorAll('[data-count]').forEach(el=>cu.observe(el));
    if(d.ok)cf.reset();}catch(e){document.getElementById('contactMsg').textContent='전송 실패';}
   btn.textContent='문의하기';});})();
 </script></body></html>"""
+
+
+def _foot() -> str:
+    """공통 스크립트 꼬리 — 상담 링크 자리표시자를 실제 경로로 채워 반환한다.
+
+    `_FOOT_TPL`은 모듈 상수(순수 JS 문자열)라 f-string 보간을 못 쓴다.
+    그렇다고 모듈 로드 시 한 번 치환해두면 `consult_href()`를 갈아끼워도 안 바뀌어
+    테스트가 실물을 못 본다 — 그래서 **부를 때마다** 채운다(단일 관문 유지).
+    """
+    return (_FOOT_TPL
+            .replace("__CONSULT_LABEL__", consult_label())
+            .replace("__CONSULT_SUB__", consult_sub())
+            .replace("__CONSULT__", consult_href()))
 
 
 def _nav() -> str:
@@ -604,13 +617,20 @@ def _hero() -> str:
        실측: 결과 화면에 가입 버튼이 한 화면에 7개(모바일)·6개(PC)까지 겹쳤다.
        오늘 결과 CTA를 새로 넣으면서 원래 있던 버튼을 안 지운 탓이다.
        업계 권장은 '페이지당 주요 CTA 하나' — 선택지가 많으면 사람은 고르는 대신 멈춘다. -->
-  <div class="reveal mt-6 flex flex-col items-center gap-3 hide-on-result">
-   <p class="text-xs text-slate-400">사진까지 올리면 <b class="text-slate-500">블로그 글 도입부</b>도 만들어 드려요 ·
-    약 2분 · 완성본과 영상은 가입 후 무료 2회</p>
-   <div class="flex flex-col sm:flex-row gap-2 items-center mt-2">
-    <span class="text-sm text-slate-400">이미 마음 정하셨다면</span>
-    <a href="/login/kakao" class="flex items-center justify-center px-6 py-2.5 rounded-xl font-bold text-sm" style="background:#FEE500;color:#191600">카카오로 무료 시작</a>{_naver_hero_btn()}
-    <a href="/login/google" class="flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl font-bold text-sm bg-white border border-slate-200 text-slate-700">{_GOOGLE_G} 구글로 시작</a></div>
+  <!-- ★ 2026-08-17 대행 단일 전환 — 여기 있던 '카카오로 무료 시작 / 구글로 시작'을 뺐다.
+       대행 고객은 가입해서 할 일이 없다. 가입시키면 빈 화면 앞에 앉혀두는 꼴이고,
+       실제로 그렇게 가입한 3명이 전원 사진 0장·생성 0건이었다.
+       주 행동은 '상담', 보조는 '샘플 먼저 보기'다. 링크는 consult_href() 단일 관문. -->
+  <div class="reveal mt-7 flex flex-col items-center gap-2 hide-on-result">
+   <a href="{consult_href()}" {_consult_attrs()}
+    class="w-full sm:w-auto text-center px-10 py-4 rounded-2xl font-extrabold text-lg text-white
+    bg-indigo-600 hover:bg-indigo-700 transition shadow-lg shadow-indigo-200">사진 보내고 상담받기</a>
+   <p class="text-xs text-slate-400">{consult_sub()}</p>
+   <div class="mt-4 pt-4 border-t border-slate-100 w-full max-w-sm text-center">
+    <p class="text-sm text-slate-500 mb-2">먼저 보고 결정하고 싶으세요?</p>
+    <a href="#try" class="inline-block px-6 py-2.5 rounded-xl font-bold text-sm bg-white border border-slate-200 text-slate-700 hover:border-slate-300 transition">내 사진으로 샘플 받아보기</a>
+    <p class="text-[11px] text-slate-400 mt-2">가입 없이 · 약 2분 · 블로그 글 도입부를 실제로 만들어 보여드려요</p>
+   </div>
   </div>
   <p class="reveal mt-4 text-sm text-slate-500 hide-on-result">이미 회원이면 <a href="/login" class="inline-block px-1 py-1 text-indigo-600 font-bold underline underline-offset-4">회원 로그인</a></p>
   <!-- ★ 2026-08-13: 순위진단·무료체험 위젯은 두 번째 화면(_try)으로 옮겼다.
@@ -710,29 +730,20 @@ def _hero() -> str:
    var _nm=(document.getElementById('rc_name').value||'').trim().replace(/[<>]/g,'');
    var _gap=((d.missing||[])[0]||{{}}).keyword||'';
    var _hasPost=(d.caught||[]).length>0;
+   // 2026-08-17 대행 전환 — '무료 가입하고 …'에서 '맡기고 …'로. 파는 것이 도구가 아니라 대행이다.
    var _cta = _hasPost
-     ? (_gap? '무료 가입하고 ‘'+_gap+'’ 잡는 글 받기 →' : '무료 가입하고 '+_nm+' 다음 글 받기 →')
-     : (_nm? '무료 가입하고 '+_nm+' 첫 글 받기 →' : '무료 가입하고 내 가게 첫 글 받기 →');
-   // ★ 2026-08-14 사장님 지시 — 버튼 하나로 바로 가입. 결과를 본 직후가 가장 뜨거운 순간이고,
-   //   비가입 미리보기는 흐린 도입부뿐이라 거기서 끝나면 아무것도 안 남는다.
-   //   ★ 약속을 지키려면 방금 알아낸 가게 정보를 함께 넘겨야 한다 — 안 그러면 가입 직후
-   //     "딱 3가지만 알려주세요" 화면이 나와서 '이 글 받기'가 거기서 끊긴다(signup_carry).
-   var _q = new URLSearchParams();
-   if(_nm) _q.set('nm', _nm);
-   var _rg=(document.getElementById('rc_region')||{{}}).value||'';
-   var _in=(document.getElementById('rc_ind')||{{}}).value||'';
-   if(_rg) _q.set('rg', _rg);
-   if(_in) _q.set('ind', _in);
-   if(window.__rcAddr) _q.set('ad', window.__rcAddr);
-   if(d.blog_id) _q.set('blog', d.blog_id);
-   if(_gap) _q.set('kw', _gap);
-   var _href='/login/kakao?'+_q.toString();
-   window.__signupHref=_href;          // AI 제목 카드가 같은 링크(가게 정보 포함)를 재사용한다
+     ? (_gap? '‘'+_gap+'’ 잡는 글, 맡기고 받아보기 →' : _nm+' 다음 글, 맡기고 받아보기 →')
+     : (_nm? _nm+' 첫 글, 맡기고 받아보기 →' : '내 가게 첫 글, 맡기고 받아보기 →');
+   // ★ 2026-08-17 대행 전환 — 여기서 가게 정보(nm·rg·ind·blog·kw)를 쿼리로 모아
+   //   가입 링크에 실어 보내던 블록을 지웠다(signup_carry). 상담은 전화·카톡이라
+   //   쿼리를 실을 수 없고, 대신 방금 본 결과를 사장님이 그대로 말씀하시면 된다.
+   //   리드는 아래 이메일 회수 박스가 받는다 — 그쪽이 대행에서 더 중요한 경로다.
    o.innerHTML='<b class="text-slate-900">'+d.headline+'</b>'+rows
      +'<div class="text-slate-400 mt-2">'+d.subline+'</div>'
-     +'<a href="'+_href+'" class="block w-full text-center bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl px-4 py-3.5 mt-4 font-extrabold text-[15px] leading-snug transition shadow-lg shadow-indigo-200">'+_cta+'</a>'
-     +'<div class="text-center text-xs text-slate-400 mt-1.5">카카오로 3초 · 카드 없이 · 무료 2회 · '
-     +'<a href="'+_href.replace("/login/kakao","/login/google")+'" class="underline">구글로</a></div>'
+     // ★ 2026-08-17 대행 전환 — 진단 결과 직후가 가장 뜨거운 지점이다. 여기서 가입시키면
+     //   그 사람이 만나는 다음 화면은 빈 대시보드다. 다음 행동은 '연락'이어야 한다.
+     +'<a href="{consult_href()}" onclick="trackEv(\\'rc_consult\\',{{}})" class="block w-full text-center bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl px-4 py-3.5 mt-4 font-extrabold text-[15px] leading-snug transition shadow-lg shadow-indigo-200">'+_cta+'</a>'
+     +'<div class="text-center text-xs text-slate-400 mt-1.5">{consult_sub()}</div>'
      // ★ B. 이메일 회수(2026-08-14) — 진단은 봤는데 가입 안 하는 사람이 대다수다.
      //   대화형 도구의 높은 전환은 '결과를 받아보시겠어요?' 지점에서 나온다(조사).
      //   가입(계정 연동)보다 이메일 한 줄이 마찰이 훨씬 낮고, 드립 메일이 이미 돈다.
@@ -903,8 +914,9 @@ def _flow() -> str:
 
     return (f"<section class='bg-[#F9FAFB] py-16'><div class='max-w-6xl mx-auto px-5'>"
             f"<h2 class='reveal text-2xl sm:text-3xl font-bold text-center text-slate-900 mb-2'>"
-            f"가입하시면 이렇게 <span class='text-indigo-600'>굴러갑니다</span></h2>"
-            f"<p class='reveal text-center text-slate-500 mb-10'>사진만 올리시면 나머지는 올린다가 합니다.</p>"
+            # 2026-08-17 대행 전환 — '가입하시면'은 셀프서비스 언어다. 맡기는 사람의 말로 바꾼다.
+            f"맡기시면 이렇게 <span class='text-indigo-600'>굴러갑니다</span></h2>"
+            f"<p class='reveal text-center text-slate-500 mb-10'>사진만 보내주시면 나머지는 저희가 합니다.</p>"
             f"<div class='grid sm:grid-cols-2 lg:grid-cols-4 gap-4 items-start'>{s1}{s2}{s3}{s4}</div>"
             f"</div></section>")
 
@@ -927,9 +939,9 @@ def _try() -> str:
        이 섹션은 이제 '사진 올려서 실제로 만들어보기' 하나만 한다. -->
   <div class="reveal text-center mb-8">
    <span class="inline-block px-3 py-1 rounded-full bg-[#EEF2FF] text-indigo-600 text-xs font-bold mb-3">가입 없이 · 무료</span>
-   <h2 class="text-2xl sm:text-3xl font-bold text-slate-900">사진 올려서 한번 만들어보세요</h2>
-   <p class="text-slate-500 text-sm mt-2">업종만 고르시면 <b class="text-slate-800">사장님 가게 글의 앞부분</b>을
-    실제로 만들어서 보여드려요 · 2분쯤 걸려요</p></div>
+   <h2 class="text-2xl sm:text-3xl font-bold text-slate-900">맡기기 전에, 먼저 보세요</h2>
+   <p class="text-slate-500 text-sm mt-2">사진을 올려주시면 <b class="text-slate-800">사장님 가게 글의 앞부분</b>을
+    실제로 만들어서 보여드려요 · 2분쯤 걸려요 · 가입도 결제도 필요 없습니다</p></div>
   <div class="reveal max-w-2xl mx-auto">{_hero_demo_card()}</div>
  </div>
  <script>
@@ -956,11 +968,12 @@ def _try() -> str:
    //   결과 CTA가 만든 링크에 이미 kw가 들어 있어, 뒤에 또 붙이면 같은 키가 두 번이 되고
    //   서버는 앞의 값을 읽는다. 고른 제목이 무시되면 3개를 보여준 의미가 없다.
    //   → 기존 kw를 지우고 '고른 제목'으로 다시 세운다.
-   var _u=new URL((window.__signupHref||'/login/kakao'), location.origin);
+   // ★ 2026-08-17 대행 전환 — 제목을 kw로 실어 가입시키던 링크를 상담으로 바꿨다.
+   //   전화·카톡에는 제목을 실어 보낼 수 없다. 그래서 고른 제목을 화면에 남겨
+   //   사장님이 상담에서 그대로 말씀하실 수 있게 한다(아래 안내 문구와 한 쌍).
    var lis=d.titles.map(function(t){{
      var tx=t.replace(/[<>]/g,'');
-     _u.searchParams.set('kw', tx);          // set = 있으면 갈아끼운다
-     var href=_u.pathname+'?'+_u.searchParams.toString();
+     var href='{consult_href()}';
      return '<a href="'+href+'" onclick="trackEv(\\'title_click\\',{{m:\\''+tx.replace(/\\'/g,'').slice(0,40)+'\\'}})" class="flex items-start gap-2 bg-white border border-slate-200 '
        +'hover:border-indigo-400 hover:bg-indigo-50 rounded-xl px-3 py-2.5 cursor-pointer transition">'
        +'<span class="text-indigo-500 mt-0.5">✎</span>'
@@ -968,7 +981,7 @@ def _try() -> str:
        +'<span class="text-xs text-indigo-500 font-bold whitespace-nowrap mt-0.5">이 글로 →</span></a>';}}).join('');
    box.innerHTML='<div class="bg-[#F9FAFB] border border-slate-200 rounded-2xl p-4">'
      +'<div class="text-xs font-bold text-indigo-600 mb-1">AI가 방금 지은 — 내 가게가 지금 쓰면 좋을 글</div>'
-     +'<div class="text-[11px] text-slate-400 mb-2">누르시면 그 글부터 무료로 만들어드려요</div>'
+     +'<div class="text-[11px] text-slate-400 mb-2">마음에 드는 걸 누르고 <b class="text-slate-600">그 제목을 말씀해 주세요</b> — 그 글부터 씁니다</div>'
      +'<div class="space-y-2">'+lis+'</div>'
      +'<div class="text-[11px] text-slate-400 mt-2">없는 가격·성능은 넣지 않았어요</div></div>';
   }}catch(e){{ box.className='hidden'; }}
@@ -1018,7 +1031,7 @@ def _hero_demo_card() -> str:
      <button id="d_submit" class="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition disabled:opacity-40 disabled:cursor-not-allowed">실제로 만들어보기</button>
      <div id="d_submit_hint" class="hidden text-center text-xs text-slate-400"></div></form>
     <div id="demoResult" class="mt-4"></div>
-    <p class="text-center text-slate-400 text-xs mt-2">가입 안 하셔도 맛보기는 됩니다 · 가입하시면 <b class="text-slate-600">글과 영상 전부</b> 무료 2회</p>
+    <p class="text-center text-slate-400 text-xs mt-2">여기까지는 맛보기입니다 · <b class="text-slate-600">완성본과 영상</b>은 맡겨주시면 만들어 보내드려요</p>
    </div>"""
 
 
@@ -1253,12 +1266,17 @@ def _pricing() -> str:
         f"</div></section>")
 
 
-_QA = [("정말 사진만 올리면 되나요?", "네. 사진이랑 한 줄 설명만 주시면 됩니다. 사진 한 장만 있어도 자막과 목소리가 들어간 세로 영상까지 만들어 드려요."),
-       ("쿠팡·11번가 셀러도 되나요?", "네. '온라인 셀러'로 설정하면 글 마무리가 지도 대신 구매 링크/검색어로, 키워드가 지역명 대신 상품·후기 키워드로 자동 전환됩니다. (쿠팡은 직링크 정책상 '검색어 유도'를 권장)"),
-       ("제 SNS 비밀번호를 줘야 하나요?", "아니요. 공식 OAuth로 한 번만 권한을 허용하면 됩니다. 비밀번호는 저장하지 않습니다."),
-       ("네이버 블로그도 되나요?", "글·사진을 완성해 드리고, 임시저장된 글을 네이버에서 발행만 누르시면 됩니다. (네이버는 공식 발행 API가 없어 반자동)"),
-       ("업종이 특이해도 되나요?", "어떤 업종이든 AI가 맞춤 프로필을 자동 생성합니다."),
-       ("해지는 어떻게 하나요?", "언제든 해지할 수 있습니다. 문의하기(이메일 포함)로 요청하시면 바로 처리해 드리고, 해지 후 다음 결제일부터는 청구되지 않습니다. 이미 결제한 기간은 그대로 이용 가능합니다.")]
+# 대행 FAQ (2026-08-17 전환) — 실제로 맡기는 사장님이 묻는 것만.
+# ★ 건수는 적지 않는다. 아직 확정되지 않은 숫자다(정직 게이트). 상담에서 정한다고 그대로 쓴다.
+# ★ 순위 보장 질문은 반드시 남긴다 — 우리 실측이 1위도 사라진다고 말하고, 약관 6조와 같은 말이다.
+_QA = [("정말 사진만 보내면 되나요?", "네. 사진이랑 한 줄 설명만 주시면 됩니다. 나머지 — 글 쓰기, 사진 보정, 번호판 가리기, 영상 제작, 순위 확인까지 저희가 합니다. 사장님이 배우실 프로그램은 없습니다."),
+       ("사진은 어떻게 보내나요?", "카카오톡이나 이메일로 보내주시면 됩니다. 폰으로 찍은 사진 그대로 괜찮습니다. 보정과 번호판 가림은 저희가 합니다."),
+       ("한 달에 몇 건이나 올려주시나요?", "가게와 업종에 따라 다릅니다. 검색어의 경쟁 상황을 먼저 재보고 상담 때 정해 드립니다. 무작정 많이 쓰는 것보다 뜰 자리를 찾는 게 먼저입니다."),
+       ("상위노출을 보장해 주시나요?", "보장하지 않습니다. 저희 실측으로는 1위를 3주 지키던 글이 어느 날 사라지기도 합니다. 대신 <b>매일 순위를 재고, 내려가면 원인을 찾아 다시 씁니다.</b> 순위를 보장한다는 업체가 있다면 그쪽을 의심하셔야 합니다."),
+       ("네이버 계정 비밀번호를 드려야 하나요?", "아니요. <b>절대 받지 않습니다.</b> 글과 사진을 완성해 임시저장까지 해드리면 사장님이 발행 버튼만 누르시면 됩니다. (네이버는 공식 발행 API가 없어 이 방식이 유일합니다) 비밀번호를 달라는 대행업체는 사장님 계정을 통째로 위험에 빠뜨립니다."),
+       ("계약 기간이 묶이나요?", "아니요. 월 단위이고 언제든 해지하실 수 있습니다. 해지하시면 다음 결제일부터 청구되지 않고, 이미 결제한 기간은 그대로 이용하십니다."),
+       ("업종이 특이해도 되나요?", "됩니다. 업종을 미리 정해두지 않고, 그 가게의 검색어와 사진을 실제로 재서 맞춥니다."),
+       ("없는 얘기를 지어내지는 않나요?", "지어내지 않습니다. 사진과 사장님이 주신 정보로만 씁니다. 가격·성능·후기를 날조하지 않고, 모르는 것은 여쭤봅니다. 답이 없으면 지어내는 대신 사실 위주로 먼저 씁니다.")]
 
 
 def _docs_download() -> str:
@@ -1267,7 +1285,7 @@ def _docs_download() -> str:
         "<section class='bg-white py-14'><div class='max-w-3xl mx-auto px-5'>"
         "<div class='reveal bg-[#EEF2FF] border border-indigo-100 rounded-3xl p-8 text-center'>"
         "<h3 class='text-xl font-bold text-slate-900 mb-2'>천천히 검토하고 싶으세요?</h3>"
-        "<p class='text-sm text-slate-500 mb-6'>제품설명서와 1분 소개 영상을 받아서 보시고, 팀·가족과 상의 후 시작하셔도 됩니다.</p>"
+        "<p class='text-sm text-slate-500 mb-6'>서비스 안내서와 1분 소개 영상을 받아서 보시고, 가족과 상의 후 연락 주셔도 됩니다.</p>"
         "<div class='flex flex-wrap justify-center gap-3'>"
         f"<a href='{_v('/docs/guide.pdf')}' class='px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold transition'>"
         "📄 제품설명서 PDF 받기</a>"
@@ -1332,6 +1350,38 @@ def _kakao_contact_line() -> str:
     return "카카오톡 상담 버튼(우측 하단) · " if _kakao_channel_url() else ""
 
 
+def consult_href() -> str:
+    """상담 버튼이 실제로 갈 곳 — **랜딩의 모든 상담 CTA는 이 함수 하나만 쓴다.**
+
+    2026-08-17 대행 단일 전환. 사장님이 고른 주 경로는 카카오 채널인데
+    `KAKAO_CHANNEL_URL`이 아직 비어 있다(채널 미개설). 링크가 죽은 버튼이 되면
+    그게 곧 2026-08-09에 봉합한 '없는 상담 버튼을 안내하던 허위 카피'의 재발이다.
+    → 채널이 없으면 **전화로 대체**한다. 침묵 폴백이 아니다 —
+      버튼 문구(`consult_label`)도 같이 바뀌어 무엇이 열리는지 정확히 말한다.
+    채널을 만들면 env만 넣으면 즉시 카톡으로 바뀐다(코드 수정 불필요).
+    """
+    return _kakao_channel_url() or f"tel:{BIZ_PHONE.replace('-', '')}"
+
+
+def consult_label() -> str:
+    """상담 버튼 문구 — 실제로 열리는 것과 말이 어긋나면 안 된다."""
+    return "카톡으로 상담받기" if _kakao_channel_url() else "전화로 상담받기"
+
+
+def _consult_attrs() -> str:
+    """상담 링크의 태그 속성 — 카톡은 새 창, 전화는 같은 창(새 창이면 iOS에서 빈 탭이 남는다)."""
+    ev = "kakao_consult" if _kakao_channel_url() else "tel_consult"
+    tgt = ' target="_blank" rel="noopener"' if _kakao_channel_url() else ""
+    return f"{tgt} onclick=\"trackEv('{ev}',{{}})\""
+
+
+def consult_sub() -> str:
+    """상담 버튼 아래 보조 문구 — 열려 있는 경로만 나열한다(없는 경로를 적지 않는다)."""
+    ways = ["카카오톡"] if _kakao_channel_url() else []
+    ways += [BIZ_PHONE, CONTACT_EMAIL]
+    return " · ".join(ways)
+
+
 def _kakao_float() -> str:
     """우측 하단 카카오톡 상담 플로팅 버튼 — KAKAO_CHANNEL_URL 설정 시에만 렌더.
     모바일은 하단 스티키 CTA 위로 띄운다(safe-area 포함)."""
@@ -1347,14 +1397,24 @@ def _kakao_float() -> str:
 
 
 def _cta() -> str:
+    """마지막 CTA — 2026-08-17 대행 단일 전환으로 가입 버튼을 상담으로 교체.
+
+    여기까지 읽고 내려온 사람에게 회원가입을 시키면, 그 사람이 만나는 다음 화면은
+    빈 대시보드다. 대행에서 다음 행동은 '연락'이지 '가입'이 아니다.
+    """
     return f"""
 <section id="cta" class="bg-[#F5F3FF] py-28">
  <div class="max-w-3xl mx-auto px-5 text-center">
   <h2 class="reveal text-4xl sm:text-5xl font-bold leading-tight text-slate-900">오늘 사진 한 장,<br><span class="text-indigo-600">내일 손님으로</span></h2>
-  <p class="reveal mt-6 text-slate-500 text-lg">지금 시작하면 첫 콘텐츠 세트를 무료로 만들어 드립니다.</p>
-  <div class="reveal mt-10 flex flex-col sm:flex-row gap-3 justify-center">
-   <a href="/login/kakao" class="px-9 py-4 rounded-2xl font-extrabold text-lg" style="background:#FEE500;color:#191600">카카오로 시작하기</a>{_naver_cta_btn()}
-   <a href="/login/google" class="flex items-center justify-center gap-2 px-9 py-4 rounded-2xl font-extrabold text-lg bg-white border border-slate-200 text-slate-700"><svg width="22" height="22" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg> 구글로 시작하기</a></div>
+  <p class="reveal mt-6 text-slate-500 text-lg">사진만 보내주시면 나머지는 저희가 합니다.<br>
+   <b class="text-slate-700">사장님이 배우실 프로그램은 없습니다.</b></p>
+  <div class="reveal mt-10 flex flex-col items-center gap-3">
+   <a href="{consult_href()}" {_consult_attrs()}
+    class="w-full sm:w-auto text-center px-10 py-4 rounded-2xl font-extrabold text-lg text-white
+    bg-indigo-600 hover:bg-indigo-700 transition shadow-lg shadow-indigo-200">{consult_label()}</a>
+   <p class="text-sm text-slate-400">{consult_sub()}</p>
+   <a href="#try" class="mt-3 text-sm text-indigo-600 underline underline-offset-4">먼저 샘플부터 보고 싶어요</a>
+  </div>
  </div></section>"""
 
 
@@ -1430,13 +1490,15 @@ def _sticky_cta() -> str:
     터치 타겟 전체를 주소창 위로 띄운다. onclick의 location.href는 폴백(기본 내비 실패 대비),
     href는 그대로 유지(JS 꺼져도 동작)."""
     # ★ 진단 결과가 뜨면 숨긴다 — 결과 안의 주 CTA와 완전히 중복이다(2026-08-14).
+    # ★ 2026-08-17 대행 전환 — '무료로 시작하기'(가입)에서 상담으로. 링크는 consult_href() 단일 관문.
+    href = consult_href()
     return ('<div class="fixed bottom-0 left-0 right-0 z-50 sm:hidden hide-on-result bg-white/95 backdrop-blur border-t border-slate-200 px-3 pt-3" '
             'style="padding-bottom:max(28px,calc(env(safe-area-inset-bottom) + 12px))">'
-            '<a href="/login/kakao" '
-            'onclick="trackEv(\'sticky_cta\',{});window.location.href=\'/login/kakao\';return false;" '
+            f'<a href="{href}" '
+            f'onclick="trackEv(\'sticky_cta\',{{}});window.location.href=\'{href}\';return false;" '
             'class="block text-center py-3.5 rounded-xl font-extrabold text-white bg-indigo-600 '
             'active:scale-[.98] active:bg-indigo-700 transition" '
-            'style="-webkit-tap-highlight-color:rgba(79,70,229,.25)">무료로 시작하기</a></div>')
+            f'style="-webkit-tap-highlight-color:rgba(79,70,229,.25)">{consult_label()}</a></div>')
 
 
 def _naver_preview() -> str:
@@ -1661,7 +1723,7 @@ def render(visits: int = 0, today: int = 0) -> str:
             + _hero() + _flow() + _try()
             + _video() + _honesty()
             + _pricing() + _docs_download() + _faq() + _contact() + _cta() + _footer()
-            + _sticky_cta() + _kakao_float() + _FOOT)
+            + _sticky_cta() + _kakao_float() + _foot())
 
 
 def terms() -> str:
@@ -1688,7 +1750,7 @@ def terms() -> str:
   <p><b>제7조 (사업자 정보)</b> — {BIZ_CEO} · 사업자등록번호 {BIZ_REG_NO} ·
    {BIZ_ADDR} · 문의 {CONTACT_EMAIL}</p>
  </div></div>"""
-    return _HEAD + _nav() + body + _footer() + _FOOT
+    return _HEAD + _nav() + body + _footer() + _foot()
 
 
 def privacy() -> str:
@@ -1705,7 +1767,7 @@ def privacy() -> str:
   <p><b>5. 사업자</b> — {BIZ_CEO} · {BIZ_REG_NO} · {BIZ_ADDR}</p>
   <p><b>6. 문의</b> — {CONTACT_EMAIL}</p>
  </div></div>"""
-    return _HEAD + _nav() + body + _footer() + _FOOT
+    return _HEAD + _nav() + body + _footer() + _foot()
 
 
 def intro() -> str:
@@ -1727,7 +1789,7 @@ def intro() -> str:
   <p class="text-xs text-slate-400 mt-3"><a href="/login" class="underline">이미 회원이신가요? 로그인</a></p>
  </div>
 </div>"""
-    return _HEAD_META + _ga() + _BODY_OPEN + body + _FOOT
+    return _HEAD_META + _ga() + _BODY_OPEN + body + _foot()
 
 
 def _head_for(title: str, desc: str, path: str) -> str:
@@ -1788,7 +1850,7 @@ def guide_index() -> str:
     return (_head_for("실측 기록 — 네이버 검색 노출을 직접 재봤습니다 | 올린다",
                       "네이버 상위 글 339개 대조, 크롤러 로그 전수 분석, 순위 일일 추적. "
                       "추측이 아니라 직접 잰 값만 기록합니다.", "/guide")
-            + _ga() + _BODY_OPEN + _nav() + body + _footer() + _FOOT)
+            + _ga() + _BODY_OPEN + _nav() + body + _footer() + _foot())
 
 
 def guide_page(slug: str) -> str:
@@ -1826,7 +1888,7 @@ def guide_page(slug: str) -> str:
 </div>
 <script type="application/ld+json">{ld}</script>"""
     return (_head_for(f'{g["title"]} | 올린다', g["desc"], f"/guide/{slug}")
-            + _ga() + _BODY_OPEN + _nav() + body + _footer() + _FOOT)
+            + _ga() + _BODY_OPEN + _nav() + body + _footer() + _foot())
 
 
 def refund() -> str:
@@ -1850,4 +1912,4 @@ def refund() -> str:
   <p><b>제5조 (사업자 정보)</b> — {BIZ_CEO} · 사업자등록번호 {BIZ_REG_NO} ·
    {BIZ_ADDR} · 문의 {CONTACT_EMAIL}</p>
  </div></div>"""
-    return _HEAD + _nav() + body + _footer() + _FOOT
+    return _HEAD + _nav() + body + _footer() + _foot()

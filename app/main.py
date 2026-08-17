@@ -4825,7 +4825,7 @@ def _auth_page(title: str, inner: str) -> str:
     from app import landing
     return (landing._HEAD + "<div class='max-w-md mx-auto px-5 py-16'>"
             f"<a href='/' class='text-indigo-600 text-sm'>← 홈</a>"
-            f"<h1 class='text-2xl font-extrabold mt-3 mb-6'>{esc(title)}</h1>{inner}</div>" + landing._FOOT)
+            f"<h1 class='text-2xl font-extrabold mt-3 mb-6'>{esc(title)}</h1>{inner}</div>" + landing._foot())
 
 
 @app.get("/signup", response_class=HTMLResponse)
@@ -4989,7 +4989,7 @@ def login_get(request: Request):
         "<p class='text-sm text-slate-400 mt-4'>아직 회원이 아니신가요? <a href='/signup' class='text-indigo-600 font-semibold'>이메일로 회원가입</a></p>"
         "<a href='/' class='inline-block text-xs text-slate-400 mt-3 hover:text-slate-600'>← 홈으로</a>"
         "</div></div>")
-    return HTMLResponse(landing._HEAD + inner + landing._FOOT)
+    return HTMLResponse(landing._HEAD + inner + landing._foot())
 
 
 @app.post("/login")
@@ -5028,7 +5028,7 @@ def _subscriber_page(title: str, inner: str, wide: bool = False) -> str:
             "<div class='flex items-center justify-between mb-6'>"
             f"<a href='/' class='font-extrabold text-xl flex items-center gap-2'>{landing.LOGO}<span>올린다</span></a>"
             "<a href='/logout' class='text-sm text-slate-400'>로그아웃</a></div>"
-            + head + inner + "</div>" + landing._FOOT)
+            + head + inner + "</div>" + landing._foot())
 
 
 def _ensure_user_tenant(u: dict):
@@ -6068,7 +6068,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             # 🔍 노출 현황을 최상단에(CLAUDE.md: 첫 화면 1번 숫자는 발행량이 아니라 노출 상태).
             #   콘텐츠 목록·발행 이력은 그 아래로 — 순서만 바꾸고 기존 화면은 그대로 둔다.
             + "<div class='max-w-[1400px]'>" + banner + exposure_card + main_inner + "</div></main></div>"
-            + landing._FOOT)
+            + landing._foot())
     _resp = HTMLResponse(page)
     if _carry_filled:
         _resp.delete_cookie(_SC_COOKIE)

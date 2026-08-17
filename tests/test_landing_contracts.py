@@ -214,7 +214,11 @@ def test_landing_media_assets():
 def test_cancel_policy_present():
     h = _html()
     assert "언제든 해지" in h, "요금 섹션 해지 안내 누락"
-    assert any("해지는 어떻게" in q for q, _ in landing._QA), "FAQ 해지 항목 누락"
+    # 2026-08-17: FAQ 문항을 대행용으로 갈아끼우며 '해지는 어떻게'가 '계약 기간이 묶이나요'가
+    # 됐다. 지켜야 하는 것은 특정 문장이 아니라 **해지 조건 고지**(전자상거래법)다 — 의미로 본다.
+    _qa = " ".join(q + " " + a for q, a in landing._QA)
+    assert "해지" in _qa, "FAQ에 해지 관련 항목이 아예 없다"
+    assert "다음 결제일부터" in _qa, "FAQ가 해지 후 청구 시점을 말하지 않는다"
 
 
 # ── 랜딩 정직·구성 계약 (2026-08-13 사장님 지시 1~4순위) ─────────────
@@ -250,14 +254,23 @@ def test_proof_is_above_the_fold():
     assert "실측" in hero, "실측 표기가 없다(허위 양성 방지 문구 포함)"
 
 
-def test_primary_cta_is_no_signup_trial():
-    """첫 행동은 '가입'이 아니라 '체험'이다 — 가입 없이 되는 미리보기가 있는데
-    버튼이 묻혀 한 달 넘게 아무도 안 썼다(마지막 사용 2026-07-11)."""
+def test_primary_cta_is_consult_not_signup():
+    """2026-08-17 대행 단일 전환 — 주 행동이 '가입'에서 '상담'으로 바뀌었다.
+
+    전 계약(가입보다 무료 체험을 위에)은 파는 것이 도구였을 때의 규칙이다.
+    대행 고객은 가입해서 할 일이 없다 — 실제로 그렇게 가입한 3명이 전원
+    사진 0장·생성 0건이었다. 이제 지켜야 할 것은 두 가지다.
+      ① 히어로에 가입 버튼이 없다(가입은 '이미 회원' 로그인만 남는다)
+      ② 주 CTA는 상담이고, 체험은 그 아래 보조로 남아 있다
+    """
     hero = landing._hero()
-    assert "가입 없이" in hero, "무료 진입 문구가 히어로에서 사라졌다"
-    i_trial = hero.find("가입 없이")
-    i_login = hero.find("/login/kakao")
-    assert 0 <= i_trial < i_login, "가입 버튼이 무료 진단보다 위에 있다(마찰 큰 행동이 먼저)"
+    assert "/login/kakao" not in hero and "/login/google" not in hero, \
+        "히어로에 가입 버튼이 되살아났다(대행 고객은 가입할 이유가 없다)"
+    i_consult = hero.find("사진 보내고 상담받기")
+    i_trial = hero.find("샘플 받아보기")
+    assert i_consult > 0, "히어로에 상담 CTA가 없다"
+    assert i_trial > i_consult, "체험이 상담보다 위에 있다(주 행동이 밀렸다)"
+    assert "가입 없이" in hero, "체험이 가입 없이 된다는 안내가 사라졌다"
 
 
 def test_no_kitchen_jargon_on_landing():
@@ -298,7 +311,12 @@ def test_demo_cta_states_what_is_actually_shown():
     받는 것을 부풀리면 열어본 사람이 더 크게 실망한다."""
     hero = landing._hero()
     assert "도입부" in hero, "체험이 무엇을 보여주는지(도입부)를 말하지 않는다"
-    assert "가입 후" in hero, "완성본·영상이 가입 후라는 경계를 말하지 않는다"
+    # 2026-08-17 대행 전환 — 경계가 '가입 후'에서 '맡기시면'으로 바뀌었다.
+    # 지켜야 하는 것은 특정 단어가 아니라 **여기까지가 맛보기라는 경계 표시**다.
+    assert "가입도 결제도 필요 없" in hero or "가입 없이" in hero, \
+        "체험이 어디까지 공짜인지 말하지 않는다"
+    demo = landing._hero_demo_card()
+    assert "맡겨주시면" in demo, "완성본·영상이 맡긴 뒤라는 경계를 말하지 않는다"
 
 
 # ── 랜딩 재구성 계약 (2026-08-13 사장님 지시: 첫 화면에 전 과정 · 2번째는 무료 · 간단명료) ──
@@ -454,14 +472,15 @@ def test_result_cta_is_personalized():
     할 말도 달라야 한다."""
     h = landing.render()
     assert "_nm" in h and "_gap" in h, "결과 CTA에 가게 이름·검색어가 안 들어간다"
-    assert "첫 글 받기" in h, "글이 없는 사장님용 문구가 없다"
-    assert "잡는 글 받기" in h, "글이 있는 사장님용 문구가 없다"
-    # ★ 2026-08-14 사장님 지시 — 버튼 하나로 바로 가입. 그리고 방금 알아낸 가게 정보를
-    #   함께 넘겨야 가입 직후 "딱 3가지만 알려주세요"에서 약속이 끊기지 않는다.
-    assert "무료 가입하고" in h, "가입 직행 CTA가 아니다"
-    assert "/login/kakao?'+_q" in h or "_href" in h, "가입 링크에 가게 정보를 안 싣는다"
-    for k in ("'nm'", "'rg'", "'ind'", "'ad'", "'blog'", "'kw'"):
-        assert k in h, f"가입 링크에 {k}가 빠졌다 — 온보딩에서 다시 묻게 된다"
+    # 2026-08-17 대행 전환 — 문구가 '무료 가입하고 …'에서 '… 맡기고 받아보기'로 바뀌었다.
+    # 지켜야 하는 것은 **개인화**(가게 이름·빈 검색어가 버튼 문구에 들어간다)이지 특정 동사가 아니다.
+    assert "첫 글, 맡기고" in h, "글이 없는 사장님용 문구가 없다"
+    assert "잡는 글, 맡기고" in h, "글이 있는 사장님용 문구가 없다"
+    assert "/login/kakao" not in h, "결과 CTA가 가입으로 되돌아갔다"
+    assert landing.consult_href() in h, "결과 CTA가 상담으로 연결되지 않는다"
+    # ★ 삭제된 계약(2026-08-17): 가게 정보(nm·rg·ind·ad·blog·kw)를 가입 링크 쿼리로
+    #   실어 보내던 signup_carry. 상담은 전화·카톡이라 쿼리를 실을 수 없어 블록을 지웠다.
+    #   그 자리의 리드 회수는 아래 이메일 박스가 맡는다(test_email_capture_sits_right_after_result).
 
 
 def test_email_capture_sits_right_after_result():
@@ -513,13 +532,14 @@ def test_ai_titles_are_clickable_and_carry_that_title():
     """2026-08-14 사장님 지적 — AI 제목이 카드처럼 생겼는데 눌러도 아무 일도 안 일어났다
     (실측: onclick 없음 · href 없음 · cursor auto · 클릭해도 스크롤·URL 그대로).
     내 가게 이름이 든 제목을 방금 본 순간이 가장 뜨겁다 — 그 자리를 죽여두면 안 된다.
-    각 제목은 '그 글부터 만들어달라'는 가입 링크여야 하고, 그 제목을 kw로 실어야 한다."""
+    각 제목은 눌리는 <a>여야 하고, 누른 뒤 갈 곳이 있어야 한다.
+
+    ★ 2026-08-17 대행 전환으로 목적지가 바뀌었다. 전에는 제목을 kw로 실은 가입 링크였는데,
+      상담(전화·카톡)에는 쿼리를 실을 수 없다. 그래서 제목은 화면에 남기고
+      '그 제목을 말씀해 주세요'로 잇는다 — 죽은 카드가 되지 않는 것이 원래 취지다."""
     h = landing.render()
-    assert "window.__signupHref" in h, "제목 카드가 가입 링크를 재사용하지 않는다"
-    # ★ 2026-08-14 실측 — 세 제목이 전부 같은 kw를 실어 보냈다(기존 kw가 이미 있어 무시됨).
-    #   3개를 보여주고 고르게 해놓고 선택이 반영 안 되면 보여준 의미가 없다.
-    assert "searchParams.set('kw'" in h, "고른 제목이 링크에 반영되지 않는다(같은 키 중복)"
-    assert "누르시면 그 글부터" in h, "누를 수 있다는 안내가 없다"
+    assert landing.consult_href() in h, "제목 카드가 갈 곳이 없다"
+    assert "그 제목을 말씀해" in h, "누른 뒤 무엇을 하면 되는지 안내가 없다"
     # 카드가 <a>여야 한다 — div면 눌러도 아무 일도 안 일어난다
     i = h.find("d.titles.map")
     assert i > 0
@@ -539,7 +559,9 @@ def test_result_screen_has_one_primary_cta_and_one_exit():
     # 감추는 장치가 살아 있는가
     assert "body.has-result .hide-on-result" in h, "결과 화면에서 중복 버튼을 감추는 규칙이 없다"
     assert "classList.add('has-result')" in h, "결과가 떠도 감추기가 발동하지 않는다"
-    for frag in ("이미 마음 정하셨다면", "이미 회원이면"):
+    # 2026-08-17 — '이미 마음 정하셨다면'(가입 유도) 블록을 상담 CTA로 갈아끼웠다.
+    # 계약은 그대로다: 결과가 뜨면 중복 진입로를 감춘다.
+    for frag in ("먼저 보고 결정하고 싶으세요", "이미 회원이면"):
         i = h.find(frag)
         assert i > 0, frag
         # 그 블록이 hide-on-result 표식을 달고 있는지(앞쪽 태그에서 확인)
