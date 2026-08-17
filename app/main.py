@@ -1288,6 +1288,60 @@ def admin_vacantq_purge(tid: str = "", dry: int = 1):
                                   if dry else "무관한 글감만 지웠다")})
 
 
+@app.get("/admin/perf/content")
+def admin_perf_content(tid: str = "", view: str = ""):
+    """⏱ '내 콘텐츠' 렌더 병목 측정(2026-08-18 사장님: "보기가 안 열린다").
+
+    같은 함수를 단계별로 재서 **무엇이 느린지** 숫자로 가른다.
+    추측으로 최적화하면 엉뚱한 곳을 고친다 — 먼저 잰다.
+    """
+    import time as _t
+    t = db.get_tenant(tid)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    out = {}
+    t0 = _t.time()
+    sets = db.list_sets(tenant_id=t.id, limit=50)
+    out["list_sets"] = round(_t.time() - t0, 3)
+    out["n_sets"] = len(sets)
+
+    t0 = _t.time()
+    pieces_by = db.get_pieces_for_assets([s["asset_id"] for s in sets])
+    out["get_pieces_for_assets"] = round(_t.time() - t0, 3)
+
+    # 카드당 반복 쿼리 — 세트 수만큼 곱해진다
+    t0 = _t.time()
+    n_rank = 0
+    for s in sets:
+        ps = pieces_by.get(s["asset_id"], [])
+        bp = next((p for p in ps if p.kind.value == "blog"), None)
+        if not bp:
+            continue
+        kw = ((bp.payload.get("target_keywords") or [""])[0] or "").strip()
+        if not kw:
+            continue
+        db.rank_history(t.id, kw, kind="post")
+        db.get_blog_publish(bp.id)
+        n_rank += 1
+    out["per_card_queries"] = round(_t.time() - t0, 3)
+    out["cards_with_query"] = n_rank
+
+    if view:
+        t0 = _t.time()
+        ps = db.get_set_pieces(view)
+        bp = next((p for p in ps if p.kind.value == "blog"), None)
+        out["get_set_pieces"] = round(_t.time() - t0, 3)
+        if bp:
+            t0 = _t.time()
+            _content_photo_layout(t, bp)
+            out["photo_layout"] = round(_t.time() - t0, 3)
+            out["n_imgs"] = len((bp.payload or {}).get("image_paths") or [])
+    out["ok"] = True
+    out["total_measured"] = round(sum(v for k, v in out.items()
+                                      if isinstance(v, float)), 3)
+    return JSONResponse(out)
+
+
 @app.post("/admin/agent-dryrun/{piece_id}")
 def admin_agent_dryrun(piece_id: str):
     """🧪 에이전트 동작 실측 — 발행 훅을 태워 학습이 실제로 도는지 본다(2026-08-17).
