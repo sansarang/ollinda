@@ -96,3 +96,23 @@ def test_생성기가_상한과_검증을_실제로_쓴다():
     assert "cap_for" in src, "사진 상한이 생성 경로에 안 물렸다"
     assert "placement_audit" in src, "배치 검증이 생성 경로에 안 물렸다"
     assert "photo_placement" in src, "검증 결과가 payload에 안 남는다"
+
+
+def test_배치_단계에서_문단수로_다시_자른다():
+    """★ 2026-08-17 실물 — 생성 전 글자수 어림(3,500자 → 17장)이 빗나갔다.
+    실제 문단이 19개라 문단당 0.89장이 됐고 5곳이 뭉쳤다.
+    글자수는 문단 수를 예측하지 못한다 — 문단을 아는 자리에서 다시 잘라야 한다."""
+    import inspect
+
+    from app.generators import text_claude as tc
+    src = inspect.getsource(tc._semantic_photo_placement)
+    assert "cap_for" in src, "배치 단계에 상한 재조정이 없다(어림값 그대로 쓴다)"
+    assert "allowed_idx" in src.split("cap_for")[0], "허용 문단 수를 세기 전에 잘랐다"
+
+
+def test_문단수_기준이_뭉침없는_밀도를_준다():
+    """실측: 0.41 → 뭉침 0곳 · 0.64 → 1곳 · 0.89 → 5곳 · 1.32 → 9곳."""
+    for n_para in (10, 19, 25, 40):
+        cap = pc.cap_for(25, n_paragraphs=n_para)
+        assert cap / n_para <= pc.PER_PARA + 0.01, \
+            f"문단 {n_para}개에 {cap}장 = {cap/n_para:.2f} — 뭉친다"

@@ -851,6 +851,18 @@ def _semantic_photo_placement(body: str, note: str, n: int) -> str:
     allowed_idx = [j for j in range(len(paras)) if _allowed(j)]
     if not allowed_idx:
         return _ensure_photo_markers(body, n)
+    # ★ 2026-08-17 — 여기가 **문단 수를 처음으로 아는 자리**다. 상한을 여기서 다시 건다.
+    #   생성 전에는 목표 글자수로 어림할 수밖에 없어 빗나간다: 3,500자로 17장을 냈는데
+    #   실제 문단이 19개라 문단당 0.89장이 됐고 5곳이 뭉쳤다(실측). 뭉침 0이었던 조합은 0.41이었다.
+    #   글자수는 문단 수를 예측하지 못한다 — 어림 대신 실제 값으로 자른다.
+    #   잘린 사진은 마커만 빠지고 그리드·ZIP·영상 소재로는 그대로 남는다.
+    from app.services import photocap as _pc3
+    _fit = _pc3.cap_for(n, n_paragraphs=len(allowed_idx))
+    if _fit < n:
+        import logging as _lgfit
+        _lgfit.getLogger("shopcast.gen").info(
+            "[사진] 배치 단계 재조정 %d장 → %d장 (담을 문단 %d개)", n, _fit, len(allowed_idx))
+        n = _fit
     # ★ 2026-08-04 실물: 20장 중 9장이 도입부에 연달아 붙었다. 상한은 있었지만
     #   허용 문단이 사진 수보다 적으면 폴백이 상한을 무시하고(or allowed_idx) 앞으로 몰았다.
     #   상한은 고정값이 아니라 '사진 수 ÷ 담을 문단 수'다 — 그래야 어떤 글 길이에서도 고르게 퍼진다.
