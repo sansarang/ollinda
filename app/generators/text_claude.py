@@ -421,6 +421,26 @@ class BlogDraftGenerator(Generator):
         except Exception:
             import logging as _lgr
             _lgr.getLogger("shopcast.gen").warning("[취재] 실패 — 재료 없이 계속", exc_info=True)
+        # 📓 에이전트 일지 — 사장님이 "누가 무엇을 왜 했는지" 볼 수 있어야 한다(2026-08-17).
+        #   발행해야만 기록이 생기면 생성 과정이 통째로 깜깜하다. 실패해도 생성은 계속된다.
+        try:
+            from app.agents import RESEARCH, SCOUT, journal as _jn
+            _jn.write(SCOUT, f"이번 글 타깃 — '{kw0}'",
+                      why=f"판의 언어 {len(_mkt_terms)}개 확보"
+                          + (f": {', '.join(_mkt_terms[:5])}" if _mkt_terms else " (아직 재본 자료 없음)"),
+                      kind="act", tenant_id=tenant.id)
+            _rf = (_research.get("facts") or [])
+            if _rf:
+                _jn.write(RESEARCH, f"웹 취재 {len(_rf)}건 — {', '.join(f['term'] for f in _rf[:3])}",
+                          why="법령·백과 등 공신력 출처만 채택(경쟁 블로그는 차단). 3인칭 사실로만 쓴다.",
+                          kind="act", tenant_id=tenant.id,
+                          data=" · ".join(f["source"] for f in _rf[:3]))
+            elif _research.get("already_had"):
+                _jn.write(RESEARCH, "취재 생략 — 재료에 이미 있음",
+                          why=f"{', '.join(_research['already_had'][:4])}",
+                          kind="note", tenant_id=tenant.id)
+        except Exception:
+            pass
         _fact_block = ""
         try:
             from app.services import research as _rsh2
@@ -662,6 +682,19 @@ class BlogDraftGenerator(Generator):
                 _lgpa.getLogger("shopcast.gen").warning(
                     "[배치] 사진 %s번이 내용과 어긋남(%d/%d 일치)", _place_audit["miss"],
                     _place_audit["n_checked"] - _place_audit["n_miss"], _place_audit["n_checked"])
+            # 📓 편집 에이전트 일지 — 사진을 몇 장으로 줄였고 배치가 맞았는지 남긴다.
+            try:
+                from app.agents import EDITOR, journal as _jn2
+                _cut = (f"사진 {len(_all_imgs)}장 → 본문 {len(imgs)}장"
+                        if len(_all_imgs) > len(imgs) else f"사진 {len(imgs)}장 그대로")
+                _rate = _place_audit.get("rate")
+                _jn2.write(EDITOR, f"{_cut} · 배치 일치 {_rate}%",
+                           why=("문단당 1장을 넘기면 마커가 붙어 체류가 오히려 준다(실측)"
+                                + (f" · 어긋난 사진 {_place_audit['miss']}" if _place_audit.get("miss") else "")),
+                           kind="act" if len(_all_imgs) > len(imgs) else "note",
+                           tenant_id=tenant.id)
+            except Exception:
+                pass
         except Exception:
             _place_audit = {}
         # 셀러: 본문 끝에 구매 블록 보강(누락 대비) — 트랙 B 정보성 글은 상업 블록 제외(정보 순수성)

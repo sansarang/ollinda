@@ -206,3 +206,28 @@ def test_발행줄이_카드에_실제로_붙는다():
     assert i > 0
     seg = src[i:i + 200]
     assert "_publish_row(" in seg, "발행 줄을 만들어놓고 카드에 안 붙였다"
+
+
+def test_생성_과정도_일지에_남는다():
+    """★ 사장님 지시: "각각의 에이전트들이 어떻게 일을 하는지 로그로 보여줘."
+    발행해야만 기록이 생기면 생성 과정이 통째로 깜깜하다 —
+    사장님이 아침에 열었을 때 볼 것이 있어야 한다."""
+    import inspect
+
+    from app.generators import text_claude as tc
+    src = inspect.getsource(tc.BlogDraftGenerator.generate)
+    assert "journal" in src, "생성 경로에서 일지를 안 쓴다"
+    assert "SCOUT" in src and "RESEARCH" in src and "EDITOR" in src, \
+        "정찰·취재·편집 중 일지를 안 남기는 에이전트가 있다"
+
+
+def test_일지_실패가_생성을_막지_않는다():
+    """기록이 본체를 죽이면 그게 더 큰 사고다."""
+    import inspect
+
+    from app.generators import text_claude as tc
+    src = inspect.getsource(tc.BlogDraftGenerator.generate)
+    i = src.find("from app.agents import RESEARCH")
+    assert i > 0
+    seg = src[i:i + 1400]
+    assert "except Exception" in seg, "일지 기록에 예외 보호가 없다"
