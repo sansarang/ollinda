@@ -111,4 +111,7 @@ def test_live_조회에_상한이_있다(monkeypatch):
     monkeypatch.setattr(br, "blog_rank", lambda kw, bid: calls.append(kw) or {"rank": 5})
     kws = [f"검색어{i}" for i in range(20)]
     board.scan("tid", kws, blog_id="x", live=True)
-    assert len(calls) <= board.LIVE_MAX, f"상한 없이 {len(calls)}번 조회했다(타임아웃 재발)"
+    # ★ 2026-08-17 — 여기서 board.LIVE_MAX를 기준으로 쓰면 상수를 키울 때 같이 움직여
+    #   아무것도 못 막는다(사령관 실측에서 photocap이 그렇게 뚫렸다). 값을 직접 박는다.
+    assert board.LIVE_MAX == 6, "live 조회 상한이 바뀌었다(12개에서 502 실측)"
+    assert len(calls) <= 6, f"상한 없이 {len(calls)}번 조회했다(타임아웃 재발)"

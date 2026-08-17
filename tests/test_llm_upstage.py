@@ -167,3 +167,26 @@ def test_본문_경로가_payload에_기록된다():
     src = inspect.getsource(ingest)
     assert 'payload["body_route"]' in src, "본문 경로가 payload에 안 남는다(사후 검증 불가)"
     assert 'LAST_ROUTE.get("body")' in src
+
+
+def test_짧은_출력은_추론강도를_낮춘다():
+    """★ 2026-08-17 실측 — 영상 자막(spoken)을 medium으로 부르니 **0자 빈 응답**,
+    low로 부르니 361자 정상. 추론이 출력 예산을 다 먹기 때문이다.
+    반대로 본문은 medium이 필요하다(minimal이면 노린 질의 커버가 0/2로 죽는다)."""
+    assert llm.solar_effort("spoken") == "low"
+    assert llm.solar_effort("caption") == "low"
+    assert llm.solar_effort("body") == "medium", "본문이 low로 떨어지면 커버리지가 죽는다"
+
+
+def test_캡션_영상자막이_solar로_간다(monkeypatch):
+    """2026-08-17 사장님 승인 — Anthropic 크레딧 소진 시에도 만들 수 있어야 한다."""
+    monkeypatch.delenv("LLM_CAPTION", raising=False)
+    monkeypatch.delenv("LLM_SPOKEN", raising=False)
+    assert llm.route("spoken")[0] == "upstage"
+    assert llm.route("caption")[0] == "upstage"
+
+
+def test_품질고정이_비었는지_확인한다():
+    """caption 고정을 풀었다. 되살리면 크레딧 소진 시 캡션이 통째로 막힌다 —
+    2026-07-28 고정 사유(캐스퍼 날조)의 진짜 원인은 cache_prefix 누락이었고 이미 막혔다."""
+    assert "caption" not in llm.QUALITY_PIN, "caption이 다시 특정 모델에 고정됐다"

@@ -124,7 +124,9 @@ def test_plan_splits_core_and_attributes():
 def test_plan_caps_attribute_count():
     """다중 타깃은 환상 — 상한이 없으면 문단이 얕아져 전부 안 뽑힌다."""
     kws = ["핵심", "가격 얼마", "시간 얼마나 걸려", "과정 방법", "비교 차이"]
-    assert len(ab.plan("핵심", kws)["attrs"]) <= ab.MAX_ATTRS <= 3
+    # ★ 계산과 기준이 같은 상수면 항상 참이다 — 실측 근거가 있는 값은 직접 박는다(2026-08-17).
+    assert ab.MAX_ATTRS == 3, "속성 축 상한이 바뀌었다(판 겹침 0.8~4.2% 실측 — 다중 타깃은 환상)"
+    assert len(ab.plan("핵심", kws)["attrs"]) <= 3 <= 3
 
 
 def test_plan_does_not_invent_axes():
@@ -266,7 +268,9 @@ def test_thick_paragraphs_pass():
     para = "가" * ab.MIN_THICK_CHARS
     body = f"## 하나\n{para}\n\n## 둘\n{para}"
     t = ab.thickness(body)
-    assert t["ok"] and t["n_thick"] >= ab.MIN_THICK_PARAS
+    assert ab.MIN_THICK_PARAS == 2 and ab.MIN_THICK_CHARS == 180, \
+        "답변 문단 기준이 바뀌었다(상위글 소제목 중간값 2개 실측)"
+    assert t["ok"] and t["n_thick"] >= 2
 
 
 def test_query_coverage_measures_the_real_thing():

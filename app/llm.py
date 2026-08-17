@@ -260,6 +260,15 @@ USAGE = {"gemini": {"n": 0, "in": 0, "out": 0}, "anthropic": {"n": 0},
 #   **medium이 최적점**이라 코드에서 고정한다. env로만 실험적으로 바꾼다.
 SOLAR_EFFORT = os.environ.get("SOLAR_REASONING", "medium").strip() or "medium"
 
+#: 작업별 추론 강도 — **짧은 출력에 medium을 주면 추론이 예산을 다 먹고 빈 응답이 나온다.**
+#: 2026-08-17 실측: 영상 자막(spoken)을 medium으로 부르니 0자, low로 부르니 361자 정상.
+#: 본문처럼 긴 글은 medium이 필요하다(minimal이면 노린 질의 커버가 0/2로 죽는다).
+SOLAR_EFFORT_BY_TASK = {"spoken": "low", "caption": "low", "x": "low", "title": "low"}
+
+
+def solar_effort(task: str = "") -> str:
+    return SOLAR_EFFORT_BY_TASK.get(task, SOLAR_EFFORT)
+
 # 💰 세트별 비용 계측(2026-07-29 실측 $4/세트 사고 후) — 모델 단가($/M tokens)로 근사 집계.
 #   ingest가 세트 시작 시 reset, 종료 시 snapshot을 blog payload(api_cost)에 기록.
 _PRICES = {"claude-opus": (15.0, 75.0), "claude-sonnet": (3.0, 15.0),
@@ -292,12 +301,29 @@ HAIKU = "claude-haiku-4-5-20251001"
 SONNET = "claude-sonnet-5"
 # 작업별 기본 라우팅(env LLM_<TASK>로 오버라이드 가능) — spoken(자막 구어 변환)은
 # '빼기만·더하기 금지' 제약 준수 작업이라 Claude Haiku 지정(A/B 실측 Claude 우위 유형, 문장 수 적어 비용 미미).
-TASK_DEFAULTS = {"spoken": ("anthropic", SONNET)}   # 대본 품질(전보문 자막 실사고 2026-07-27) — Haiku→Sonnet 상향
+#: 작업별 기본 라우팅(env LLM_<TASK>로 오버라이드 가능)
+#: ★ 2026-08-17 — spoken·caption·x를 Solar로 옮겼다(사장님 승인·실측 근거).
+#:   spoken은 '빼기만·더하기 금지' 제약 준수 작업이라 Claude Sonnet을 썼는데,
+#:   Solar가 effort=low에서 같은 제약을 지켰다(8문장 → 361자, 중괄호 강조·22자 내외 준수).
+#:   effort=medium은 추론이 예산을 다 먹어 **0자 빈 응답**이 났다 — 짧은 출력엔 low다.
+#:   원가: Sonnet 대비 1/10 수준이고, 무엇보다 Anthropic 크레딧과 무관하게 돈다.
+SOLAR = "solar-pro4"
+TASK_DEFAULTS = {"spoken": ("upstage", SOLAR),
+                 "caption": ("upstage", SOLAR),
+                 "x": ("upstage", SOLAR)}
 
 # 품질 표면 고정(2026-07-28 사장님 결정: 품질 우선, 비용 절감 라우팅 폐지) — env LLM_* 보다 우선.
 # 캡션 제미나이 절감 라우팅은 사진 분석 미전달 실사고(캐스퍼 날조)의 온상이었음. 절감 실험은
 # 품질 회귀 검사(/admin/quality-check) 정착 후에만 재개.
-QUALITY_PIN = {"caption": ("anthropic", MODEL)}
+#: 품질 표면 고정 — env보다 우선한다.
+#: ★ 2026-08-17 사장님 승인으로 caption 고정을 풀었다.
+#:   2026-07-28에 고정한 이유는 '캡션 제미나이 절감 라우팅이 사진 분석 미전달 실사고(캐스퍼 날조)의
+#:   온상'이어서였다. 그 사고의 원인은 **cache_prefix 누락**(사진 분석이 전달 안 됨)이었지
+#:   모델 실력이 아니었고, 그 구멍은 이미 막혀 있다(call_task가 _full_prompt로 합쳐 보낸다).
+#:   Solar 실측: 캡션 343자·X 193자 모두 재료 범위 안, 날조 0. 원가 $0.004.
+#:   그리고 이날 Anthropic 크레딧이 소진돼 오퍼스 고정이 곧 '캡션 생성 불가'를 뜻하게 됐다.
+#:   env(LLM_CAPTION)를 비우면 아래 TASK_DEFAULTS/기본 모델로 되돌아간다.
+QUALITY_PIN: dict = {}
 
 
 def route(task: str) -> tuple[str, str]:
@@ -338,7 +364,7 @@ def _gemini_generate(parts: list, model: str, max_tokens: int) -> str:
         raise RuntimeError(f"gemini 응답 파싱 실패: {str(d)[:160]}")
 
 
-def _upstage_generate(prompt: str, model: str, max_tokens: int) -> str:
+def _upstage_generate(prompt: str, model: str, max_tokens: int, task: str = "") -> str:
     """Upstage Solar REST 호출(OpenAI 호환). 실패 시 예외 — 상위에서 anthropic 폴백.
 
     2026-08-17 도입 근거(A/B 실측, 같은 재료·같은 프롬프트):
@@ -355,7 +381,7 @@ def _upstage_generate(prompt: str, model: str, max_tokens: int) -> str:
     r = _rq.post("https://api.upstage.ai/v1/chat/completions",
                  headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                  json={"model": model, "max_tokens": max(max_tokens * 3, 6000),  # 추론 토큰이 출력에 포함
-                       "reasoning_effort": SOLAR_EFFORT,
+                       "reasoning_effort": solar_effort(task),
                        "messages": [{"role": "user", "content": prompt}]},
                  timeout=300)          # 추론 모드는 느리다(실측 60~150초)
     d = r.json()
@@ -372,7 +398,7 @@ def _upstage_generate(prompt: str, model: str, max_tokens: int) -> str:
     except Exception:
         raise RuntimeError(f"upstage 응답 파싱 실패: {str(d)[:160]}")
     if not txt:                        # 추론만 하고 본문을 안 낸 경우 — 침묵 폴백 금지
-        raise RuntimeError(f"upstage 빈 응답(reasoning={(u.get('completion_tokens_details') or {}).get('reasoning_tokens')})")
+        raise RuntimeError(f"upstage 빈 응답(effort={solar_effort(task)} reasoning={(u.get('completion_tokens_details') or {}).get('reasoning_tokens')})")
     return txt
 
 
@@ -395,7 +421,7 @@ def call_task(task: str, prompt: str, max_tokens: int = 1200,
     if provider == "upstage" and not images:
         for attempt in (1, 2):                        # 1회 재시도(gemini 경로와 같은 규율)
             try:
-                out = _upstage_generate(_full_prompt, model, max_tokens)
+                out = _upstage_generate(_full_prompt, model, max_tokens, task)
                 LAST_ROUTE[task] = info
                 return out
             except Exception as e:
