@@ -287,6 +287,19 @@ class BlogDraftGenerator(Generator):
                  images: list[str] | None = None) -> ContentPiece:
         imgs = images or [asset.path]
         imgs = _select_slot_photos(imgs, asset.note or "")   # 슬롯 선별(권장 초과분은 뒤로 — 그리드·ZIP 전용)
+        # ★ 2026-08-17 사장님 지시 — 본문 사진 수를 노출·체류에 맞게 제한한다.
+        #   _select_slot_photos는 **재정렬만** 하고 자르지 않아서, 25장을 올리면 25개가 전부
+        #   마커가 됐다. 같은 재료로 잰 실측:
+        #     문단당 사진 0.41 → 뭉침 0곳 · 0.64 → 1곳 · 1.32 → **9곳**
+        #   마커가 붙으면 그 사이에 읽을 것이 없다 = 체류시간이 늘지 않고 오히려 준다.
+        #   자른 사진은 버리지 않는다 — 그리드·ZIP·영상 소재로 그대로 남는다(_all_imgs).
+        from app.services import photocap as _pcap
+        _all_imgs = list(imgs)
+        _cap = _pcap.cap_for(len(imgs), target_chars=3500)
+        if _cap < len(imgs):
+            import logging as _lgcap
+            _lgcap.getLogger("shopcast.gen").info("[사진] %s", _pcap.reason(len(imgs), _cap))
+            imgs = imgs[:_cap]
         prof = resolve_industry(tenant.industry)
         strat = resolve_strategy(tenant)
         kplan = seo.keyword_plan(prof.name, tenant.region, asset.note,
@@ -604,6 +617,19 @@ class BlogDraftGenerator(Generator):
         _body_raw, _dwell_rep = _ensure_dwell_devices(d.get("본문") or raw, kw0)
         # 글-사진 의미 매칭: LLM 마커 배치 대신 사진 설명↔문단 어절 겹침으로 결정적 재배치(레이트리밋 무관)
         body = _semantic_photo_placement(_body_raw, asset.note or "", len(imgs))
+        # 배치 검증(2026-08-17) — 자리를 정하는 것과 그 자리가 맞는지는 다른 일이다.
+        #   실측에서 9장 중 2장이 어긋났다(가죽 코팅 사진 옆에 도장 이야기).
+        #   결과는 payload에 남겨 품질 화면·리포트가 볼 수 있게 한다.
+        try:
+            from app.services import photocap as _pcap2
+            _place_audit = _pcap2.placement_audit(body, asset.note or "", len(imgs))
+            if _place_audit.get("n_miss"):
+                import logging as _lgpa
+                _lgpa.getLogger("shopcast.gen").warning(
+                    "[배치] 사진 %s번이 내용과 어긋남(%d/%d 일치)", _place_audit["miss"],
+                    _place_audit["n_checked"] - _place_audit["n_miss"], _place_audit["n_checked"])
+        except Exception:
+            _place_audit = {}
         # 셀러: 본문 끝에 구매 블록 보강(누락 대비) — 트랙 B 정보성 글은 상업 블록 제외(정보 순수성)
         if _ctype != "info" and strat.closing in ("buy", "both") and buy and buy not in body:
             body = body.rstrip() + "\n\n" + buy
@@ -675,6 +701,8 @@ class BlogDraftGenerator(Generator):
                      "meta_description": d.get("메타설명", ""),
                      # 🔢 '5.7만km' 류 비한국어 표기 교정(2026-08-02 사장님 지적) — 표면 단일 규칙
                      "body": seo.natural_kr_number(body), "photo_markers": markers,
+                     "photo_placement": _place_audit,      # 사진↔문단 일치 검증(2026-08-17)
+                     "photo_capped": {"uploaded": len(_all_imgs), "in_body": len(imgs)},
                      "recommended_image_placement": d.get("이미지배치", ""),
                      "tags": tags, "seo_keywords": tags, "target_keywords": kws,
                      # 🎯 노린 질의 구조[핵심 1 + 속성 2~3] — 발행 후 queryscout 실측과 대조해
