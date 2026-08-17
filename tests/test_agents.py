@@ -231,3 +231,15 @@ def test_일지_실패가_생성을_막지_않는다():
     assert i > 0
     seg = src[i:i + 1400]
     assert "except Exception" in seg, "일지 기록에 예외 보호가 없다"
+
+
+def test_완료했는데_산출물이_없으면_잡는다():
+    """★ 2026-08-17 — 진행률 done 1.0인데 글 0건인 일이 세 번 있었다.
+    원인은 ① 크레딧 전면차단 ② 배포가 진행 중 스레드를 죽인 것.
+    완료라고 말하면서 아무것도 안 만든 것을 그대로 두면 다음 사람이 또 속는다."""
+    import inspect
+
+    from app import main
+    src = inspect.getsource(main.admin_gen_progress)
+    assert "ghost" in src, "유령 완료(done인데 산출물 0)를 감지하지 않는다"
+    assert "스레드 사망" in src or "글이 없다" in src

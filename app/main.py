@@ -3129,7 +3129,24 @@ def admin_gen_progress(request: Request, tenant_id: str):
     ★ 미존재 tenant는 404 — 배포 게이트가 잘못된 ID로 'idle 착각' 후 push한 실사고(2026-07-27) 방지."""
     if not db.get_tenant(tenant_id):
         return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
-    return JSONResponse({"ok": True, "progress": db.get_gen_progress(tenant_id),
+    pr = db.get_gen_progress(tenant_id) or {}
+    # ★ 2026-08-17 — '완료했는데 산출물이 없는' 상태를 잡는다.
+    #   이날 세 번 있었다: 진행률은 done 1.0인데 글이 0건.
+    #   원인은 ① 크레딧 전면차단 ② 배포가 진행 중 스레드를 죽인 것.
+    #   완료라고 말하면서 아무것도 안 만든 것을 그대로 두면 다음 사람이 또 속는다.
+    ghost = None
+    try:
+        if (pr.get("stage") == "done") and (pr.get("status") == "done"):
+            aid = pr.get("asset_id") or ""
+            made = [p for p in (db.get_set_pieces(aid) if aid else [])
+                    if p.kind.value == "blog"]
+            if aid and not made:
+                ghost = "완료로 표시됐지만 그 세트에 글이 없다(스레드 사망 의심)"
+            elif not aid:
+                ghost = "완료로 표시됐지만 세트 ID가 없다"
+    except Exception:
+        pass
+    return JSONResponse({"ok": True, "progress": pr, "ghost": ghost,
                          "duration_range": db.gen_duration_range()})
 
 
