@@ -1288,6 +1288,32 @@ def admin_vacantq_purge(tid: str = "", dry: int = 1):
                                   if dry else "무관한 글감만 지웠다")})
 
 
+@app.post("/admin/agent-dryrun/{piece_id}")
+def admin_agent_dryrun(piece_id: str):
+    """🧪 에이전트 동작 실측 — 발행 훅을 태워 학습이 실제로 도는지 본다(2026-08-17).
+
+    ★ 이것은 **발행이 아니다.** 네이버에 글이 올라가지 않고 발행 기록도 남기지 않는다.
+      실제 발행은 사람이 복붙해야 하고(네이버는 공식 API가 없다), 그건 사장님 계정이다.
+      여기서는 learner.on_publish만 호출해 '에이전트가 무엇을 보고 무엇을 판단하는가'를
+      일지에 남긴다 — 자율 계층이 실제로 도는지 확인하는 유일한 방법이다.
+    """
+    p = db.get_piece(piece_id)
+    if not p:
+        return JSONResponse({"ok": False, "error": "piece 없음"}, status_code=404)
+    t = db.get_tenant(p.tenant_id)
+    if not t:
+        return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
+    from app.agents import learner as _lrn
+    try:
+        r = _lrn.on_publish(t, p)
+        return JSONResponse({"ok": True, "dryrun": True, "result": r,
+                             "note": "발행 기록 없음 — 에이전트 동작만 확인"})
+    except Exception as e:
+        import traceback
+        return JSONResponse({"ok": False, "error": repr(e)[:200],
+                             "traceback": traceback.format_exc()[-1200:]}, status_code=500)
+
+
 @app.get("/admin/commander")
 def admin_commander(scan: int = 0, fmt: str = "text"):
     """🎖 코드 수정 사령관 — 결함 신호 + 수정안 대기열(2026-08-17 사장님 지시).

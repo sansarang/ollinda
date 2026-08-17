@@ -26,8 +26,20 @@ from app.services import photocap as pc
 
 
 def test_많이_올려도_절대상한을_넘지_않는다():
-    assert pc.cap_for(50, target_chars=10000) <= pc.HARD_MAX
+    # ★ 2026-08-17 사령관 시험에서 드러난 골든 결함 — 여기서 pc.HARD_MAX를 참조했더니
+    #   상수를 22→99로 바꿔도 골든이 통과했다(기준이 같이 움직였다).
+    #   실측에서 나온 값은 골든에 **직접 박는다** — 그래야 상수를 건드리면 잡힌다.
+    #   22의 근거: 상위글 사진 중간값 21장(kw_anatomy 29키워드) + Yeti 20초/장(자체 로그).
+    assert pc.HARD_MAX == 22, "절대 상한이 실측 근거(상위글 21장·Yeti 20초/장)에서 벗어났다"
+    assert pc.cap_for(50, target_chars=10000) <= 22
     assert pc.cap_for(25, target_chars=3500) < 25, "25장이 그대로 통과했다(뭉침 9곳 재발)"
+
+
+def test_실측에서_나온_상수는_골든이_직접_지킨다():
+    """상수를 참조하는 골든은 상수가 바뀌면 같이 움직여 아무것도 못 막는다.
+    실측 근거가 있는 값은 그 값 자체를 박아둔다."""
+    assert pc.PER_PARA == 0.7, "문단당 사진 상한이 바뀌었다(실측: 0.41→뭉침0, 1.32→뭉침9)"
+    assert pc.MIN_PHOTOS == 3, "최소 사진 수가 바뀌었다(상위글 최소 3장)"
 
 
 def test_적게_올리면_자르지_않는다():
