@@ -2832,6 +2832,15 @@ async def admin_set_signature(request: Request, tenant_id: str):
         return JSONResponse({"ok": False, "error": "tenant 없음"}, status_code=404)
     form = await request.form()
     txt = str(form.get("text") or "").strip()[:200]
+    # 2026-08-17 — 자기광고·날조 서명은 저장 단계에서 막는다(입구·출구 양쪽 차단).
+    #   'AI가 25분 만에 완성 · 올린다 ollinda.kr'이 두 실계정에 저장돼 발행 글마다 붙었다.
+    if txt:
+        from app.services.qualitycheck import _self_promo_hits as _sph
+        bad = _sph(txt)
+        if bad:
+            logging.error("[서명] 저장 거부 tenant=%s 걸린조각=%s", tenant_id, bad)
+            return JSONResponse({"ok": False, "error": "자기광고·제작시간 주장은 서명에 넣을 수 없습니다",
+                                 "hits": bad}, status_code=400)
     with db._conn() as c:
         c.execute("UPDATE tenants SET blog_signature=? WHERE id=?", (txt, tenant_id))
     return JSONResponse({"ok": True, "signature": txt})

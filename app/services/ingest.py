@@ -558,17 +558,32 @@ def _polish_body(tenant: Tenant, asset, pieces: list) -> None:
                                              _cost["usd"], _cost["calls"], tenant.id)
     except Exception:
         pass
-    # ✍️ 블로그 서명 자동 삽입(2026-07-29 사장님 승인) — 이웃 새글 피드 = 합법 자동 홍보 채널.
-    #   tenant.blog_signature 설정 시 모든 블로그 글 끝에 1줄(쪽지 자동화 대체 — 리스크 0).
+    # ✍️ 블로그 서명 자동 삽입 — tenant.blog_signature가 있을 때만(비면 미삽입).
+    #
+    # ★ 2026-08-17 실사고 — 이 표면에 게이트가 없었다.
+    #   두 실계정에 이런 서명이 박혀 발행 글마다 붙고 있었다:
+    #     "이 글은 사진 몇 장으로 AI가 25분 만에 완성했습니다 · 올린다 ollinda.kr"
+    #   세 겹으로 틀렸다 — ① 실제 3.8분인데 25분(날조) ② 사장님 블로그에 우리 광고
+    #   ③ 'AI가 썼다'를 스스로 공표(노출에 불리). qualitycheck에 이걸 잡는 규칙
+    #   (_SELF_PROMO)이 이미 있었는데도 통과했다: **검사가 끝난 뒤에 붙기 때문**이다.
+    #   → 삽입 직전에 같은 규칙으로 검사한다. 게이트 없는 산출물 표면은 만들지 않는다(헌법).
     try:
         _sig = (getattr(tenant, "blog_signature", "") or "").strip()
         if _sig:
-            _bsig = next((p for p in pieces if p.kind == ContentKind.BLOG), None)
-            if _bsig and _sig not in (_bsig.payload.get("body") or ""):
-                _bsig.payload["body"] = (_bsig.payload.get("body") or "").rstrip() + "\n\n---\n" + _sig
-                db.save_piece(_bsig)
+            from app.services.qualitycheck import _self_promo_hits as _sph
+            _bad = _sph(_sig)
+            if _bad:
+                import logging as _lgsig
+                _lgsig.getLogger("shopcast.ingest").error(
+                    "[서명] 자기광고·날조로 삽입 거부 tenant=%s 걸린조각=%s", tenant.id, _bad)
+            else:
+                _bsig = next((p for p in pieces if p.kind == ContentKind.BLOG), None)
+                if _bsig and _sig not in (_bsig.payload.get("body") or ""):
+                    _bsig.payload["body"] = (_bsig.payload.get("body") or "").rstrip() + "\n\n---\n" + _sig
+                    db.save_piece(_bsig)
     except Exception:
-        pass
+        import logging as _lgsig2
+        _lgsig2.getLogger("shopcast.ingest").exception("[서명] 검사 실패 — 삽입하지 않는다")
     # 네이버 플레이스 연동 — 매장(local/hybrid)이면 블로그에 플레이스 키워드 + 리뷰요청 문구 첨부 (#플레이스전략)
     try:
         if (getattr(tenant, "biz_type", "local") or "local") in ("local", "hybrid"):
