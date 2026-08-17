@@ -1288,6 +1288,36 @@ def admin_vacantq_purge(tid: str = "", dry: int = 1):
                                   if dry else "무관한 글감만 지웠다")})
 
 
+@app.get("/admin/agents")
+def admin_agents(tid: str = "", agent: str = "", kind: str = "", limit: int = 200,
+                 fmt: str = "text"):
+    """🤖 에이전트 일지 — 누가·언제·무엇을·왜 했는지(2026-08-17 사장님 지시).
+
+    fmt=text면 그대로 파일로 저장해 열어볼 수 있는 형태, fmt=json이면 원자료.
+    자율 시스템의 가장 큰 위험은 말없이 일하는 것이다 — 무엇을 왜 바꿨는지 남아야
+    결과가 나빠졌을 때 되짚고, 좋아져도 무엇 덕분인지 안다.
+    """
+    from app.agents import journal, params
+    rows = journal.recent(limit=min(limit, 1000), tenant_id=tid, agent=agent, kind=kind)
+    if fmt == "json":
+        return JSONResponse({"ok": True, "rows": rows,
+                             "by_agent": journal.summary(rows),
+                             "params": params.snapshot()})
+    snap = params.snapshot()
+    head = ["# 에이전트 현황", ""]
+    for a, s in sorted(journal.summary(rows).items()):
+        head.append(f"  {a:6s} 조치 {s['act']:>3} · 관측 {s['note']:>3} · 경보 {s['alert']:>2}"
+                    f"   최근 {s['last'][:19]}")
+    head += ["", f"# 학습된 파라미터 (실험 진행 {snap['open_trials']}건)", ""]
+    for p in snap["params"]:
+        head.append(f"  [{p['kind']}] {p['scope']}.{p['name']} = {p['value']}"
+                    f"  ({p['wins']}승 {p['fails']}패 · {p['agent']})")
+        if p.get("reason"):
+            head.append(f"        ↳ {p['reason']}")
+    body = "\n".join(head) + "\n\n" + journal.as_text(rows)
+    return Response(body, media_type="text/plain; charset=utf-8")
+
+
 @app.get("/admin/board")
 def admin_board(tid: str = "", kws: str = "", live: int = 0):
     """🗺 판 스캔표 — 글을 쓰기 전에 '이길 수 있는 자리'부터 고른다(2026-08-17).

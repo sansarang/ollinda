@@ -295,7 +295,7 @@ class BlogDraftGenerator(Generator):
         #   자른 사진은 버리지 않는다 — 그리드·ZIP·영상 소재로 그대로 남는다(_all_imgs).
         from app.services import photocap as _pcap
         _all_imgs = list(imgs)
-        _cap = _pcap.cap_for(len(imgs), target_chars=3500)
+        _cap = _pcap.cap_for(len(imgs), target_chars=3500, tenant_id=tenant.id)
         if _cap < len(imgs):
             import logging as _lgcap
             _lgcap.getLogger("shopcast.gen").info("[사진] %s", _pcap.reason(len(imgs), _cap))
@@ -649,7 +649,8 @@ class BlogDraftGenerator(Generator):
         # — 프롬프트 지시는 확률, 게이트는 보장(제목·FAQ 보강과 동일 패턴)
         _body_raw, _dwell_rep = _ensure_dwell_devices(d.get("본문") or raw, kw0)
         # 글-사진 의미 매칭: LLM 마커 배치 대신 사진 설명↔문단 어절 겹침으로 결정적 재배치(레이트리밋 무관)
-        body = _semantic_photo_placement(_body_raw, asset.note or "", len(imgs))
+        body = _semantic_photo_placement(_body_raw, asset.note or "", len(imgs),
+                                        tenant_id=tenant.id)
         # 배치 검증(2026-08-17) — 자리를 정하는 것과 그 자리가 맞는지는 다른 일이다.
         #   실측에서 9장 중 2장이 어긋났다(가죽 코팅 사진 옆에 도장 이야기).
         #   결과는 payload에 남겨 품질 화면·리포트가 볼 수 있게 한다.
@@ -848,7 +849,7 @@ def _tpl_sequence(tenant) -> str:
 _HERO_HINT = ("외관", "전면", "전체", "정면", "측면", "앞모습", "풀샷", "전경")
 
 
-def _semantic_photo_placement(body: str, note: str, n: int) -> str:
+def _semantic_photo_placement(body: str, note: str, n: int, tenant_id: str = "") -> str:
     """글-사진 의미 매칭 — 각 사진을 '그 사진 내용과 가장 관련 깊은 문단' 뒤에 배치.
     LLM의 마커 배치(41% 신뢰)를 폐기하고, 사진 설명(analyze_all의 [사진N] 라인)의 핵심 어절이
     가장 많이 겹치는 문단에 결정적으로 배치한다 — API·레이트리밋 무관, 재현 가능.
@@ -901,7 +902,7 @@ def _semantic_photo_placement(body: str, note: str, n: int) -> str:
     #   글자수는 문단 수를 예측하지 못한다 — 어림 대신 실제 값으로 자른다.
     #   잘린 사진은 마커만 빠지고 그리드·ZIP·영상 소재로는 그대로 남는다.
     from app.services import photocap as _pc3
-    _fit = _pc3.cap_for(n, n_paragraphs=len(allowed_idx))
+    _fit = _pc3.cap_for(n, n_paragraphs=len(allowed_idx), tenant_id=tenant_id)
     if _fit < n:
         import logging as _lgfit
         _lgfit.getLogger("shopcast.gen").info(

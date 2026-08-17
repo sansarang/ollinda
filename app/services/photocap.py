@@ -31,17 +31,30 @@ CHARS_PER_PHOTO = 200
 MIN_PHOTOS = 3
 
 
-def cap_for(n_uploaded: int, target_chars: int = 0, n_paragraphs: int = 0) -> int:
+def cap_for(n_uploaded: int, target_chars: int = 0, n_paragraphs: int = 0,
+            tenant_id: str = "") -> int:
     """본문에 넣을 사진 수. 업로드 수를 넘지 않는다.
 
     문단 수를 알면(생성 후 재배치) 그것을 쓰고, 모르면(생성 전) 목표 글자수로 어림한다.
+
+    ★ 2026-08-17 — PER_PARA는 이제 **학습 에이전트가 정한다**(agents/params).
+      이 값을 내가 손으로 세 번 고쳤고 세 번 다 틀렸다(0.7 → 뭉침 5곳 → 사진 3장).
+      가게마다 글 길이·문단 리듬이 달라 하나의 상수로 맞을 수가 없다.
+      저장소가 비었거나 죽었으면 아래 코드 기본값으로 그대로 돈다(자율 계층이 생성을 막지 않는다).
     """
     n = max(0, int(n_uploaded or 0))
     if n <= MIN_PHOTOS:
         return n                       # 적을 땐 그대로 — 자를 게 없다
+    per = PER_PARA
+    if tenant_id:
+        try:
+            from app.agents import params as _pm
+            per = float(_pm.get(f"photo:{tenant_id}", "per_para", PER_PARA))
+        except Exception:
+            per = PER_PARA
     limits = [n, HARD_MAX]
     if n_paragraphs:
-        limits.append(max(MIN_PHOTOS, int(n_paragraphs * PER_PARA)))
+        limits.append(max(MIN_PHOTOS, int(n_paragraphs * per)))
     elif target_chars:
         limits.append(max(MIN_PHOTOS, target_chars // CHARS_PER_PHOTO))
     return max(MIN_PHOTOS, min(limits))

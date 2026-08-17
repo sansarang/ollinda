@@ -148,6 +148,18 @@ def _fresh_index_check() -> None:
         lessons.sweep()                     # 🧪 미노출 자동 개선 — 격차 진단→교훈 적재→검증(UI 0개)
     except Exception:
         logging.getLogger("shopcast.lessons").exception("[lessons] 크론 실패")
+    try:  # 🎓 학습 에이전트 — 재평가 구간(4일)이 지난 파라미터 실험을 순위로 판정
+        #   발행 즉시 배우는 것은 pipesync 훅이 한다. 여기는 '순위가 나와야 아는 것'만 본다.
+        from app.agents import learner as _lrn
+        from app import config as _cfg0
+        _n = 0
+        for _t in db.list_tenants():
+            if getattr(_t, "id", "") in getattr(_cfg0, "PRODUCTION_TENANTS", []) or True:
+                _n += _lrn.judge_ready(_t)
+        if _n:
+            logging.getLogger("shopcast.agents").info("[learner] 실험 판정 %d건", _n)
+    except Exception:
+        logging.getLogger("shopcast.agents").exception("[learner] 판정 크론 실패")
     try:  # 🌐 유입 경로 진단(2026-08-01) — 주제·이웃·플레이스·외부 통로(하루 1회, 새벽)
         import datetime as _dtb
         _nb = _dtb.datetime.utcnow()

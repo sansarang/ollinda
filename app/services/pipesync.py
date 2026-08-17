@@ -60,6 +60,16 @@ def confirm_publish(t, piece, url: str, matched_by: str, score: float = 1.0,
         growth.on_publish(t, piece)
     except Exception:
         pass
+    # 🎓 학습 에이전트 — **발행하는 순간** 배운다(2026-08-17 사장님 지시).
+    #   크론을 기다리지 않는 이유: 뭉침·배치 일치율·용어 커버율은 발행 즉시 확정된 값이다.
+    #   3일 기다려야 하는 것은 순위뿐이고, 그건 learner.judge_ready가 따로 판정한다.
+    #   실패해도 발행은 계속된다 — 자율 계층이 본체를 막으면 그게 더 큰 사고다.
+    try:
+        from app.agents import learner as _lrn
+        _lrn.on_publish(t, piece)
+    except Exception:
+        import logging as _lgag
+        _lgag.getLogger("shopcast.agents").exception("[learner] 발행 훅 실패 — 발행은 계속")
     # ② 생존신고 즉시 시작(A2-b·c) — 색인 확인 + 첫 순위 스냅샷(kind='post').
     #    스냅샷이 생기면 '키워드 순위' 섹션에도 자동 편입된다. 네이버 콜이라 백그라운드로.
     def _kick():
