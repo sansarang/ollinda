@@ -199,9 +199,10 @@ def _commander_sweep() -> None:
       (배포가 생성을 죽인 것과 같은 계열 — 무거운 작업은 한가할 때만).
     """
     try:
+        from app import db as _dbc
         from app.agents import commander as _cm
-        for t in db.list_tenants():
-            pr = db.get_gen_progress(getattr(t, "id", "")) or {}
+        for t in _dbc.list_tenants():
+            pr = _dbc.get_gen_progress(getattr(t, "id", "")) or {}
             if (pr.get("status") or "") == "running":
                 logging.getLogger("shopcast.agents").info("[commander] 생성 중 — 이번 주기 건너뜀")
                 return
