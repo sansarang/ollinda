@@ -12787,6 +12787,25 @@ def admin_disk(prune: str = ""):
                     "removable_mb": round(dup_bytes / 1e6, 1)}}
 
 
+@app.api_route("/admin/photo-dedup", methods=["GET", "POST"])
+def admin_photo_dedup(apply: str = "", tenant: str = "", limit_mb: float = 0.0):
+    """🧹 같은 사진 중복 정리 (2026-08-18 사장님: "같은 사진이면 남길 이유가 있냐???").
+
+    기본은 **계획만** 보여준다 — 무엇을 무엇으로 합칠지. apply=1일 때만 실행한다.
+    실행은 [DB 참조 교체 → 참조 0 확인 → 파일 삭제] 순서를 코드가 강제한다.
+    가게 경계는 절대 넘지 않는다(같은 사진이라도 가게가 다르면 각자 보관).
+    """
+    from app.services import photodedup
+    if apply == "1":
+        return photodedup.apply(tenant_id=tenant.strip(), limit_mb=limit_mb)
+    p = photodedup.plan(tenant_id=tenant.strip())
+    return {"n_groups": p["n_groups"], "n_drop": p["n_drop"], "mb": p["mb"],
+            "top": [{"tenant": g["tenant"], "keep": os.path.basename(g["keep"]),
+                     "drop_n": len(g["drop"]), "mb": round(g["bytes"] / 1e6, 1)}
+                    for g in p["groups"][:10]],
+            "note": "계획만 봤습니다. 실행하려면 ?apply=1"}
+
+
 @app.api_route("/admin/cleanup", methods=["GET", "POST"])
 def admin_cleanup():
     """디스크 확보 — 사장님(OWNER) 소유 tenant만 남기고 데모·테스트 저장폴더+DB 전부 삭제 + 사장님 오래된 영상 정리."""
