@@ -1299,8 +1299,9 @@ def _seo_jsonld() -> str:
     app_ = {"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "올린다",
             "applicationCategory": "BusinessApplication", "operatingSystem": "Web",
             "offers": {"@type": "AggregateOffer", "priceCurrency": "KRW",
-                       "lowPrice": str(_cfg.PRICE_BASIC), "highPrice": str(_cfg.AGENCY_FROM),
-                       "offerCount": "3"}}
+                       # 2026-08-18 — 대행 단일 상품이다. 검색엔진에 없는 요금제를 알리지 않는다.
+                       "lowPrice": str(_cfg.AGENCY_FROM), "highPrice": str(_cfg.AGENCY_FROM),
+                       "offerCount": "1"}}
     return "".join(f'<script type="application/ld+json">{json.dumps(x, ensure_ascii=False)}</script>'
                    for x in (org, site, faq, app_))
 

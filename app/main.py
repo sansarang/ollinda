@@ -3766,18 +3766,13 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
     """랜딩 데모 — 미가입자는 '실제 생성 티저(흐리게)'로 가입 유도. 로그인 회원은 작업실로."""
     u = auth.current_user(request)
     _dev = _is_dev_ip(_client_ip(request))           # 개발자 IP — 무료 한도 미적용(env 등록 IP만)
-    if u:                                            # 로그인 회원 → 작업실에서 실제 생성
-        used = u.get("free_used") or 0
-        free = (u.get("plan") or "free") == "free"
-        if free and used >= FREE_LIMIT and not _dev:
-            from app import config as _cfg
-            return JSONResponse({"limit": True,
-                                 "message": (f"무료 {FREE_LIMIT}회를 모두 사용했어요. 방금 만든 품질 그대로 계속하려면 "
-                                             f"베이직 월 {_cfg.PRICE_BASIC:,}원 — 순위 성장 추적까지 열려요.")})
-        left = (FREE_LIMIT - used) if free else None
+    if u:
+        # 🗑 2026-08-18 — 로그인 회원의 무료 한도·업셀 안내를 지웠다.
+        #   이제 로그인하는 사람은 사장님(운영자) 하나다. 그런데 그 계정의 plan이 'free'라
+        #   랜딩 데모를 쓰면 "무료 2회를 다 쓰셨어요 · 베이직 39,000원"이 사장님께 떴다.
+        #   대행에는 요금제가 없다 — 운영자는 바로 운영 화면으로 보낸다.
         return JSONResponse({"go_dashboard": True,
-                             "message": "내 작업실에서 사진을 올리면 바로 만들어드려요!"
-                                        + (f" (무료 {left}회 남음)" if left is not None else "")})
+                             "message": "운영 화면에서 사진을 올리면 바로 만들어드려요!"})
     # 미로그인 → 실제 생성 후 '흐리게' 미리보기(티저)로 가입 유도
     if not (industry or "").strip():
         return JSONResponse({"require_signup": True, "message": "업종/상품을 입력하면 실제로 만들어 보여드려요!"})

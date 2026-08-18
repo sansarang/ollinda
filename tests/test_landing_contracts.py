@@ -61,9 +61,14 @@ def test_favicon_links_and_assets():
 
 
 def test_jsonld_price_matches_config():
+    """★ 2026-08-18 — 검사 기준을 PRICE_BASIC에서 AGENCY_FROM으로 바꿨다.
+    요금제를 없애고 대행 단일이 됐기 때문이다(사장님: 대행이다).
+    지키려는 것은 그대로다 — **검색엔진에 알리는 가격이 실제 가격과 같아야 한다.**
+    2026년에 '29,000원'을 하드코딩해 없는 요금을 알린 적이 있다."""
     h = _html()
     assert '"price":"29000"' not in h.replace(" ", ""), "하드코딩 허위 가격 회귀"
-    assert str(config.PRICE_BASIC) in h and "AggregateOffer" in h
+    assert str(config.AGENCY_FROM) in h and "AggregateOffer" in h
+    assert '"offerCount":"1"' in h.replace(" ", ""), "없는 요금제 개수를 알린다(대행 단일이다)"
 
 
 def test_video_no_autoplay_attr():
