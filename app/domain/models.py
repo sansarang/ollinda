@@ -78,6 +78,10 @@ class Tenant:
     guide_dismissed: int = 0  # 시작 가이드 '다음에 하기'(온보딩 P1)
     naver_blog_url: str = ""  # 사용자 네이버 블로그 URL(수동 발행 추적의 기준점)
     blog_id: str = ""         # 정규화된 네이버 블로그 아이디(RSS·검색결과 정확 식별)
+    # 📬 대행 고객 연락처 — 주간 성과 리포트를 받을 사람(2026-08-18).
+    #   가입 계정이 아니다. 대행 고객은 우리 화면에 로그인하지 않는다.
+    client_email: str = ""
+    client_name: str = ""
     created_at: Optional[datetime] = None
 
 

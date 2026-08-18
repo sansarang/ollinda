@@ -7076,13 +7076,15 @@ async def api_blog_angle_variant(request: Request):
 @app.post("/me/store-info")
 def my_store_info(request: Request, phone: str = Form(""), address: str = Form(""),
                   hours: str = Form(""), parking: str = Form(""), map_url: str = Form(""),
-                  buy_url: str = Form(""), search_kw: str = Form("")):
+                  buy_url: str = Form(""), search_kw: str = Form(""),
+                  client_email: str = Form(""), client_name: str = Form("")):
     """매장 고정정보 저장(블로그템플릿 PHASE 1) — 한 번 입력 → 모든 블로그 글 마무리에 재사용."""
     u = auth.current_user(request)
     if not u:
         return RedirectResponse("/login", status_code=303)
     t = _ensure_user_tenant(u)
     db.update_store_info(t.id, phone, address, hours, parking, map_url)
+    db.update_client_contact(t.id, client_email, client_name)   # 리포트 받을 사람
     if (buy_url.strip() or search_kw.strip()):     # 셀러 구매정보(있을 때만 갱신)
         db.update_tenant_classification(t.id, t.biz_type or "local", t.marketplace or "",
                                         buy_url.strip() or t.buy_url,
@@ -7113,6 +7115,13 @@ def _store_info_card(t) -> str:
             f"<input name=hours value=\"{esc(t.hours or '')}\" placeholder='영업시간 (예: 매일 10-21시, 월 휴무)' class='{inp}'>"
             f"<input name=parking value=\"{esc(getattr(t, 'parking', '') or '')}\" placeholder='주차 (예: 가게 앞 2대, 공영주차장 3분)' class='{inp}'>"
             f"<input name=map_url value=\"{esc(t.map_url or '')}\" placeholder='네이버 플레이스 URL' class='{inp}'>"
+            # 📬 대행 고객 연락처(2026-08-18) — 주간 성과 리포트를 받을 사람.
+            #   가입 계정이 아니다. 대행 고객은 우리 화면에 로그인하지 않는다.
+            #   이 칸이 비면 리포트가 만들어지고도 아무 데도 가지 않는다(발송 0건의 원인).
+            + f"<input name=client_name value=\"{esc(getattr(t, 'client_name', '') or '')}\" "
+              f"placeholder='사장님 성함 (리포트 받을 분)' class='{inp}'>"
+            + f"<input name=client_email type=email value=\"{esc(getattr(t, 'client_email', '') or '')}\" "
+              f"placeholder='사장님 이메일 — 주간 성과 리포트를 여기로 보냅니다' class='{inp}'>"
             + seller_rows +
             "<button class='bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 rounded-xl sm:col-span-2 transition'>저장</button>"
             "</form></details>")

@@ -121,35 +121,24 @@ def _email_body(rep: dict) -> str:
         lines += ["", "🚧 " + rep["blocked_reason"]]
     if rep.get("next_target"):
         lines.append(f"🎯 다음에 노릴 곳: {rep['next_target']}")
-    lines += ["", rep.get("coaching", ""), "", "자세히 보기: https://ollinda.kr/me?tab=report"]
+    # 🗑 2026-08-18 — '자세히 보기' 링크를 뺐다. 대행 고객은 우리 화면에 로그인하지 않는다
+    #   (게다가 그 탭은 사라졌다). 리포트는 메일 본문 하나로 완결돼야 한다.
+    lines += ["", rep.get("coaching", ""), "",
+              "— 올린다 · 문의 010-9796-9009"]
     return "\n".join(lines)
 
 
 def _send_email(to: str, subject: str, body: str) -> bool:
-    """SMTP 설정 시에만 발송(competitor.notify_alerts 패턴). 실패는 조용히."""
-    if not (to and os.environ.get("SMTP_HOST")):
-        return False
-    try:
-        import smtplib
-        from email.mime.text import MIMEText
-        msg = MIMEText(body, _charset="utf-8")
-        msg["Subject"] = subject
-        msg["From"] = os.environ.get("SMTP_USER", "no-reply@ollinda.kr")
-        msg["To"] = to
-        with smtplib.SMTP(os.environ["SMTP_HOST"], int(os.environ.get("SMTP_PORT", "587")), timeout=10) as s:
-            s.starttls()
-            if os.environ.get("SMTP_USER"):
-                s.login(os.environ["SMTP_USER"], os.environ.get("SMTP_PASS", ""))
-            s.send_message(msg)
-        return True
-    except Exception:
-        _log.exception("[weekly_report] 이메일 발송 실패 to=%s", to)
-        return False
+    """메일 발송 — services/mailer 단일 관문만 쓴다.
 
-
-def _send_kakao_stub(user: dict | None, rep: dict) -> None:
-    # TODO(kakao): 알림톡 템플릿 승인 후 발송 연결. 현재는 스텁(로그만).
-    _log.info("[weekly_report] 카톡 알림톡(스텁) tenant=%s week=%s", rep.get("tenant_id"), rep.get("week"))
+    ★ 2026-08-18 — 여기서 smtplib를 직접 부르며 SMTP_HOST를 요구했다. 그런데 Railway는
+      Pro 미만 플랜에서 SMTP 발신을 차단한다(2026-08-11 실측 OSError 101) — 그래서
+      SMTP_HOST가 비어 있는 게 정상이고, 이 함수는 **항상 False를 반환했다.**
+      리포트 8건이 만들어지고 발송 0건이던 이유의 절반이 이것이다(나머지 절반은 주소 없음).
+      mailer는 Resend를 먼저 쓴다.
+    """
+    from app.services import mailer
+    return mailer.send(to, subject, body)
 
 
 def send_all() -> dict:
@@ -159,12 +148,26 @@ def send_all() -> dict:
     for t in tenants:
         try:
             rep = build_report(t)
-            owner = db.get_user_by_tenant(t.id)
+            # 📬 받을 사람 — **가게에 등록된 고객 연락처**가 먼저다(2026-08-18).
+            #   전에는 가입자(owner)의 이메일만 찾았다. 그런데 대행 가게는 가입하지 않으므로
+            #   owner가 없다 → 주소가 늘 비어 발송 0건이었다. 대행에서 리포트는
+            #   부가 서비스가 아니라 고객이 매달 돈을 내는 이유 그 자체다.
+            cc = db.client_contact(t.id)
+            email = (cc.get("email") or "").strip()
+            if not email:
+                owner = db.get_user_by_tenant(t.id)
+                email = ((owner or {}).get("email") or "").strip()
+                if email.endswith((".guest", ".local")):     # 소셜 가입 가짜 주소
+                    email = ""
             mailed = False
-            email = (owner or {}).get("email") or ""
-            if email and not email.endswith((".guest", ".local")):   # 게스트 가짜 이메일 제외
+            if email:
                 mailed = _send_email(email, f"[올린다] 주간 리포트 — {t.name}", _email_body(rep))
-            _send_kakao_stub(owner, rep)
+                if not mailed:
+                    _log.warning("[weekly_report] 발송 실패 tenant=%s to=%s", t.name, email)
+            else:
+                # 침묵 폴백 금지 — 보낼 곳이 없으면 그 사실을 남긴다(조용히 건너뛰지 않는다)
+                _log.warning("[weekly_report] 보낼 주소 없음 tenant=%s — 가게 정보에 "
+                             "고객 이메일을 넣어야 리포트가 나간다", t.name)
             db.save_weekly_report(t.id, rep["week"], rep, sent_email=mailed)
             sent += 1
         except Exception:

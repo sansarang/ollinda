@@ -72,7 +72,13 @@ def init_db() -> None:
                          ("parking", "TEXT"),                     # 주차 안내(블로그템플릿 PHASE 1 고정정보)
                          ("briefing_hour", "INTEGER DEFAULT 8"),  # 아침 브리핑 시각(KST, 브리핑 PHASE 2)
                          ("briefing_on", "INTEGER DEFAULT 1"),    # 브리핑 on/off
-                         ("guide_dismissed", "INTEGER DEFAULT 0")]:  # 시작 가이드 '다음에 하기'(온보딩 P1)
+                         ("guide_dismissed", "INTEGER DEFAULT 0"),  # 시작 가이드 '다음에 하기'(온보딩 P1)
+                         # 📬 대행 고객 연락처(2026-08-18) — 성과 리포트를 보낼 곳.
+                         #   전에는 리포트가 '가입자(owner)의 이메일'을 찾았는데 대행 가게는
+                         #   가입하지 않으므로 owner가 없다 → 주소가 늘 비어 발송 0건이었다.
+                         #   가게 자체에 연락처를 둔다(가입과 무관하게).
+                         ("client_email", "TEXT"),
+                         ("client_name", "TEXT")]:
             try:
                 c.execute(f"ALTER TABLE tenants ADD COLUMN {col} {ddl}")
             except sqlite3.OperationalError:
@@ -300,6 +306,7 @@ def _row_to_tenant(r: sqlite3.Row) -> Tenant:
                   topic_axis=g("topic_axis"),
                   naver_blog_url=g("naver_blog_url"), blog_id=g("blog_id"),
                   parking=g("parking"),
+                  client_email=g("client_email"), client_name=g("client_name"),
                   # g()는 falsy를 기본값으로 바꿔버리므로(0→1) on/off는 raw로 읽는다
                   briefing_hour=(r["briefing_hour"] if "briefing_hour" in keys and r["briefing_hour"] else 8),
                   briefing_on=(0 if ("briefing_on" in keys and r["briefing_on"] == 0) else 1),
@@ -3021,3 +3028,21 @@ def set_contact_status(cid: int, status: str, memo: str = "") -> None:
                           (status, _now(), cid))
     except sqlite3.OperationalError:
         pass
+
+
+def update_client_contact(tid: str, email: str = "", name: str = "") -> None:
+    """대행 고객 연락처 — 성과 리포트를 받을 사람(가입 계정이 아니다)."""
+    with _conn() as c:
+        c.execute("UPDATE tenants SET client_email=?, client_name=? WHERE id=?",
+                  (email.strip()[:120], name.strip()[:60], tid))
+
+
+def client_contact(tid: str) -> dict:
+    try:
+        with _conn() as c:
+            r = c.execute("SELECT client_email, client_name FROM tenants WHERE id=?",
+                          (tid,)).fetchone()
+        return {"email": (r["client_email"] or "") if r else "",
+                "name": (r["client_name"] or "") if r else ""}
+    except sqlite3.OperationalError:
+        return {"email": "", "name": ""}
