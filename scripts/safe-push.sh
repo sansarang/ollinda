@@ -10,6 +10,28 @@
 #        SHOPCAST_FORCE_PUSH=1 ./scripts/safe-push.sh   # 사장님이 명시 승인했을 때만
 set -euo pipefail
 
+# 🧾 커밋 안 된 변경으로는 push하지 않는다(2026-08-18 사고).
+#   이 스크립트는 **커밋하지 않는다** — 원장 파일만 자동 커밋하고 HEAD를 push한다.
+#   그런데 골든은 워킹트리를 검사한다. 커밋을 빠뜨리면
+#     "✅ 골든 전체 통과" → "push 성공" 이 그대로 뜨는데 **배포물엔 그 변경이 없다.**
+#   실제로 죽은 라우트 3건 복구가 이 구멍으로 배포되지 않았고, 배포됐다고 보고할 뻔했다.
+#   (면역 검진도 staged_diff()를 보므로, 스테이징이 없으면 빈 diff를 검사한 셈이 된다.)
+#   data/ 는 아래에서 스크립트가 직접 커밋하므로 제외한다.
+DIRTY="$(git status --porcelain -- . ':(exclude)data' | grep -v '^??' || true)"
+if [ -n "$DIRTY" ]; then
+  echo "🛑 커밋하지 않은 변경이 있다 — 이대로 push하면 이 변경은 배포되지 않는다:"
+  echo "$DIRTY" | sed 's/^/  /'
+  echo "→ 먼저 커밋하라:  git add -A && git commit -m \"...\""
+  exit 6
+fi
+UNTRACKED="$(git status --porcelain -- . ':(exclude)data' | grep '^??' || true)"
+if [ -n "$UNTRACKED" ] && [ "${SHOPCAST_ALLOW_UNTRACKED:-0}" != "1" ]; then
+  echo "🛑 추적되지 않는 파일이 있다 — 로컬에만 있으므로 프로덕션에서 ImportError가 난다:"
+  echo "$UNTRACKED" | sed 's/^/  /'
+  echo "→ 커밋하거나, 아직 안 쓰는 파일이면 SHOPCAST_ALLOW_UNTRACKED=1 로 넘겨라."
+  exit 6
+fi
+
 HOST="${SHOPCAST_HOST:-https://ollinda.kr}"
 AUTH="${SHOPCAST_ADMIN_AUTH:-}"
 [ -z "$AUTH" ] && { echo "❌ SHOPCAST_ADMIN_AUTH(admin:비밀번호)가 없다"; exit 2; }
