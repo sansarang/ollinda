@@ -12787,6 +12787,24 @@ def admin_disk(prune: str = ""):
                     "removable_mb": round(dup_bytes / 1e6, 1)}}
 
 
+@app.get("/admin/media-integrity")
+def admin_media_integrity(limit: int = 20):
+    """🔎 깨진 사진 진단 — DB가 참조하는데 **실제로 없는 파일**을 센다.
+
+    2026-08-18에 필요해졌다. 중복 사진을 정리한 뒤 "글의 사진이 살아있나"를 확인하려는데
+    `/web/{asset}/{fname}`은 사장님 로그인 세션을 요구해서 운영자가 밖에서 확인할 수가 없었다.
+    (그걸 admin 인증으로 치고 404가 나오자 나는 하마터면 '사진을 지웠다'고 오판할 뻔했다 —
+     실제로는 그 파일이 멀쩡히 있었다. 검증은 관찰이 아니라 대조다.)
+
+    0이 아니면 그 글은 사진이 깨진 채 떠 있다는 뜻이다.
+    """
+    refs = _referenced_media()
+    missing = [p for p in refs if not os.path.exists(p)]
+    return {"referenced": len(refs), "missing": len(missing),
+            "ok": not missing,
+            "sample": [os.path.basename(p) for p in missing[:limit]]}
+
+
 @app.api_route("/admin/photo-dedup", methods=["GET", "POST"])
 def admin_photo_dedup(apply: str = "", tenant: str = "", limit_mb: float = 0.0):
     """🧹 같은 사진 중복 정리 (2026-08-18 사장님: "같은 사진이면 남길 이유가 있냐???").
