@@ -54,11 +54,23 @@ def test_briefing_hour_is_not_shifted_a_day(monkeypatch):
 
 
 def test_no_utc_day_bucketing_left_in_user_facing_paths():
-    """사장님이 보는 '오늘'을 서버 날짜로 계산하는 코드가 다시 들어오면 실패한다."""
+    """사장님이 보는 '오늘'을 서버 날짜로 계산하는 코드가 다시 들어오면 실패한다.
+
+    ★ 2026-08-18 — 검사 대상을 파일 두 개(main.py·briefing.py)로 못 박아뒀었다.
+      briefing.py가 삭제되자 골든이 FileNotFoundError로 죽었다. 목록을 고정하면
+      파일이 사라질 때 깨지고, 새 파일이 생길 때는 **아무것도 안 잡는다**(더 나쁘다).
+      그래서 app/ 전체를 훑는다 — 오늘 추가한 날짜별 목록 그룹핑도 이제 대상이다.
+    """
     import os
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     bad = []
-    for rel in ("app/main.py", "app/services/briefing.py"):
+    targets = []
+    for cur, dirs, files in os.walk(os.path.join(root, "app")):
+        dirs[:] = [d for d in dirs if d != "__pycache__"]
+        targets += [os.path.relpath(os.path.join(cur, f), root)
+                    for f in files if f.endswith(".py")]
+    assert targets, "검사할 파일을 못 찾았다"
+    for rel in sorted(targets):
         src = open(os.path.join(root, rel), encoding="utf-8").read()
         for i, ln in enumerate(src.splitlines(), 1):
             if ln.lstrip().startswith("#"):

@@ -88,3 +88,40 @@ def test_조사카드에_그려질_것이_없으면_아무것도_안_그린다()
         id = ""
         name = "x"
     assert main._research_card(_T(), _Empty()) == ""
+
+
+def test_브리핑은_완전히_사라졌다():
+    """★ 2026-08-18 사장님: "브리핑은 의미 없다. 업체마다 나가는 날짜가 틀리다.
+    이제 대행업체라는 것을 명심해라. 모든건 사장인 내가 직접 판단한다."
+
+    대행에서는 발행 리듬을 시스템이 정하지 않는다. 화면 카드만 지우고 발송이 남으면
+    사장님은 여전히 매일 아침 메일을 받는다 — 그래서 모듈·잡·라우트까지 전부 지웠다.
+    """
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    assert not (root / "app" / "services" / "briefing.py").exists(), "브리핑 모듈이 되살아났다"
+    sched = (root / "app" / "scheduler.py").read_text()
+    for line in sched.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        assert "briefing" not in line, f"브리핑 잡이 스케줄러에 남아 있다: {line.strip()[:60]}"
+    paths = {getattr(r, "path", "") for r in main.app.routes}
+    assert not [p for p in paths if "briefing" in p], "브리핑 라우트가 남아 있다"
+
+
+def test_자동_글준비는_죽지_않았다():
+    """브리핑을 지우면서 같이 죽이면 안 되는 것 — autoqueue는 `briefing_on`을
+    '자동 글 준비' 스위치로 읽는다(이름만 브리핑). 컬럼까지 지웠으면 준비가 멈춘다."""
+    import inspect
+    from app.services import autoqueue
+    assert "briefing_on" in inspect.getsource(autoqueue), \
+        "자동 글 준비 스위치가 사라졌다 — 브리핑과 함께 지워버린 것이다"
+
+
+def test_목록은_접히고_날짜마다_색이_다르다():
+    """사장님: "눌렀을때 펼쳐지게 / 펼쳤을때도 날짜별 색깔도 달리해라"."""
+    import inspect
+    src = inspect.getsource(main.my_dashboard)
+    assert "<details id='myContent'" in src, "내 콘텐츠가 접히지 않는다"
+    assert "_PALETTE" in src and "_PALETTE[_i % len(_PALETTE)]" in src, \
+        "날짜별 색 순환이 없다"

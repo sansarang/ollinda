@@ -5644,16 +5644,28 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             _pub = bool(_bp and _bp.status.value == "published")
             _by_day.setdefault(_day, []).append(
                 {"aid": s["asset_id"], "title": title, "published": _pub})
+        # 🎨 날짜별로 색을 달리한다 (2026-08-18 사장님: "펼쳤을때도 날짜별 색깔도 달리해라").
+        #   날짜 경계가 글자 크기로만 구분되니 목록이 한 덩어리로 보였다.
+        #   색은 **최신 날짜부터 순환**한다 — 업종·상태와 무관한 순수 구분선이라
+        #   특정 색에 의미를 부여하지 않는다(발행됨 뱃지만 의미를 가진다).
+        _PALETTE = (("bg-indigo-50", "text-indigo-700", "border-indigo-100"),
+                    ("bg-emerald-50", "text-emerald-700", "border-emerald-100"),
+                    ("bg-amber-50", "text-amber-700", "border-amber-100"),
+                    ("bg-sky-50", "text-sky-700", "border-sky-100"),
+                    ("bg-violet-50", "text-violet-700", "border-violet-100"),
+                    ("bg-rose-50", "text-rose-700", "border-rose-100"))
         _blocks = []
-        for _day in sorted(_by_day, reverse=True):
+        for _i, _day in enumerate(sorted(_by_day, reverse=True)):
             items = _by_day[_day]
+            _bg, _fg, _bd = _PALETTE[_i % len(_PALETTE)]
             _rows = ""
             for it in items:
                 _badge = ("<span class='flex-shrink-0 text-[11px] font-bold text-emerald-700 "
                           "bg-emerald-50 px-2 py-0.5 rounded-full'>발행됨</span>" if it["published"]
                           else "")
                 _rows += (
-                    "<div class='group flex items-center gap-3 py-2.5 border-b border-slate-100 last:border-0'>"
+                    "<div class='group flex items-center gap-3 py-2.5 border-b "
+                    f"{_bd} last:border-0'>"
                     f"<a href='/me?view={it['aid']}' class='flex-1 min-w-0 text-[15px] text-slate-700 "
                     f"hover:text-indigo-600 font-medium truncate transition'>{esc(it['title'])}</a>"
                     + _badge
@@ -5664,9 +5676,9 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                        + _ic("xcircle", "w-4 h-4") + "</button></form>")
                     + "</div>")
             _blocks.append(
-                "<div class='mb-5 last:mb-0'>"
-                f"<div class='text-xs font-bold text-slate-400 mb-1'>{esc(_day)}"
-                f"<span class='ml-1.5 font-medium text-slate-300'>{len(items)}건</span></div>"
+                f"<div class='rounded-2xl border {_bd} {_bg} px-4 py-3 mb-3 last:mb-0'>"
+                f"<div class='text-xs font-extrabold {_fg} mb-1'>{esc(_day)}"
+                f"<span class='ml-1.5 font-medium opacity-60'>{len(items)}건</span></div>"
                 f"<div>{_rows}</div></div>")
         hist = "".join(_blocks)
     else:
@@ -5796,9 +5808,18 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                       "<div class='mb-5'><div class='text-lg font-extrabold text-slate-900'>콘텐츠 만들기</div>"
                       "<div class='text-sm text-slate-400'>가게 이름·사진만 있으면 끝</div></div>"
                       + _upload_form_html(t, tok, target_kw=_tkw, angle=_angle, src=_src) + "</div>" + _scrolljs)
-    content = ("<div id='myContent' class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5'>"
-               "<h2 class='font-bold text-slate-900 mb-1'>내 콘텐츠</h2>"
-               "<p class='text-xs text-slate-400 mb-3'>‘보기’를 누르면 결과가 나와요.</p>" + hist + "</div>")
+    # 📂 접었다 펼친다 (2026-08-18 사장님: "내 콘텐츠를 눌렀을때 펼쳐지게 해라. 너무 혼란스럽다").
+    #   기본은 접힘 — 홈에 들어오면 먼저 보이는 것은 '콘텐츠 만들기'여야 한다.
+    #   글이 아직 없으면 접을 게 없으니 펼쳐둔다(빈 화면에서 또 눌러야 하는 헛수고 방지).
+    _n_sets = len(sets)
+    content = ("<details id='myContent'" + ("" if _n_sets else " open")
+               + " class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5'>"
+               "<summary class='cursor-pointer select-none list-none flex items-center gap-2'>"
+               "<span class='font-bold text-slate-900'>내 콘텐츠</span>"
+               + (f"<span class='text-xs font-bold text-slate-400'>{_n_sets}건</span>"
+                  if _n_sets else "")
+               + "<span class='ml-auto text-slate-300 text-lg'>▾</span></summary>"
+               "<div class='mt-3'>" + hist + "</div></details>")
     # ('주방은 보여주지 않는다') 통계 KPI 카드(만든 세트·발행물·평균 노출점수) 삭제 —
     # 자체 채점·개수는 허영 지표. 사장님에게 의미 있는 건 실측(순위·유입·문의)뿐.
     kw_card = ""    # (auto) '노리는 키워드' 카드 제거
@@ -5988,7 +6009,14 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             # 정보성 글은 리포트의 도구 섹션에서 접근, 발행 리듬은 브리핑(할 일 1개)이 담당.
             # 시작 가이드는 첫 콘텐츠 전에만(온보딩 끝난 사장님에게 체크리스트 반복 금지).
             _guide = _guide_card(t) if not db.list_sets(tenant_id=t.id, limit=1) else ""
-            _task = _due_html or _briefing_card(t, _plan)     # 오늘 할 일은 딱 1장(발행 준비 우선)
+            # 🗑 2026-08-18 사장님: "오늘 할 일 딱 하나 / 사진 보내고 시작하기 — 이것도 삭제해야 하는거 아니냐??"
+            #   맞다. 두 가지가 틀렸다:
+            #     ① 화자 — "최근 작업 사진 3장만 보내주세요"는 **고객에게** 할 말이다.
+            #        대행사인 사장님께 할 말이 아니다(사진은 고객이 /u/{token}으로 보낸다).
+            #     ② 중복 — '사진 보내고 시작하기'는 바로 아래 '콘텐츠 만들기'와 같은 자리다.
+            #   브리핑 **서비스**는 살아 있다(scheduler가 아침·저녁 메일을 보낸다).
+            #   화면 카드만 지웠고, 끄는 스위치는 매장 정보 카드로 옮겼다.
+            _task = _due_html
             # 🗑 2026-08-18 사장님: "도구 삭제 — 분석이 생겨서 필요없다."
             #   플레이스 도구·추적 QR은 발행글 조사 그래프(_research_card)가 대신한다.
             #   ★ 단 '블로그 연결'은 분석이 아니라 **설정**이라 같이 죽이면 안 된다 —
@@ -7167,72 +7195,20 @@ def _store_info_card(t) -> str:
             + seller_rows +
             "<button class='bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 rounded-xl sm:col-span-2 transition'>저장</button>"
             "</form></details>")
+            # 🗑 2026-08-18 — 브리핑 설정 폼도 지웠다. 사장님: "브리핑은 의미 없다."
+            #   `briefing_on` 컬럼 자체는 남는다 — autoqueue가 '자동 글 준비'
+            #   스위치로 읽고 있고(기본 켜짐), 그 준비는 계속 돌아야 한다.
+            #   끄는 UI가 필요해지면 그때 '자동 글 준비'라는 제 이름으로 만든다.
 
 
-@app.post("/me/briefing-pref")
-def my_briefing_pref(request: Request, hour: str = Form("8"), on: str = Form("1")):
-    """아침 브리핑 설정 — 시각(05~12시)·on/off (브리핑 PHASE 2)."""
-    u = auth.current_user(request)
-    if not u:
-        return RedirectResponse("/login", status_code=303)
-    t = _ensure_user_tenant(u)
-    try:
-        db.set_briefing_pref(t.id, int(hour or 8), (on or "1") == "1")
-    except Exception:
-        pass
-    return RedirectResponse("/me?ok=아침 브리핑 설정을 저장했어요", status_code=303)
 
 
-@app.post("/api/briefing/pass")
-def api_briefing_pass(request: Request):
-    """'오늘은 패스' — 부담 없이 넘기기(브리핑 PHASE 3)."""
-    u = auth.current_user(request)
-    if not u:
-        return JSONResponse({"ok": False}, status_code=401)
-    t = _ensure_user_tenant(u)
-    import datetime
-    db.pass_briefing(t.id, db.kst_today())      # '오늘'은 사장님 달력 기준
-    return JSONResponse({"ok": True, "message": "오늘은 쉬어가요. 내일 아침에 다시 브리핑드릴게요!"})
 
 
-@app.post("/api/briefing/send-test")
-def api_briefing_send_test(request: Request):
-    """본인 계정 한정 테스트 발송 — 실발송 경로(알림+이메일+카톡 스텁) 그대로, 시각·1일1회 락 무시.
-    남용 방지: 로그인 필수(본인 tenant만) + IP 레이트리밋(시간 3회)."""
-    from app import ratelimit
-    u = auth.current_user(request)
-    if not u:
-        return JSONResponse({"ok": False, "error": "로그인이 필요해요."}, status_code=401)
-    if not ratelimit.allow("brieftest:" + _client_ip(request), 3, 3):
-        return JSONResponse({"ok": False, "error": "테스트 발송은 시간당 3회까지예요."}, status_code=429)
-    t = _ensure_user_tenant(u)
-    if not (t.industry or "").strip():
-        return JSONResponse({"ok": False, "error": "가게 설정(업종) 먼저 완료해 주세요."}, status_code=400)
-    from app.services import briefing as _bf
-    b = _bf.get_or_create_today(t, u.get("plan") or "free")
-    text = _bf._briefing_text(t, b)
-    db.add_notice(t.id, "briefing", f"오늘 아침 브리핑 — {b['headline']} 오늘 할 일: {b['task']}")
-    mailed = False
-    email = (u.get("email") or "")
-    if email and not email.endswith((".guest", ".local")) and os.environ.get("SMTP_HOST"):
-        try:
-            from app.services.weekly_report import _send_email
-            mailed = _send_email(email, "[올린다] 오늘 아침 브리핑 (테스트)", text)
-        except Exception:
-            pass
-    _bf._send_kakao_stub(t, b)
-    return JSONResponse({"ok": True, "kind": b.get("kind"), "headline": b.get("headline"),
-                         "task": b.get("task"), "notice": True, "mailed": mailed})
 
 
-@app.post("/admin/briefing/send-now")
-def admin_briefing_now(hour: int = 0):
-    """수동 트리거(테스트) — hour 미지정 시 현재 KST 시각."""
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-    from app.services import briefing
-    h = hour or datetime.now(ZoneInfo("Asia/Seoul")).hour
-    return JSONResponse(briefing.send_morning(h))
+
+
 
 
 @app.post("/me/topic-axis")
@@ -7653,74 +7629,8 @@ def guide_dismiss(request: Request):
     return RedirectResponse("/me", status_code=303)
 
 
-def _briefing_card(t, plan: str) -> str:
-    """오늘의 브리핑 카드(브리핑 PHASE 5) — 능동 발송과 별개로 앱에서도 확인. 밝은 톤.
-    게이팅: 전 플랜 제공(리텐션 목적 — 매일 들어올 이유가 곧 구독 유지)."""
-    from app.services import briefing as _bf
-    try:
-        b = _bf.get_or_create_today(t, plan)
-    except Exception:
-        return ""
-    if b.get("passed"):
-        return (f"<div class='{_CARD} p-4 mb-5 flex items-center gap-3'>"
-                f"{_icchip('checkcircle')}"
-                "<div class='text-sm text-slate-500'>오늘 브리핑은 패스하셨어요 — 푹 쉬세요. "
-                "내일 아침에 새 브리핑으로 찾아뵐게요.</div></div>")
-    hour = int(getattr(t, "briefing_hour", 8) or 8)
-    on = bool(getattr(t, "briefing_on", 1))
-    hours_opts = "".join(f"<option value='{h}'{' selected' if h == hour else ''}>{h:02d}:00</option>"
-                         for h in range(5, 13))
-    pref = ("<details class='mt-3'><summary class='text-xs text-slate-400 cursor-pointer select-none'>"
-            f"브리핑 설정 — 매일 {hour:02d}:00 · {'켜짐' if on else '꺼짐'}</summary>"
-            "<form method=post action='/me/briefing-pref' class='flex items-center gap-2 mt-2'>"
-            f"<select name=hour class='border border-slate-200 rounded-xl px-2.5 py-2 text-sm'>{hours_opts}</select>"
-            f"<label class='text-sm text-slate-600 flex items-center gap-1.5'>"
-            f"<input type=checkbox name=on value=1 {'checked' if on else ''}> 아침 브리핑 받기</label>"
-            f"<button class='{_BTN} text-xs px-3 py-2'>저장</button></form></details>")
-    # ('주방은 보여주지 않는다') 헤드라인 잔소리·이유·파트너 노트 삭제 — 할 일 한 문장 + 버튼만.
-    return (f"<div class='bg-[#F5F3FF] border border-indigo-200 rounded-2xl p-5 mb-5'>"
-            "<div class='flex items-center gap-2 mb-1.5'>"
-            f"{_ic('message', 'w-4 h-4 text-indigo-600')}"
-            "<span class='text-xs font-bold text-indigo-600'>오늘 할 일 딱 하나</span></div>"
-            f"<div class='text-sm font-bold text-slate-900'>{esc(b.get('task', ''))}</div>"
-            "<div class='flex items-center gap-2 mt-3'>"
-            f"<a href='{b.get('action_href', '/me')}' class='{_BTN} text-sm px-4 py-2.5'>{esc(b.get('action_label', '시작하기'))}</a>"
-            "<button type=button onclick=\"fetch('/api/briefing/pass',{method:'POST'}).then(r=>r.json())"
-            ".then(d=>{location.reload();})\" class='text-xs text-slate-400 hover:text-slate-600 px-2'>오늘은 패스</button>"
-            "</div>" + pref + "</div>")
 
 
-def _calendar_card(t, plan: str) -> str:
-    """발행 캘린더 카드(상위노출 PHASE 2) — 이번 주 진행률 + 남은 슬롯 제안 + 주제 축."""
-    from app.services import pubcal
-    wp = pubcal.week_plan(t, plan)
-    # 진행률 도트(●=완료 ○=남음)
-    dots = "".join("<span class='w-3.5 h-3.5 rounded-full bg-emerald-500 inline-block'></span>"
-                   for _ in range(min(wp["done"], wp["target"])))
-    dots += "".join("<span class='w-3.5 h-3.5 rounded-full bg-slate-200 inline-block'></span>"
-                    for _ in range(wp["remaining"]))
-    basis_note = "" if wp["basis"] == "published" else " <span class='text-[10px] text-slate-400'>(발행확인 전엔 생성 기준)</span>"
-    sug_html = ""
-    for s in wp["suggestions"][:3]:
-        sug_html += (f"<a href='{s['href']}' class='flex items-center justify-between bg-white border border-slate-100 "
-                     "rounded-xl px-3.5 py-2.5 mb-1.5 hover:border-indigo-300 hover:shadow-sm transition'>"
-                     f"<div class='text-sm'><b class='text-slate-700'>{esc(s['topic'])}</b> "
-                     f"<span class='text-xs text-indigo-500 font-bold'>{s['angle_label']}</span>"
-                     f"<div class='text-[11px] text-slate-400'>{esc(s['why'])}</div></div>"
-                     "<span class='text-xs font-bold text-indigo-600 whitespace-nowrap'>만들기 →</span></a>")
-    axis = esc(getattr(t, "topic_axis", "") or "")
-    inp = "flex-1 border border-slate-200 rounded-xl px-3 py-2 text-sm"
-    axis_form = ("<details class='mt-2'><summary class='text-xs text-slate-400 cursor-pointer select-none'>"
-                 f"전문 주제 축 {('· <b class=\"text-slate-600\">' + axis + '</b>') if axis else '설정(권장)'} — 같은 주제 꾸준함이 노출 신호</summary>"
-                 "<form method=post action='/me/topic-axis' class='flex gap-2 mt-2'>"
-                 f"<input name=topic_axis value=\"{axis}\" placeholder='예: 부산 썬팅, 열차단 필름 (쉼표로 여러 개)' class='{inp}'>"
-                 "<button class='px-4 bg-slate-900 text-white rounded-xl text-xs font-bold'>저장</button></form></details>")
-    return ("<div class='bg-white rounded-3xl border border-slate-100 shadow-sm p-5 mb-5'>"
-            "<div class='flex items-center justify-between mb-2'>"
-            f"<h2 class='font-extrabold text-slate-900'>발행 캘린더 · 이번 주 {wp['done']}/{wp['target']}{basis_note}</h2>"
-            f"<div class='flex items-center gap-1'>{dots}</div></div>"
-            f"<p class='text-xs text-slate-500 mb-3'>{esc(wp['coach'])}</p>"
-            + sug_html + axis_form + "</div>")
 
 
 @app.post("/me/place-news")
@@ -13138,21 +13048,14 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
                       src: str = "") -> str:
     """모던·간결 생성 카드 — 가게이름/링크 자동인식 + 사진 + 형태 + 목적 → 5채널 생성.
     target_kw/angle: 진단→생성 연결(상위노출 PHASE 1) — 이 키워드/앵글을 겨냥한 글 생성.
-    src='briefing': 아침 브리핑 원클릭 진입(브리핑 PHASE 3) — 파트너 톤 배너."""
+    src: 어디서 들어왔는지(진입 경로 표시용)."""
     bt = (tenant.biz_type or "local")
     _angle_lab = {"review": "후기형", "howto": "방법·과정형", "price": "가격·비용형"}.get(angle, "")
     target_banner = ""
-    if target_kw and src == "briefing":
-        # 브리핑 원클릭: "사진만 보내면 나머지는 제가" — 짐을 나눠 지는 경험
-        target_banner = ("<div class='flex items-center gap-2.5 bg-[#EEF2FF] border border-indigo-200 rounded-2xl p-3.5'>"
-                         f"{_ic('wand', 'w-5 h-5 text-indigo-600 flex-shrink-0')}<div class='text-sm text-slate-700'>"
-                         "오늘 브리핑의 글감은 제가 잡아뒀어요"
-                         + (f" · <b>{_angle_lab}</b>" if _angle_lab else "")
-                         + " — <b>사진 3장만</b> 올려주세요. 글·영상·발행 준비는 제가 할게요.</div>"
-                         "<button type=button onclick=\"fetch('/api/briefing/pass',{method:'POST'}).then(r=>r.json())"
-                         ".then(d=>{alert(d.message||'내일 다시 브리핑드릴게요');location.href='/me';})\" "
-                         "class='ml-auto text-xs text-slate-400 hover:text-slate-600 whitespace-nowrap'>오늘은 패스</button></div>")
-    elif target_kw:
+    # 🗑 2026-08-18 — 브리핑 전용 배너('오늘 브리핑의 글감은…' + [오늘은 패스')를 지웠다.
+    #   브리핑이 없어졌으니 이 분기는 영영 안 탄다(src='briefing'이 올 곳이 없다).
+    #   아래 일반 배너가 같은 일을 한다 — 화자만 바로잡았다.
+    if target_kw:
         target_banner = ("<div class='flex items-center gap-2.5 bg-amber-50 border border-amber-200 rounded-2xl p-3.5'>"
                          f"{_ic('target', 'w-5 h-5 text-amber-600 flex-shrink-0')}<div class='text-sm text-slate-700'>"
                          "이번 글의 글감은 AI가 정해뒀어요"

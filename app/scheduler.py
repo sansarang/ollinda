@@ -48,12 +48,11 @@ def start() -> None:
         # 순위 자동추적(상위노출 PHASE 3) — tenant×타겟키워드 일일 스냅샷(아침, 스캔과 시차)
         sch.add_job(_rank_track, "cron", hour=7, minute=30,
                     id="rank_track_daily", replace_existing=True)
-        # 아침 브리핑(브리핑 PHASE 2) — 매시 정각(05~12시), tenant별 설정 시각에 발송(1일 1회 락)
-        sch.add_job(_morning_briefing, "cron", hour="5-12", minute=0,
-                    id="morning_briefing", replace_existing=True)
-        # 저녁 성과 피드백(브리핑 PHASE 4) — 20시
-        sch.add_job(_evening_feedback, "cron", hour=20, minute=0,
-                    id="evening_feedback", replace_existing=True)
+        # 🗑 2026-08-18 사장님: "브리핑은 의미 없다. 업체마다 나가는 날짜가 틀리다.
+        #   이제 대행업체라는 것을 명심해라. 모든건 사장인 내가 직접 판단한다."
+        #   아침 브리핑·저녁 피드백 발송을 중단했다. 대행에서는 발행 리듬을 시스템이 정하지 않는다 —
+        #   가게마다 나가는 날이 다르고, 그 판단은 사장님이 한다.
+        #   (자동 글 준비는 별개로 살아 있다 — autoqueue는 briefing 모듈을 쓰지 않는다)
         # RSS 자동 매칭(파이프 A1 보조 경로) — 3시간마다 새 글 감지→자동 연결/확인 요청
         sch.add_job(_fresh_index_check, "cron", minute="*/30",
                     id="fresh_index", replace_existing=True)   # 발행 후 24h 집중 색인 체크(2-3)
@@ -101,24 +100,6 @@ def start() -> None:
         logging.exception("[scheduler] 기동 실패 — 자동 스캔 없이 계속")
 
 
-def _morning_briefing() -> None:
-    """매일 아침 브리핑 — 현재 KST 시각에 예약된 가게만(브리핑 PHASE 2)."""
-    try:
-        from datetime import datetime
-        from zoneinfo import ZoneInfo
-        from app.services import briefing
-        briefing.send_morning(datetime.now(ZoneInfo("Asia/Seoul")).hour)
-    except Exception:
-        logging.exception("[scheduler] 아침 브리핑 실패")
-
-
-def _evening_feedback() -> None:
-    """저녁 성과 피드백(브리핑 PHASE 4)."""
-    try:
-        from app.services import briefing
-        briefing.send_evening()
-    except Exception:
-        logging.exception("[scheduler] 저녁 피드백 실패")
 
 
 def _fresh_index_check() -> None:
