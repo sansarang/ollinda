@@ -5123,6 +5123,51 @@ def admin_publish_pending(tenant: str = ""):
     return JSONResponse({"ok": True, "rows": pubqueue.pending(tenant.strip())})
 
 
+@app.get("/admin/factgate-recheck")
+def admin_factgate_recheck(limit: int = 10, dry: int = 1):
+    """🔬 날조 게이트 재판정 — 저장된 글을 지금 코드(Solar)로 다시 판정해 옛 기록과 대조한다.
+
+    2026-08-18. 게이트를 haiku → Solar로 옮긴 뒤 "정말 맞느냐"를 재는 유일한 방법이다.
+    새 글을 만들지 않으므로 **실계정 콘텐츠를 건드리지 않는다**(읽기만 · dry=1 기본).
+
+    반환의 `changed`가 핵심 — 옛 판정과 새 판정이 갈린 글이다.
+      old=miss, new=ok  → 옛 게이트가 정상 글을 막고 있었다(오탐)
+      old=ok,  new=miss → 새 게이트가 더 엄격하다(확인 필요)
+      old='',  new=*    → 옛 게이트가 아예 죽어 있었다(크레딧)
+    """
+    from app import seo
+    rows, changed = [], 0
+    try:
+        with db._conn() as c:
+            recs = c.execute(
+                "SELECT id, tenant_id, created_at, payload FROM content_pieces "
+                "WHERE kind='blog' AND payload LIKE '%gen_source%' "
+                "ORDER BY created_at DESC LIMIT ?", (max(1, min(limit, 40)),)).fetchall()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": repr(e)[:120]}, status_code=500)
+    import json as _j
+    for r in recs:
+        try:
+            pl = _j.loads(r["payload"] or "{}")
+        except Exception:
+            continue
+        old = pl.get("subject_check")
+        old = "" if old is None else str(old)
+        note, body = pl.get("gen_source") or "", pl.get("body") or ""
+        kw = (pl.get("target_kw") or "").strip()
+        v = seo.subject_match(body, note, kw)
+        new = "" if v is None else ("ok" if v else "miss")
+        if new != old:
+            changed += 1
+        rows.append({"at": (r["created_at"] or "")[:16],
+                     "title": (pl.get("title") or "")[:34],
+                     "kw": kw, "old": old or "(판정없음)", "new": new or "(판정없음)",
+                     "same": new == old})
+    return JSONResponse({"ok": True, "checked": len(rows), "changed": changed,
+                         "note": "dry — 저장하지 않고 판정만 했습니다(실계정 무변경)",
+                         "rows": rows})
+
+
 @app.get("/admin/inquiries", response_class=HTMLResponse)
 def admin_inquiries(status: str = "", ok: str = ""):
     """📨 받은 문의 — 대행의 입구를 한 화면에서 본다.
