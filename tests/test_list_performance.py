@@ -17,13 +17,20 @@ from app import main as m
 
 
 def test_list_uses_thumbnails_not_originals():
-    """A. 목록 카드가 원본 경로(/dl)를 쓰면 실패한다 — 이게 57MB의 원인이었다."""
+    """A. 목록이 원본 경로(/dl)를 쓰면 실패한다 — 이게 57MB의 원인이었다.
+
+    ★ 2026-08-18 — 목록에서 **이미지가 통째로 사라졌다.** 사장님 지시로 '날짜 + 제목'
+      목록이 됐다("너무 지저분하다"). 썸네일조차 없으니 이 골든이 지키려던 것
+      (목록이 무거운 이미지를 받지 않는다)은 더 강하게 달성된다.
+      그래서 검사를 '썸네일을 쓰는가'에서 **'이미지를 아예 안 받는가'**로 올린다.
+      썸네일 자체는 test_thumb_route_caches_and_shrinks가 계속 지킨다.
+    """
     src = inspect.getsource(m.my_dashboard)
-    i = src.find("thumb = next(")
-    assert i > 0, "목록 썸네일 생성부를 못 찾음"
-    seg = src[i:i + 200]
-    assert "/thumb/" in seg, "목록이 원본을 쓴다"
+    i = src.find("_by_day.setdefault(")
+    assert i > 0, "날짜별 목록 생성부를 못 찾음"
+    seg = src[max(0, i - 2500):i + 2500]
     assert "/dl/" not in seg, "목록에 원본 경로가 남아 있다"
+    assert "<img" not in seg, "목록이 다시 이미지를 받는다 — 36개면 그만큼 요청이 뜬다"
 
 
 def test_thumb_route_caches_and_shrinks():
@@ -141,12 +148,14 @@ def test_목록_썸네일이_지연로드된다():
     import inspect
 
     from app import main
-    src = inspect.getsource(main)
-    i = src.find("thumb_html = ")
-    assert i > 0
-    seg = src[i:i + 400]
-    assert "loading='lazy'" in seg, "목록 썸네일이 지연로드되지 않는다(36개를 한꺼번에 받는다)"
-    assert "width=" in seg and "height=" in seg, "치수가 없어 레이아웃이 흔들린다(CLS)"
+    src = inspect.getsource(main.my_dashboard)
+    # ★ 2026-08-18 — 지연로드로 고쳤던 그 썸네일이 이제 목록에서 사라졌다(제목만 남김).
+    #   받지 않는 것이 늦게 받는 것보다 낫다 — 검사를 '이미지 0'으로 바꾼다.
+    i = src.find("_blocks.append(")
+    assert i > 0, "날짜별 목록 블록을 못 찾음"
+    seg = src[max(0, i - 3000):i + 1500]
+    assert "<img" not in seg and "/thumb/" not in seg, \
+        "목록이 다시 이미지를 받는다 — 그러면 지연로드가 필수가 된다"
 
 
 def test_상세_대표이미지가_원본이_아니다():

@@ -511,7 +511,7 @@ def test_H27_완성_화면은_어느_세트인지_추측하지_않는다():
     # 화면이 그 값을 먼저 쓰는가 + 못 구했을 때도 실제로 이동하는가
     src = inspect.getsource(m._upload_form_html)
     assert "if(!aid&&pr.asset_id)aid=pr.asset_id;" in src, "화면이 서버 값을 안 쓴다"
-    assert "'/me?tab=content'" in src, "못 구했을 때 같은 화면으로 보낸다(눌러도 변화 없음)"
+    assert "'/me'" in src, "못 구했을 때 같은 화면으로 보낸다(눌러도 변화 없음)"
 
 
 def test_H28_다시_쓰게_할_때_토큰이_모자라지_않는다():

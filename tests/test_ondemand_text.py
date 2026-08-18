@@ -61,16 +61,21 @@ def test_ondemand_verifies_ownership():
 def test_preview_has_the_make_buttons():
     """사장님이 고를 자리가 화면에 있어야 온디맨드가 성립한다."""
     src = _src("app/main.py")
-    assert "def _text_row(" in src, "미리보기에 텍스트 만들기 행이 없다"
+    # ★ 2026-08-18 — 대시보드 카드가 '날짜+제목' 목록이 되면서 이 행이 갈 곳을 잃었다.
+    #   그냥 지웠으면 기능이 조용히 죽는다 → **미리보기(_result_html)로 옮겼다.**
+    #   검사도 새 자리에서 한다. 지키는 것은 그대로다: 만들어놓고 안 붙이면 화면에 없다.
+    assert "def _text_ondemand_row(" in src, "텍스트 만들기 행이 없다"
     assert "인스타 캡션" in src and "X 글" in src, "고를 항목이 없다"
     assert "function tdMake(" in src, "만들기 버튼 동작이 없다"
-    i = src.find("_vrow, _ = _video_row(")
-    assert "_text_row(" in src[i:i + 200], "만든 행이 카드에 붙지 않았다(죽은 코드)"
+    i = src.find("def _result_html(")
+    assert i > 0
+    assert "_text_ondemand_row(asset_id, pieces)" in src[i:], \
+        "만든 행이 미리보기에 붙지 않았다(죽은 코드)"
 
 
 def test_made_items_are_marked_done_not_offered_again():
     """이미 만든 것은 다시 고르게 하면 안 된다(죽은 자리·중복 비용)."""
     src = _src("app/main.py")
-    i = src.find("def _text_row(")
-    seg = src[i:i + 1800]
+    i = src.find("def _text_ondemand_row(")
+    seg = src[i:i + 2200]
     assert "✓" in seg, "이미 만든 것 표시가 없다"

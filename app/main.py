@@ -5298,7 +5298,7 @@ def store_cancel(request: Request):
         return RedirectResponse("/login", status_code=303)
     t = _ensure_user_tenant(u)
     if db.list_sets(tenant_id=t.id):                 # 콘텐츠가 있으면 실수 아님 → 그냥 전환만
-        return RedirectResponse("/me?tab=content", status_code=303)
+        return RedirectResponse("/me", status_code=303)
     db.delete_store(u["id"], t.id)                   # 비어있으면 삭제 + 이전 가게로
     return RedirectResponse("/me?ok=이전 가게로 돌아왔어요", status_code=303)
 
@@ -5610,244 +5610,65 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
     _chan_icon = {k: _ic(v, "w-3.5 h-3.5 inline-block text-slate-500") for k, v in
                   {"instagram": "camera", "naver_blog": "pen", "x": "message", "youtube": "play",
                    "facebook": "check", "marketplace": "package"}.items()}
+    # 🗂 콘텐츠 목록 — 날짜별 · 제목만 · 누르면 미리보기 (2026-08-18 사장님 지시)
+    #
+    #   "너무 지저분하다..날짜별로 정리..제목만 표시..날짜 눌렀을시 미리보기로 이동"
+    #
+    #   전에는 세트마다 카드였다: 썸네일 + 채널 아이콘 + 노출 배지 + 클릭수 +
+    #   [올리기][올렸어요][캡션 만들기][영상 만들기][보기][삭제]. 한 화면에 세트가 36개까지
+    #   쌓이니 버튼만 200개가 넘었다. 사장님이 여기서 할 일은 **글을 고르는 것** 하나다.
+    #   나머지 조작은 전부 미리보기 안에 있다(발행·영상·캡션·다운로드).
+    #
+    #   ★ 걷어내면서 죽은 기능이 없는지 확인했다 — 발행/영상은 미리보기에 이미 있었고,
+    #     텍스트 온디맨드(인스타 캡션·X 글)만 없어서 그것을 미리보기로 **옮긴 뒤** 지웠다.
+    #     (규율 1: 이동 = 원위치 비우기. 옮기지 않고 지우면 기능이 조용히 죽는다)
     if sets:
-        _cards = []
-        _ccounts = db.content_click_counts(t.id)         # 콘텐츠별 클릭 뱃지(추적 P2)
-        # 🚅 세트 조각 일괄 조회(2026-08-03 성능 사고) — 세트마다 쿼리를 돌리면 세트 수만큼 왕복한다.
         _pieces_by_asset = db.get_pieces_for_assets([s["asset_id"] for s in sets])
-        _vol_budget = [3]                                 # 렌더당 searchad 미캐시 조회 상한(비용 가드)
-
-        def _kw_volume_cached(kw: str):
-            """월 검색량 — 일 1회 캐시(rx P3). 캐시 미스는 렌더당 3회까지만 실조회."""
-            from app import ratelimit as _rl
-            key = "kwvol:" + kw.replace(" ", "")
-            v = _rl.cache_get(key, 86400)
-            if v is not None:
-                return v or None
-            if _vol_budget[0] <= 0:
-                return None
-            _vol_budget[0] -= 1
-            try:
-                from app.services import searchad
-                rows = searchad.keyword_volumes([kw])
-                me = next((r for r in rows if (r.get("keyword") or "").replace(" ", "") == kw.replace(" ", "")), None)
-                val = (me or {}).get("total") or 0
-            except Exception:
-                val = 0
-            _rl.cache_set(key, val)
-            return val or None
-
-        def _expose_badge(ps):
-            """글별 노출 배지(rx P3) — 저장된 실측 스냅샷·색인 상태만(렌더 시 네이버 콜 없음)."""
-            blog_p = next((p for p in ps if p.kind.value == "blog"), None)
-            if not blog_p:
-                return ""
-            kw = ((blog_p.payload.get("target_keywords") or [""])[0] or "").strip()
-            if not kw:
-                return ""
-            hist = [h for h in db.rank_history(t.id, kw, kind="post") if h.get("rank") is not None] \
-                or [h for h in db.rank_history(t.id, kw, kind="blog_search") if h.get("rank") is not None]
-            pub = db.get_blog_publish(blog_p.id)
-            vol = _kw_volume_cached(kw)
-            vtxt = f" (월 {vol:,}회)" if vol else ""
-            if hist:
-                cur = hist[-1]["rank"]
-                prev = hist[-2]["rank"] if len(hist) >= 2 else None
-                if cur:
-                    d = ("↑상승중" if prev and cur < prev else "↓하락" if prev and cur > prev else "")
-                    body, cls = f"지금 {cur}위" + (f" {d}" if d else ""), ("text-emerald-700 bg-emerald-50" if cur <= 10 else "text-indigo-700 bg-indigo-50")
-                else:
-                    body, cls = "31위 밖", "text-slate-500 bg-slate-100"
-            elif pub and not pub.get("indexed_at"):
-                from app.services.whynot import _days_since as _ds
-                body, cls = f"색인대기 {max(0, _ds(pub.get('published_at') or ''))}일차", "text-amber-700 bg-amber-50"
-            elif pub:
-                body, cls = "추적 시작 전", "text-slate-500 bg-slate-100"
-            else:
-                return ""
-            return (f"<a href='/me#blog' title='실측 기준 · 위치·기기별 차이' "
-                    f"class='inline-block text-[11px] font-bold px-2 py-0.5 rounded-full {cls}'>"
-                    f"{esc(kw)}{vtxt} · {body}</a>")
-        def _text_row(aid: str, ps) -> str:
-            """(텍스트 온디맨드, 2026-08-16 사장님 지시) 인스타 캡션·X 글은 **고르셨을 때만** 만든다.
-            기본 생성은 네이버 글 하나뿐이라, 나머지는 여기서 요청받는다(영상과 같은 모양)."""
-            _bp = next((p for p in ps if p.kind.value == "blog"), None)
-            if not _bp:
-                return ""
-            have = {p.kind.value for p in ps}
-            opts = [("caption", "인스타 캡션"), ("x", "X 글")]
-            chips = ""
-            pick = False
-            for key, lab in opts:
-                kind_v = {"caption": "caption", "x": "x_post"}[key]
-                if kind_v in have:
-                    chips += ("<span class='text-[10px] font-bold text-emerald-600 bg-emerald-50 "
-                              f"px-1.5 py-0.5 rounded-full'>{lab} ✓</span>")
-                else:
-                    pick = True
-                    chips += ("<label class='text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 "
-                              "rounded-full cursor-pointer inline-flex items-center gap-1'>"
-                              f"<input type='checkbox' name='tp_{aid}' value='{key}' "
-                              f"class='w-3 h-3 accent-indigo-600'>{lab}</label>")
-            if not pick:
-                return ""
-            btn = ("<button type='button' onclick=\"tdMake('" + aid + "')\" "
-                   "class='text-[10px] font-bold text-white bg-slate-800 hover:bg-slate-900 "
-                   "px-2 py-1 rounded-full transition'>✍️ 만들기</button>")
-            return ("<div class='mt-1.5 flex flex-wrap items-center gap-1'>" + chips + btn + "</div>")
-
-        def _publish_row(aid: str, ps) -> str:
-            """네이버 발행 줄 (2026-08-17 사장님 지시).
-
-            왜 여기 필요한가 — 발행 UI가 `/kit/{asset}/naver` 안에만 있어서 대시보드에서
-            바로 누를 수가 없었다. 그런데 **발행 확인이 학습 에이전트의 출발 신호**다
-            (pipesync.confirm_publish → learner.on_publish). 버튼이 묻혀 있으면
-            에이전트가 영영 깨어나지 않는다.
-
-            네이버는 공식 발행 API가 없어 복붙이 필수다(반자동).
-            그래서 두 단계로 둔다: ① 복붙하러 간다 ② 올린 뒤 '발행했어요'를 누른다.
-            """
-            _bp = next((p for p in ps if p.kind.value == "blog"), None)
-            if not _bp:
-                return ""
-            if _bp.status.value == "published":
-                return ("<div class='mt-1.5'><span class='text-[10px] font-bold text-emerald-700 "
-                        "bg-emerald-50 px-2 py-0.5 rounded-full'>네이버 발행됨 · 순위 추적 중</span></div>")
-            go = (f"<a href='/kit/{aid}/naver' class='text-[10px] font-bold text-white "
-                  "bg-emerald-600 hover:bg-emerald-700 px-2 py-1 rounded-full transition'>"
-                  "📤 네이버에 올리기</a>")
-            done = (f"<button type='button' onclick=\"pubDone('{_bp.id}')\" "
-                    "class='text-[10px] font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 "
-                    "px-2 py-1 rounded-full transition'>올렸어요 ✓</button>")
-            return ("<div class='mt-1.5 flex flex-wrap items-center gap-1'>" + go + done + "</div>")
-
-        def _video_row(aid: str, ps) -> tuple[str, bool]:
-            """(영상 온디맨드) 카드 내 플랫폼 선택·상태 행 — 반환: (HTML, 생성중 여부)."""
-            _bp = next((p for p in ps if p.kind.value == "blog"), None)
-            if not _bp:
-                return "", False
-            _csv = _bp.payload.get("channel_status") or {}
-            _has_short_piece = any(p.kind.value == "short" for p in ps)
-            chips, sel_any, gen_any = "", False, False
-            for ch, lab in (("shorts", "숏폼"), ("reels", "릴스"), ("naver", "네이버")):
-                stt = (_csv.get(ch) or {}).get("status") or ""
-                if stt == "done" or (not stt and _has_short_piece):   # 구건(상태 기록 이전)은 피스 실재로 판정
-                    chips += ("<span class='text-[10px] font-bold text-emerald-600 bg-emerald-50 "
-                              f"px-1.5 py-0.5 rounded-full'>{lab} ✓</span>")
-                elif stt == "generating":
-                    gen_any = True
-                    chips += ("<span class='text-[10px] font-bold text-indigo-500 bg-indigo-50 "
-                              f"px-1.5 py-0.5 rounded-full animate-pulse'>{lab} 만드는 중…</span>")
-                else:                                   # not_requested·failed·기록 없음 → 선택 가능
-                    sel_any = True
-                    _retry = " 다시" if stt == "failed" else ""
-                    chips += ("<label class='text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 "
-                              "rounded-full cursor-pointer inline-flex items-center gap-1'>"
-                              # ★ 기본 해제(2026-08-01 사장님 지시) — 셋 다 켜져 있어 '영상 만들기'만
-                              #   누르면 요청하지 않은 쇼츠·릴스까지 만들어졌다(API 크레딧 소모).
-                              f"<input type='checkbox' name='vp_{aid}' value='{ch}' "
-                              f"class='w-3 h-3 accent-indigo-600'>{lab}{_retry}</label>")
-            btn = (("<button type='button' onclick=\"vdMake('" + aid + "')\" "
-                    "class='text-[10px] font-bold text-white bg-slate-800 hover:bg-slate-900 "
-                    "px-2 py-1 rounded-full transition'>🎬 영상 만들기</button>") if sel_any else "")
-            row = (f"<div id='vd_{aid}'" + (f" data-vgenrow='{aid}'" if gen_any else "")
-                   + " class='mt-1.5 flex flex-wrap items-center gap-1'>" + chips + btn + "</div>")
-            return row, gen_any
+        _by_day: dict = {}
         for s in sets:
             ps = _pieces_by_asset.get(s["asset_id"], [])
-            _vrow, _ = _video_row(s["asset_id"], ps)
-            # 발행 줄이 맨 위 — 이걸 눌러야 순위 추적과 학습 에이전트가 시작된다.
-            _vrow = _publish_row(s["asset_id"], ps) + _text_row(s["asset_id"], ps) + _vrow
-            _nclk = sum(_ccounts.get(p.id[:8], 0) for p in ps)
-            _ebadge = _expose_badge(ps)
-            # 진행 중 판정(삭제 잠금용) — 다시쓰기 running 또는 영상 잡 진행 중
-            _bpl = next((p.payload or {} for p in ps if p.kind.value == "blog"), {})
-            _vj_b = _bpl.get("video_job") or {}
-            _vj_live = False
-            if _vj_b.get("status") in ("registered", "running", "retrying"):
-                try:      # 유령 잡 필터(admin/busy와 동일 기준) — 2시간 넘으면 죽은 것으로 본다.
-                    from datetime import datetime as _dvb
-                    _vj_live = (_dvb.utcnow() - _dvb.fromisoformat(_vj_b.get("ts", ""))).total_seconds() < 7200
-                except Exception:
-                    _vj_live = False          # ts 불명 = 구식 기록 → 잠그지 않는다(삭제 영구 봉인 방지)
-            s["busy"] = bool(_rewrite_running(_bpl) or _vj_live)
-            thumb = ""
-            for p in ps:
-                ips = p.payload.get("image_paths") or ([p.payload.get("image_path")] if p.payload.get("image_path") else [])
-                # 목록은 썸네일만 — 원본은 상세 진입 때만(2026-08-03 성능 사고)
-                thumb = next((f"/thumb/{s['asset_id']}/{os.path.basename(im)}" for im in ips if im), "")
-                if thumb:
-                    break
-            seen, badges = set(), ""
-            for p in ps:
-                ic = _chan_icon.get(p.channel.value, "•")
-                if ic not in seen:
-                    seen.add(ic)
-                    badges += f"<span>{ic}</span>"
-            # ★ 2026-08-18 사장님: "보기가 안 열린다" — 서버 렌더는 0.119초로 빨랐다(실측).
-            #   병목은 브라우저였다: 세트가 36개까지 쌓였는데 썸네일에 지연로드가 없어
-            #   화면 밖 카드까지 전부 한꺼번에 받았다(브라우저 동시연결 6개 → 긴 대기 줄).
-            #   보이는 것만 받게 하면 첫 화면이 즉시 뜬다.
-            thumb_html = (f"<img src='{thumb}' loading='lazy' decoding='async' width='56' height='56' onerror=\"this.onerror=null;this.outerHTML='<div class=\\'w-14 h-14 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center text-2xl text-white flex-shrink-0\\'>✨</div>'\" class='w-14 h-14 rounded-xl object-cover flex-shrink-0 bg-slate-100'>" if thumb
-                          else "<div class='w-14 h-14 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center text-2xl text-white flex-shrink-0'>✨</div>")
-            _cards.append(
-                "<div class='group flex items-center gap-3 p-2.5 rounded-2xl border border-slate-100 bg-white hover:shadow-md hover:border-indigo-200 hover:-translate-y-0.5 transition-all'>"
-                + thumb_html
-                + f"<div class='flex-1 min-w-0'><div class='flex items-center gap-1 text-base leading-none mb-1.5'>{badges}"
-                + (f"<span class='ml-1 text-[11px] font-bold text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full' "
-                   f"title='올린다 추적링크 클릭 기준(조회수 아님)'>이 콘텐츠로 온 손님 {_nclk}명</span>" if _nclk else "")
-                + "</div>"
-                + f"<div class='text-xs text-slate-400 font-medium'>{esc(s['created'])} · {s['n']}채널</div>"
-                + (f"<div class='mt-1'>{_ebadge}</div>" if _ebadge else "")
-                + _vrow + "</div>"
-                + f"<a href='/me?view={s['asset_id']}' class='px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-[.98] text-white text-xs font-bold rounded-xl transition'>보기</a>"
-                # 🔒 진행 중(다시쓰기·영상)에는 삭제 잠금 — 지웠는데 되살아나는 경험을 없앤다
-                #   (2026-08-01 실사고: 삭제 6분 뒤 끝난 다시쓰기가 글을 되살렸다. 서버 쪽 묘비로
-                #    이미 막히지만, 사장님이 헛수고하지 않도록 버튼 단계에서도 안내한다.)
-                + (("<span class='px-1.5 py-2 text-slate-200 text-base' title='작업이 끝난 뒤 지울 수 있어요'>"
-                    + _ic("xcircle", "w-4 h-4") + "</span>") if s.get("busy") else
-                   (f"<form method=post action='/me/set/{s['asset_id']}/delete' onsubmit=\"return confirm('이 콘텐츠를 삭제할까요?')\">"
-                    + "<button class='px-1.5 py-2 text-slate-300 hover:text-rose-500 text-base transition' title='삭제'>"
-                    + _ic("xcircle", "w-4 h-4") + "</button></form>")) + "</div>")
-        hist = ("<div class='grid sm:grid-cols-2 gap-3'>" + "".join(_cards) + "</div>"
-                # 영상 온디맨드 — 요청(선택 플랫폼 전송) + 생성중 카드 폴링(끝나면 새로고침으로 ✓ 반영)
-                "<script>"
-                "async function vdMake(aid){"
-                "var sel=[].slice.call(document.querySelectorAll(\"input[name=vp_\"+aid+\"]:checked\"))"
-                ".map(function(x){return x.value;});"
-                "if(!sel.length){alert('만들 플랫폼을 선택해 주세요');return;}"
-                "window.vmPick(null,aid,sel.join(','));}"
-                # ✍️ 텍스트 온디맨드(2026-08-16) — 고른 것만 만든다
-                "async function tdMake(aid){"
-                "var sel=[].slice.call(document.querySelectorAll(\"input[name=tp_\"+aid+\"]:checked\"))"
-                ".map(function(x){return x.value;});"
-                "if(!sel.length){alert('만들 것을 선택해 주세요');return;}"
-                "var fd=new FormData();fd.append('asset_id',aid);fd.append('kinds',sel.join(','));"
-                "try{var d=await (await fetch('/me/text/make',{method:'POST',body:fd})).json();"
-                "if(!d.ok){alert(d.error||'만들지 못했어요');return;}"
-                "alert('만들고 있어요 — 잠시 뒤 새로고침하면 보입니다');}"
-                "catch(e){alert('만들지 못했어요');}}"
-                # 📤 발행 확인(2026-08-17) — 이걸 눌러야 순위 추적과 학습 에이전트가 시작된다.
-                #   RSS 자동 감지를 먼저 시도하고(붙여넣기 없이 끝나는 게 최선), 못 잡으면 주소를 묻는다.
-                "async function pubDone(pid){"
-                "try{var d=await (await fetch('/api/blog/check-published',{method:'POST'})).json();"
-                "if(d&&d.synced){alert('발행 확인! 지금부터 순위를 매일 확인합니다.');location.reload();return;}}"
-                "catch(e){}"
-                "var u=prompt('네이버에 올리신 글 주소를 붙여넣어 주세요\\n(https://blog.naver.com/...)');"
-                "if(!u)return;"
-                "var f=document.createElement('form');f.method='post';f.action='/me/blog/published';"
-                "var a=document.createElement('input');a.name='piece_id';a.value=pid;f.appendChild(a);"
-                "var b=document.createElement('input');b.name='url';b.value=u;f.appendChild(b);"
-                "document.body.appendChild(f);f.submit();}"     # ⭐ 대표 사진 고르기 모달 경유(구세트 포함)
-                "(function(){var rows=document.querySelectorAll('[data-vgenrow]');if(!rows.length)return;"
-                "var iv=setInterval(async function(){var busy=false;"
-                "for(var i=0;i<rows.length;i++){var aid=rows[i].getAttribute('data-vgenrow');"
-                "try{var d=await (await fetch('/me/video/status?asset_id='+aid)).json();"
-                "var st=(d&&d.status)||{};"
-                "if(st.shorts==='generating'||st.reels==='generating'||st.naver==='generating')busy=true;"
-                "}catch(e){busy=true;}}"
-                "if(!busy){clearInterval(iv);location.reload();}},8000);})();"
-                "</script>" + _VMPICK_JS)
+            _bp = next((x for x in ps if x.kind.value == "blog"), None)
+            _pl = (_bp.payload if _bp else {}) or {}
+            title = (_pl.get("title") or "").strip()
+            if not title:                       # 제목이 없으면 그렇게 말한다(지어내지 않는다)
+                title = "제목 없는 글"
+            # 날짜는 사장님이 보는 날짜(KST)로 — DB는 UTC다. 이 변환을 빠뜨려
+            #   "글이 없다"고 세 번 잘못 보고한 적이 있다(2026-08-17).
+            _day = (s["created"] or "")[:10]
+            try:
+                from datetime import datetime as _dd, timedelta as _td
+                _day = (_dd.fromisoformat((s["created"] or "").replace("Z", ""))
+                        + _td(hours=9)).strftime("%Y-%m-%d")
+            except Exception:
+                pass
+            _pub = bool(_bp and _bp.status.value == "published")
+            _by_day.setdefault(_day, []).append(
+                {"aid": s["asset_id"], "title": title, "published": _pub})
+        _blocks = []
+        for _day in sorted(_by_day, reverse=True):
+            items = _by_day[_day]
+            _rows = ""
+            for it in items:
+                _badge = ("<span class='flex-shrink-0 text-[11px] font-bold text-emerald-700 "
+                          "bg-emerald-50 px-2 py-0.5 rounded-full'>발행됨</span>" if it["published"]
+                          else "")
+                _rows += (
+                    "<div class='group flex items-center gap-3 py-2.5 border-b border-slate-100 last:border-0'>"
+                    f"<a href='/me?view={it['aid']}' class='flex-1 min-w-0 text-[15px] text-slate-700 "
+                    f"hover:text-indigo-600 font-medium truncate transition'>{esc(it['title'])}</a>"
+                    + _badge
+                    + (f"<form method=post action='/me/set/{it['aid']}/delete' class='flex-shrink-0' "
+                       "onsubmit=\"return confirm('이 글을 삭제할까요?')\">"
+                       "<button class='text-slate-200 hover:text-rose-500 transition opacity-0 "
+                       "group-hover:opacity-100' title='삭제'>"
+                       + _ic("xcircle", "w-4 h-4") + "</button></form>")
+                    + "</div>")
+            _blocks.append(
+                "<div class='mb-5 last:mb-0'>"
+                f"<div class='text-xs font-bold text-slate-400 mb-1'>{esc(_day)}"
+                f"<span class='ml-1.5 font-medium text-slate-300'>{len(items)}건</span></div>"
+                f"<div>{_rows}</div></div>")
+        hist = "".join(_blocks)
     else:
         hist = "<p class='text-slate-400 text-sm py-6 text-center'>아직 만든 콘텐츠가 없어요. 위에서 사진 올려 만들어보세요.</p>"
     # ── 최초 1회 온보딩 vs 작동 대시보드 ──
@@ -5983,18 +5804,17 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
     kw_card = ""    # (auto) '노리는 키워드' 카드 제거
     view = (request.query_params.get("view") or "").strip()
     tab = (request.query_params.get("tab") or "").strip()
-    result_html = _result_html(u, view, back_href="/me?tab=content", back_label="◀ 내 콘텐츠") if view else None
+    result_html = _result_html(u, view, back_href="/me", back_label="◀ 돌아가기") if view else None
     _sbadge = (f"<div class='inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-700 text-sm font-bold px-3 py-1.5 rounded-full mb-4'>{esc(_sname)}</div>" if _sname else "")
     _fw = "bg-white rounded-3xl border border-slate-100 shadow-sm p-6 sm:p-8"
     # 사이드바 클릭 = 전체 폭 단일 패널 전환 (내 콘텐츠 / 리포트 / 결과 / 만들기)
     if result_html:                                        # 콘텐츠 결과 (전체 폭)
         active = "content"
         main_inner = _sbadge + f"<div class='{_fw}'>{result_html}</div>"
-    elif tab == "content":                                # 내 콘텐츠 (전체 폭)
-        active = "content"
-        main_inner = (_sbadge + f"<div class='{_fw}'>"
-                      "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>내 콘텐츠</h2>"
-                      "<p class='text-sm text-slate-400 mb-5'>‘보기’를 누르면 결과가 크게 나와요.</p>" + hist + "</div>")
+    elif tab == "content":
+        # 🗑 2026-08-18 사장님: "내 콘텐츠 자체를 삭제 — 한 화면으로 옮겨졌다."
+        #   홈에 이미 같은 목록이 있어 탭이 중복이었다. 구 링크·북마크는 홈으로 보낸다.
+        return RedirectResponse("/me", status_code=303)
     elif tab == "report":                                 # ('주방은 보여주지 않는다') 리포트 탭 삭제
         # 결과는 홈 한 줄 + 증빙 접힘이 전부 — 구 링크·북마크는 홈으로.
         return RedirectResponse("/me", status_code=303)
@@ -6169,34 +5989,22 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             # 시작 가이드는 첫 콘텐츠 전에만(온보딩 끝난 사장님에게 체크리스트 반복 금지).
             _guide = _guide_card(t) if not db.list_sets(tenant_id=t.id, limit=1) else ""
             _task = _due_html or _briefing_card(t, _plan)     # 오늘 할 일은 딱 1장(발행 준비 우선)
-            # 🧰 도구 서랍(리포트 탭 대체) — 블로그 연결·플레이스 도구·매장 QR·실경험. 기본 접힘.
+            # 🗑 2026-08-18 사장님: "도구 삭제 — 분석이 생겨서 필요없다."
+            #   플레이스 도구·추적 QR은 발행글 조사 그래프(_research_card)가 대신한다.
+            #   ★ 단 '블로그 연결'은 분석이 아니라 **설정**이라 같이 죽이면 안 된다 —
+            #     연결이 없으면 발행 확인도 순위 추적도 안 되고, 그러면 그래프에 그릴 것이 없어진다.
+            #     그래서 가게 정보 카드 옆으로 옮겨 남긴다(규율 1: 지울 땐 갈 곳부터 만든다).
             _fw2 = "bg-white rounded-3xl border border-slate-100 shadow-sm p-6 sm:p-8"
             try:
-                _tools = ("<details id='tools' class='mt-5 bg-white rounded-3xl border border-slate-200 shadow-sm'>"
-                          "<summary class='cursor-pointer select-none list-none p-5 flex items-center gap-4'>"
-                          "<span class='w-12 h-12 rounded-2xl bg-[#EEF2FF] flex items-center justify-center text-2xl flex-shrink-0'>🧰</span>"
-                          "<span class='flex-1 min-w-0'>"
-                          "<span class='block text-base font-extrabold text-slate-900'>도구</span>"
-                          "<span class='block text-xs text-slate-400 mt-0.5'>블로그 연결 · 플레이스 · 매장 QR · 실경험 답변</span></span>"
-                          "<span class='text-slate-300 text-xl'>▾</span></summary>"
-                          "<div class='px-5 pb-5 space-y-5'>"
-                          + _blog_connect_card(t, _fw2) + _place_card(t, _fw2) + _track_qr_box(t, _fw2)
-                          + "<a href='/me/experience' class='block text-sm font-semibold text-slate-500 "
-                          "hover:text-slate-700'>📝 사장님 실경험 답변 관리 →</a>"
-                          "</div></details>"
-                          "<script>if(['#tools','#blog','#place','#qr'].indexOf(location.hash)>=0)"
-                          "{var _td=document.getElementById('tools');if(_td)_td.setAttribute('open','');}</script>")
+                _blogset = _blog_connect_card(t, _fw2)
             except Exception:
-                _tools = ""
+                _blogset = ""
             # ★ 2026-08-18 사장님 지시 — "가게를 누르면 내 콘텐츠·글 올리기가 한 화면에 있어야 한다."
             #   대행에서는 가게를 고른 순간 할 일이 둘뿐이다: 사진을 올리고, 나온 글을 본다.
-            #   그 둘이 다른 탭에 있으면 가게마다 탭을 두 번씩 오간다.
-            #   `content`(내 콘텐츠)는 원래 여기서 만들어놓고 홈에서는 쓰지 않던 변수다 —
-            #   따로 만들지 않고 그것을 그대로 붙인다(규율 10: 있는 것부터 찾는다).
             main_inner = (greeting + _conv_card + _upsell + _rank_hook + _task + _notice_html
                           + _guide + _blog_nudge + upload_section
                           + "<div class='mt-6'></div>" + content
-                          + "<div class='mt-5'></div>" + _store_info_card(t) + _tools)
+                          + "<div class='mt-5'></div>" + _store_info_card(t) + _blogset)
     # 🆕 새로 추가한 '빈 새 가게'면 실수 대비 '뒤로가기(취소)' 배너
     if t.name == "새 가게" and len(db.list_user_stores(u["id"])) > 1 and not db.list_sets(tenant_id=t.id):
         _backban = ("<div class='flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-5'>"
@@ -6206,7 +6014,9 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         main_inner = _backban + main_inner
     from app import landing
     # ('주방은 보여주지 않는다') 리포트 탭 삭제 — 결과는 홈 한 줄 + 증빙 접힘이 전부.
-    _navitems = [("wand", "홈", "/me", "create"), ("book", "내 콘텐츠", "/me?tab=content", "content")]
+    # 🗑 2026-08-18 — '내 콘텐츠' 메뉴 삭제(사장님 지시). 홈 한 화면에 다 있다.
+    #   메뉴가 하나뿐이면 메뉴가 아니다 — 그래도 로고/로그아웃 자리를 위해 구조는 남긴다.
+    _navitems = [("wand", "홈", "/me", "create")]
 
     def _navlink(i, l, h, key):
         cls = ("bg-[#EEF2FF] text-indigo-700" if key == active
@@ -6366,7 +6176,7 @@ def my_blog_published(request: Request, piece_id: str = Form(""), url: str = For
     piece = db.get_piece(piece_id.strip())
     back = f"/kit/{piece.asset_id}/naver" if piece else "/me"
     if not piece or piece.tenant_id != t.id or piece.kind.value != "blog":
-        return RedirectResponse("/me?tab=content&err=" + _q("내 블로그 글을 찾지 못했어요"), status_code=303)
+        return RedirectResponse("/me?err=" + _q("내 블로그 글을 찾지 못했어요"), status_code=303)
     url = (url or "").strip()
     from app.services import blogsync
     if not blogsync.normalize_blog_id(url) or "blog.naver.com" not in url:
@@ -6988,6 +6798,47 @@ def _trust_card_html(piece) -> str:
         return ""
 
 
+def _text_ondemand_row(asset_id: str, pieces) -> str:
+    """✍️ 인스타 캡션·X 글 — **고르셨을 때만** 만든다(2026-08-16 사장님 지시).
+
+    ★ 2026-08-18 — 원래 대시보드 카드 안에 있었는데, 목록을 '날짜+제목'으로 정리하면서
+      카드가 사라졌다. 그냥 지웠으면 이 기능이 조용히 죽는다 —
+      발행·영상은 미리보기에 이미 있었지만 이것만 없었다. 그래서 여기로 옮겼다.
+      (규율 1: 새로 만들 때가 아니라 **지울 때도** 원위치를 비우기 전에 갈 곳을 만든다)
+    """
+    if not any(p.kind.value == "blog" for p in pieces):
+        return ""
+    have = {p.kind.value for p in pieces}
+    chips, pick = "", False
+    for key, lab, kind_v in (("caption", "인스타 캡션", "caption"), ("x", "X 글", "x_post")):
+        if kind_v in have:
+            chips += ("<span class='text-[11px] font-bold text-emerald-600 bg-emerald-50 "
+                      f"px-2 py-1 rounded-full'>{lab} ✓</span>")
+        else:
+            pick = True
+            chips += ("<label class='text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-1 "
+                      "rounded-full cursor-pointer inline-flex items-center gap-1'>"
+                      f"<input type='checkbox' name='tp_{asset_id}' value='{key}' "
+                      f"class='w-3 h-3 accent-indigo-600'>{lab}</label>")
+    if not pick:
+        return ""
+    return ("<div class='bg-white rounded-2xl border border-slate-200 p-4 mb-4'>"
+            "<div class='text-xs font-bold text-slate-500 mb-2'>다른 채널에도 올리시겠어요?</div>"
+            "<div class='flex flex-wrap items-center gap-1.5'>" + chips
+            + "<button type='button' onclick=\"tdMake('" + asset_id + "')\" "
+              "class='text-[11px] font-bold text-white bg-slate-800 hover:bg-slate-900 "
+              "px-2.5 py-1 rounded-full transition'>✍️ 만들기</button></div>"
+            "<script>async function tdMake(aid){"
+            "var sel=[].slice.call(document.querySelectorAll(\"input[name=tp_\"+aid+\"]:checked\"))"
+            ".map(function(x){return x.value;});"
+            "if(!sel.length){alert('만들 것을 선택해 주세요');return;}"
+            "var fd=new FormData();fd.append('asset_id',aid);fd.append('kinds',sel.join(','));"
+            "try{var d=await (await fetch('/me/text/make',{method:'POST',body:fd})).json();"
+            "if(!d.ok){alert(d.error||'만들지 못했어요');return;}"
+            "alert('만들고 있어요 — 잠시 뒤 새로고침하면 보입니다');}"
+            "catch(e){alert('만들지 못했어요');}}</script></div>")
+
+
 def _research_card(tenant, piece) -> str:
     """📈 이 글을 쓰기 위해 조사한 것 + 발행 후 순위 — 그래프.
 
@@ -7468,68 +7319,12 @@ def _growth_card(t, fw: str) -> str:
             + rows + coach + "</div>")
 
 
-def _place_card(t, fw: str) -> str:
-    """📍 플레이스 최적화 카드(상위노출 PHASE 5) — 매장(local/hybrid)만.
-    순위 요약 + 정보 완성도 체크리스트 + 리뷰 요청 키트(QR·문구)."""
-    if (getattr(t, "biz_type", "local") or "local") not in ("local", "hybrid"):
-        return ""
-    from app.services import place_opt
-    s = place_opt.place_summary(t)
-    # 플레이스 순위 요약
-    rank_rows = ""
-    for r in s["place_ranks"][:4]:
-        lab = f"{r['rank']}위" if r["rank"] else "5위 밖"
-        chg = ""
-        if r["prev"] is not None and r["rank"] is not None:
-            cc, pp = (r["rank"] or 6), (r["prev"] or 6)
-            chg = (" <span class='text-emerald-600 text-xs font-bold'>⬆️</span>" if cc < pp
-                   else (" <span class='text-rose-500 text-xs font-bold'>⬇️</span>" if cc > pp else ""))
-        rank_rows += (f"<div class='flex justify-between text-sm py-1.5 border-b border-slate-100'>"
-                      f"<span class='text-slate-600'>{esc(r['keyword'])}</span>"
-                      f"<span class='font-bold text-slate-800'>{lab}{chg}</span></div>")
-    rank_box = (f"<div class='mb-1'>{rank_rows}</div>" if rank_rows
-                else "<div class='text-sm text-slate-400'>지도 순위가 잡히면 여기 표시돼요</div>")
-    # 체크리스트
-    chk = ""
-    for i in s["checklist"]:
-        if i["done"] is True:
-            ic, cls = "✅", "text-slate-500"
-        elif i["done"] is False:
-            ic, cls = "⬜", "text-slate-700 font-semibold"
-        else:
-            ic, cls = "·", "text-slate-600"
-        _go = ("<a href='https://smartplace.naver.com/' target=_blank rel=noopener "
-               "class='text-indigo-600 font-bold'> 네이버 플레이스 관리에서 하기 ↗</a>" if i["done"] is False else "")
-        chk += (f"<details class='py-1.5 border-b border-slate-100'><summary class='cursor-pointer text-sm {cls} select-none'>"
-                f"{ic} {esc(i['label'])} <span class='text-[11px] text-slate-400 font-normal'>— {esc(i['why'])}</span></summary>"
-                f"<div class='text-xs text-slate-500 mt-1 pl-6'>{esc(i['how'])}{_go}</div></details>")
-    # 리뷰 요청 키트
-    rv = ""
-    for idx, r in enumerate(s["reviews"]):
-        rv += (f"<details class='bg-slate-50 rounded-xl px-3.5 py-2.5 mb-1.5'>"
-               f"<summary class='cursor-pointer text-sm font-semibold text-slate-700 select-none'>{esc(r['where'])}</summary>"
-               f"<div class='text-sm text-slate-600 whitespace-pre-wrap mt-2'>{esc(r['text'])}</div>"
-               f"<textarea id='rv{idx}' class='hidden'>{esc(r['text'])}</textarea>"
-               f"<button onclick=\"omCopy(document.getElementById('rv{idx}').value);this.textContent='✅ 복사됨'\" "
-               "class='mt-2 px-3 py-1.5 bg-white border border-slate-200 text-slate-600 text-xs font-bold rounded-lg'>복사</button></details>")
-    _tl = _ensure_track_link(t)
-    qr = (f"<div class='flex items-center gap-3 mt-3 bg-indigo-50/60 rounded-xl p-3'>"
-          f"<img src='/me/qr/{_tl['code']}.png' class='w-20 h-20 rounded-lg bg-white p-1 border border-slate-100' alt='QR'>"
-          "<div class='text-xs text-slate-600'>이 QR을 카운터에 두면 손님이 바로 내 플레이스로 가요.<br>"
-          f"<a href='/me/review-card.png' download class='text-indigo-600 font-bold'>⬇ 리뷰 요청 카드(인쇄용)</a> · "
-          f"<a href='/me/qr/{_tl['code']}.png' download class='text-indigo-600 font-bold'>⬇ QR 저장</a></div></div>") if _tl else ""
-    # ('주방은 보여주지 않는다') 실측 순위만 노출 — 체크리스트·리뷰키트·QR·인쇄물은 도구(접힘)로 강등.
-    return (f"<div id='place' class='{fw} mt-5'>"
-            "<h2 class='text-xl font-extrabold text-slate-900 mb-3'>지도 노출 순위</h2>"
-            + rank_box
-            + "<details class='mt-3'><summary class='cursor-pointer text-sm font-bold text-slate-500 select-none'>"
-            f"🧰 플레이스 도구 — 체크리스트(정보 완성 {s['done']}/{s['known']})·리뷰 요청·QR·인쇄물</summary>"
-            "<div class='mt-3 grid sm:grid-cols-2 gap-5'>"
-            f"<div><div class='text-xs font-bold text-slate-500 mb-1'>정보 완성도 체크리스트</div>{chk}</div>"
-            f"<div><div class='text-xs font-bold text-slate-500 mb-1'>리뷰 요청 키트</div>{rv}{qr}</div>"
-            "</div>"
-            + _print_block(t)
-            + "</details></div>")
+# 🗑 2026-08-18 — `_place_card`(플레이스 도구)·`_track_qr_box`(추적 QR)를 지웠다.
+#   사장님: "도구 삭제 — 분석이 생겨서 필요없다." 둘 다 도구 서랍에서만 쓰였고
+#   서랍을 걷어내면서 소비자가 0이 됐다. 발행글 조사 그래프(_research_card)가 그 자리를 대신한다.
+#   같은 서랍에 있던 '블로그 연결'만은 분석이 아니라 설정이라 가게 정보 옆으로 옮겨 살렸다.
+
+
 
 
 def _visitor_box(t) -> str:
@@ -7569,26 +7364,6 @@ def _visitor_box(t) -> str:
               "(쿠키를 지우면 추적되지 않아요). 지역은 국가 단위까지만 봅니다.</p></div>")
 
 
-def _track_qr_box(t, fw: str) -> str:
-    """매장 QR·손님 추적(도구 서랍용, 압축판) — QR + 유입 수 + 링크. 상시 화면 아님."""
-    _tl = _ensure_track_link(t)
-    if not _tl:
-        return ""
-    _clicks = sum(int(l.get("clicks") or 0) for l in db.list_links(t.id))
-    _base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
-    _short = f"{_base}/r/{_tl['code']}"
-    return (f"<div class='{fw}' id='qr'>"
-            "<div class='text-sm font-bold text-slate-700 mb-2'>매장 QR — 명함·매장 앞에 붙이면 찍고 온 손님이 집계돼요</div>"
-            "<div class='flex items-center gap-4 flex-wrap'>"
-            f"<img src='/me/qr/{_tl['code']}.png' class='w-24 h-24 rounded-xl border border-slate-100 p-1 bg-white' alt='추적 QR'>"
-            "<div class='flex-1 min-w-[200px]'>"
-            f"<div class='text-2xl font-extrabold text-indigo-600'>{_clicks}<span class='text-sm text-slate-400 font-bold ml-1'>회 유입</span></div>"
-            "<div class='mt-2 flex items-center gap-2'>"
-            f"<input readonly value='{_short}' id='trkurl' class='flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600'>"
-            "<button type=button onclick=\"navigator.clipboard&&navigator.clipboard.writeText(document.getElementById('trkurl').value);this.textContent='✅'\" "
-            "class='flex-shrink-0 bg-indigo-600 text-white text-sm font-bold px-3 py-2 rounded-lg'>복사</button></div>"
-            f"<a href='/me/qr/{_tl['code']}.png' download='ollinda-qr.png' class='inline-block mt-2 text-xs font-bold text-indigo-500'>⬇ QR 이미지 저장</a>"
-            "</div></div></div>")
 
 
 def _ai_summary(t) -> str:
@@ -7647,7 +7422,7 @@ def _guide_card(t) -> str:
             f"<div class='text-sm font-extrabold text-violet-700'>올린다 시작 가이드 <span class='font-bold text-violet-400'>({done_n}/3)</span></div>"
             + dismiss + "</div>"
             + _step(s1, 1, "사진 올려 첫 콘텐츠 만들기", "/me#made", "만들기")
-            + _step(s2, 2, "네이버 블로그에 발행하기", "/me?tab=content", "발행 소재 보기")
+            + _step(s2, 2, "네이버 블로그에 발행하기", "/me", "발행 소재 보기")
             + _step(s3, 3, "매장 QR·추적링크 붙이기 (손님 유입이 집계돼요)", "/me#qr", "QR 받기")
             + "</div>")
 
@@ -8778,7 +8553,7 @@ def my_set_delete(request: Request, asset_id: str):
     t = _ensure_user_tenant(u)
     db.delete_set(asset_id, t.id)
     from urllib.parse import quote as _q
-    return RedirectResponse("/me?tab=content&ok=" + _q("콘텐츠를 삭제했어요"), status_code=303)
+    return RedirectResponse("/me?ok=" + _q("콘텐츠를 삭제했어요"), status_code=303)
 
 
 _BOT_UA_RE = __import__("re").compile(
@@ -9544,6 +9319,8 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
             "<p class='text-slate-400 text-sm mb-5'>각 앱에 올리면 <b class='text-slate-600'>이렇게</b> 보여요. 글은 복사, 사진·영상은 다운로드하세요.</p>"
             # 📈 조사 항목 그래프(2026-08-18 사장님 지시) — 블로그 글 기준.
             + _research_card(tenant, next((p for p in pieces if p.kind.value == "blog"), pieces[0]))
+            # ✍️ 인스타 캡션·X 글 만들기 — 대시보드 카드에서 여기로 옮겨왔다(카드 정리).
+            + _text_ondemand_row(asset_id, pieces)
             + _vid_poll + pipeline + all_btn + track_box + filter_bar
             + "<div class='sm:columns-2 gap-6'>" + cards + "</div>" + js)
     return body
@@ -9710,7 +9487,7 @@ def _angle_variant_box(blog, sec: str, cbtn: str) -> str:
             "try{var fd=new FormData();fd.append('piece_id','" + blog.id + "');fd.append('angle',a);"
             "var r=await fetch('/api/blog/angle-variant',{method:'POST',body:fd});var d=await r.json();"
             "if(d.error){m.textContent=d.error;btn.disabled=false;return;}"
-            "m.innerHTML='✅ '+d.msg+' <a href=\"/me?tab=content\" class=\"text-indigo-500 font-bold underline\">내 콘텐츠 →</a>';"
+            "m.innerHTML='✅ '+d.msg+' <a href=\"/me\" class=\"text-indigo-500 font-bold underline\">확인하기 →</a>';"
             "}catch(e){m.textContent='요청 실패';btn.disabled=false;}}</script></div>")
 
 
@@ -13642,7 +13419,7 @@ def _upload_form_html(tenant, token: str, target_kw: str = "", angle: str = "",
           #   ① 지금 주소와 **같은 URL이면 브라우저가 이동하지 않는다** → 매번 다른 파라미터를 붙인다
           #   ② location.href 대입보다 replace가 확실하다(히스토리 남지 않아 뒤로가기 루프도 없음)
           #   ③ 그래도 1.5초 안에 안 떠나면 마지막 수단으로 강제 새로고침
-          "var url=(aid?('/me?view='+aid):'/me?tab=content')+'&done='+Date.now();"
+          "var url=(aid?('/me?view='+aid):'/me')+'&done='+Date.now();"
           "setBar(100);setLabel('✅ 콘텐츠 완성!');setDetail('영상은 목록에서 원하는 플랫폼을 골라 만들 수 있어요');setSlow('');"
           "var tm=document.getElementById('gTeam');if(tm)tm.textContent='3초 뒤 자동으로 이동해요';"
           # ★ 2026-08-16 사장님: "지금 보러가기 했을 때 바로 이동해야 한다 — 한참 후 이동한다."

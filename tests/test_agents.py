@@ -182,30 +182,52 @@ def test_너무_넓은_수정안은_거부된다():
     assert not r["ok"]
 
 
-def test_대시보드에_발행버튼이_있다():
-    """★ 2026-08-17 사장님 지시 — 발행 확인이 학습 에이전트의 출발 신호다
-    (pipesync.confirm_publish → learner.on_publish).
-    발행 UI가 /kit 안에만 있어 대시보드에서 못 눌렀고, 그러면 에이전트가 영영 안 깨어난다."""
+def test_발행확인까지_경로가_끊기지_않는다():
+    """★ 발행 확인이 학습 에이전트의 출발 신호다(pipesync.confirm_publish → learner.on_publish).
+    누르는 자리가 어디든 상관없지만, **거기까지 가는 길이 끊기면** 에이전트가 영영 안 깨어난다.
+
+    ★ 2026-08-18 — 전에는 대시보드 카드에 발행 줄(_publish_row·pubDone)이 있었다.
+      사장님 지시로 목록이 '날짜 + 제목'이 되면서 그 카드가 사라졌다.
+      지우기 전에 확인했다 — 발행 확인 UI는 /kit/{asset}/naver 에 온전히 있다.
+      그래서 검사를 '대시보드에 버튼이 있는가'에서 **'경로가 이어지는가'**로 바꾼다.
+
+        홈 목록(제목) → /me?view={asset} 미리보기 → /kit/{asset}/naver 발행 확인
+    """
     import inspect
 
     from app import main
     src = inspect.getsource(main)
-    assert "_publish_row" in src, "대시보드에 발행 줄이 없다"
-    assert "pubDone" in src, "발행 확인 스크립트가 없다"
+    # ① 목록의 제목이 미리보기로 간다
+    dash = inspect.getsource(main.my_dashboard)
+    assert "/me?view=" in dash, "목록에서 미리보기로 가는 길이 없다"
+    # ② 미리보기에 발행 화면으로 가는 버튼이 있다
+    res = inspect.getsource(main._result_html)
+    assert "/kit/" in res and "naver" in res, "미리보기에서 발행 화면으로 가는 길이 없다"
+    # ③ 발행 화면에 확인 수단이 있다(자동 감지 + 주소 붙여넣기 폴백)
     assert "/me/blog/published" in src and "check-published" in src, \
         "발행 확인이 실제 엔드포인트로 안 간다"
 
 
-def test_발행줄이_카드에_실제로_붙는다():
-    """만들어놓고 안 붙이면 화면에 안 나온다 — 오늘 이미 그 실수를 했다."""
+def test_발행_버튼이_화면에_실제로_붙는다():
+    """만들어놓고 안 붙이면 화면에 안 나온다 — 그 실수를 실제로 했다.
+
+    ★ 2026-08-18 — 발행 버튼이 대시보드 카드에 있었는데 목록이 '날짜+제목'으로
+      정리되면서 카드가 사라졌다. 지우기 전에 확인했다: 발행 버튼은 미리보기에
+      이미 있었다(naver_btn). 그래서 카드 쪽만 걷어냈고, 검사는 미리보기에서 한다.
+      **발행 확인이 학습 에이전트의 출발 신호**라 이 버튼이 묻히면 에이전트가 안 깨어난다.
+    """
     import inspect
 
     from app import main
-    src = inspect.getsource(main)
-    i = src.find("_vrow = ")
+    src = inspect.getsource(main._result_html)
+    assert "naver_btn" in src, "발행 버튼을 만들지 않았다"
+    i = src.find("naver_btn = ")
     assert i > 0
-    seg = src[i:i + 200]
-    assert "_publish_row(" in seg, "발행 줄을 만들어놓고 카드에 안 붙였다"
+    assert "/kit/" in src[i:i + 300], "발행 버튼이 발행 화면으로 안 간다"
+    # 만들기만 하고 안 붙이는 것이 바로 그 실수다 — 실제로 카드에 조립되는지 본다
+    used = [ln for ln in src.splitlines()
+            if "naver_btn" in ln and "naver_btn = " not in ln.strip()]
+    assert used, "발행 버튼을 만들어놓고 화면에 안 붙였다"
 
 
 def test_생성_과정도_일지에_남는다():
