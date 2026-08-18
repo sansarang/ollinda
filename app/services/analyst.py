@@ -278,8 +278,9 @@ def analyze(t, piece, publish: dict) -> dict:
         "[한 줄 요약]\n(브리핑용 한 문장: 현재 상태+격차 핵심+다음 수)")
     try:
         from app import llm
-        # 🔒 클로드 유지(2026-08-18) — 상위 글과의 격차 분석(검수 계열). 초안 생성이 아니다.
-        raw = llm.call(prompt, max_tokens=800)
+        # 🔄 2026-08-18 Solar 전환(사장님 지시) — 상위 글과의 격차 분석.
+        #   추론이 필요한 작업이라 effort를 낮추지 않는다(analysis=medium).
+        raw = llm.call_task("analysis", prompt, max_tokens=800)
         from app.generators.text_claude import _parse_sections
         sec = _parse_sections(raw, ["왜 이 순위", "왜 1위가 아닌가", "한 줄 요약"])
     except Exception:

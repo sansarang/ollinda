@@ -30,6 +30,7 @@ MUST_BE_SOLAR = {
     "aux": "solar-pro4",
     "judge": "solar-pro4",
     "title": "solar-pro4",
+    "analysis": "solar-pro4",
 }
 
 
@@ -71,8 +72,8 @@ def test_클로드에_남긴_자리는_의도적이다():
     allowed = {
         ("app/seo.py", "사진에 없는 것을 실물처럼 썼는지 — 날조 방지 최후 관문"),
         ("app/main.py", "Anthropic 크레딧 생존 확인 ping"),
-        ("app/services/lessons.py", "순위 하락 원인 추론 → 다음 글 교훈"),
-        ("app/services/analyst.py", "상위 글과의 격차 분석"),
+        # 2026-08-18 — lessons·analyst는 Solar로 옮겨 목록에서 뺐다.
+        #   허용 목록을 안 줄이면 새 직행이 들어와도 통과한다(목록은 좁을수록 강하다).
         ("app/generators/text_claude.py", "task 없이 부르는 마지막 폴백"),
     }
     allowed_files = {f for f, _ in allowed}
@@ -99,3 +100,49 @@ def test_환경변수로_되돌릴_수는_있다(monkeypatch):
     monkeypatch.setattr(llm, "QUALITY_PIN", {}, raising=False)
     monkeypatch.setenv("LLM_BODY", "anthropic:claude-opus-4-8")
     assert llm.route("body") == ("anthropic", "claude-opus-4-8")
+
+
+def test_짧은_출력이면_추론강도를_자동으로_낮춘다():
+    """★ 같은 결함을 두 번 만나서 만든 규칙이다(2026-08-18).
+
+    Solar는 reasoning 토큰을 **출력 예산 안에서** 쓴다. 예산이 작은데 medium을 주면
+    추론이 예산을 다 먹고 본문이 0자로 나온다(빈 응답 → 재시도 → 지연).
+
+    처음엔 spoken·caption에서 났고 SOLAR_EFFORT_BY_TASK에 이름을 하나씩 넣어 막았다.
+    그런데 `analysis`를 추가하자 **또 났다** — 교훈 추출이 max_tokens=100인데 medium이었다.
+    원인은 task 이름이 아니라 출력 예산이다. 이름으로 막으면 새 task마다 재발한다.
+    (헌법: 같은 계열 결함 2회째부터는 표면별 수정 금지, 전 표면 공통 규칙으로만)
+    """
+    assert llm.SHORT_OUTPUT_TOKENS == 400
+    # 예산이 작으면 task와 무관하게 low
+    for task in ("analysis", "body", "judge", "이름없는새task"):
+        assert llm.solar_effort(task, 100) == "low", f"{task}: 짧은 출력에 low가 아니다"
+        assert llm.solar_effort(task, 399) == "low"
+    # 예산이 충분하면 task 기본값을 따른다
+    assert llm.solar_effort("analysis", 800) == "medium", "긴 분석까지 low로 낮추면 품질이 죽는다"
+    assert llm.solar_effort("body", 6000) == "medium"
+    assert llm.solar_effort("spoken", 6000) == "low", "task별 지정은 그대로 살아 있어야 한다"
+
+
+def test_예산을_실제_호출에_넘긴다():
+    """solar_effort가 예산을 받아도 호출부가 안 넘기면 아무 소용이 없다(죽은 규칙)."""
+    import inspect
+    src = inspect.getsource(llm._upstage_generate)
+    assert "solar_effort(task, max_tokens)" in src, \
+        "출력 예산을 effort 결정에 넘기지 않는다 — 짧은 출력에서 빈 응답이 다시 난다"
+
+
+def test_분석_계열도_크레딧에_묶이지_않는다():
+    """2026-08-18 사장님 지시로 교훈·격차분석을 Solar로 옮겼다.
+    이로써 글 파이프라인 전체가 Anthropic 크레딧과 무관해진다."""
+    assert llm.route("analysis")[0] == "upstage"
+    import inspect
+    from app.services import analyst, lessons
+    for mod in (lessons, analyst):
+        src = inspect.getsource(mod)
+        for i, line in enumerate(src.splitlines(), 1):
+            t = line.strip()
+            if t.startswith("#") or "call_task" in t:
+                continue
+            assert "llm.call(" not in t and "_llm.call(" not in t, \
+                f"{mod.__name__}:{i} 라우팅을 우회한다 — 크레딧 0이면 학습이 멈춘다"

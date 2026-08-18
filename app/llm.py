@@ -291,8 +291,27 @@ SOLAR_EFFORT_BY_TASK = {"spoken": "low", "caption": "low", "x": "low", "title": 
                         "aux": "low", "judge": "low"}
 
 
-def solar_effort(task: str = "") -> str:
-    return SOLAR_EFFORT_BY_TASK.get(task, SOLAR_EFFORT)
+#: 이 토큰 예산 아래에서는 effort를 강제로 낮춘다.
+#: Solar는 reasoning 토큰을 **출력 예산 안에서** 쓴다. 예산이 작은데 medium을 주면
+#: 추론이 예산을 다 먹고 본문이 0자로 나온다(빈 응답).
+SHORT_OUTPUT_TOKENS = 400
+
+
+def solar_effort(task: str = "", max_tokens: int = 0) -> str:
+    """작업별 추론 강도. **짧은 출력이면 task와 무관하게 low로 낮춘다.**
+
+    ★ 2026-08-18 — 같은 결함을 두 번째로 만났다.
+      처음엔 spoken·caption에서 났고 그때는 SOLAR_EFFORT_BY_TASK에 task 이름을 하나씩
+      넣어 막았다(표면별 수정). 오늘 `analysis`를 추가하자 **같은 빈 응답이 또 났다** —
+      교훈 추출은 max_tokens=100인데 medium이라 reasoning 3040토큰이 예산을 삼켰다.
+
+      원인은 task 이름이 아니라 **출력 예산**이다. 이름으로 막으면 새 task마다 재발한다.
+      그래서 예산 기준 공통 규칙으로 바꾼다(헌법: 같은 계열 결함 2회째는 전 표면 공통 규칙으로만).
+    """
+    base = SOLAR_EFFORT_BY_TASK.get(task, SOLAR_EFFORT)
+    if 0 < max_tokens < SHORT_OUTPUT_TOKENS:
+        return "low"
+    return base
 
 # 💰 세트별 비용 계측(2026-07-29 실측 $4/세트 사고 후) — 모델 단가($/M tokens)로 근사 집계.
 #   ingest가 세트 시작 시 reset, 종료 시 snapshot을 blog payload(api_cost)에 기록.
@@ -355,6 +374,11 @@ TASK_DEFAULTS = {"spoken": ("upstage", SOLAR),
                  "body": ("upstage", SOLAR),
                  "judge": ("upstage", SOLAR),
                  "title": ("upstage", SOLAR),
+                 #: analysis — 순위 격차 추론·교훈 추출. 짧은 판정(judge)과 달리 **추론**이 필요해
+                 #: effort를 낮추지 않는다(SOLAR_EFFORT_BY_TASK에 넣지 않음 = medium).
+                 #: 2026-08-18 사장님 지시로 클로드에서 옮겼다 — 이로써 글 파이프라인 전체가
+                 #: Anthropic 크레딧과 무관해진다. 남는 anthropic 호출은 크레딧 확인 ping뿐이다.
+                 "analysis": ("upstage", SOLAR),
                  #: vision은 사진을 봐야 하므로 Solar가 못 한다(멀티모달 아님) → Gemini.
                  #: body와 똑같은 위험이었다 — 프로덕션은 LLM_VISION env로 Gemini인데
                  #: 코드 기본값은 Opus라, 변수가 사라지면 사진 분석이 조용히 Opus로 갔다.
@@ -430,7 +454,9 @@ def _upstage_generate(prompt: str, model: str, max_tokens: int, task: str = "") 
     r = _rq.post("https://api.upstage.ai/v1/chat/completions",
                  headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                  json={"model": model, "max_tokens": max(max_tokens * 3, 6000),  # 추론 토큰이 출력에 포함
-                       "reasoning_effort": solar_effort(task),
+                       # ★ 출력 예산을 함께 넘긴다 — 짧으면 effort가 자동으로 낮아진다.
+                       #   예산이 작은데 medium이면 추론이 예산을 다 먹고 빈 응답이 난다.
+                       "reasoning_effort": solar_effort(task, max_tokens),
                        "messages": [{"role": "user", "content": prompt}]},
                  timeout=300)          # 추론 모드는 느리다(실측 60~150초)
     d = r.json()
@@ -447,7 +473,9 @@ def _upstage_generate(prompt: str, model: str, max_tokens: int, task: str = "") 
     except Exception:
         raise RuntimeError(f"upstage 응답 파싱 실패: {str(d)[:160]}")
     if not txt:                        # 추론만 하고 본문을 안 낸 경우 — 침묵 폴백 금지
-        raise RuntimeError(f"upstage 빈 응답(effort={solar_effort(task)} reasoning={(u.get('completion_tokens_details') or {}).get('reasoning_tokens')})")
+        raise RuntimeError(f"upstage 빈 응답(effort={solar_effort(task, max_tokens)} "
+                           f"max_tokens={max_tokens} "
+                           f"reasoning={(u.get('completion_tokens_details') or {}).get('reasoning_tokens')})")
     return txt
 
 
