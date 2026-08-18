@@ -6919,9 +6919,63 @@ def _research_card(tenant, piece) -> str:
 
     if not (graph or scores or fact_html):
         return ""
+    # 🔎 진단 버튼 (2026-08-18 사장님: "최근 발행 확인건, 이거 각 콘텐츠 분석과 중복되지 않니?")
+    #   블로그 카드의 '최근 발행 확인' 목록은 제목·발행일·순위·근거가 전부 다른 화면과 겹쳤다.
+    #   겹치지 않는 것은 이 셋뿐이라 그것만 여기로 옮기고 목록은 지웠다(규율 1).
+    pid = getattr(piece, "id", "") or ""
+    pub_link, diag = "", ""
+    try:
+        _pub = db.get_blog_publish(pid) if pid else None
+    except Exception:
+        _pub = None
+    if _pub and (_pub.get("published_url") or ""):
+        pub_link = (f"<a href='{esc(_pub['published_url'])}' target=_blank rel=noopener "
+                    "class='text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 "
+                    "px-2.5 py-1 rounded-lg transition'>발행된 글 보기 ↗</a>")
+    if pid and _pub:
+        diag = (f"<button type=button onclick=\"raceView('{esc(pid)}',this)\" "
+                "class='text-[11px] font-bold text-violet-600 border border-violet-200 "
+                "hover:bg-violet-50 px-2.5 py-1 rounded-lg transition'>순위 추적</button>"
+                f"<button type=button onclick=\"whyNot('{esc(pid)}',this)\" "
+                "class='text-[11px] font-bold text-indigo-600 border border-indigo-200 "
+                "hover:bg-indigo-50 px-2.5 py-1 rounded-lg transition'>왜 안 뜨나요? 진단</button>")
+    tools = ""
+    if pub_link or diag:
+        tools = ("<div class='flex flex-wrap items-center gap-1.5 mt-3'>" + pub_link + diag + "</div>"
+                 f"<div id='race_{esc(pid)}'></div><div id='why_{esc(pid)}'></div>"
+                 "<script>"
+                 "async function whyNot(pid,btn){var box=document.getElementById('why_'+pid);if(!box)return;"
+                 "if(box.innerHTML){box.innerHTML='';btn.textContent='왜 안 뜨나요? 진단';return;}"
+                 "btn.disabled=true;btn.textContent='진단 중… (10초쯤)';"
+                 "try{var r=await fetch('/api/whynot/'+pid);var d=await r.json();"
+                 "if(d.error){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">'+d.error+'</div>';}"
+                 "else{box.innerHTML=d.html;btn.textContent='진단 닫기';}"
+                 "}catch(e){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">진단 실패 — 잠시 후 다시</div>';}"
+                 "btn.disabled=false;if(btn.textContent.indexOf('진단 중')>=0)btn.textContent='왜 안 뜨나요? 진단';}"
+                 "async function raceView(pid,btn){var box=document.getElementById('race_'+pid);if(!box)return;"
+                 "if(box.innerHTML){box.innerHTML='';btn.textContent='순위 추적';return;}"
+                 "btn.disabled=true;btn.textContent='불러오는 중…';"
+                 "try{var r=await fetch('/api/race/'+pid);var d=await r.json();"
+                 "if(d.error){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">'+d.error+'</div>';}"
+                 "else{box.innerHTML=d.html;btn.textContent='닫기';}"
+                 "}catch(e){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">불러오지 못했어요</div>';}"
+                 "btn.disabled=false;}"
+                 # ★ analystView — /api/race 응답 HTML 안의 버튼이 부른다.
+                 #   정의가 다른 화면에 있으면 눌러도 아무 일이 없다(죽은 자리).
+                 "async function analystView(pid,btn){var box=document.getElementById('anl_'+pid);if(!box)return;"
+                 "if(box.innerHTML){box.innerHTML='';btn.textContent='왜 이 순위? AI 분석';return;}"
+                 "btn.disabled=true;btn.textContent='분석 중… (첫 분석은 30초쯤)';"
+                 "try{var r=await fetch('/api/analyst/'+pid);var d=await r.json();"
+                 "if(d.error){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">'+d.error+'</div>';"
+                 "btn.textContent='왜 이 순위? AI 분석';}"
+                 "else{box.innerHTML=d.html;btn.textContent='분석 닫기';}"
+                 "}catch(e){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">분석 실패 — 잠시 후 다시</div>';"
+                 "btn.textContent='왜 이 순위? AI 분석';}"
+                 "btn.disabled=false;}"
+                 "</script>")
     _wr = "bg-white rounded-2xl border border-slate-200 p-4"
     left = (f"<div class='{_wr}'><div class='text-xs font-bold text-slate-500 mb-2'>"
-            "발행 후 순위</div>" + (graph or chart.empty(why)) + "</div>")
+            "발행 후 순위</div>" + (graph or chart.empty(why)) + tools + "</div>")
     mid = ((f"<div class='{_wr}'><div class='text-xs font-bold text-slate-500 mb-2'>"
             "조사 점검</div>" + scores + "</div>") if scores else "")
     right = ((f"<div class='{_wr}'><div class='text-xs font-bold text-slate-500 mb-2'>"
@@ -6963,75 +7017,21 @@ def _blog_connect_card(t, fw: str) -> str:
                              "<div class='text-[10px] text-slate-400 mt-1'>← 4주 전 · · 이번 주 →</div></div>")
         except Exception:
             pass
-        _wr = db.latest_weekly_report(t.id)
-        if _wr and _wr.get("data"):
-            _d = _wr["data"]
-            _rows2 = ""
-            for c in (_d.get("rank_changes") or [])[:4]:
-                _b = c.get("before") or "미노출"
-                _a = c.get("after") or "미노출"
-                from app.services import surfaces as _sf2
-                _src = _sf2.label(c.get("kind") or "")
-                _up = (c.get("after") or 99) < (c.get("before") or 99) and c.get("after")
-                _cls = "text-emerald-600" if _up else "text-slate-500"
-                _rows2 += (f"<div class='flex justify-between text-sm py-1 border-b border-slate-100'>"
-                           f"<span class='text-slate-600'>{esc(str(c.get('keyword', '')))} <span class='text-[10px] text-slate-400'>{_src}</span></span>"
-                           f"<span class='font-bold {_cls}'>{_b} → {_a}{' ⬆️' if _up else ''}</span></div>")
-            cons_html += ("<div class='mt-3 bg-indigo-50/50 rounded-2xl p-4'>"
-                          f"<div class='text-sm font-bold text-slate-700 mb-1'>주간 리포트 <span class='text-xs text-slate-400 font-normal'>({esc(_wr.get('week') or '')})</span></div>"
-                          + _rows2
-                          + f"<p class='text-xs text-slate-500 mt-2'>{esc(_d.get('coaching') or '')}</p></div>")
+        # 🗑 2026-08-18 사장님: "주간 리포트 이제 불필요하다."
+        #   키워드별 before→after 표였는데, 발행글마다 순위 추이 그래프가 생겨
+        #   같은 것을 두 곳에서 다르게 말하고 있었다(_research_card).
         pubs = db.list_blog_publishes(t.id, limit=5)
 
-        def _pub_row(p):
-            # 발행 후 며칠(진단 P3) — 색인 대기(3일 미만)면 그 사실을 먼저 보여줌(불안 방지)
-            from app.services.whynot import _days_since
-            _d = _days_since(p.get("published_at") or "")
-            _chip = (f"<span class='text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full whitespace-nowrap'>"
-                     f"{_d}일차</span>" if _d >= 0 else "")
-            # 생존신고 요약(파이프 A4) — 저장된 실측 스냅샷만(렌더 시 네이버 콜 없음)
-            _pc = None
-            try:
-                _pc = db.get_piece(p.get("piece_id") or "")
-                _pkw = ((((_pc.payload or {}).get("target_keywords") or [""])[0] or "").strip() if _pc
-                        else (p.get("target_kw") or "").strip())   # 외부 글(rss_auto)은 자동 추출 키워드
-                _ph = [h for h in db.rank_history(t.id, _pkw, kind="post") if h.get("rank") is not None] if _pkw else []
-                if _ph:
-                    _pr, _pp = _ph[-1]["rank"], (_ph[-2]["rank"] if len(_ph) >= 2 else None)
-                    if _pr:
-                        _ar = ("↑" if _pp and _pr < _pp else "↓" if _pp and _pr > _pp else "→")
-                        _chip += (f"<span class='ml-1 text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full whitespace-nowrap'>"
-                                  f"{_pr}위 {_ar}</span>")
-                    else:
-                        _chip += "<span class='ml-1 text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full whitespace-nowrap'>31위 밖</span>"
-                elif p.get("indexed_at"):
-                    _chip += f"<span class='ml-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full whitespace-nowrap'>{_index_label(p)}</span>"
-                elif _d >= 0 and _d < 1:
-                    _chip += "<span class='ml-1 text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full whitespace-nowrap'>네이버 접수 확인 중이에요</span>"
-            except Exception:
-                pass
-            _pid = esc(p.get("piece_id") or "")
-            btn = (f"<button type=button onclick=\"whyNot('{_pid}',this)\" "
-                   "class='text-[11px] font-bold text-indigo-600 border border-indigo-200 hover:bg-indigo-50 "
-                   "px-2.5 py-1 rounded-lg transition whitespace-nowrap'>왜 안 뜨나요? 진단</button>"
-                   if (_pid and _pc) else "")   # 진단은 글 품질(audit)이 있는 올린다 글만
-            race_btn = (f"<button type=button onclick=\"raceView('{_pid}',this)\" "
-                        "class='text-[11px] font-bold text-violet-600 border border-violet-200 hover:bg-violet-50 "
-                        "px-2.5 py-1 rounded-lg transition whitespace-nowrap'>순위 추적</button>" if _pid else "")
-            return (f"<div class='border-b border-slate-100 py-2'>"
-                    f"<div class='flex items-center justify-between gap-2'>"
-                    f"<a href='{esc(p.get('published_url') or '')}' target=_blank rel=noopener class='text-sm text-slate-700 font-medium truncate'>"
-                    f"{esc(p.get('post_title') or (p.get('published_url') or '')[:50])}</a>"
-                    f"<span class='flex items-center gap-1.5'>{_chip}{race_btn}{btn}</span></div>"
-                    f"<div class='text-xs text-slate-400'>{esc(db.fmt_kst(p.get('published_at'), date_only=True))} · "
-                    f"{'RSS자동' if p.get('matched_by') == 'rss' else '직접확인'}</div>"
-                    # 근거 카드(trust PHASE 3-3) — 큐 연결 없는 글(외부 발행 등)은 자동 생략
-                    + (_trust_card_html(_pc) if _pc else "")
-                    + f"<div id='race_{_pid}'></div><div id='why_{_pid}'></div></div>")
-        pub_rows = "".join(_pub_row(p) for p in pubs)
-        pub_box = ((f"<div class='mt-4'><div class='text-xs font-bold text-slate-500 mb-1'>최근 발행 확인 {len(pubs)}건</div>{pub_rows}</div>")
-                   if pubs else ("<p class='text-xs text-slate-400 mt-3'>블로그 등록됨 — 새 글은 <b class='text-slate-600'>자동으로</b> 감지해 추적해요"
-                                 "(2시간 주기 · 방금 발행했다면 '지금 새로고침'). 여기엔 추적 중인 글이 표시돼요.</p>"))
+        # 🗑 2026-08-18 사장님: "최근 발행 확인건, 이거는 각 컨텐츠 분석과 중복되지 않니?"
+        #   맞다. 그 목록이 보여주던 것은 전부 다른 화면에 이미 있었다:
+        #     제목·발행일 → 홈 목록(날짜별) · 순위/N일차 → 조사 카드 그래프
+        #     '이 글, 왜 이렇게 썼냐면' → 조사 카드 조사 항목
+        #   겹치지 않는 것은 [순위 추적]·[왜 안 뜨나요? 진단]·발행글 링크 셋뿐이라
+        #   그 셋만 _research_card로 옮기고 목록을 지웠다(규율 1: 옮긴 뒤 비운다).
+        pub_box = ("" if db.list_blog_publishes(t.id, limit=1) else
+                   "<p class='text-xs text-slate-400 mt-3'>블로그 등록됨 — 새 글은 "
+                   "<b class='text-slate-600'>자동으로</b> 감지해 추적해요"
+                   "(2시간 주기 · 방금 발행했다면 '지금 새로고침').</p>")
         return (f"<div id='blog' class='{fw} mt-5'>"
                 "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>내 네이버 블로그</h2>"
                 f"<p class='text-sm text-slate-400 mb-3'>연결됨 · 새 글을 자동으로 감지해 색인·순위까지 추적해요 — 따로 누를 건 없어요.</p>"
@@ -7056,34 +7056,11 @@ def _blog_connect_card(t, fw: str) -> str:
                 "if(d.synced){m.textContent='✅ 새 글 '+d.synced+'건 추적 시작!';setTimeout(function(){location.reload();},900);}"
                 "else{m.textContent='새 글 없음 — 이미 다 추적 중이에요 (RSS '+d.rss_posts+'건 대조).';btn.disabled=false;}"
                 "}catch(e){m.textContent='확인 실패';btn.disabled=false;}}"
-                # '왜 안 뜨나요?' 원클릭 진단(whynot P1~P3) — 결과는 해당 발행 항목 아래 삽입
-                "async function whyNot(pid,btn){var box=document.getElementById('why_'+pid);if(!box)return;"
-                "if(box.innerHTML){box.innerHTML='';btn.textContent='왜 안 뜨나요? 진단';return;}"
-                "btn.disabled=true;btn.textContent='진단 중… (10초쯤)';"
-                "try{var r=await fetch('/api/whynot/'+pid);var d=await r.json();"
-                "if(d.error){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">'+d.error+'</div>';}"
-                "else{box.innerHTML=d.html;btn.textContent='진단 닫기';}"
-                "}catch(e){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">진단 실패 — 잠시 후 다시</div>';}"
-                "btn.disabled=false;if(btn.textContent.indexOf('진단 중')>=0)btn.textContent='왜 안 뜨나요? 진단';}"
-                # (auto) enrich 인라인 폼 제거 — 보강은 품질 게이트가 자동 수행
-                # AI 순위 분석(분석가 P3) — 타임라인 안 버튼에서 호출
-                "async function analystView(pid,btn){var box=document.getElementById('anl_'+pid);if(!box)return;"
-                "if(box.innerHTML){box.innerHTML='';btn.textContent='왜 이 순위? AI 분석';return;}"
-                "btn.disabled=true;btn.textContent='분석 중… (첫 분석은 30초쯤)';"
-                "try{var r=await fetch('/api/analyst/'+pid);var d=await r.json();"
-                "if(d.error){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">'+d.error+'</div>';btn.textContent='왜 이 순위? AI 분석';}"
-                "else{box.innerHTML=d.html;btn.textContent='분석 닫기';}"
-                "}catch(e){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">분석 실패 — 잠시 후 다시</div>';btn.textContent='왜 이 순위? AI 분석';}"
-                "btn.disabled=false;}"
-                # 생존 신고(생존신고 P3) — 발행→색인→진입→현재→다음 관문 타임라인
-                "async function raceView(pid,btn){var box=document.getElementById('race_'+pid);if(!box)return;"
-                "if(box.innerHTML){box.innerHTML='';btn.textContent='순위 추적';return;}"
-                "btn.disabled=true;btn.textContent='실측 중…';"
-                "try{var r=await fetch('/api/race/'+pid);var d=await r.json();"
-                "if(d.error){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">'+d.error+'</div>';btn.textContent='순위 추적';}"
-                "else{box.innerHTML=d.html;btn.textContent='추적 닫기';}"
-                "}catch(e){box.innerHTML='<div class=\"text-xs text-rose-500 py-1\">실측 실패 — 잠시 후 다시</div>';btn.textContent='순위 추적';}"
-                "btn.disabled=false;}"
+                # 🗑 2026-08-18 — whyNot·raceView·analystView 정의를 여기서 지웠다.
+                #   이 카드의 '최근 발행 확인' 목록이 사라지면서 부르는 버튼이 없어졌다.
+                #   ★ analystView는 죽지 않았다 — /api/race 응답 안의 버튼이 부른다.
+                #     그 버튼은 이제 미리보기(_research_card)에 뜨는데 정의가 여기(홈)에 남으면
+                #     눌러도 아무 일이 없다. 그래서 셋 다 _research_card로 옮겼다.
                 "</script></div>")
     return (f"<div id='blog' class='{fw} mt-5'>"
             "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>내 네이버 블로그 연결</h2>"
