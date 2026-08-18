@@ -1288,6 +1288,98 @@ def admin_vacantq_purge(tid: str = "", dry: int = 1):
                                   if dry else "무관한 글감만 지웠다")})
 
 
+def _ops_rows() -> list:
+    """운영 화면 데이터 — **한 번의 집계 쿼리**로 전 가게를 가져온다.
+
+    ★ 가게마다 쿼리를 돌리면 곧 느려진다. 어제 '내 콘텐츠'가 그렇게 됐다
+      (카드 36개 × 쿼리 3~4회). 대행은 가게가 계속 늘어나므로 처음부터 집계로 짠다.
+    """
+    from datetime import datetime, timedelta
+    wk = (datetime.utcnow() - timedelta(days=7)).isoformat()
+    sql = """
+      SELECT t.id, t.name, t.blog_id,
+             (SELECT COUNT(*) FROM assets a WHERE a.tenant_id=t.id) n_assets,
+             (SELECT COUNT(DISTINCT p.asset_id) FROM content_pieces p WHERE p.tenant_id=t.id) n_made,
+             (SELECT COUNT(*) FROM content_pieces p
+               WHERE p.tenant_id=t.id AND p.kind='blog' AND p.status='published'
+                 AND p.created_at > ?) n_pub_week,
+             (SELECT COUNT(*) FROM content_pieces p
+               WHERE p.tenant_id=t.id AND p.kind='blog' AND p.status!='published') n_draft,
+             (SELECT MAX(p.created_at) FROM content_pieces p WHERE p.tenant_id=t.id) last_made,
+             t.upload_token
+        FROM tenants t
+       WHERE COALESCE(t.is_demo,0)=0
+       ORDER BY t.created_at
+    """
+    try:
+        with db._conn() as c:
+            rows = [dict(r) for r in c.execute(sql, (wk,)).fetchall()]
+    except Exception:
+        logging.exception("[ops] 집계 실패")
+        return []
+    out = []
+    for r in rows:
+        # 아직 글이 안 만들어진 사진 묶음 = 사장님이 처리할 일감
+        waiting = max(0, (r.get("n_assets") or 0) - (r.get("n_made") or 0))
+        out.append({**r, "waiting": waiting})
+    return out
+
+
+@app.get("/admin/ops", response_class=HTMLResponse)
+def admin_ops():
+    """🏢 대행 운영판 — 여러 가게를 한 화면에서 굴린다(2026-08-18 사장님 지시).
+
+    왜 필요한가: 대행으로 바뀌면서 주체가 바뀌었다.
+      SaaS 시절엔 고객이 로그인해 자기 가게를 봤지만, 대행은 **사장님이 여러 가게를 본다.**
+      /me는 '내 가게 하나'를 보는 화면이라 가게가 셋만 돼도 굴릴 수가 없다.
+
+    여기서 하는 일: 일감 확인 → 만들기 → 검토 → 발행. 하루에 이 화면만 보면 되게 한다.
+    """
+    rows = _ops_rows()
+    tot_wait = sum(r["waiting"] for r in rows)
+    tot_draft = sum(r["n_draft"] or 0 for r in rows)
+    tot_pub = sum(r["n_pub_week"] or 0 for r in rows)
+
+    def _cell(r):
+        wait = r["waiting"]
+        dot = ("<span class='inline-block w-2 h-2 rounded-full bg-rose-500 mr-1'></span>"
+               if wait else "")
+        wait_txt = (f"{dot}사진 {wait}묶음 대기" if wait
+                    else "<span class='text-slate-300'>대기 없음</span>")
+        blog = (f"<a href='https://blog.naver.com/{esc(r['blog_id'])}' target='_blank' "
+                f"class='text-indigo-600 hover:underline'>{esc(r['blog_id'])}</a>"
+                if r.get("blog_id") else "<span class='text-amber-600'>블로그 미연결</span>")
+        acts = (f"<a href='/admin/board?tid={r['id']}' class='px-2 py-1 rounded-lg bg-slate-100 "
+                "hover:bg-slate-200 text-xs font-bold'>판</a>"
+                f"<a href='/u/{esc(r['upload_token'] or '')}' target='_blank' "
+                "class='px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-bold'>업로드링크</a>")
+        return (f"<tr class='border-t border-slate-100'>"
+                f"<td class='py-2.5 pr-3 font-bold text-slate-800'>{esc(r['name'])}<div class='text-[11px] font-normal text-slate-400'>{blog}</div></td>"
+                f"<td class='py-2.5 pr-3 text-sm'>{wait_txt}</td>"
+                f"<td class='py-2.5 pr-3 text-sm text-center'>{r['n_draft'] or 0}</td>"
+                f"<td class='py-2.5 pr-3 text-sm text-center font-bold'>{r['n_pub_week'] or 0}<span class='text-slate-300'>/3</span></td>"
+                f"<td class='py-2.5 text-right'><div class='flex gap-1 justify-end'>{acts}</div></td></tr>")
+
+    head = ("<div class='grid grid-cols-3 gap-3 mb-6'>"
+            f"<div class='card p-4 text-center'><div class='text-2xl font-extrabold text-rose-600'>{tot_wait}</div>"
+            "<div class='text-xs text-slate-400 mt-1'>사진 대기</div></div>"
+            f"<div class='card p-4 text-center'><div class='text-2xl font-extrabold text-slate-800'>{tot_draft}</div>"
+            "<div class='text-xs text-slate-400 mt-1'>검토·발행 대기</div></div>"
+            f"<div class='card p-4 text-center'><div class='text-2xl font-extrabold text-emerald-600'>{tot_pub}</div>"
+            "<div class='text-xs text-slate-400 mt-1'>이번 주 발행</div></div></div>")
+    table = ("<div class='card p-4 overflow-x-auto'><table class='w-full text-sm'>"
+             "<thead><tr class='text-xs text-slate-400 text-left'>"
+             "<th class='pb-2'>가게</th><th class='pb-2'>사진</th>"
+             "<th class='pb-2 text-center'>검토대기</th><th class='pb-2 text-center'>주 발행</th>"
+             "<th class='pb-2 text-right'>바로가기</th></tr></thead><tbody>"
+             + "".join(_cell(r) for r in rows) + "</tbody></table></div>")
+    links = ("<div class='mt-5 flex flex-wrap gap-2 text-xs'>"
+             "<a href='/admin/agents' class='px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 font-bold'>에이전트 일지</a>"
+             "<a href='/admin/commander' class='px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 font-bold'>사령관</a>"
+             "<a href='/me?tab=content' class='px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 font-bold'>내 콘텐츠</a></div>")
+    return HTMLResponse(_subscriber_page("운영판", head + table + links, wide=True))
+
+
 @app.get("/admin/perf/content")
 def admin_perf_content(tid: str = "", view: str = ""):
     """⏱ '내 콘텐츠' 렌더 병목 측정(2026-08-18 사장님: "보기가 안 열린다").
