@@ -1236,11 +1236,17 @@ def _pricing() -> str:
         f"월 {a:,}원</div>"
         f"<div class='text-xs text-slate-400 mb-5'>영상까지 전부 포함 · 첫 달 해지 가능</div>"
         f"<ul class='space-y-2.5 text-sm text-slate-600'>{lis}</ul>"
-        f"<a href='/billing?plan=agency' class='block mt-7 text-center px-4 py-4 rounded-xl "
-        f"font-extrabold text-white bg-indigo-600 hover:bg-indigo-700 transition'>맡기고 시작하기</a>"
+        # 🗑 2026-08-18 — 카드 결제 버튼을 지웠다. 대행 계약은 사장님이 직접 한다.
+        #   ★ 링크는 반드시 consult_href()를 쓴다. 여기에 tel:을 박았다가 골든이 잡았다 —
+        #     채널을 개설해도 이 버튼만 전화로 남아 "카톡으로 상담"이 거짓이 된다.
+        f"<a href='{consult_href()}' class='block mt-7 text-center px-4 py-4 rounded-xl "
+        f"font-extrabold text-white bg-indigo-600 hover:bg-indigo-700 transition'>{consult_label()}</a>"
+        f"<a href='#contact' class='block mt-2 text-center px-4 py-3 rounded-xl "
+        f"font-bold text-slate-600 border border-slate-200 hover:bg-slate-50 transition'>"
+        f"문의 남기기</a>"
         f"</div>"
-        f"<p class='reveal text-center text-xs text-slate-400 mt-8'>언제든 해지 가능 — "
-        f"해지 후 다음 결제일부터 청구되지 않아요 · 남은 기간은 그대로 이용</p>"
+        f"<p class='reveal text-center text-xs text-slate-400 mt-8'>상담 후 시작 · "
+        f"계약 조건은 가게 상황에 맞춰 정합니다</p>"
         f"</div></section>")
 
 

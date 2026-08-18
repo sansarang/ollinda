@@ -64,46 +64,20 @@ def _paddle_sig(secret: str, raw: str) -> str:
     return f"ts={ts};h1={mac}"
 
 
-def test_paddle_webhook_priceid_blocks_bypass(monkeypatch):
-    secret = "whsec_test"
-    monkeypatch.setenv("PADDLE_WEBHOOK_SECRET", secret)
-    monkeypatch.setenv("PADDLE_PRICE_PRO", "pri_realpro")   # pri_realpro → plan 'pro'
+def test_결제는_사라졌다():
+    """★ 2026-08-18 사장님: "대행이다. 사용자의 가입은 원하지 않는다."
 
+    여기 있던 것은 Paddle 웹훅의 가격 우회 방지 검사였다(custom_data.plan으로
+    상위 플랜 승격 금지). 결제 자체가 사라졌으니 지킬 대상이 없다 —
+    대행에서 계약은 사장님이 직접 하고, 우리 시스템은 돈을 받지 않는다.
+
+    지금 지켜야 할 것은 반대다: **결제 문이 다시 열리지 않는 것.**
+    """
     import app.main as main
-    client = TestClient(main.app)
-
-    u = db.create_user(email="pay@t.com", pw_hash="h", salt="s")
-    uid = u["id"]
-
-    # (a) 우회 시도: custom_data.plan='agency' 인데 실제 결제 price는 pro → pro로만 승격돼야
-    body_a = json.dumps({
-        "event_type": "subscription.activated",
-        "data": {"custom_data": {"user_id": uid, "plan": "agency"},
-                 "items": [{"price": {"id": "pri_realpro"}}]},
-    })
-    r = client.post("/webhook/paddle", content=body_a,
-                    headers={"Paddle-Signature": _paddle_sig(secret, body_a)})
-    assert r.status_code == 200
-    assert db.get_user(uid)["plan"] == "pro", "custom_data.plan로 agency 승격되면 안 됨(B4)"
-
-    # (b) 매칭 price 없음: 플랜 변경 보류(우회 완전 차단)
-    db.set_user_plan(uid, "free")
-    body_b = json.dumps({
-        "event_type": "subscription.activated",
-        "data": {"custom_data": {"user_id": uid, "plan": "pro"},
-                 "items": [{"price": {"id": "pri_unknown"}}]},
-    })
-    r = client.post("/webhook/paddle", content=body_b,
-                    headers={"Paddle-Signature": _paddle_sig(secret, body_b)})
-    assert r.status_code == 200
-    assert db.get_user(uid)["plan"] == "free", "미매칭 price인데 플랜이 바뀌면 안 됨(B4)"
-
-    # (c) 서명 위조 → 401
-    r = client.post("/webhook/paddle", content=body_b, headers={"Paddle-Signature": "ts=1;h1=bad"})
-    assert r.status_code == 401
-
-
-# ── 3) SHOPCAST_SECRET 미설정 시 기동 실패 (B1, fail-closed) ──
+    paths = {getattr(r, "path", "") for r in main.app.routes}
+    for dead in ("/billing", "/billing/success", "/billing/fail",
+                 "/webhook/paddle", "/admin/billing/charge-due"):
+        assert dead not in paths, f"결제 경로가 되살아났다: {dead}"
 def test_missing_secret_fails_closed():
     env = {k: v for k, v in os.environ.items() if k != "SHOPCAST_SECRET"}
     env.pop("SHOPCAST_SECRET", None)

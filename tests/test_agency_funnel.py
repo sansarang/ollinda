@@ -64,9 +64,13 @@ def test_주_CTA는_상담이고_체험은_보조다():
 
 
 def test_요금은_대행_단일이다():
+    """★ 2026-08-18 — 'plan=agency' 결제 링크 검사를 상담 링크 검사로 바꿨다.
+    카드 결제를 없앴기 때문이다(사장님: 대행 계약은 내가 직접 한다).
+    지키려는 것은 그대로다 — 요금이 대행 하나이고, 누를 곳이 살아 있어야 한다."""
     p = landing._pricing()
     assert f"{config.AGENCY_FROM:,}원" in p
-    assert "plan=agency" in p
+    assert "/billing" not in p, "카드 결제 링크가 되살아났다"
+    assert landing.consult_href() in p, "요금 카드에서 상담으로 가는 길이 없다"
     for gone in ("라이트", "스탠다드", f"{config.PRICE_BASIC:,}원"):
         assert gone not in p, f"SaaS 플랜 '{gone}'이 요금에 되살아났다"
 

@@ -53,66 +53,10 @@ GOOGLE_SVG = ('<svg width="20" height="20" viewBox="0 0 48 48" class="inline-blo
               '2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>')
 
 
-def _quota_block(owner: dict | None):
-    """플랜별 생성 한도 초과 시 안내 HTML 반환, 통과면 None. owner 없음(대행 tenant)=무제한."""
-    if not owner:
-        return None
-    if _is_owner(owner):                 # 사장님 영구 라이선스 = 무제한
-        return None
-    plan = owner.get("plan") or "free"
-    if plan == "agency":
-        return None
-    up = ("<div class='bg-white rounded-2xl shadow-sm p-7 text-center max-w-md mx-auto'>"
-          "<div class='text-4xl mb-2'>🎁</div>{t}"
-          "<p class='text-slate-500 text-sm mb-4'>{m}</p>"
-          "<a href='/#pricing' class='inline-block bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl'>"
-          "요금제 보기 (베이직 39,000 · 프로 79,000)</a></div>")
-    if plan == "free":
-        if (owner.get("free_used") or 0) >= FREE_LIMIT:
-            return up.format(t=f"<h1 class='text-xl font-bold mb-1'>무료 {FREE_LIMIT}회를 모두 사용했어요</h1>",
-                             m="프로는 무제한, 베이직도 매달 넉넉히 만들 수 있어요.")
-        return None
-    # 유료 플랜(self): 구독 활성 + 월 한도
-    from app.services import pay
-    from datetime import datetime
-    sub = db.get_subscription(owner["id"])
-    active = bool(sub and sub.get("status") == "active" and (sub.get("expires_at") or "") > datetime.utcnow().isoformat())
-    if not active:
-        return up.format(t="<h1 class='text-xl font-bold mb-1'>구독이 만료됐어요</h1>",
-                         m="다시 결제하면 계속 이용할 수 있어요.")
-    cap = pay.PLANS.get(plan, {}).get("monthly", 0)
-    if cap and db.month_usage(owner["id"]) >= cap:
-        return up.format(t=f"<h1 class='text-xl font-bold mb-1'>이번 달 한도({cap}건) 도달</h1>",
-                         m="다음 달에 리셋됩니다. 더 필요하면 문의해 주세요.")
-    return None
 
 
-def _record_usage(owner: dict | None) -> None:
-    if not owner:
-        return
-    plan = owner.get("plan") or "free"
-    if plan == "free":
-        db.incr_user_free(owner["id"])
-    elif plan != "agency":
-        db.incr_month_usage(owner["id"])
 
 
-def _refund_usage(owner: dict | None) -> None:
-    """생성 실패 시 선예약(_record_usage)한 사용량 원복(B7). db 함수가 0 미만으로 내려가지 않게 클램프."""
-    if not owner:
-        return
-    plan = owner.get("plan") or "free"
-    if plan == "free":
-        db.incr_user_free(owner["id"], -1)
-    elif plan != "agency":
-        db.incr_month_usage(owner["id"], -1)
-
-
-# ── 업로드 검증(B9) ──────────────────────────────────────
-MAX_UPLOAD_BYTES = 25 * 1024 * 1024   # 사진 1장 최대 25MB
-_ALLOWED_IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".gif", ".bmp"}
-_ALLOWED_IMG_CT = {"image/jpeg", "image/png", "image/webp", "image/heic",
-                   "image/heif", "image/gif", "image/bmp"}
 
 
 async def _read_image_uploads(photos, limit: int = 30) -> list[tuple[bytes, str]]:   # 안전 상한 30(사진 제한 해제 — 서버 부하 방지용, UI 비노출)
@@ -2318,6 +2262,8 @@ def admin_audit(asset_id: str):
                          "gen_source": pl.get("gen_source") or ""})   # 사진 묘사 원문(자막 재료 진단)
 
 
+# 🗑 2026-08-18 — '구독자 관리' 화면(플랜 변경·사용량 리셋)을 지웠다.
+#   대행에는 구독자가 없다. 계정 확인은 아래 진단(/admin/users.json)으로 충분하다.
 @app.get("/admin/users.json")
 def admin_users_json():
     """운영 진단 — 가입자 명단(이메일 앞부분 마스킹·플랜·무료사용·가게명). '43명이 누구냐' 가시화(2026-07-31).
@@ -3970,12 +3916,14 @@ def _img_thumb_data_uri(path, max_px: int = 640) -> str:
         return ""
 
 
+    from app import landing as _landing   # 상담 링크는 단일 함수(consult_href)만 쓴다
 def _teaser_html(pieces, brief, asset_id, remaining: int = 0,
                  target_kw: str = "", target_vol: int = 0, enrichment: str = "bare") -> str:
     """미가입 무료 체험 결과 — '보여주되 다 주지 않는다'(전환 PHASE 1·2).
     블로그 글은 대부분 노출(품질 증명 = 미끼), 영상은 8초 워터마크 미리보기,
     5채널 중 2개(블로그+인스타)만 공개 — 완성본·다운로드·발행·전체 채널은 가입 뒤(훅).
     정직성: 잠긴 채널도 '실제로 생성됨'만 표기, 가짜 급함 없이 남은 무료 횟수만 표시."""
+    from app import landing as _landing   # 상담 링크는 단일 함수(consult_href)만 쓴다
     import re as _re
     by = {p.kind.value: p for p in pieces}
     imgs = (next((p.payload.get("image_paths") for p in pieces
@@ -4101,7 +4049,7 @@ def _teaser_html(pieces, brief, asset_id, remaining: int = 0,
         cta = (loss
                + "<div class='text-center text-slate-700 text-sm font-bold mb-2'>무료 미리보기 2회를 다 보셨어요 — 방금 그 품질 그대로 저희가 매주 올려드립니다</div>"
                "<a href='/#contact' class='block text-center py-3.5 rounded-xl font-extrabold mb-2 text-white' style='background:#4F46E5'>상담 문의하기</a>"
-               "<a href='tel:010-9796-9009' class='block text-center py-3 rounded-xl font-bold bg-white border border-slate-200 text-slate-700'>전화로 바로 상담 (010-9796-9009)</a>")
+               f"<a href='{_landing.consult_href()}' class='block text-center py-3 rounded-xl font-bold bg-white border border-slate-200 text-slate-700'>{_landing.consult_label()}</a>")
     return ("<div class='bg-[#F9FAFB] border border-slate-200 rounded-2xl p-4'>"
             "<div class='text-center mb-1'><span class='inline-block bg-[#EEF2FF] text-indigo-600 text-[10px] font-bold px-2.5 py-1 rounded-full'>5채널 동시 생성</span></div>"
             "<div class='text-center text-slate-900 font-extrabold text-lg mb-1'>사진 한 장으로 이 모든 게 완성됐어요</div>"
@@ -5582,67 +5530,9 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 "<h2 class='font-bold mb-3'>내 가게/상품 정보</h2>" + store_form_min + "</div>")
         return _subscriber_page(f"{esc(t.name)} · 시작 설정", banner + intro + card)
     # 온보딩 완료 → 사진 올려 생성이 메인
-    from app.services import pay as _pay
-    _plan = u.get("plan") or "free"
-    _pn = {"free": "무료", "basic": "베이직", "pro": "프로", "self": "프로", "agency": "대행"}.get(_plan, _plan)
-    if _is_owner(u):
-        _pn, _usage, _upbtn = "사장님", "무제한 · 영구 라이선스", ""
-    elif _plan == "free":
-        _usage = f"무료 {u.get('free_used') or 0}/{FREE_LIMIT}회"
-        _upbtn = (f"<a href='/billing?plan=pro' class='ml-auto {_BTN} text-sm px-4 py-2'>업그레이드</a>")
-    else:
-        _cap = _pay.PLANS.get(_plan, {}).get("monthly", 0)
-        _usage = f"이번달 {db.month_usage(u['id'])}" + (f"/{_cap}건" if _cap else "건(무제한)")
-        _upbtn = ""
-    plan_card = (f"<div class='{_CARD} p-4 mb-4 flex items-center gap-3'>"
-                 f"{_icchip('shield')}"
-                 f"<div><div class='text-xs text-slate-400'>내 플랜</div>"
-                 f"<div class='font-bold text-slate-900'>{_pn} · {_usage}</div></div>{_upbtn}</div>")
-    # 무료 소진 → 결제 유도(전환 PHASE 3) — 방금 만든 품질 근거 + 유료 기능 맛보기(사실만, 과장 없음)
-    _upsell = ""
-    if (not _is_owner(u)) and _plan == "free" and (u.get("free_used") or 0) >= FREE_LIMIT:
-        from app import config as _cfg2
-        _perks = "".join(
-            f"<div class='flex items-center gap-2 text-sm text-slate-600 py-1'>"
-            f"<span class='w-1.5 h-1.5 rounded-full bg-indigo-500 flex-shrink-0'></span>{p}</div>"
-            for p in [f"콘텐츠 계속 생성 (베이직 월 8건 · 프로 무제한)",
-                      "순위 성장 추적 — 발행 전후 '5위→2위' 자동 비교",
-                      "경쟁사 추적 — 옆집 대비 내 순위 매일 자동 체크",
-                      "블로그 발행 자동 확인 + 주간 성과 리포트"])
-        _upsell = ("<div class='bg-white border-2 border-indigo-200 rounded-2xl p-5 mb-4'>"
-                   "<div class='font-extrabold text-slate-900 mb-1'>무료 2회를 다 쓰셨어요</div>"
-                   "<p class='text-sm text-slate-500 mb-3'>방금 만든 그 품질 그대로 계속 — "
-                   f"<b class='text-slate-800'>베이직 월 {_cfg2.PRICE_BASIC:,}원</b>이면 이런 게 열려요.</p>"
-                   + _perks +
-                   "<div class='flex gap-2 mt-3'>"
-                   "<a href='/billing?plan=basic' class='flex-1 text-center bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition'>베이직 시작</a>"
-                   f"<a href='/billing?plan=pro' class='flex-1 text-center bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-xl transition'>프로 (월 {_cfg2.PRICE_PRO:,}원)</a></div>"
-                   "<p class='text-xs text-slate-400 mt-2'>연 결제 시 약 30% 할인 · 언제든 해지 가능</p></div>")
-    # 📈 성과 기반 업셀(전환 개선 ③, 2026-07-31 사장님 승인) — '한도 소진'보다 강한 트리거:
-    #   추적 키워드가 상위 20위 안에 들어온 순간, 그 순위를 근거로 제안(손실 회피 프레임).
-    _rank_hook = ""
-    if (not _is_owner(u)) and _plan == "free" and not _upsell:
-        try:
-            _best = None
-            for _kw0 in db.tracked_keywords(t.id, 5):
-                _h0 = db.rank_history(t.id, _kw0, limit=30)
-                _r0 = _h0[-1].get("rank") if _h0 else None
-                if isinstance(_r0, int) and 1 <= _r0 <= 20 and (_best is None or _r0 < _best[1]):
-                    _best = (_kw0, _r0)
-            if _best:
-                from app import config as _cfg3
-                _rank_hook = (
-                    "<div class='bg-white border-2 border-emerald-200 rounded-2xl p-5 mb-4'>"
-                    f"<div class='font-extrabold text-slate-900 mb-1'>🎉 사장님 글이 '<span class='text-emerald-600'>{esc(_best[0])}</span>' "
-                    f"검색 <span class='text-emerald-600'>{_best[1]}위</span>에 있어요</div>"
-                    "<p class='text-sm text-slate-500 mb-3'>순위는 새 글이 계속 올라와야 유지되고 올라갑니다 — "
-                    "여기서 멈추면 경쟁 가게 글이 자리를 채워요.</p>"
-                    "<div class='flex gap-2'>"
-                    f"<a href='/billing?plan=pro' class='flex-1 text-center bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl transition'>스탠다드로 계속 밀어올리기 (월 {_cfg3.PRICE_PRO:,}원)</a>"
-                    f"<a href='/billing?plan=basic' class='flex-1 text-center bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-xl transition'>라이트 (월 {_cfg3.PRICE_BASIC:,}원)</a>"
-                    "</div></div>")
-        except Exception:
-            pass
+    # 🗑 2026-08-18 사장님: "버릴것부터 버려라" — 요금제·무료한도·업그레이드 유도를 지웠다.
+    #   대행에서 가게는 우리에게 결제하지 않는다. 계약은 사장님이 직접 한다.
+    #   지운 것: 내 플랜 카드 · 무료 소진 업셀 · 순위 근거 업셀(_rank_hook).
     _sname = t.name if (t.name and t.name not in ("카카오회원", "구글회원", "회원", "내 가게")) else ""
     greeting = ("<div class='mb-6'>"
                 + (f"<div class='inline-flex items-center gap-1.5 bg-[#EEF2FF] text-indigo-700 text-sm font-bold px-3 py-1.5 rounded-full mb-3'>{_ic('store', 'w-3.5 h-3.5')} {esc(_sname)}</div>" if _sname else "")
@@ -5881,7 +5771,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                 _blogset = ""
             # ★ 2026-08-18 사장님 지시 — "가게를 누르면 내 콘텐츠·글 올리기가 한 화면에 있어야 한다."
             #   대행에서는 가게를 고른 순간 할 일이 둘뿐이다: 사진을 올리고, 나온 글을 본다.
-            main_inner = (greeting + _conv_card + _upsell + _rank_hook + _task + _notice_html
+            main_inner = (greeting + _conv_card + _task + _notice_html
                           + _guide + _blog_nudge + upload_section
                           + "<div class='mt-6'></div>" + content
                           + "<div class='mt-5'></div>" + _store_info_card(t) + _blogset)
@@ -5923,7 +5813,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                f"<a href='/' class='flex items-center gap-2 font-extrabold text-lg mb-6 px-2'>{landing.LOGO}<span>올린다</span></a>"
                + _storebox
                + "<nav class='space-y-1'>" + "".join(_navlink(*n) for n in _navitems)
-               + f"</nav><div class='mt-auto px-3 pt-4 border-t border-slate-100'><div class='text-xs text-slate-400 mb-1'>{_pn}</div>"
+               + "</nav><div class='mt-auto px-3 pt-4 border-t border-slate-100'>"
                "<a href='/logout' class='text-sm font-semibold text-slate-400 hover:text-slate-700'>로그아웃</a></div></aside>")
     # 로그아웃은 스크롤 스트립 '밖'에 고정 — 스트립 끝에 두면 메뉴가 넘칠 때 화면 밖으로
     # 밀려나 모바일에서 로그아웃이 안 보였다(2026-08-11 사장님 발견).
@@ -10831,137 +10721,8 @@ def adpack_zip(tid: str):
     return FileResponse(zpath, filename="광고소재팩.zip", media_type="application/zip")
 
 
-# ── 결제(토스페이먼츠 정기결제) ─────────────────────────────
-@app.get("/billing", response_class=HTMLResponse)
-def billing(request: Request, plan: str = "pro"):
-    from app.services import pay, pay_paddle
-    u = auth.current_user(request)
-    if not u:
-        return RedirectResponse("/login", status_code=303)
-    # 2026-08-17 대행 단일 전환 — 판매 상품은 대행이다. 알 수 없는 plan은 대행으로 받는다.
-    plan = plan if plan in pay.PLANS else "agency"
-    info = pay.PLANS[plan]
-    base = os.environ.get("SHOPCAST_BASE", "https://ollinda.kr").rstrip("/")
-    # 패들(Paddle) 우선 — 설정돼 있으면 오버레이 체크아웃
-    if pay_paddle.configured():
-        token = pay_paddle.client_token()
-        pid = pay_paddle.price_id(plan)
-        if not pid:
-            # 침묵 폴백 금지 — 다른 플랜 가격으로 대신 긁지 않는다(표시가 ≠ 청구액 = 신뢰 사고).
-            logging.error("[billing] %s 플랜 가격 ID 없음(PADDLE_PRICE_%s 미설정) — 결제 차단",
-                          plan, plan.upper())
-            return HTMLResponse(_subscriber_page(
-                "결제 준비 중",
-                "<div class='bg-white rounded-2xl border p-6 max-w-md mx-auto text-center'>"
-                "<div class='text-lg font-bold mb-2'>지금은 결제를 열 수 없습니다</div>"
-                "<p class='text-slate-500 text-sm'>결제 상품 설정이 끝나지 않았습니다. "
-                "잘못된 금액이 청구되지 않도록 결제를 막아두었습니다.<br>"
-                "잠시 뒤 다시 시도하시거나 문의해 주세요.</p></div>"))
-        envset = "Paddle.Environment.set('sandbox');" if pay_paddle.env() == "sandbox" else ""
-        email = esc((u.get("email") or "").replace("'", ""))
-        inner = (
-            "<div class='bg-white rounded-2xl border p-6 max-w-md mx-auto text-center'>"
-            f"<div class='text-lg font-bold mb-1'>{esc(info['name'])}</div>"
-            f"<div class='text-3xl font-extrabold my-2'>월 {info['price']:,}원</div>"
-            "<p class='text-slate-500 text-sm mb-5'>카드로 매월 자동 결제. 언제든 해지 가능. (세금계산서·영수증 자동)</p>"
-            "<button onclick='subscribe()' class='w-full bg-indigo-600 text-white font-bold py-3 rounded-xl'>구독 시작하기</button></div>"
-            "<script src='https://cdn.paddle.com/paddle/v2/paddle.js'></script>"
-            f"<script>{envset}Paddle.Initialize({{token:'{token}'}});function subscribe(){{Paddle.Checkout.open({{"
-            f"items:[{{priceId:'{pid}',quantity:1}}],customer:{{email:'{email}'}},"
-            f"customData:{{user_id:'{u['id']}',plan:'{plan}'}},"
-            f"settings:{{successUrl:'{base}/me?ok='+encodeURIComponent('결제 완료! 곧 플랜이 활성화돼요 🎉')}}}});}}</script>")
-        return HTMLResponse(_subscriber_page(f"{info['name']} 구독", inner))
-    if not pay.configured():
-        return HTMLResponse(_subscriber_page("결제 준비 중",
-            "<div class='bg-amber-50 text-amber-700 p-5 rounded-2xl text-sm'>결제(토스페이먼츠)가 아직 연결되지 않았어요. "
-            "운영자에게 문의하시면 플랜을 바로 열어드립니다. (TOSS 키 등록 후 자동 결제 가능)</div>"))
-    ck = pay.client_key()
-    customer_key = "cust_" + u["id"].replace("-", "")[:24]
-    inner = (
-        "<div class='bg-white rounded-2xl border p-6 max-w-md mx-auto text-center'>"
-        f"<div class='text-lg font-bold mb-1'>{esc(info['name'])}</div>"
-        f"<div class='text-3xl font-extrabold my-2'>월 {info['price']:,}원</div>"
-        "<p class='text-slate-500 text-sm mb-5'>카드 등록 후 매월 자동 결제. 언제든 해지 가능.</p>"
-        "<button onclick='subscribe()' class='w-full bg-indigo-600 text-white font-bold py-3 rounded-xl'>카드 등록하고 구독 시작</button></div>"
-        "<script src='https://js.tosspayments.com/v1/payment'></script>"
-        f"<script>const tp=TossPayments('{ck}');function subscribe(){{tp.requestBillingAuth('카드',"
-        f"{{customerKey:'{customer_key}',successUrl:'{base}/billing/success?plan={plan}',failUrl:'{base}/billing/fail'}});}}</script>")
-    return HTMLResponse(_subscriber_page(f"{info['name']} 구독", inner))
-
-
-@app.get("/billing/success")
-def billing_success(request: Request, plan: str = "pro", customerKey: str = "", authKey: str = ""):
-    from app.services import pay
-    from datetime import datetime, timedelta
-    import uuid as _uuid
-    u = auth.current_user(request)
-    if not u:
-        return RedirectResponse("/login", status_code=303)
-    if not (authKey and customerKey):
-        return RedirectResponse("/billing/fail", status_code=303)
-    if not db.claim_once("toss:" + authKey):     # 새로고침·프리페치 이중청구 방지(B10)
-        return RedirectResponse("/me?ok=이미 처리된 결제예요 🎉", status_code=303)
-    issued = pay.issue_billing_key(authKey, customerKey)
-    if issued.get("error") or not issued.get("billingKey"):
-        return HTMLResponse(_subscriber_page("결제 등록 실패",
-            f"<div class='bg-rose-50 text-rose-600 p-5 rounded-2xl'>카드 등록 실패: {esc(issued.get('error',''))} "
-            "<a href='/billing?plan=pro' class='underline'>다시 시도</a></div>"))
-    plan = plan if plan in pay.PLANS else "pro"
-    info = pay.PLANS[plan]
-    paid = pay.charge(issued["billingKey"], customerKey, info["price"], "ord_" + _uuid.uuid4().hex[:20], info["name"])
-    if paid.get("error"):
-        return HTMLResponse(_subscriber_page("결제 실패",
-            f"<div class='bg-rose-50 text-rose-600 p-5 rounded-2xl'>결제 실패: {esc(paid.get('error',''))} "
-            "<a href='/billing?plan=pro' class='underline'>다시 시도</a></div>"))
-    expires = (datetime.utcnow() + timedelta(days=30)).isoformat()
-    db.upsert_subscription(u["id"], plan, "active", issued["billingKey"], customerKey, info["price"], expires)
-    db.set_user_plan(u["id"], plan)
-    return RedirectResponse("/me?ok=결제 완료! 플랜이 활성화됐어요 🎉", status_code=303)
-
-
-@app.get("/billing/fail")
-def billing_fail(message: str = ""):
-    return HTMLResponse(_subscriber_page("결제 취소",
-        f"<div class='bg-rose-50 text-rose-600 p-5 rounded-2xl'>결제가 완료되지 않았어요. {esc(message)} "
-        "<a href='/billing?plan=pro' class='underline font-semibold'>다시 시도</a></div>"))
-
-
-@app.post("/webhook/paddle")
-async def paddle_webhook(request: Request):
-    """패들 구독 이벤트 웹훅 — 서명 검증 후 플랜 활성/해지. custom_data.user_id로 사용자 매칭."""
-    import json
-    from app.services import pay_paddle
-    raw = (await request.body()).decode("utf-8", "ignore")
-    sig = request.headers.get("Paddle-Signature", "")
-    if not pay_paddle.verify_webhook(sig, raw):
-        return JSONResponse({"error": "invalid signature"}, status_code=401)
-    try:
-        ev = json.loads(raw)
-    except Exception:
-        return JSONResponse({"error": "bad json"}, status_code=400)
-    etype = ev.get("event_type", "")
-    data = ev.get("data", {}) or {}
-    cd = data.get("custom_data") or {}
-    uid = cd.get("user_id")
-    if uid and db.get_user(uid):
-        from datetime import datetime, timedelta
-        if etype in ("subscription.activated", "subscription.created", "transaction.completed"):
-            # 플랜은 custom_data.plan(클라 조작 가능)이 아니라 실제 결제된 price id로 서버 검증(B4)
-            plan = pay_paddle.plan_from_event(data)
-            if not plan:
-                import logging
-                logging.warning("paddle webhook: price id 매칭 실패 — 플랜 변경 보류 uid=%s", uid)
-                return JSONResponse({"ok": True, "note": "unrecognized price id"}, status_code=200)
-            db.set_user_plan(uid, plan)
-            exp = (datetime.utcnow() + timedelta(days=32)).isoformat()
-            try:
-                db.upsert_subscription(uid, plan, "active", billing_key=str(data.get("id", "")),
-                                       customer_key=str(data.get("customer_id", "")), expires_at=exp)
-            except Exception:
-                pass
-        elif etype in ("subscription.canceled", "subscription.paused", "subscription.past_due"):
-            db.set_user_plan(uid, "free")
-    return JSONResponse({"ok": True})
+# 🗑 2026-08-18 — 결제 구역을 통째로 지웠다(사장님: 대행이다, 가입을 원하지 않는다).
+#   토스 정기결제·Paddle 웹훅·요금제 화면 전부. 계약은 사장님이 직접 한다.
 
 
 @app.post("/admin/reports/send-due")
@@ -10978,91 +10739,14 @@ def reports_weekly_now():
     return JSONResponse(weekly_report.send_all())
 
 
-@app.post("/admin/billing/charge-due")
 def billing_charge_due():
     """정기결제 갱신 — 만료 임박 구독을 빌링키로 자동 청구(운영자/크론이 호출)."""
-    from app.services import pay
-    from datetime import datetime, timedelta
-    import uuid as _uuid
-    done = failed = 0
-    for s in db.subs_due_for_charge(within_days=1):
-        info = pay.PLANS.get(s["plan"])
-        if not info:
-            continue
-        r = pay.charge(s["billing_key"], s["customer_key"], info["price"],
-                       "ord_" + _uuid.uuid4().hex[:20], info["name"])
-        if r.get("error"):
-            failed += 1
-            db.upsert_subscription(s["user_id"], s["plan"], "past_due", s["billing_key"],
-                                   s["customer_key"], info["price"], s["expires_at"])
-        else:
-            exp = (datetime.utcnow() + timedelta(days=30)).isoformat()
-            db.upsert_subscription(s["user_id"], s["plan"], "active", s["billing_key"],
-                                   s["customer_key"], info["price"], exp)
-            done += 1
-    return {"charged": done, "failed": failed}
 
 
-# ── 구독자 관리 (운영자) ─────────────────────────────────
-@app.get("/admin/users", response_class=HTMLResponse)
-def admin_users(ok: str = "", err: str = ""):
-    from app.services import pay
-    users = db.list_users()
-    inp = "border border-slate-200 rounded-lg px-2 py-1.5 text-sm"
-    pmeta = {"free": ("무료", "bg-slate-100 text-slate-600"),
-             "self": ("셀프", "bg-indigo-100 text-indigo-700"),
-             "agency": ("대행", "bg-amber-100 text-amber-700")}
-    paid = sum(1 for u in users if (u.get("plan") or "free") != "free")
-    rows = ""
-    for u in users:
-        plan = u.get("plan") or "free"
-        lbl, cls = pmeta.get(plan, pmeta["free"])
-        sub = db.get_subscription(u["id"])
-        exp = (sub or {}).get("expires_at", "")[:10]
-        substat = (f"~{exp}" if exp else "-")
-        used = (f"무료 {u.get('free_used') or 0}/2" if plan == "free"
-                else (f"이번달 {db.month_usage(u['id'])}" + (f"/{pay.PLANS.get(plan,{}).get('monthly')}" if pay.PLANS.get(plan,{}).get('monthly') else "")))
-        popt = "".join(f"<option value='{k}'{' selected' if plan==k else ''}>{v[0]}</option>" for k, v in pmeta.items())
-        rows += (
-            "<tr class='border-t'>"
-            f"<td class='py-2 pr-2'>{esc(u.get('email') or u.get('name') or '(회원)')}</td>"
-            f"<td class='pr-2'><span class='text-xs font-bold px-2 py-0.5 rounded-full {cls}'>{lbl}</span></td>"
-            f"<td class='pr-2 text-slate-500'>{used}</td>"
-            f"<td class='pr-2 text-slate-400 text-xs'>{substat}</td>"
-            f"<td class='pr-2 text-slate-400 text-xs'>{(u.get('created_at') or '')[:10]}</td>"
-            "<td class='pr-2'>"
-            f"<form method=post action='/admin/users/{u['id']}/plan' class='flex gap-1'>"
-            f"<select name=plan class='{inp}'>{popt}</select>"
-            "<button class='px-2 py-1 bg-slate-800 text-white text-xs rounded-lg'>변경</button></form></td>"
-            f"<td><form method=post action='/admin/users/{u['id']}/reset'>"
-            "<button class='px-2 py-1 bg-slate-100 text-slate-600 text-xs rounded-lg'>사용량 리셋</button></form></td></tr>")
-    banner = (f"<div class='bg-emerald-50 text-emerald-700 p-3 rounded-xl mb-3 text-sm'>✅ {esc(ok)}</div>" if ok else "")
-    stats = ("<div class='grid grid-cols-3 gap-4 mb-6'>"
-             + stat_card("전체 회원", len(users), "indigo")
-             + stat_card("유료 회원", paid, "emerald")
-             + stat_card("무료 회원", len(users) - paid, "slate") + "</div>")
-    table = ("<div class='bg-white rounded-2xl border border-slate-100 shadow-sm p-4 overflow-x-auto'>"
-             "<table class='w-full text-sm'><thead><tr class='text-slate-400 text-xs text-left'>"
-             "<th class='pb-2'>회원</th><th>플랜</th><th>사용량</th><th>구독만료</th><th>가입</th><th>플랜변경</th><th></th>"
-             f"</tr></thead><tbody>{rows or '<tr><td class=py-6 colspan=7>회원이 없습니다.</td></tr>'}</tbody></table></div>"
-             "<p class='text-xs text-slate-400 mt-3'>※ 결제(토스) 없이도 여기서 플랜을 수동 지정하면 즉시 유료처럼 이용됩니다(수동 청구 시).</p>")
-    return shell("users", "구독자 관리", banner + stats + table, subtitle=f"회원 {len(users)}명 · 유료 {paid}")
 
 
-@app.post("/admin/users/{uid}/plan")
-def admin_user_plan(uid: str, plan: str = Form("free")):
-    db.set_user_plan(uid, plan)
-    if plan in ("basic", "pro", "self", "agency"):   # 운영자 수동 활성화(결제 없이 30일)
-        from datetime import datetime, timedelta
-        db.upsert_subscription(uid, plan, "active", "", "", 0,
-                               (datetime.utcnow() + timedelta(days=30)).isoformat())
-    return RedirectResponse("/admin/users?ok=플랜을 변경했어요", status_code=303)
 
 
-@app.post("/admin/users/{uid}/reset")
-def admin_user_reset(uid: str):
-    db.reset_usage(uid)
-    return RedirectResponse("/admin/users?ok=사용량을 리셋했어요", status_code=303)
 
 
 @app.api_route("/admin/demo/reset", methods=["GET", "POST"])
@@ -13225,11 +12909,8 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
                                         s_buy.strip() or tenant.buy_url, s_search.strip() or tenant.search_kw,
                                         s_brand.strip() or tenant.brand_name)
     tenant, _ = db.get_tenant_by_token(token)   # 갱신본 재로드 (업종 프로필 생성은 백그라운드에서)
-    # 플랜별 쿼터(셀프서비스 가게만; 운영자/대행 tenant는 owner 없음 → 무제한)
-    owner = db.get_user_by_tenant(tenant.id)
-    block = _quota_block(owner)
-    if block:
-        return page("이용 안내", block)
+    # 🗑 2026-08-18 — 플랜별 쿼터 검사를 지웠다. 대행에서는 요금제가 없다.
+    #   계약은 사장님이 직접 하고, 몇 건을 쓰는지는 상담에서 정해진다.
     files = await _read_image_uploads(photos)
     if not files:
         return HTMLResponse("<p>이미지 파일을 한 장 이상 올려주세요. (jpg·png·webp·heic, 최대 25MB)</p>", status_code=400)
@@ -13274,7 +12955,6 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
     # 생성은 시간이 오래 걸려(전략가→3채널→SEO편집) 요청을 붙잡으면 서버 타임아웃(500).
     # → 백그라운드 스레드에서 생성하고 요청은 즉시 반환. 완료되면 대시보드에 자동 표시.
     _ind = s_industry.strip()
-    _record_usage(owner)                           # 쿼터 선예약 — 동시 업로드로 한도 우회 방지(B7)
 
     def _bg_generate():
         nonlocal target_kw, angle
@@ -13359,8 +13039,6 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
             elif _q_claim:
                 from app import db as _db3
                 _db3.rollback_writing(_q_claim["id"])
-            if not made:
-                _refund_usage(owner)               # 생성 결과 없음 → 예약 원복
             db.finish_gen_job(_job_id, "done" if made else "failed",
                               asset_id=(made[0].asset_id if made else ""))
             try:
@@ -13369,7 +13047,6 @@ async def upload(token: str, req: Request, photos: list[UploadFile] = File(...),
             except Exception:
                 pass
         except Exception:
-            _refund_usage(owner)                   # 실패 → 예약 원복
             db.finish_gen_job(_job_id, "failed")
             import logging, traceback
             logging.exception("[upload-bg] 생성 실패 tenant=%s", tenant.id)
