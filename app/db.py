@@ -2940,3 +2940,84 @@ def set_feedback_status(fid: str, status: str, category: str = "") -> None:
                       (status, category, fid))
     except sqlite3.OperationalError:
         pass
+
+
+# ── 📨 상담 문의 (2026-08-18) ────────────────────────────────
+#   대행에서 문의는 **유일한 입구**다. 그런데 그동안 문의 폼은 메일만 시도하고
+#   (SMTP 미설정으로 실패) 서버 로그 파일에 한 줄 남기는 게 전부였다 —
+#   누가 언제 문의했는지 볼 화면조차 없었다. 영업을 해도 받을 그릇이 없던 셈이다.
+#
+#   ★ 저장이 먼저다. 메일·알림이 실패해도 문의는 남아야 한다.
+#     (침묵 폴백 금지의 입구판 — 놓친 문의는 그대로 잃어버린 계약이다)
+
+def _ensure_contacts(c) -> None:
+    c.execute("CREATE TABLE IF NOT EXISTS contacts("
+              "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+              "company TEXT, manager TEXT, phone TEXT, email TEXT, message TEXT,"
+              "source TEXT DEFAULT 'form',"       # form · phone · kakao · mail
+              "status TEXT DEFAULT 'new',"        # new · contacted · won · lost
+              "memo TEXT, mailed INTEGER DEFAULT 0,"
+              "created_at TEXT, updated_at TEXT)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_contacts_status ON contacts(status, id DESC)")
+
+
+def save_contact(company: str = "", manager: str = "", phone: str = "", email: str = "",
+                 message: str = "", source: str = "form") -> int:
+    """문의 저장 — 실패하면 예외를 올린다(조용히 삼키면 문의를 잃는다)."""
+    with _conn() as c:
+        _ensure_contacts(c)
+        cur = c.execute(
+            "INSERT INTO contacts(company,manager,phone,email,message,source,status,created_at,updated_at)"
+            " VALUES(?,?,?,?,?,?,'new',?,?)",
+            (company[:120], manager[:60], phone[:40], email[:120], message[:2000],
+             source[:20], _now(), _now()))
+        return int(cur.lastrowid)
+
+
+def mark_contact_mailed(cid: int) -> None:
+    try:
+        with _conn() as c:
+            _ensure_contacts(c)
+            c.execute("UPDATE contacts SET mailed=1 WHERE id=?", (cid,))
+    except sqlite3.OperationalError:
+        pass
+
+
+def list_contacts(limit: int = 100, status: str = "") -> list[dict]:
+    try:
+        with _conn() as c:
+            _ensure_contacts(c)
+            q = "SELECT * FROM contacts"
+            a: list = []
+            if status:
+                q += " WHERE status=?"
+                a.append(status)
+            q += " ORDER BY id DESC LIMIT ?"
+            a.append(limit)
+            return [dict(r) for r in c.execute(q, a).fetchall()]
+    except sqlite3.OperationalError:
+        return []
+
+
+def count_contacts(status: str = "new") -> int:
+    try:
+        with _conn() as c:
+            _ensure_contacts(c)
+            r = c.execute("SELECT COUNT(*) n FROM contacts WHERE status=?", (status,)).fetchone()
+            return int(r["n"] if r else 0)
+    except sqlite3.OperationalError:
+        return 0
+
+
+def set_contact_status(cid: int, status: str, memo: str = "") -> None:
+    try:
+        with _conn() as c:
+            _ensure_contacts(c)
+            if memo:
+                c.execute("UPDATE contacts SET status=?, memo=?, updated_at=? WHERE id=?",
+                          (status, memo[:1000], _now(), cid))
+            else:
+                c.execute("UPDATE contacts SET status=?, updated_at=? WHERE id=?",
+                          (status, _now(), cid))
+    except sqlite3.OperationalError:
+        pass

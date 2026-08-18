@@ -63,6 +63,8 @@ def shell(active: str, title: str, body: str, subtitle: str = "", actions: str =
         '<nav class="flex-1 overflow-y-auto px-3 py-4 space-y-1">'
         '<p class="px-3 text-[11px] font-semibold text-slate-500 mb-1">메인</p>'
         + _si("/admin/ops", "운영 관제탑", "ops", active, "ops")
+        # 📨 2026-08-18 — 대행의 유일한 입구. 놓친 문의가 없어야 사업이 굴러간다.
+        + _si("/admin/inquiries", "받은 문의", "inquiries", active, "ops")
         + _si("/admin", "검수 대기", "review", active, "review")
         + _si("/admin/board", "포스팅 현황판", "board", active, "board")
         + '<p class="px-3 text-[11px] font-semibold text-slate-500 mt-4 mb-1">채널별</p>'

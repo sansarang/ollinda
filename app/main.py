@@ -4938,33 +4938,131 @@ def api_lookup(q: str = "", biz: str = ""):
 
 @app.post("/api/contact")
 async def api_contact(company: str = Form(""), manager: str = Form(""), phone: str = Form(""),
-                      email: str = Form(""), message: str = Form("")):
-    """랜딩 문의 — SMTP 설정 시 메일 발송, 항상 로그로 백업(리드 보존)."""
-    to = os.environ.get("OLLINDA_INQUIRY_TO", "ollinda.2026@gmail.com")   # 문의 수신함(2026-08-11 지정)
-    body = f"[올린다 문의]\n상호:{company}\n담당:{manager}\n연락처:{phone}\n이메일:{email}\n내용:{message}"
-    sent = False
-    host, user, pw = (os.environ.get("SMTP_HOST"), os.environ.get("SMTP_USER"), os.environ.get("SMTP_PASS"))
-    if host and user and pw:
-        try:
-            import smtplib
-            from email.mime.text import MIMEText
-            msg = MIMEText(body)
-            msg["Subject"] = f"[올린다 문의] {company}"
-            msg["From"] = user
-            msg["To"] = to
-            with smtplib.SMTP(host, int(os.environ.get("SMTP_PORT", "587"))) as s:
-                s.starttls(); s.login(user, pw); s.send_message(msg)
-            sent = True
-        except Exception:
-            sent = False
+                      email: str = Form(""), message: str = Form(""), request: Request = None):
+    """📨 상담 문의 접수 — 대행의 **유일한 입구**다.
+
+    2026-08-18 사장님: "대행이다. 사용자의 가입은 원하지 않는다.
+    카카오 채널 개설, 전화·메일로 내가 직접 받는다."
+
+    ★ 순서가 계약이다: **저장 → 알림 → 응답.**
+      전에는 메일만 시도하고(SMTP 미설정으로 늘 실패) 로그 파일에 한 줄 남기는 게 전부였다.
+      볼 화면도 없어서, 문의가 왔는지조차 알 수 없었다 — 영업을 해도 받을 그릇이 없던 셈이다.
+      이제 DB에 먼저 남기고, 메일·경보가 실패해도 문의는 살아 있다.
+
+    ★ 메일은 services/mailer 하나만 쓴다. 여기서 smtplib를 직접 부르고 있었는데,
+      Railway는 Pro 미만 플랜에서 SMTP 발신을 차단한다(2026-08-11 실측 OSError 101).
+      mailer는 그래서 Resend를 먼저 쓴다 — 같은 일을 두 곳에서 다르게 하면 한쪽만 낫는다.
+    """
+    company, manager = company.strip(), manager.strip()
+    phone, email, message = phone.strip(), email.strip(), message.strip()
+    if not (phone or email):
+        return JSONResponse({"ok": False, "error": "연락처나 이메일 중 하나는 남겨주세요."}, status_code=400)
+    # 봇 도배 방지 — 같은 IP에서 잦은 접수는 막되, 사람이 다시 쓰는 정도는 통과.
     try:
-        d = os.environ.get("SHOPCAST_STORAGE", "storage")
-        os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, "contacts.log"), "a") as f:
-            f.write(body.replace("\n", " | ") + "\n")
+        from app import ratelimit as _rl
+        ip = ""
+        if request is not None:
+            ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+        if ip and not _rl.allow("contact:" + ip, 3, 10):
+            return JSONResponse({"ok": False, "error": "잠시 후 다시 시도해 주세요."}, status_code=429)
     except Exception:
         pass
-    return JSONResponse({"ok": True, "mailed": sent})
+
+    # ① 저장 — 실패하면 사장님께 사실대로 말한다(성공한 척하지 않는다)
+    try:
+        cid = db.save_contact(company=company, manager=manager, phone=phone,
+                              email=email, message=message, source="form")
+    except Exception:
+        logging.getLogger("shopcast.contact").exception("[contact] 저장 실패 — 문의를 잃는다")
+        return JSONResponse({"ok": False,
+                             "error": "접수에 실패했어요. 죄송하지만 010-9796-9009로 전화 주세요."},
+                            status_code=500)
+
+    body = (f"[올린다 상담 문의 #{cid}]\n"
+            f"상호: {company or '-'}\n담당: {manager or '-'}\n"
+            f"연락처: {phone or '-'}\n이메일: {email or '-'}\n\n{message or '-'}\n\n"
+            f"→ 운영판에서 확인: https://ollinda.kr/admin/inquiries")
+
+    # ② 알림 — 메일과 경보 둘 다 시도한다. 하나가 죽어도 다른 하나가 알린다.
+    mailed = False
+    try:
+        from app.services import mailer
+        to = os.environ.get("OLLINDA_INQUIRY_TO", "ollinda.2026@gmail.com")
+        mailed = mailer.send(to, f"[올린다 문의] {company or manager or phone}", body)
+        if mailed:
+            db.mark_contact_mailed(cid)
+        else:
+            logging.getLogger("shopcast.contact").warning(
+                "[contact] 메일 미발송(#%s) — DB에는 저장됨. RESEND_API_KEY/SMTP 확인 필요", cid)
+    except Exception:
+        logging.getLogger("shopcast.contact").exception("[contact] 메일 발송 예외 #%s", cid)
+    try:
+        from app.services import watchtower
+        watchtower.send("📨 새 상담 문의\n" + body)
+    except Exception:
+        pass
+    return JSONResponse({"ok": True, "id": cid, "mailed": mailed})
+
+
+@app.get("/admin/inquiries", response_class=HTMLResponse)
+def admin_inquiries(status: str = "", ok: str = ""):
+    """📨 받은 문의 — 대행의 입구를 한 화면에서 본다.
+
+    놓친 문의가 없어야 대행이 굴러간다. 그래서 기본은 **미처리(new)가 위**,
+    처리 상태를 여기서 바로 바꾼다.
+    """
+    rows = db.list_contacts(limit=200, status=status.strip())
+    n_new = db.count_contacts("new")
+    _S = [("new", "새 문의", "amber"), ("contacted", "연락함", "indigo"),
+          ("won", "계약", "emerald"), ("lost", "무산", "slate")]
+    _lab = {k: (l, c) for k, l, c in _S}
+    tabs = "".join(
+        f"<a href='/admin/inquiries{'' if not k else '?status=' + k}' "
+        f"class='px-3.5 py-1.5 rounded-full text-xs font-bold "
+        + ("bg-indigo-600 text-white" if status == k else "bg-slate-100 text-slate-600")
+        + f"'>{lab}</a>"
+        for k, lab in [("", "전체")] + [(k, l) for k, l, _ in _S])
+    items = ""
+    for r in rows:
+        lab, color = _lab.get(r.get("status") or "new", ("새 문의", "amber"))
+        opts = "".join(f"<option value='{k}'{' selected' if (r.get('status') or 'new') == k else ''}>{l}</option>"
+                       for k, l, _ in _S)
+        _tel = esc(r.get("phone") or "")
+        items += (
+            "<div class='bg-white rounded-2xl border border-slate-200 p-4 mb-3'>"
+            "<div class='flex items-start gap-3 flex-wrap'>"
+            f"<span class='text-xs font-bold px-2 py-0.5 rounded-full bg-{color}-50 text-{color}-700'>{lab}</span>"
+            f"<b class='text-slate-900'>{esc(r.get('company') or '(상호 없음)')}</b>"
+            f"<span class='text-slate-500 text-sm'>{esc(r.get('manager') or '')}</span>"
+            f"<span class='ml-auto text-xs text-slate-400'>{esc((r.get('created_at') or '')[:16].replace('T', ' '))}"
+            + ("" if r.get("mailed") else " · <span class='text-rose-500'>메일 미발송</span>") + "</span></div>"
+            "<div class='flex flex-wrap gap-3 mt-2 text-sm'>"
+            + (f"<a href='tel:{_tel}' class='font-bold text-indigo-600'>{_tel}</a>" if _tel else "")
+            + (f"<span class='text-slate-500'>{esc(r.get('email') or '')}</span>" if r.get("email") else "")
+            + "</div>"
+            + (f"<p class='text-sm text-slate-600 mt-2 whitespace-pre-wrap'>{esc(r.get('message') or '')}</p>"
+               if r.get("message") else "")
+            + (f"<p class='text-xs text-slate-400 mt-1'>메모: {esc(r.get('memo') or '')}</p>" if r.get("memo") else "")
+            + f"<form method=post action='/admin/inquiries/{r['id']}' class='flex flex-wrap gap-2 mt-3'>"
+            f"<select name=status class='border border-slate-200 rounded-lg px-2 py-1.5 text-sm'>{opts}</select>"
+            "<input name=memo placeholder='메모(선택)' class='flex-1 min-w-[10rem] border border-slate-200 "
+            "rounded-lg px-2 py-1.5 text-sm'>"
+            "<button class='px-3 py-1.5 bg-slate-900 text-white text-xs font-bold rounded-lg'>저장</button>"
+            "</form></div>")
+    banner = (f"<div class='bg-emerald-50 text-emerald-700 p-3 rounded-xl mb-3 text-sm'>✅ {esc(ok)}</div>"
+              if ok else "")
+    body = (banner
+            + f"<div class='flex gap-2 mb-4 flex-wrap'>{tabs}</div>"
+            + (items or "<p class='text-slate-400 text-sm py-10 text-center'>아직 받은 문의가 없어요.</p>"))
+    return shell("inquiries", "받은 문의", body,
+                 subtitle=f"전체 {len(rows)}건" + (f" · 미처리 {n_new}건" if n_new else ""))
+
+
+@app.post("/admin/inquiries/{cid}")
+def admin_inquiry_update(cid: int, status: str = Form("new"), memo: str = Form("")):
+    db.set_contact_status(cid, status.strip() or "new", memo.strip())
+    return RedirectResponse("/admin/inquiries?ok=" + _q("저장했어요"), status_code=303)
+
 
 
 @app.get("/demo-upload/{name}")
