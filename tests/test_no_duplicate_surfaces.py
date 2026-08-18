@@ -187,3 +187,20 @@ def test_드립_메일은_꺼져_있다(monkeypatch):
     import json
     body = json.loads(bytes(r.body).decode())
     assert body["ok"] is False and body["sent"] == 0, "꺼둔 드립이 수동으로 나갔다"
+
+
+def test_크레딧_확인_실패는_Sentry에_쌓지_않는다():
+    """★ 2026-08-18 — 같은 에러 79건이 쌓여 진짜 에러가 묻혔다.
+
+    `llm._probe_ok()`는 1분마다 haiku를 1토큰 찔러 '크레딧이 돌아왔나'를 본다.
+    크레딧이 없으면 400이 나는 게 **정상**인데, Sentry 자동 계측이 그걸 전부 이슈로 올렸다.
+    크레딧 소진은 watchtower가 이미 메일로 알린다 — 같은 사실을 79번 더 쌓을 이유가 없다.
+    """
+    import inspect
+    src = inspect.getsource(main._init_sentry)
+    assert "before_send" in src, "Sentry 필터가 사라졌다 — 소음이 다시 쌓인다"
+    assert "credit balance is too low" in src, "크레딧 확인 실패를 거르지 않는다"
+    # 알림 경로는 살아 있어야 한다(숨기는 게 아니라 옮긴 것)
+    from app import llm
+    assert "watchtower" in inspect.getsource(llm.note_credit_out), \
+        "크레딧 소진 알림 경로가 사라졌다 — 이러면 진짜로 숨기는 것이다"

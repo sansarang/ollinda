@@ -95,12 +95,34 @@ def _init_sentry() -> bool:
         return False
     try:
         import sentry_sdk
+
+        def _before_send(event, hint):
+            """크레딧 확인 ping의 실패는 이슈가 아니다 — 걸러낸다(2026-08-18).
+
+            `llm._probe_ok()`는 1분마다 1토큰짜리 haiku를 찔러 '크레딧이 돌아왔나'를 본다.
+            크레딧이 없으면 당연히 400이 나고, 그게 **정상 동작**이다.
+            그런데 Sentry의 Anthropic 자동 계측이 그 400을 전부 이슈로 올려
+            같은 에러가 79건 쌓였다(2026-08-18 실측) — 진짜 에러가 그 속에 묻힌다.
+
+            ★ 크레딧 소진 자체를 숨기는 것이 아니다. 최초 감지 시
+              `llm.note_credit_out()`이 watchtower로 **메일을 보낸다**(사장님이 실제로 받았다).
+              알림 경로가 이미 있는데 같은 사실을 79번 더 쌓을 이유가 없다.
+            """
+            try:
+                exc = (hint or {}).get("exc_info")
+                if exc and "credit balance is too low" in repr(exc[1]).lower():
+                    return None
+            except Exception:
+                pass
+            return event
+
         sentry_sdk.init(
             dsn=dsn,
             environment=os.environ.get("RAILWAY_ENVIRONMENT_NAME", "local"),
             release=(os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:12] or None,
             traces_sample_rate=0,
             send_default_pii=False,
+            before_send=_before_send,
         )
         return True
     except Exception:
