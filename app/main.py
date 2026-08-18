@@ -12798,11 +12798,36 @@ def admin_media_integrity(limit: int = 20):
 
     0이 아니면 그 글은 사진이 깨진 채 떠 있다는 뜻이다.
     """
+    # ★ '로컬에 없다' ≠ '깨졌다'. 이 시스템은 R2에 미러를 두고 서빙한다(/dl이 R2로 리다이렉트).
+    #   R2를 안 보고 판정했다가 멀쩡한 사진 110건을 '깨짐'으로 셀 뻔했다(2026-08-18).
+    #   진짜 깨진 것 = 로컬에도 없고 R2에도 없는 것.
     refs = _referenced_media()
-    missing = [p for p in refs if not os.path.exists(p)]
-    return {"referenced": len(refs), "missing": len(missing),
-            "ok": not missing,
-            "sample": [os.path.basename(p) for p in missing[:limit]]}
+    gone_local = [p for p in refs if not os.path.exists(p)]
+    from app import storage as _stg
+    broken, mirrored = [], 0
+    for p in gone_local:
+        url = None
+        try:
+            url = _stg.public_url_for(p)
+        except Exception:
+            url = None
+        if not url:
+            broken.append(p)
+            continue
+        try:
+            import requests as _rq
+            if _rq.head(url, timeout=6).status_code == 200:
+                mirrored += 1
+            else:
+                broken.append(p)
+        except Exception:
+            broken.append(p)
+    return {"referenced": len(refs),
+            "gone_local": len(gone_local),
+            "mirrored_on_r2": mirrored,        # 로컬엔 없지만 R2가 서빙 — 정상
+            "broken": len(broken),             # 어디에도 없다 — 이게 0이 아니면 깨진 글이 있다
+            "ok": not broken,
+            "sample": [os.path.basename(p) for p in broken[:limit]]}
 
 
 @app.api_route("/admin/photo-dedup", methods=["GET", "POST"])
