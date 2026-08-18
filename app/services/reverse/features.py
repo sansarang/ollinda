@@ -70,7 +70,7 @@ def enrich_with_llm(rows: list, limit: int = 8) -> dict:
         if not txt:
             continue
         try:
-            out = _llm.call(
+            out = _llm.call_task("judge",
                 "아래 글이 검색자에게 어떤 유형인지 한 줄로 판정하라. "
                 "형식: 유형=<정보형|구매형|후기형>, 실경험=<있음|없음>, 근거=<15자 이내>\n\n" + txt,
                 max_tokens=80)

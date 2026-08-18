@@ -30,10 +30,18 @@ def test_라우팅이_upstage를_받는다(monkeypatch):
 
 
 def test_모르는_provider는_기본값으로_떨어진다(monkeypatch):
+    """검증 안 된 provider 이름은 무시하고 **그 작업의 코드 기본값**으로 간다.
+
+    ★ 2026-08-18 — 기대값을 anthropic에서 바꿨다. 테스트가 무뎌진 게 아니라
+      계약이 바뀐 것이다: 이날 body의 코드 기본값이 Opus → Solar가 됐다
+      (env 하나 지워지면 비용 40배로 되돌아가는 구멍을 막느라).
+      지키려는 것은 그대로다 — **알 수 없는 provider가 그대로 통과하면 안 된다.**
+    """
     monkeypatch.setenv("LLM_BODY", "openai:gpt-9")
     monkeypatch.setattr(llm, "QUALITY_PIN", {})
-    p, _ = llm.route("body")
-    assert p == "anthropic", "검증 안 된 provider가 통과했다"
+    p, m = llm.route("body")
+    assert p != "openai" and m != "gpt-9", "검증 안 된 provider가 통과했다"
+    assert (p, m) == llm.TASK_DEFAULTS["body"], "기본값이 아닌 엉뚱한 곳으로 떨어졌다"
 
 
 def test_추론강도가_medium이다():
@@ -216,9 +224,15 @@ def test_크레딧이_없어도_필요없으면_막지_않는다(monkeypatch):
 
 
 def test_하나라도_anthropic이면_막는다(monkeypatch):
+    """핵심 작업 중 하나만 anthropic이어도 크레딧 없이는 못 만든다 → 막아야 한다.
+
+    ★ 2026-08-18 — 전에는 LLM_VISION을 지우기만 하면 vision이 기본값 anthropic으로
+      떨어져서 이 상황이 만들어졌다. 이제 vision 기본값도 Gemini라 그 방법이 안 통한다.
+      그래서 **명시적으로** anthropic을 하나 심어 검증한다 — 검사하려는 것은 그대로다.
+    """
     monkeypatch.setattr(llm, "credit_out", lambda: True)
     monkeypatch.setenv("LLM_BODY", "upstage:solar-pro4")
-    monkeypatch.delenv("LLM_VISION", raising=False)      # vision이 기본(anthropic)으로 떨어진다
+    monkeypatch.setenv("LLM_VISION", "anthropic:claude-opus-4-8")
     monkeypatch.setattr(llm, "QUALITY_PIN", {})
     assert llm.anthropic_needed()
     assert llm.blocked(), "Anthropic이 필요한데 안 막았다"

@@ -64,7 +64,7 @@ def generate_copy(ptype: str, industry: str, name: str, items: list, note: str =
             "항목·가격은 절대 지어내거나 바꾸지 마라(위 입력만이 사실). 없는 혜택·수치 금지.\n"
             "출력 형식(딱 2줄):\n헤드라인: ...\n태그라인: ..."
         )
-        raw = llm.call(prompt, max_tokens=200) or ""
+        raw = llm.call_task("aux", prompt, max_tokens=200) or ""
         for line in raw.splitlines():
             if line.startswith("헤드라인:"):
                 headline = line.split(":", 1)[1].strip() or headline

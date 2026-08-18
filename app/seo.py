@@ -510,7 +510,7 @@ def region_conflict(kw: str, region: str) -> bool:
         _ck = ""
     try:
         from app import llm as _llm
-        v = _llm.call(
+        v = _llm.call_task("judge",
             f"키워드: '{kw}' / 가게 소재지: '{reg}'\n"
             "이 키워드 안에 한국의 지역명(시·군·구·동네)이 포함되어 있고, 그 지역이 가게 소재지와 "
             "명백히 다른 생활권이면 YES. 지역명이 없거나, 가게 소재지와 같은 지역(상위 광역 포함 — "
@@ -622,7 +622,7 @@ def keyword_intent_ok(kw: str, industry: str, biz: str, content_type: str, note:
         _bz = {"local": "동네 매장(방문 손님 유치)", "seller": "온라인 판매자",
                "hybrid": "매장+온라인"}.get(biz or "local", "매장")
         _snip = " ".join((note or "").split())[:200]
-        v = _llm.call(
+        v = _llm.call_task("judge",
             f"'{kw}'를 네이버에 검색하는 사람의 의도를 판단하라.\n"
             f"글 주인: {ind0} 업종의 {_bz}. 이번 글 소재: {_snip or ind0}\n"
             "이 검색자가 '이 가게의 실제 매물·시공·상품·서비스 소개 글'에서 원하는 답을 얻는가?\n"
@@ -1100,6 +1100,8 @@ def subject_match(text: str, note: str, kw: str) -> "bool | None":
         return None                                     # 사진 분석 없는 세트는 판정 불가(스킵)
     try:
         from app import llm
+        # 🔒 클로드 유지(2026-08-18) — 사진에 없는 것을 실물처럼 썼는지 잡는 **날조 방지 최후 관문**.
+        #   사장님 설계는 '초안은 Solar, 검수는 클로드'다. 여기서 실력이 떨어지면 정직 게이트가 뚫린다.
         v = llm.call(
             "너는 사실 검증자다. [글]이 '지금 여기 있는 실물'처럼 서술하는 소재(차종·메뉴·제품·시술 대상 등)가 "
             "[사진 분석]에서 확인되는지만 판단하라. 사진 분석에 없는 차종·모델·제품을 실물처럼(입고·검수·"

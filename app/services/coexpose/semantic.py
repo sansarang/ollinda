@@ -65,7 +65,7 @@ def judge(post: dict, query: str, body_limit: int = 2600) -> dict:
          .replace("{title}", (post.get("title") or "")[:120])
          .replace("{body}", body))
     try:
-        raw = _llm.call(p, max_tokens=300)
+        raw = _llm.call_task("judge", p, max_tokens=300)
     except Exception as e:
         return {"error": repr(e)[:120]}
     d = _parse(raw)

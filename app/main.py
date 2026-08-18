@@ -3892,6 +3892,8 @@ async def api_demo(request: Request, industry: str = Form(""), note: str = Form(
                 # 전 채널 실패 — generate_for가 개별 예외를 삼키므로, LLM 1회 프로브로
                 # 진짜 원인(401/크레딧/429)을 끌어올려 분류(진단 가능하게). 무키면 더미라 통과.
                 from app import llm as _llm
+                # 🔒 클로드 유지 — 이건 Anthropic 크레딧 생존 확인용 ping이다.
+                #   다른 provider로 보내면 확인하려던 것을 확인하지 못한다.
                 _llm.call("ping", max_tokens=16)
                 raise RuntimeError("no pieces")
             remaining = 2 if _dev else max(0, 2 - db.demo_ip_count(ip))
@@ -4647,7 +4649,7 @@ async def api_instant_titles(request: Request):
     try:
         import re as _re
         from app import llm
-        raw = llm.call(
+        raw = llm.call_task("title",
             "너는 한국 소상공인의 네이버 블로그 글 제목을 짓는 사람이다.\n"
             f"[가게] {name or '이 가게'}\n[업종] {industry}\n[지역] {region}\n"
             f"[잡고 싶은 검색어] {target}\n\n"
@@ -12730,12 +12732,59 @@ def admin_disk(prune: str = ""):
                 freed += sz
             except Exception:
                 pass
+    # ★ 2026-08-18 사장님: "같은 사진이면 남길 이유가 있냐?"
+    #   답하려면 세 가지를 갈라야 한다 — 원본 / 파생본(.web·.thumbs) / 내용이 같은 중복.
+    #   그전까지 by_ext만 봐서 'jpg 2867개'가 원본인지 파생본인지 구분이 안 됐다.
+    #   파생본은 원본에서 다시 만들 수 있으니 성격이 다르다(지워도 복구 가능, 단 첫 조회가 느려짐).
+    #   중복 판정은 크기로 먼저 묶고 같은 크기끼리만 해시한다 — 전량 해시는 만차 디스크에서 위험하다.
+    from app.services.derived import THUMB_DIR, WEB_DIR
+    orig, deriv = {}, [0, 0]          # orig: size -> [paths] · deriv: [개수, 바이트]
+    for root, _d, fs in os.walk(STORAGE_DIR):
+        _is_deriv = os.path.basename(root) in (THUMB_DIR, WEB_DIR)
+        for fn in fs:
+            if fn.rsplit(".", 1)[-1].lower() not in ("jpg", "jpeg", "png", "webp"):
+                continue
+            fp = os.path.join(root, fn)
+            try:
+                sz = os.path.getsize(fp)
+            except Exception:
+                continue
+            if _is_deriv:
+                deriv[0] += 1
+                deriv[1] += sz
+            else:
+                orig.setdefault(sz, []).append(fp)
+    dup_n, dup_bytes, dup_groups = 0, 0, 0
+    import hashlib as _hl
+    for sz, paths in orig.items():
+        if len(paths) < 2 or sz <= 0:
+            continue
+        seen: dict = {}
+        for fp in paths:
+            try:
+                with open(fp, "rb") as _f:
+                    h = _hl.sha256(_f.read()).hexdigest()
+            except Exception:
+                continue
+            seen.setdefault(h, []).append(fp)
+        for h, same in seen.items():
+            if len(same) > 1:
+                dup_groups += 1
+                dup_n += len(same) - 1          # 한 장은 남긴다
+                dup_bytes += sz * (len(same) - 1)
     du = _sh.disk_usage(STORAGE_DIR)
     return {"disk_mb": {"free": round(du.free / 1e6), "used": round(du.used / 1e6)},
             "by_ext_mb": {k: [v[0], round(v[1] / 1e6, 1)] for k, v in
                           sorted(by_ext.items(), key=lambda kv: -kv[1][1])},
             "referenced": len(refs), "orphans": len(orphans),
-            "orphan_mb": round(orphan_bytes / 1e6, 1), "freed_mb": round(freed / 1e6, 1)}
+            "orphan_mb": round(orphan_bytes / 1e6, 1), "freed_mb": round(freed / 1e6, 1),
+            # 원본 = 사장님이 올린 사진(다시 못 만든다) · 파생본 = 우리가 만든 것(다시 만들 수 있다)
+            "originals": {"n": sum(len(v) for v in orig.values()),
+                          "mb": round(sum(s * len(v) for s, v in orig.items()) / 1e6, 1)},
+            "derived": {"n": deriv[0], "mb": round(deriv[1] / 1e6, 1)},
+            # 내용이 완전히 같은 사진(같은 크기 + 같은 해시). 묶음당 한 장은 남긴 수치.
+            "dup": {"groups": dup_groups, "removable_n": dup_n,
+                    "removable_mb": round(dup_bytes / 1e6, 1)}}
 
 
 @app.api_route("/admin/cleanup", methods=["GET", "POST"])

@@ -1073,6 +1073,8 @@ def _call_llm(prompt: str, model: str = MODEL, max_tokens: int = 1200, cache_pre
     if task:
         return llm.call_task(task, prompt, max_tokens, default_model=model,
                              cache_prefix=cache_prefix)
+    # 🔒 task 없이 부르는 마지막 폴백 — 여기까지 오면 라우팅이 없다는 뜻이라 기본 모델로 간다.
+    #   새 호출을 추가할 땐 반드시 task를 지정하라(그래야 Solar 경로를 탄다).
     return llm.call(prompt, model, max_tokens, cache_prefix=cache_prefix)
 
 

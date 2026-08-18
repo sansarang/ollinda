@@ -69,7 +69,7 @@ def _theme_fits(theme: str, industry: str, biz: str) -> "bool | None":
         from app import llm as _llm
         _bz = {"local": "동네 매장", "seller": "온라인 판매자", "hybrid": "매장+온라인"}.get(
             biz or "local", "매장")
-        v = _llm.call(
+        v = _llm.call_task("judge",
             f"네이버 블로그 주제(카테고리): '{theme}'\n가게 업종: '{ind}' ({_bz})\n"
             "이 가게가 자기 업종 글을 쓸 때, 저 블로그 주제가 적절한 분류인가?\n"
             "적절하면 YES, 전혀 다른 분야라 주제별 노출에 불리하면 NO. 한 단어만.",

@@ -288,7 +288,7 @@ SOLAR_EFFORT = os.environ.get("SOLAR_REASONING", "medium").strip() or "medium"
 #: 2026-08-17 실측: 영상 자막(spoken)을 medium으로 부르니 0자, low로 부르니 361자 정상.
 #: 본문처럼 긴 글은 medium이 필요하다(minimal이면 노린 질의 커버가 0/2로 죽는다).
 SOLAR_EFFORT_BY_TASK = {"spoken": "low", "caption": "low", "x": "low", "title": "low",
-                        "aux": "low"}
+                        "aux": "low", "judge": "low"}
 
 
 def solar_effort(task: str = "") -> str:
@@ -333,14 +333,33 @@ SONNET = "claude-sonnet-5"
 #:   effort=medium은 추론이 예산을 다 먹어 **0자 빈 응답**이 났다 — 짧은 출력엔 low다.
 #:   원가: Sonnet 대비 1/10 수준이고, 무엇보다 Anthropic 크레딧과 무관하게 돈다.
 SOLAR = "solar-pro4"
+#: 사진을 보는 작업(vision)의 모델. 모델명이 코드 두 곳에 흩어져 있어 상수로 묶었다 —
+#: 같은 값이 두 곳에 살면 그게 결함이다(canonical 단일 관문의 모델명판).
+GEMINI = "gemini-flash-latest"
 #: aux — 제목 조각·YES/NO 판정 같은 **짧은 보조 호출**.
 #:   2026-08-17 실사고: 본문을 Solar로 옮겨놓고도 생성이 계속 실패했다. 원인은 이 보조
 #:   호출들이 anthropic 직행이라 크레딧 0에서 터진 것이다. 본문만 옮겨서는 소용이 없다 —
 #:   한 세트가 완성되려면 그 세트의 **모든 호출**이 살아 있는 경로여야 한다.
+#: ★ 2026-08-18 사장님 승인 — `body`를 코드 기본값으로 못 박았다.
+#:   그전까지 본문 Solar는 Railway 환경변수(LLM_BODY) 하나에만 걸려 있었고,
+#:   **코드 기본값은 Opus였다.** 변수가 지워지거나 서비스를 다시 만들면 아무 경고 없이
+#:   Opus로 돌아가 비용이 40배가 된다(실측: 8/16 건당 $0.54~1.37 → 8/17 $0.011~0.023).
+#:   침묵 폴백 금지 — 비용도 조용히 되돌아가면 안 된다. 이제 env는 안전장치일 뿐이다.
+#: judge — YES/NO·유형 같은 **짧은 판정**. 사장님 설계: "초안은 한국 특화 api, 검수는 클로드".
+#:   단 '사진에 없는 것을 썼는가'(seo.fact_check)만은 클로드에 남긴다 — 날조를 막는 마지막 관문이라
+#:   여기서 실력이 떨어지면 정직 게이트 전체가 뚫린다.
 TASK_DEFAULTS = {"spoken": ("upstage", SOLAR),
                  "caption": ("upstage", SOLAR),
                  "x": ("upstage", SOLAR),
-                 "aux": ("upstage", SOLAR)}
+                 "aux": ("upstage", SOLAR),
+                 "body": ("upstage", SOLAR),
+                 "judge": ("upstage", SOLAR),
+                 "title": ("upstage", SOLAR),
+                 #: vision은 사진을 봐야 하므로 Solar가 못 한다(멀티모달 아님) → Gemini.
+                 #: body와 똑같은 위험이었다 — 프로덕션은 LLM_VISION env로 Gemini인데
+                 #: 코드 기본값은 Opus라, 변수가 사라지면 사진 분석이 조용히 Opus로 갔다.
+                 #: 실측으로 이미 Gemini가 돌고 있다(payload.vision_route = gemini-flash-latest).
+                 "vision": ("gemini", GEMINI)}
 
 # 품질 표면 고정(2026-07-28 사장님 결정: 품질 우선, 비용 절감 라우팅 폐지) — env LLM_* 보다 우선.
 # 캡션 제미나이 절감 라우팅은 사진 분석 미전달 실사고(캐스퍼 날조)의 온상이었음. 절감 실험은
@@ -499,7 +518,7 @@ def call_task(task: str, prompt: str, max_tokens: int = 1200,
             info["error"] = repr(e)[:150]
             if os.environ.get("GEMINI_API_KEY"):      # 역방향 폴백: anthropic → gemini
                 try:
-                    out = _gemini_generate([{"text": _full_prompt}], "gemini-flash-latest", max_tokens)
+                    out = _gemini_generate([{"text": _full_prompt}], GEMINI, max_tokens)
                     info["fallback"] = True
                     info["fallback_to"] = "gemini"
                     LAST_ROUTE[task] = info

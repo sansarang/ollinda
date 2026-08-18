@@ -77,6 +77,8 @@ def _analyze_gap(tenant, pub: dict, kw: str, cause: str, existing: list[str]) ->
                           "서두 훅·끝까지 읽게 하는 장치·콘텐츠 충실도 관점으로 진단하라)" if cause == "dwell_drop"
                      else f"색인은 됐지만 {UNEXPOSED_DAYS}일 넘게 30위 밖이다")
         from app import llm
+        # 🔒 클로드 유지(2026-08-18) — 순위가 왜 밀렸는지 추론해 '다음 글의 교훈'을 만든다.
+        #   틀린 교훈은 모든 가게의 다음 글에 박힌다. 검수 계열이라 남긴다.
         v = llm.call(
             "너는 네이버 상위노출 분석가다. 우리 가게 블로그 글이 아래 키워드 검색에서 "
             f"{cause_txt}. 상위 글들과 비교해 원인을 추정하고, '다음 글부터 적용할 교훈' 1개를 만들어라.\n"
@@ -257,6 +259,8 @@ def sweep_global() -> None:
                 continue
             try:
                 from app import llm as _llm
+                    # 🔒 클로드 유지 — 여러 가게에 반복된 감점에서 '전체 생성 지시'를 뽑는다.
+                    #   한 문장이 모든 tenant의 글에 적용되므로 검수 계열로 남긴다.
                 lesson = (_llm.call(
                     "블로그 자동 생성에서 아래 감점이 여러 가게에 반복된다. 다음 글부터 이 감점을 예방할 "
                     "'생성 지시' 한 문장을 써라. 규칙: 특정 업종·가게·키워드 언급 금지(어느 가게에나 "
