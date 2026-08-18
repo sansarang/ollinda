@@ -223,7 +223,12 @@ def test_발행_버튼이_화면에_실제로_붙는다():
     assert "naver_btn" in src, "발행 버튼을 만들지 않았다"
     i = src.find("naver_btn = ")
     assert i > 0
-    assert "/kit/" in src[i:i + 300], "발행 버튼이 발행 화면으로 안 간다"
+    seg = src[i:i + 2000]
+    # ★ 2026-08-18 — 발행이 두 갈래가 됐다.
+    #   ① 자동: 확인만 하면 로컬 에이전트가 가게 계정으로 올린다(주 경로)
+    #   ② 손으로: 자동이 막히거나 직접 손보고 싶을 때(보조). 자동은 실패할 수 있으니 없애지 않는다.
+    assert "/me/publish/" in seg, "자동 발행 경로가 없다"
+    assert "/kit/" in seg, "손으로 올리는 길이 사라졌다 — 자동이 막히면 발행 자체가 막힌다"
     # 만들기만 하고 안 붙이는 것이 바로 그 실수다 — 실제로 카드에 조립되는지 본다
     used = [ln for ln in src.splitlines()
             if "naver_btn" in ln and "naver_btn = " not in ln.strip()]

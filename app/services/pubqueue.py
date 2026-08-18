@@ -125,6 +125,15 @@ def claim(tenant_id: str = "") -> "dict | None":
         d["payload"] = json.loads(d.get("payload") or "{}")
     except Exception:
         d["payload"] = {}
+    # 🖼 사진은 파일명만 준다 — 로컬 에이전트는 admin 인증으로 받는다.
+    #   ★ /dl/{asset}/{fname}은 **로그인 세션**을 요구한다(사장님 브라우저용).
+    #     에이전트는 세션이 없으므로 그 경로를 주면 404를 받는다.
+    #     실제로 이걸 놓쳐 사진 없는 글이 올라갈 뻔했다 — 경로를 나눠 둔다.
+    import os as _os
+    pl = d["payload"]
+    pl["photos"] = [{"name": _os.path.basename(x),
+                     "url": f"/admin/publish/media/{d['tenant_id']}/{_os.path.basename(x)}"}
+                    for x in (pl.get("image_paths") or []) if x]
     return d
 
 

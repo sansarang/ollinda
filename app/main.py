@@ -5004,6 +5004,95 @@ async def api_contact(company: str = Form(""), manager: str = Form(""), phone: s
     return JSONResponse({"ok": True, "id": cid, "mailed": mailed})
 
 
+# ── 📤 네이버 발행 큐 (2026-08-18) ──────────────────────────
+#
+#   사장님 지시(2026-08-17):
+#     "콘텐츠가 만들어진 미리보기 창에서 내가 확인하고 발행을 누르면
+#      네이버에서 실제로 작성하듯이 작성되어야 한다. 사진 배치 및 글."
+#
+#   왜 큐인가 — 브라우저는 서버에서 못 돈다:
+#     Railway 컨테이너에는 화면이 없고, 네이버 세션은 **가게마다 다른 계정**이라
+#     사장님 PC의 브라우저 프로필에만 산다. 그래서 역할이 갈린다.
+#         서버: 무엇을 발행할지 정하고 큐에 넣는다
+#         로컬: 큐를 집어가 실제로 작성한다
+#
+#   ★ 우리는 가게의 네이버 비밀번호를 갖지 않는다.
+#     tenants 테이블에 blog_id·URL은 있어도 계정 정보는 없다 — 그게 맞다.
+#     세션은 가게별 브라우저 프로필(~/.browser/{tenant_id})에만 산다.
+#     사장님이 가게마다 한 번 로그인해 두면 그 프로필이 기억한다(buddy.py와 같은 방식).
+
+
+@app.post("/me/publish/{asset_id}")
+def me_publish(request: Request, asset_id: str):
+    """미리보기의 [네이버에 자동 발행] — 확인한 글을 큐에 넣는다."""
+    u = auth.current_user(request)
+    if not u:
+        return JSONResponse({"ok": False, "error": "로그인이 필요해요."}, status_code=401)
+    pieces = _owned_pieces(u, asset_id)
+    if not pieces:
+        return JSONResponse({"ok": False, "error": "내 콘텐츠가 아니에요"}, status_code=404)
+    blog = next((x for x in pieces if x.kind.value == "blog"), None)
+    if not blog:
+        return JSONResponse({"ok": False, "error": "발행할 블로그 글이 없어요"}, status_code=400)
+    from app.services import pubqueue
+    r = pubqueue.enqueue(blog.tenant_id, blog, asset_id=asset_id)
+    if not r.get("ok"):
+        return JSONResponse({"ok": False, "error": r.get("error") or "등록 실패"}, status_code=400)
+    return JSONResponse({"ok": True, "id": r.get("id"), "dup": bool(r.get("dup")),
+                         "message": ("이미 발행 대기 중이에요" if r.get("dup")
+                                     else "발행 대기에 넣었어요 — 곧 올라갑니다")})
+
+
+@app.get("/admin/publish/claim")
+def admin_publish_claim(tenant: str = ""):
+    """로컬 에이전트가 작업 하나를 집어간다. **한 번에 하나만** — 이중 발행 금지."""
+    from app.services import pubqueue
+    job = pubqueue.claim(tenant.strip())
+    if not job:
+        return JSONResponse({"ok": True, "job": None})
+    t = db.get_tenant(job.get("tenant_id") or "")
+    job["blog_id"] = getattr(t, "blog_id", "") if t else ""
+    job["tenant_name"] = getattr(t, "name", "") if t else ""
+    return JSONResponse({"ok": True, "job": job})
+
+
+@app.post("/admin/publish/finish")
+def admin_publish_finish(id: int = Form(0), ok: str = Form(""), url: str = Form(""),
+                         error: str = Form("")):
+    """에이전트가 결과를 돌려준다. 성공이면 URL이 있어야 한다 — 없으면 성공이 아니다."""
+    from app.services import pubqueue
+    r = pubqueue.finish(int(id), (ok or "").strip() == "1", url.strip(), error.strip())
+    return JSONResponse(r)
+
+
+@app.get("/admin/publish/media/{tenant_id}/{fname}")
+def admin_publish_media(tenant_id: str, fname: str):
+    """에이전트용 사진 내려받기.
+
+    ★ /dl/{asset}/{fname}을 쓰지 않는 이유 — 그건 **로그인 세션**을 요구한다(사장님 브라우저용).
+      에이전트는 세션이 없어 404를 받는다. 여기는 admin 인증 뒤라 에이전트가 쓸 수 있다.
+    """
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", fname) or not re.fullmatch(r"[A-Za-z0-9-]+", tenant_id):
+        return HTMLResponse(status_code=404)
+    path = os.path.join(os.environ.get("SHOPCAST_STORAGE", "storage"), tenant_id, fname)
+    if not os.path.exists(path):
+        from app import storage as _st
+        r2 = _st.r2_media_url(tenant_id, fname)      # 로컬 정리됨 → R2가 서빙
+        return RedirectResponse(r2, status_code=302) if r2 else HTMLResponse(status_code=404)
+    ext = fname.rsplit(".", 1)[-1].lower()
+    mt = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+          "webp": "image/webp"}.get(ext, "application/octet-stream")
+    return FileResponse(path, media_type=mt, filename=fname)
+
+
+@app.get("/admin/publish/pending")
+def admin_publish_pending(tenant: str = ""):
+    """발행 대기 목록 — 운영판이 '몇 건이 줄 서 있나'를 보여줄 때 쓴다."""
+    from app.services import pubqueue
+    return JSONResponse({"ok": True, "rows": pubqueue.pending(tenant.strip())})
+
+
 @app.get("/admin/inquiries", response_class=HTMLResponse)
 def admin_inquiries(status: str = "", ok: str = ""):
     """📨 받은 문의 — 대행의 입구를 한 화면에서 본다.
@@ -8682,8 +8771,29 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
             badge += (f"<span class='ml-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full {gcls}' "
                       f"title='AI 검색(ChatGPT 등)이 인용하기 유리한 구조 점수 — 인용을 보장하진 않아요'>AI검색 준비 {gs}점</span>")
         return f"<div class='text-xs font-bold text-slate-400 mb-2 flex items-center flex-wrap'>{label}{badge}</div>"
-    naver_btn = (f"<a href='/kit/{asset_id}/naver' target='_blank' class='block text-center py-3 rounded-xl text-white text-sm font-extrabold "
-                 "shadow-md hover:brightness-110 active:scale-[.99] transition' style='background:#03c75a'>네이버 블로그에 올리기 →</a>")
+    # 📤 발행 두 갈래 (2026-08-18)
+    #   ① 자동 — 확인만 하면 로컬 에이전트가 가게 계정으로 직접 올린다(사장님 지시의 목적지)
+    #   ② 손으로 — 자동이 막히거나 직접 손보고 싶을 때. 없애지 않는다(자동은 실패할 수 있다)
+    naver_btn = (
+        f"<button type='button' onclick=\"pubGo('{esc(asset_id)}',this)\" "
+        "class='block w-full text-center py-3 rounded-xl text-white text-sm font-extrabold "
+        "shadow-md hover:brightness-110 active:scale-[.99] transition' "
+        "style='background:#03c75a'>📤 네이버에 자동 발행</button>"
+        f"<div id='pubmsg' class='text-xs text-center mt-1.5 text-slate-400'></div>"
+        f"<a href='/kit/{asset_id}/naver' target='_blank' class='block text-center py-2 mt-1 "
+        "rounded-xl text-slate-500 text-xs font-bold border border-slate-200 "
+        "hover:bg-slate-50 transition'>직접 올리기(복붙) →</a>"
+        "<script>async function pubGo(aid,btn){"
+        "var m=document.getElementById('pubmsg');btn.disabled=true;"
+        "var t=btn.textContent;btn.textContent='발행 대기에 넣는 중…';"
+        "try{var d=await (await fetch('/me/publish/'+aid,{method:'POST'})).json();"
+        "if(!d.ok){m.textContent='⚠️ '+(d.error||'등록하지 못했어요');"
+        "m.className='text-xs text-center mt-1.5 text-rose-500';btn.disabled=false;btn.textContent=t;return;}"
+        "m.textContent='✅ '+d.message;m.className='text-xs text-center mt-1.5 text-emerald-600';"
+        "btn.textContent='발행 대기 중';}"
+        "catch(e){m.textContent='⚠️ 등록하지 못했어요';"
+        "m.className='text-xs text-center mt-1.5 text-rose-500';btn.disabled=false;btn.textContent=t;}}"
+        "</script>")
     cards = ""
     rendered_ch = set()          # 5채널 완전성 — 실제 카드가 그려진 채널(정합 감시·placeholder 판단)
     for p in pieces:
