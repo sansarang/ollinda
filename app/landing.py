@@ -495,28 +495,6 @@ def _v(url_path: str) -> str:
         return url_path
 
 
-def _naver_login_available() -> bool:
-    from app import naver_auth
-    return naver_auth.configured()
-
-
-def _naver_hero_btn() -> str:
-    """히어로 네이버 버튼 — 개발자센터 키 설정 시에만 노출(미설정=미노출, 허위 버튼 금지)."""
-    if not _naver_login_available():
-        return ""
-    return ('<a href="/login/naver" class="flex items-center justify-center px-10 py-4 rounded-2xl '
-            'font-extrabold text-lg text-white w-full sm:w-auto" style="background:#03C75A">'
-            '<span class="font-black mr-1.5">N</span>네이버로 무료 시작</a>')
-
-
-def _naver_cta_btn() -> str:
-    if not _naver_login_available():
-        return ""
-    return ('<a href="/login/naver" class="flex items-center justify-center px-9 py-4 rounded-2xl '
-            'font-extrabold text-lg text-white" style="background:#03C75A">'
-            '<span class="font-black mr-1.5">N</span>네이버로 시작하기</a>')
-
-
 def _hero() -> str:
     return f"""
 <section class="relative hero-bg overflow-hidden">
@@ -1144,7 +1122,7 @@ def _results() -> str:
             "<div class='grid lg:grid-cols-3 gap-5 mt-12'>" + c1 + c2 + c3 + "</div>"
             "<div class='grid sm:grid-cols-2 gap-5 mt-5'>" + c4 + c5 + "</div>"
             "<div class='reveal text-center mt-14'>"
-            "<a href='/login/kakao' class='inline-block bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-8 py-4 rounded-2xl text-lg transition'>내 가게 순위 올리기 →</a></div>"
+            "<a href='#contact' class='inline-block bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-8 py-4 rounded-2xl text-lg transition'>내 가게 맡기고 상담받기 →</a></div>"
             "</div></section>")
 
 

@@ -18,9 +18,6 @@ from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from app import auth, storage
-from app.kakao import make_router as kakao_router
-from app.google_auth import make_router as google_router
-from app.naver_auth import make_router as naver_router
 
 from app import db, oauth, seo
 from app.domain.models import Channel, ContentStatus
@@ -54,21 +51,6 @@ GOOGLE_SVG = ('<svg width="20" height="20" viewBox="0 0 48 48" class="inline-blo
               '16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>'
               '<path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 '
               '2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>')
-
-
-def _google_btn(label: str = "구글로 가입하기") -> str:
-    return (f"<a href='/login/google' class='flex items-center justify-center gap-2 w-full py-3 rounded-xl "
-            f"font-bold border border-slate-200 bg-white text-slate-700 mb-3 hover:bg-slate-50 shadow-sm'>"
-            f"{GOOGLE_SVG} {label}</a>")
-
-
-def _naver_login_btn(label: str = "네이버로 시작하기") -> str:
-    """네이버 로그인 버튼 — 개발자센터 키가 설정된 경우에만 렌더(미설정=버튼 자체 미노출, fail-closed)."""
-    from app import naver_auth
-    if not naver_auth.configured():
-        return ""
-    return (f"<a href='/login/naver' class='block text-center py-3.5 rounded-xl font-extrabold mb-2.5 "
-            f"text-white' style='background:#03C75A'><span class='font-black mr-1'>N</span>{label}</a>")
 
 
 def _quota_block(owner: dict | None):
@@ -3781,9 +3763,12 @@ def admin_sentry_test():
     raise RuntimeError("sentry-wiring-test: Sentry 대시보드에 이 이슈가 보이면 배선 정상")
 
 
-app.include_router(kakao_router())
-app.include_router(google_router())
-app.include_router(naver_router())
+# 🚪 2026-08-18 — 소셜 로그인(카카오·구글·네이버) 등록을 해제했다.
+#   사장님: "사용자의 가입은 원하지 않는다. 카카오 채널·전화·메일로 내가 직접 받는다."
+#   ★ /signup 폼만 막았을 때 이 문이 열려 있었다 — /login/kakao 가 307로 살아서
+#     누구나 클릭 한 번에 계정이 생겼다(_instant_signup). 링크를 지우는 것,
+#     폼을 막는 것, 문을 닫는 것은 전부 다른 일이다.
+#   사장님 로그인은 /login(이메일+비밀번호) 그대로다.
 
 _DEMO_HITS: dict = {}   # ip -> [timestamps] (무료 체험 rate limit)
 
@@ -4023,7 +4008,7 @@ def _teaser_html(pieces, brief, asset_id, remaining: int = 0,
                 f"style='filter:blur(5px);max-height:88px;overflow:hidden'>{esc(next_chunk)}</div>"
                 "<div class='absolute inset-0 flex items-center justify-center' "
                 "style='background:linear-gradient(180deg,rgba(255,255,255,.25),rgba(255,255,255,.92) 80%)'>"
-                f"<a href='/login/kakao' class='bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold "
+                f"<a href='/#contact' class='bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold "
                 f"px-3.5 py-2 rounded-xl'>{cta} →</a></div></div>")
 
     cards = []
@@ -4036,11 +4021,11 @@ def _teaser_html(pieces, brief, asset_id, remaining: int = 0,
         "<div class='w-full h-1.5 bg-slate-100 rounded-full overflow-hidden mt-3'><div class='h-full bg-indigo-400' style='width:100%;animation:tvp 1.4s ease-in-out infinite'></div></div></div></div>"
         "<style>@keyframes tvp{0%,100%{opacity:.35}50%{opacity:1}}</style>"
         "<script>(function(){var el=document.getElementById('tvid');if(!el||el._p)return;el._p=1;var a=el.dataset.a,n=0;"
-        "var iv=setInterval(async function(){n++;if(n>80){clearInterval(iv);el.innerHTML=\"<div class='text-slate-500 text-sm py-4 text-center'>영상은 가입 후 '내 작업실'에서 완성본으로 받을 수 있어요</div>\";return;}"
+        "var iv=setInterval(async function(){n++;if(n>80){clearInterval(iv);el.innerHTML=\"<div class='text-slate-500 text-sm py-4 text-center'>완성본(전체 길이·워터마크 없음)은 상담 후 보내드려요</div>\";return;}"
         "try{var r=await fetch('/api/demo/video/'+a);var d=await r.json();if(d.ready){clearInterval(iv);"
         "el.innerHTML='<video src=\"'+d.url+'\" controls autoplay muted loop playsinline class=\"w-full rounded-xl bg-black\" style=\"max-height:300px\"></video>'"
-        "+'<div class=\"flex items-center justify-between mt-2\"><span class=\"text-xs text-slate-400\">완성본(전체 길이·워터마크 없음)은 가입 후</span>"
-        "<a href=\"/login/kakao\" class=\"text-xs font-bold text-indigo-600\">완성본 받기 →</a></div>';}}catch(e){}},3000);})();</script>",
+        "+'<div class=\"flex items-center justify-between mt-2\"><span class=\"text-xs text-slate-400\">완성본은 상담 후 보내드려요</span>"
+        "<a href=\"/#contact\" class=\"text-xs font-bold text-indigo-600\">상담 문의 →</a></div>';}}catch(e){}},3000);})();</script>",
         hi=True))
     # ② 네이버 블로그 — 앞 ~32%만 선명(품질 증명), 이어지는 부분 블러+오버레이(수정2: 완성은 못 보게)
     blog = by.get("blog")
@@ -4108,15 +4093,15 @@ def _teaser_html(pieces, brief, asset_id, remaining: int = 0,
                         f"정보 넣고 다시 만들기 (미리보기 {remaining}회 남음) →</button></div>")
     if remaining > 0:
         cta = (loss + enrich_nudge
-               + "<a href='/login/kakao' class='block text-center py-3.5 rounded-xl font-extrabold mb-2' style='background:#FEE500;color:#191600'>"
-               "이 글 전체 + 영상 + 5채널 받기 → 무료 가입</a>"
-               f"<div class='text-center text-slate-500 text-sm'>가입하면 <b class='text-indigo-600'>무료 2회</b> 전체 생성 · "
+               + "<a href='/#contact' class='block text-center py-3.5 rounded-xl font-extrabold mb-2 text-white' style='background:#4F46E5'>"
+               "이 글 전체 + 영상 + 5채널 맡기기 → 상담 문의</a>"
+               f"<div class='text-center text-slate-500 text-sm'>맡기시면 <b class='text-indigo-600'>저희가 매주 올려드립니다</b> · "
                f"미리보기 <b class='text-indigo-600'>{remaining}회</b> 남음</div>")
     else:
         cta = (loss
-               + "<div class='text-center text-slate-700 text-sm font-bold mb-2'>무료 미리보기 2회를 다 보셨어요 — 방금 그 품질 그대로, 가입하면 전체를 받아요</div>"
-               "<a href='/login/kakao' class='block text-center py-3.5 rounded-xl font-extrabold mb-2' style='background:#FEE500;color:#191600'>카카오로 가입하고 전체 받기 (무료 2회)</a>"
-               "<a href='/login/google' class='block text-center py-3 rounded-xl font-bold bg-white border border-slate-200 text-slate-700'>구글로 가입</a>")
+               + "<div class='text-center text-slate-700 text-sm font-bold mb-2'>무료 미리보기 2회를 다 보셨어요 — 방금 그 품질 그대로 저희가 매주 올려드립니다</div>"
+               "<a href='/#contact' class='block text-center py-3.5 rounded-xl font-extrabold mb-2 text-white' style='background:#4F46E5'>상담 문의하기</a>"
+               "<a href='tel:010-9796-9009' class='block text-center py-3 rounded-xl font-bold bg-white border border-slate-200 text-slate-700'>전화로 바로 상담 (010-9796-9009)</a>")
     return ("<div class='bg-[#F9FAFB] border border-slate-200 rounded-2xl p-4'>"
             "<div class='text-center mb-1'><span class='inline-block bg-[#EEF2FF] text-indigo-600 text-[10px] font-bold px-2.5 py-1 rounded-full'>5채널 동시 생성</span></div>"
             "<div class='text-center text-slate-900 font-extrabold text-lg mb-1'>사진 한 장으로 이 모든 게 완성됐어요</div>"
@@ -4691,8 +4676,13 @@ async def api_rank_report(request: Request):
         return JSONResponse({"error": "잘못된 요청"}, status_code=400)
     if "@" not in email or len(email) < 5:
         return JSONResponse({"error": "이메일을 확인해주세요"}, status_code=400)
+    # ★ 2026-08-18 — 전에는 가입 폼과 같은 사설 카운터(_signup_rate_ok)를 썼다.
+    #   가입을 봉인하며 그 카운터가 사라졌는데 이 호출만 남아 NameError로 죽을 뻔했다
+    #   (골든 test_no_undefined_module_refs 가 배포 전에 잡았다).
+    #   같은 일을 하는 모듈이 이미 있다 — 카운터를 두 벌 두지 않는다.
+    from app import ratelimit as _rl
     ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or "?"
-    if not _signup_rate_ok("report:" + ip, limit=5, window=3600):
+    if not _rl.allow("report:" + ip, 2, 5):
         return JSONResponse({"error": "잠시 후 다시 시도해주세요"}, status_code=429)
     ctx = f"{mode or 'local'}|{region}|{industry}|{name}"
     db.save_landing_lead(email, ctx)                     # 리드는 발송 성공 여부와 무관하게 확보
@@ -5053,137 +5043,23 @@ def _auth_page(title: str, inner: str) -> str:
             f"<h1 class='text-2xl font-extrabold mt-3 mb-6'>{esc(title)}</h1>{inner}</div>" + landing._foot())
 
 
-@app.get("/signup", response_class=HTMLResponse)
-def signup_get(from_: str = "", err: str = ""):
-    msg = ""
-    if err == "1":
-        msg = "<p class='text-rose-500 text-sm mb-3 text-center'>이미 가입된 이메일이거나 입력이 비었어요.</p>"
-    elif err == "2":
-        msg = "<p class='text-rose-500 text-sm mb-3 text-center'>잠시 후 다시 시도해주세요.</p>"
-    elif err == "3":
-        msg = "<p class='text-rose-500 text-sm mb-3 text-center'>인증 메일 발송에 실패했어요. 잠시 후 다시 시도해주세요.</p>"
-    # 소셜 순서 = 고객층 사용률: 카카오 → 네이버 → 구글 (2026-08-09 가입 흐름 정비)
-    social = ("<a href='/login/kakao' class='block text-center mb-2.5 py-3 rounded-xl font-bold' "
-              "style='background:#FEE500;color:#191600'>카카오로 3초 가입</a>"
-              + _naver_login_btn("네이버로 가입하기")
-              + _google_btn("구글로 가입하기")
-              + "<div class='flex items-center gap-2 my-4'><div class='flex-1 h-px bg-slate-200'></div>"
-              + ("<span class='text-xs text-slate-400'>또는 이메일로 가입</span>"
-                 if __import__("app.services.mailer", fromlist=["x"]).configured()
-                 else "<span class='text-xs text-slate-400'>또는 이메일로 (인증 없이 바로)</span>")
-              + "<div class='flex-1 h-px bg-slate-200'></div></div>")
-    form = (f"{msg}<form method=post action='/signup' class='space-y-3'>"
-            # 봇 차단: 숨김 허니팟(사람은 못 보고 안 채움) + 렌더 시각 서명 토큰(즉시 제출 차단)
-            "<input name=website tabindex='-1' autocomplete='off' aria-hidden='true' "
-            "style='position:absolute;left:-9999px;height:0;width:0;opacity:0'>"
-            f"<input type=hidden name=st value='{auth.signup_token()}'>"
-            "<input name=email type=email placeholder='이메일 (아이디로 사용)' required "
-            "class='w-full border border-slate-200 rounded-xl p-3 outline-none focus:border-indigo-400'>"
-            "<input name=pw type=password placeholder='비밀번호 (6자 이상)' minlength='6' required "
-            "class='w-full border border-slate-200 rounded-xl p-3 outline-none focus:border-indigo-400'>"
-            "<button class='w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-3 rounded-xl transition'>이메일로 가입하기</button></form>"
-            "<p class='text-sm text-slate-400 mt-4 text-center'>이미 회원? <a href='/login' class='text-indigo-600 font-semibold'>로그인</a></p>")
-    return _auth_page("가입하고 시작하기", social + form)
-
-
-import threading as _sg_th
-
-_SIGNUP_HITS: dict[str, list] = {}          # IP → 최근 가입 시각들(단일 인스턴스 인메모리면 충분)
-_SIGNUP_LOCK = _sg_th.Lock()
-
-
-def _signup_ip(request: Request) -> str:
-    """Railway 프록시 뒤라 client.host는 프록시 IP — 실 IP는 X-Forwarded-For 첫 값."""
-    fwd = request.headers.get("x-forwarded-for", "")
-    return (fwd.split(",")[0].strip() or (request.client.host if request.client else "?"))
-
-
-def _signup_rate_ok(ip: str, limit: int = 3, window: int = 3600) -> bool:
-    import time as _t
-    now = _t.time()
-    with _SIGNUP_LOCK:
-        hits = [t for t in _SIGNUP_HITS.get(ip, []) if now - t < window]
-        if len(hits) >= limit:
-            _SIGNUP_HITS[ip] = hits
-            return False
-        hits.append(now)
-        _SIGNUP_HITS[ip] = hits
-        return True
-
-
-@app.post("/signup")
-def signup_post(request: Request, email: str = Form(""), pw: str = Form(""),
-                website: str = Form(""), st: str = Form("")):
-    try:
-        # 봇 차단(2026-08-11): 사유는 로그에만 — 응답은 일반 오류로 통일해 봇에게 힌트를 안 준다
-        import logging as _lg
-        ip = _signup_ip(request)
-        block = ("honeypot" if website else
-                 "token" if not auth.signup_token_ok(st) else
-                 "rate" if not _signup_rate_ok(ip) else "")
-        if block:
-            _lg.getLogger("shopcast.signup").warning("[signup] 봇 차단 사유=%s ip=%s email=%s", block, ip, email[:60])
-            return RedirectResponse("/signup?err=2", status_code=303)
-        if not (email and pw) or db.get_user_by_email(email):
-            return RedirectResponse("/signup?err=1", status_code=303)
-        h, salt = auth.hash_pw(pw)
-        # 이메일 인증(2026-08-11 사장님 지시) — SMTP 설정 시에만 활성(env 게이트).
-        # 발송 실패는 가입 통과가 아니라 명시 오류(err=3) — 침묵 폴백 금지.
-        from app.services import mailer
-        if mailer.configured():
-            code = f"{secrets.randbelow(1_000_000):06d}"
-            exp, sig = auth.signup_verify_token(email, h, salt, code)
-            if not mailer.send(email, "[올린다] 가입 인증 코드",
-                               f"올린다 가입 인증 코드: {code}\n15분 안에 입력해 주세요.\n"
-                               "본인이 요청하지 않았다면 이 메일은 무시하셔도 됩니다."):
-                return RedirectResponse("/signup?err=3", status_code=303)
-            return HTMLResponse(_verify_page(email, h, salt, exp, sig))
-        u = db.create_user(email=email, pw_hash=h, salt=salt)
-        resp = RedirectResponse("/me", status_code=303)
-        resp.set_cookie(auth.COOKIE, auth.make_session(u["id"]), max_age=5184000, httponly=True, samesite="lax", secure=auth.cookie_secure())
-        return resp
-    except Exception as e:
-        import traceback, logging
-        logging.exception("[signup] 실패")
-        if request.query_params.get("dbg") == os.environ.get("SHOPCAST_ADMIN_PASS", "_"):
-            return HTMLResponse("SIGNUP_ERR " + repr(e) + "\n" + traceback.format_exc(), status_code=500)
-        return RedirectResponse("/signup?err=2", status_code=303)
-
-
-def _verify_page(email: str, h: str, salt: str, exp: str, sig: str, err: str = "") -> str:
-    """가입 인증 코드 입력 화면 — 서버는 대기 상태를 저장하지 않는다(서명 hidden으로 왕복)."""
-    msg = f"<p class='text-rose-500 text-sm mb-3 text-center'>{esc(err)}</p>" if err else ""
-    return _auth_page("메일로 보낸 코드를 입력하세요", (
-        f"<p class='text-slate-500 text-sm mb-4 text-center'><b>{esc(email)}</b> 으로<br>"
-        "6자리 인증 코드를 보냈어요. (15분 유효 · 스팸함도 확인해 주세요)</p>"
-        f"{msg}<form method=post action='/signup/verify' class='space-y-3'>"
-        f"<input type=hidden name=email value='{esc(email)}'>"
-        f"<input type=hidden name=h value='{esc(h)}'>"
-        f"<input type=hidden name=salt value='{esc(salt)}'>"
-        f"<input type=hidden name=exp value='{esc(exp)}'>"
-        f"<input type=hidden name=sig value='{esc(sig)}'>"
-        "<input name=code inputmode=numeric pattern='[0-9]*' maxlength='6' placeholder='인증 코드 6자리' required autofocus "
-        "class='w-full border border-slate-200 rounded-xl p-3 text-center text-xl tracking-[0.4em] outline-none focus:border-indigo-400'>"
-        "<button class='w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-3 rounded-xl transition'>인증하고 시작하기</button></form>"
-        "<p class='text-sm text-slate-400 mt-4 text-center'>메일이 안 왔나요? <a href='/signup' class='text-indigo-600 font-semibold'>다시 가입하기</a></p>"))
-
-
+@app.api_route("/signup", methods=["GET", "POST"])
 @app.post("/signup/verify")
-def signup_verify(request: Request, email: str = Form(""), h: str = Form(""), salt: str = Form(""),
-                  exp: str = Form(""), sig: str = Form(""), code: str = Form("")):
-    """이메일 인증 확정 — 서명·만료·코드가 모두 맞아야 계정을 만든다. 코드 무차별 대입은 IP 제한."""
-    if not _signup_rate_ok("verify:" + _signup_ip(request), limit=10, window=3600):
-        return RedirectResponse("/signup?err=2", status_code=303)
-    if not auth.signup_verify_ok(email, h, salt, (code or "").strip(), exp, sig):
-        return HTMLResponse(_verify_page(email, h, salt, exp, sig,
-                                         err="코드가 맞지 않아요. 메일의 6자리를 다시 확인해 주세요."))
-    if db.get_user_by_email(email):
-        return RedirectResponse("/signup?err=1", status_code=303)
-    u = db.create_user(email=email, pw_hash=h, salt=salt)
-    resp = RedirectResponse("/me", status_code=303)
-    resp.set_cookie(auth.COOKIE, auth.make_session(u["id"]), max_age=5184000, httponly=True,
-                    samesite="lax", secure=auth.cookie_secure())
-    return resp
+def signup_closed():
+    """🚪 가입 봉인 (2026-08-18 사장님 지시: "사용자의 가입은 원하지 않는다").
+
+    대행에서 가게는 우리 사이트에 회원가입하지 않는다. 카카오 채널·전화·메일로 문의하고
+    사장님이 직접 상담·계약한 뒤, 사장님이 운영 화면에서 가게를 등록한다.
+
+    ★ 랜딩에는 이미 가입 링크가 0개였다(2026-08-17 대행 전환). 그런데 라우트가 살아 있어
+      **URL을 직접 치면 누구나 가입할 수 있었다.** 링크를 지우는 것과 문을 닫는 것은 다르다.
+      실제로 그렇게 가입한 3명이 전원 사진 0장·생성 0건이었다 — 빈 화면 앞에 앉혀둔 셈이다.
+
+    ★ 사장님 로그인은 그대로다(/login). 계정이 더 필요하면 /admin/testaccount로 만든다.
+    """
+    return RedirectResponse("/#contact", status_code=303)
+
+
 
 
 @app.get("/login")
@@ -5198,12 +5074,10 @@ def login_get(request: Request):
         "<div class='min-h-screen flex items-center justify-center bg-slate-50 px-5'>"
         "<div class='bg-white rounded-3xl shadow-xl border border-slate-100 p-8 w-full max-w-sm text-center'>"
         f"<a href='/' class='inline-flex items-center gap-2 font-extrabold text-2xl mb-2'>{landing.LOGO}<span>올린다</span></a>"
-        "<p class='text-slate-500 text-sm mb-6'>로그인하고 내 작업실로 이동하세요</p>"
-        "<a href='/login/kakao' class='block text-center py-3.5 rounded-xl font-extrabold mb-2.5' style='background:#FEE500;color:#191600'>카카오로 시작하기</a>"
-        + _naver_login_btn("네이버로 시작하기") +
-        "<a href='/login/google' class='block text-center py-3.5 rounded-xl font-bold border border-slate-200 hover:bg-slate-50 transition'>구글로 시작하기</a>"
-        "<div class='flex items-center gap-2 my-4'><div class='flex-1 h-px bg-slate-100'></div>"
-        "<span class='text-xs text-slate-400'>또는 아이디로</span><div class='flex-1 h-px bg-slate-100'></div></div>"
+        # 🚪 2026-08-18 — 소셜 로그인 버튼 3개(카카오·네이버·구글)를 지웠다.
+        #   가입을 봉인하면서 그 라우터를 등록 해제했으므로 눌러도 404다.
+        #   여기는 이제 **운영자 전용 문**이다 — 대행 고객은 로그인하지 않는다.
+        "<p class='text-slate-500 text-sm mb-6'>운영 화면으로 들어갑니다</p>"
         f"{err}"
         "<form method='post' action='/login' class='space-y-2 text-left'>"
         "<input name='email' type='email' required placeholder='아이디(이메일)' autocomplete='username' "
@@ -5687,24 +5561,9 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
     # ★ 2026-08-14 사장님 지시 — 랜딩 진단에서 이미 찾아낸 가게 정보를 가입 너머로 실어 왔다면
     #   여기서 채운다. 방금 우리가 알아낸 것을 사장님께 다시 입력시키지 않는다.
     #   (자동으로 채우되 무엇을 채웠는지 밝히고, 언제든 고칠 수 있게 둔다 — 정직 게이트)
-    _carry_filled, _carry = [], {}
-    from app.signup_carry import COOKIE as _SC_COOKIE
-    try:
-        from app import signup_carry as _sc
-        _carry = _sc.unpack(request.cookies.get(_sc.COOKIE) or "")
-        if _carry:
-            _carry_filled = _sc.apply_to_tenant(t, _carry)
-            if _carry_filled:
-                t = db.get_tenant(t.id) or t          # 갱신본으로 다시 읽는다
-    except Exception:
-        logging.getLogger("shopcast").exception("[me] 진단 정보 인계 실패")
-    if _carry_filled:
-        _kw0 = (_carry.get("kw") or "").strip()
-        banner += ("<div class='flex items-start gap-3 bg-emerald-50 text-emerald-800 p-4 "
-                   "rounded-2xl mb-4 text-sm'><span>✅</span><div>방금 확인한 가게 정보로 "
-                   f"<b>{esc(' · '.join(_carry_filled))}</b>을(를) 채워뒀어요. 다르면 설정에서 고치실 수 있어요."
-                   + (f"<br>이제 <b>‘{esc(_kw0)}’</b> 글을 만들어 드릴게요 — 아래에서 사진만 올려주세요."
-                      if _kw0 else "") + "</div></div>")
+    # 🗑 2026-08-18 — 랜딩 진단 결과를 '가입 너머로' 실어오던 인계(signup_carry)를 지웠다.
+    #   그 쿠키는 소셜 가입 콜백에서만 심겼는데 가입 자체가 봉인됐다 — 영영 오지 않는다.
+    #   대행에서는 사장님이 상담 뒤 직접 가게를 등록하므로 인계할 대상도 없다.
     onboarded = bool((t.industry or "").strip())
     if not onboarded:
         _multi = len(db.list_user_stores(u["id"])) > 1
@@ -5717,18 +5576,11 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                  f"{_ic('store', 'w-5 h-5 flex-shrink-0')}"
                  "<div class='flex-1'>"
                  + ("<b>새 가게</b>를 추가했어요. <b>딱 3가지</b>만 알려주세요. (30초 · 실수라면 뒤로가기)"
-                    if _multi else "가입 완료! 시작하려면 <b>딱 3가지</b>만 알려주세요. (30초)")
+                    if _multi else "새 가게예요. 시작하려면 <b>딱 3가지</b>만 알려주세요. (30초)")
                  + f"</div>{_back}</div>")
         card = (f"<div class='{_CARD} p-5'>"
                 "<h2 class='font-bold mb-3'>내 가게/상품 정보</h2>" + store_form_min + "</div>")
-        _cb = ""
-        if _carry_filled:
-            _cb = ("<div class='flex items-start gap-3 bg-emerald-50 text-emerald-800 p-4 "
-                   "rounded-2xl mb-4 text-sm'><span>✅</span><div>방금 확인한 가게 정보로 "
-                   f"<b>{esc(' · '.join(_carry_filled))}</b>을(를) 채워뒀어요. 다르면 고쳐주세요.</div></div>")
-        _r = _subscriber_page(f"{esc(t.name)} · 시작 설정", banner + _cb + intro + card)
-        _r.delete_cookie(_SC_COOKIE)          # 한 번 쓰면 지운다(수명 짧게)
-        return _r
+        return _subscriber_page(f"{esc(t.name)} · 시작 설정", banner + intro + card)
     # 온보딩 완료 → 사진 올려 생성이 메인
     from app.services import pay as _pay
     _plan = u.get("plan") or "free"
@@ -6087,10 +5939,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             #   콘텐츠 목록·발행 이력은 그 아래로 — 순서만 바꾸고 기존 화면은 그대로 둔다.
             + "<div class='max-w-[1400px]'>" + banner + main_inner + "</div></main></div>"
             + landing._foot())
-    _resp = HTMLResponse(page)
-    if _carry_filled:
-        _resp.delete_cookie(_SC_COOKIE)
-    return _resp
+    return HTMLResponse(page)
 
 
 @app.post("/me/store")

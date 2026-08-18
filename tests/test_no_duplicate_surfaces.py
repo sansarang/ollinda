@@ -125,3 +125,40 @@ def test_목록은_접히고_날짜마다_색이_다르다():
     assert "<details id='myContent'" in src, "내 콘텐츠가 접히지 않는다"
     assert "_PALETTE" in src and "_PALETTE[_i % len(_PALETTE)]" in src, \
         "날짜별 색 순환이 없다"
+
+
+def test_가입은_봉인됐다():
+    """★ 2026-08-18 사장님: "사용자의 가입은 원하지 않는다.
+    카카오 채널·전화·메일로 내가 직접 받는다."
+
+    대행에서 가게는 우리 사이트에 회원가입하지 않는다.
+    ★ 문을 닫는 일은 세 겹이었다 — 링크를 지우고(8/17 완료), 폼을 막고,
+      **소셜 로그인 라우터를 내려야** 끝난다. 앞의 둘만 했을 때
+      /login/kakao 가 307로 살아 있어 클릭 한 번에 계정이 생겼다.
+    """
+    paths = {getattr(r, "path", "") for r in main.app.routes}
+    for dead in ("/login/kakao", "/login/google", "/login/naver",
+                 "/login/kakao/callback", "/login/google/callback"):
+        assert dead not in paths, f"소셜 가입 문이 다시 열렸다: {dead}"
+    assert "/signup" in paths, "구 링크·북마크를 받아줄 자리는 남겨둔다(문의로 보냄)"
+
+
+def test_가입_유도_문구가_남아있지_않다():
+    """랜딩·데모의 CTA는 전부 문의로 모여야 한다 — 누를 곳이 가입이면 404다."""
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    bad = []
+    for rel in ("app/main.py", "app/landing.py"):
+        for i, line in enumerate((root / rel).read_text().splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            if "/login/kakao" in line or "/login/google" in line or "/login/naver" in line:
+                bad.append(f"{rel}:{i}")
+    assert not bad, f"죽은 소셜 가입 링크가 화면에 남아 있다: {bad}"
+
+
+def test_사장님_로그인은_살아있다():
+    """가입을 막는 것과 로그인을 막는 것은 다르다 — 운영 화면 문까지 닫으면 안 된다."""
+    paths = {getattr(r, "path", "") for r in main.app.routes}
+    assert "/login" in paths and "/logout" in paths, "운영자 로그인이 사라졌다"
+    assert "/admin/testaccount" in paths, "계정을 만들 안전망이 사라졌다"
