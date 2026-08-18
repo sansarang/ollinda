@@ -5418,105 +5418,14 @@ def _daily_action(t) -> dict:
             "cta": "만들기", "href": "/me"}
 
 
-def _exposure_card(t) -> str:
-    """"지금 네이버에서 사장님 가게가 보이는 곳" — 지면 4개 실측 카드(사장 언어).
-    실측이 없으면 숫자를 지어내지 않고 '측정 준비 중'으로 둔다(정직 게이트 동일 원칙)."""
-    try:
-        from app.services import exposure as _ex
-        d = _ex.summary(t.id)
-    except Exception:
-        return ""
-    _s = d.get("surfaces") or {}
-    _rows = []
+# 🗑 2026-08-18 — `_exposure_card`("지금 네이버에서 ○○가 보이는 곳")와
+#   `_place_kit_card`("플레이스(지도) 채우기")를 지웠다. 사장님 지시:
+#     "내가 대행으로 하면 필요없지 않니?"
+#   대행에서는 노출 상태를 사장님이 읽고 판단하지 않는다 — 우리가 읽고 다음 글에 반영한다.
+#   화면에 남기면 사장님이 매일 들여다보게 되고, 그게 대행이 없애야 할 일이다.
+#   운영자 확인은 /admin/ops · /admin/scan · /admin/gowatch/preview 에 그대로 있다.
+#   (규율 1 — 지울 땐 호출만이 아니라 함수 본체까지 같은 커밋에서 비운다)
 
-    def _line(icon, label, body, tone="slate"):
-        _rows.append(f"<div class='flex gap-2.5 items-start py-2 border-b border-slate-100 last:border-0'>"
-                     f"<span class='text-base leading-6'>{icon}</span>"
-                     f"<div class='min-w-0 flex-1'><div class='text-xs font-bold text-{tone}-500 mb-0.5'>{label}</div>"
-                     f"<div class='text-sm text-slate-700 leading-relaxed'>{body}</div></div></div>")
-
-    se = _s.get("search") or {}
-    if se.get("state") == "none":
-        _line("🔍", "통합검색", f"<span class='text-slate-400'>{esc(_ex.NOT_MEASURED)}</span>")
-    else:
-        _b = []
-        for x in se.get("shown", []):
-            # 블록명 미표시 — 귀속 검증 전까지 '첫 화면'까지만(허위 양성 방지, 2026-08-02).
-            _b.append(f"<b class='text-emerald-700'>‘{esc(x['keyword'])}’</b> "
-                      f"<span class='text-slate-500'>첫 화면에 보이는 중</span>")
-        for k in se.get("waiting", [])[:3]:
-            _b.append(f"‘{esc(k)}’ <span class='text-amber-600'>자리는 있는데 아직</span>")
-        for k in se.get("no_room", [])[:2]:
-            _b.append(f"‘{esc(k)}’ <span class='text-slate-400'>이 검색어는 블로그 자리가 없어요</span>")
-        _line("🔍", f"통합검색 · 검색어 {se.get('n_measured', 0)}개 확인",
-              "<br>".join(_b) or "아직 보이는 곳이 없어요")
-
-    pl = _s.get("place") or {}
-    if pl.get("state") == "measured":
-        _b = []
-        for it in pl.get("items", []):
-            _r = it.get("rank")
-            _txt = (f"<b class='text-emerald-700'>{_r}위</b>" if _r else
-                    "<span class='text-slate-400'>상위 5곳 밖</span>")
-            _b.append(f"‘{esc(it['keyword'])}’ {_txt}"
-                      + (f" <span class='text-slate-400'>· {esc(it['delta'])}</span>" if it.get("delta") else ""))
-        _line("📍", "플레이스(지도)", "<br>".join(_b))
-    else:
-        _line("📍", "플레이스(지도)", f"<span class='text-slate-400'>{esc(_ex.NOT_MEASURED)}</span>")
-
-    br = _s.get("briefing") or {}
-    if br.get("state") == "shown":
-        _line("🤖", "AI 브리핑", "‘" + "’, ‘".join(esc(k) for k in br.get("items", [])) +
-              "’ <b class='text-emerald-700'>브리핑 지면에서 확인됐어요</b>"
-              " <span class='text-slate-400'>(블록 정확도 검증 중)</span>")
-    elif br.get("state") == "waiting":
-        _line("🤖", "AI 브리핑", "‘" + "’, ‘".join(esc(k) for k in br.get("items", [])) +
-              "’ <span class='text-amber-600'>브리핑 자리는 있는데 아직</span>")
-    else:
-        _line("🤖", "AI 브리핑", f"<span class='text-slate-400'>{esc(_ex.NOT_MEASURED)}</span>")
-
-    _line("🌐", "웹문서", f"<span class='text-slate-400'>{esc(_ex.NOT_MEASURED)}</span>")
-    _when = esc((d.get("measured_at") or "").replace("T", " "))
-    return ("<div class='bg-white rounded-2xl shadow-sm p-5 mb-4'>"
-            "<div class='flex items-baseline justify-between mb-1'>"
-            f"<h2 class='font-extrabold text-slate-900'>지금 네이버에서 {esc(d.get('shop',''))}가 보이는 곳</h2>"
-            + (f"<span class='text-[11px] text-slate-400'>{_when} 확인</span>" if _when else "")
-            + "</div><div class='mt-1'>" + "".join(_rows) + "</div></div>")
-
-
-def _place_kit_card(t) -> str:
-    """📍 플레이스 채우기 — 코드가 할 수 있는 것(상세설명 초안)과 사장님이 하실 단계 안내.
-    실제 스마트플레이스 입력·인증은 사람 몫이므로, 초안은 복붙용으로 주고 순서를 안내한다."""
-    if (getattr(t, "biz_type", "local") or "local") == "seller":
-        return ""                                   # 전국 셀러는 지도 지면이 대상이 아니다
-    try:
-        from app.services import place_opt as _po
-        draft = _po.description_draft(t)
-        steps = _po.PLACE_STEPS
-    except Exception:
-        return ""
-    if not draft:
-        return ""
-    _steps = "".join(
-        f"<div class='flex gap-2 items-start py-1.5'>"
-        f"<span class='shrink-0 w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-[11px] "
-        f"font-bold grid place-items-center'>{i}</span>"
-        f"<div class='text-sm'><b class='text-slate-800'>{esc(lab)}</b> "
-        f"<span class='text-slate-500'>{esc(desc)}</span></div></div>"
-        for i, (lab, desc) in enumerate(steps, 1))
-    _id = "pldraft"
-    return ("<div class='bg-white rounded-2xl shadow-sm p-5 mb-4'>"
-            "<h2 class='font-extrabold text-slate-900 mb-1'>플레이스(지도) 채우기</h2>"
-            "<p class='text-xs text-slate-500 mb-3'>지도 순위는 글이 아니라 등록정보가 정합니다 — "
-            "여기부터 채우는 게 검색 노출의 가장 빠른 길이에요.</p>"
-            + _steps
-            + "<div class='mt-3 text-xs font-bold text-slate-500 mb-1'>상세설명 초안 (복사해서 붙여넣기)</div>"
-            + f"<pre id='{_id}' class='text-[13px] leading-relaxed text-slate-700 bg-slate-50 "
-              f"rounded-xl p-3 whitespace-pre-wrap'>{esc(draft)}</pre>"
-            + f"<button type='button' onclick=\"navigator.clipboard.writeText("
-              f"document.getElementById('{_id}').innerText);this.textContent='복사됨!';\" "
-              "class='mt-2 w-full px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-900 "
-              "text-white text-sm font-bold transition'>상세설명 복사</button></div>")
 
 
 @app.get("/me", response_class=HTMLResponse)
@@ -5595,8 +5504,6 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
         banner = _dg.render_d2(t.id) + banner
     except Exception:
         pass
-    # 🔍 노출 현황 — 사장님 화면의 1번 숫자(CLAUDE.md 최상위 기준: 발행량이 아니라 노출 상태)
-    exposure_card = _exposure_card(t) + _place_kit_card(t)
     # ① 가게/스토어 설정
     bopts = "".join(f"<option value='{k}'{' selected' if (t.biz_type or 'local') == k else ''}>{lab}</option>"
                     for k, lab in [("local", "동네 매장(방문 유도)"), ("seller", "온라인 셀러(구매 유도)"),
@@ -6279,8 +6186,14 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
                           "{var _td=document.getElementById('tools');if(_td)_td.setAttribute('open','');}</script>")
             except Exception:
                 _tools = ""
+            # ★ 2026-08-18 사장님 지시 — "가게를 누르면 내 콘텐츠·글 올리기가 한 화면에 있어야 한다."
+            #   대행에서는 가게를 고른 순간 할 일이 둘뿐이다: 사진을 올리고, 나온 글을 본다.
+            #   그 둘이 다른 탭에 있으면 가게마다 탭을 두 번씩 오간다.
+            #   `content`(내 콘텐츠)는 원래 여기서 만들어놓고 홈에서는 쓰지 않던 변수다 —
+            #   따로 만들지 않고 그것을 그대로 붙인다(규율 10: 있는 것부터 찾는다).
             main_inner = (greeting + _conv_card + _upsell + _rank_hook + _task + _notice_html
                           + _guide + _blog_nudge + upload_section
+                          + "<div class='mt-6'></div>" + content
                           + "<div class='mt-5'></div>" + _store_info_card(t) + _tools)
     # 🆕 새로 추가한 '빈 새 가게'면 실수 대비 '뒤로가기(취소)' 배너
     if t.name == "새 가게" and len(db.list_user_stores(u["id"])) > 1 and not db.list_sets(tenant_id=t.id):
@@ -6332,7 +6245,7 @@ def my_dashboard(request: Request, ok: str = "", err: str = "", gen: str = ""):
             + "<div class='lg:hidden mb-3'>" + _storebox + "</div>" + _mobnav
             # 🔍 노출 현황을 최상단에(CLAUDE.md: 첫 화면 1번 숫자는 발행량이 아니라 노출 상태).
             #   콘텐츠 목록·발행 이력은 그 아래로 — 순서만 바꾸고 기존 화면은 그대로 둔다.
-            + "<div class='max-w-[1400px]'>" + banner + exposure_card + main_inner + "</div></main></div>"
+            + "<div class='max-w-[1400px]'>" + banner + main_inner + "</div></main></div>"
             + landing._foot())
     _resp = HTMLResponse(page)
     if _carry_filled:
@@ -7071,6 +6984,99 @@ def _trust_card_html(piece) -> str:
         import logging
         logging.getLogger("shopcast.trustcard").exception("[trustcard] 렌더 실패 piece=%s", getattr(piece, "id", ""))
         return ""
+
+
+def _research_card(tenant, piece) -> str:
+    """📈 이 글을 쓰기 위해 조사한 것 + 발행 후 순위 — 그래프.
+
+    2026-08-18 사장님 지시:
+      "가게를 누르고 발행글을 눌렀을때 조사한 항목들이 그래프로 나와야 한다."
+
+    왜 여기서만 주방을 보여주는가:
+      CLAUDE.md는 '사장님 화면에 주방 용어 금지'다. 그런데 대행으로 바뀌면서
+      사장님은 **손님이 아니라 운영자**가 됐다. 대행사가 자기 작업의 근거를 못 보면
+      고객에게 설명할 수가 없다. 그래서 이 카드는 운영자 언어로 쓴다.
+
+    ★ 추정치는 넣지 않는다 — payload의 `reach`(월 검색유입 81~340)는 스스로
+      "추정"이라 적어둔 값이다. 실측 그래프에 섞으면 전체가 추정이 된다(정직 게이트).
+    ★ 없는 항목은 그리지 않고 **왜 없는지**를 적는다(chart.empty).
+    """
+    from app.web import chart
+    pl = (getattr(piece, "payload", None) or {})
+    kw = ((pl.get("target_kw") or "").strip()
+          or ((pl.get("target_keywords") or [""])[0] or "").strip())
+    tid = getattr(tenant, "id", "") or getattr(piece, "tenant_id", "")
+
+    # ① 발행 후 순위 — 유일한 실측 성과다.
+    graph, why = "", ""
+    if kw and tid:
+        hist = (db.rank_history(tid, kw, kind="post")
+                or db.rank_history(tid, kw, kind="blog_search")
+                or db.rank_history(tid, kw))
+        graph = chart.rank_line(hist, keyword=kw)
+        if not graph:
+            pub = None
+            try:
+                pub = db.get_blog_publish(piece.id)
+            except Exception:
+                pass
+            why = ("발행은 확인됐지만 아직 순위가 잡히지 않았어요 (색인 대기)" if pub
+                   else "아직 네이버에 올리지 않은 글이에요 — 올리면 매일 순위를 확인합니다")
+    else:
+        why = "이 글에는 노리는 검색어가 지정돼 있지 않아요"
+
+    # ② 조사 점수 — 전부 저장된 실측값. 없는 항목은 막대에서 빠진다.
+    score_rows = []
+    for key, lab in (("ranking_audit", "상위노출 점검"), ("geo_audit", "AI검색 대응")):
+        v = (pl.get(key) or {}).get("score")
+        if isinstance(v, (int, float)):
+            score_rows.append((lab, int(v)))
+    tc = pl.get("term_coverage") or {}
+    if isinstance(tc.get("pct"), (int, float)):
+        score_rows.append(("업계 용어 반영", int(tc["pct"])))
+    ppl = (pl.get("photo_placement") or {}).get("rows") or []
+    if ppl:
+        ok = sum(1 for r in ppl if r.get("ok"))
+        score_rows.append(("사진·글 일치", int(round(100.0 * ok / len(ppl)))))
+    sg = pl.get("score_gate") or {}
+    if isinstance(sg.get("final"), (int, float)) and not score_rows:
+        score_rows.append(("자체 점검", int(sg["final"])))
+    scores = chart.bars(score_rows, unit="점")
+
+    # ③ 이 검색어의 판 — 경쟁 문서수·상위글 나이(글을 쓰기 전에 조사한 것)
+    bp = pl.get("battle_plan") or {}
+    ws = pl.get("win_score") or {}
+    facts = []
+    if isinstance(bp.get("docs"), int):
+        facts.append(("경쟁 글", f"{bp['docs']:,}건"))
+    if isinstance(bp.get("age_median"), (int, float)):
+        facts.append(("상위글 나이", f"{int(bp['age_median'])}일"))
+    if isinstance(ws.get("score"), (int, float)):
+        facts.append(("이길 자리 점수", f"{int(ws['score'])}점"))
+    pc = pl.get("photo_capped") or {}
+    if isinstance(pc.get("uploaded"), int) and isinstance(pc.get("in_body"), int):
+        facts.append(("사진", f"{pc['uploaded']}장 중 {pc['in_body']}장 사용"))
+    br = pl.get("body_route") or {}
+    if br.get("model"):
+        facts.append(("글 작성", str(br["model"])))
+    fact_html = "".join(
+        "<div class='flex justify-between text-sm py-1.5 border-b border-slate-100 last:border-0'>"
+        f"<span class='text-slate-500'>{esc(l)}</span>"
+        f"<span class='font-bold text-slate-800'>{esc(v)}</span></div>" for l, v in facts)
+
+    if not (graph or scores or fact_html):
+        return ""
+    _wr = "bg-white rounded-2xl border border-slate-200 p-4"
+    left = (f"<div class='{_wr}'><div class='text-xs font-bold text-slate-500 mb-2'>"
+            "발행 후 순위</div>" + (graph or chart.empty(why)) + "</div>")
+    mid = ((f"<div class='{_wr}'><div class='text-xs font-bold text-slate-500 mb-2'>"
+            "조사 점검</div>" + scores + "</div>") if scores else "")
+    right = ((f"<div class='{_wr}'><div class='text-xs font-bold text-slate-500 mb-2'>"
+              "이 검색어의 판</div>" + fact_html + "</div>") if fact_html else "")
+    return ("<details class='mb-5' open><summary class='cursor-pointer select-none list-none "
+            "text-sm font-extrabold text-slate-700 mb-2'>📈 이 글을 위해 조사한 것</summary>"
+            "<div class='grid gap-3 sm:grid-cols-2 lg:grid-cols-3'>"
+            + left + mid + right + "</div></details>")
 
 
 def _blog_connect_card(t, fw: str) -> str:
@@ -9534,6 +9540,8 @@ def _result_html(u, asset_id: str, back_href: str = "/me", back_label: str = "�
             + store_hd
             + "<h2 class='text-2xl font-extrabold text-slate-900 mb-1'>발행 소재</h2>"
             "<p class='text-slate-400 text-sm mb-5'>각 앱에 올리면 <b class='text-slate-600'>이렇게</b> 보여요. 글은 복사, 사진·영상은 다운로드하세요.</p>"
+            # 📈 조사 항목 그래프(2026-08-18 사장님 지시) — 블로그 글 기준.
+            + _research_card(tenant, next((p for p in pieces if p.kind.value == "blog"), pieces[0]))
             + _vid_poll + pipeline + all_btn + track_box + filter_bar
             + "<div class='sm:columns-2 gap-6'>" + cards + "</div>" + js)
     return body
