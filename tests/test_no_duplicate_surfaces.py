@@ -162,3 +162,28 @@ def test_사장님_로그인은_살아있다():
     paths = {getattr(r, "path", "") for r in main.app.routes}
     assert "/login" in paths and "/logout" in paths, "운영자 로그인이 사라졌다"
     assert "/admin/testaccount" in paths, "계정을 만들 안전망이 사라졌다"
+
+
+def test_드립_메일은_꺼져_있다(monkeypatch):
+    """★ 2026-08-18 사장님: "메일은 꺼라."
+
+    실측이 이유다 — 리드 2,438건 중 **이메일이 3건(0.1%)**뿐이다.
+    네이버 블로그는 이메일을 공개하지 않는다. 그래서 드립 대상이
+    사장님 본인·테스트 계정 5개뿐이었고, 매일 사장님 메일함으로만 나갔다.
+
+    ★ 끄는 일도 두 겹이다 — 자동 잡을 지우고 **수동 버튼도 잠가야** 끈 것이다.
+      가입 봉인 때 배운 것과 같다(링크만 지우면 문은 열려 있다).
+    """
+    import inspect
+    from app import scheduler
+    src = inspect.getsource(scheduler.start)
+    for line in src.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        assert "drip" not in line, f"드립 자동 발송이 되살아났다: {line.strip()[:60]}"
+    # 수동 버튼은 명시적으로 켜야만 열린다(fail-closed)
+    monkeypatch.delenv("OLLINDA_DRIP_ON", raising=False)
+    r = main.admin_drip_run(dry=0)
+    import json
+    body = json.loads(bytes(r.body).decode())
+    assert body["ok"] is False and body["sent"] == 0, "꺼둔 드립이 수동으로 나갔다"

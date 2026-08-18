@@ -4500,7 +4500,15 @@ async def api_store_candidates(request: Request):
 @app.api_route("/admin/drip/run", methods=["GET", "POST"])
 def admin_drip_run(dry: int = 0):
     """리드·미전환 드립 수동 실행(마케팅 F). dry=1이면 발송 없이 대상만 집계."""
+    # 🔇 2026-08-18 — 발송을 잠갔다. 사장님 지시로 드립을 껐는데,
+    #   이 버튼이 살아 있으면 실수로 한 번 눌러 다시 나간다(잠글 곳을 하나 빼먹으면
+    #   끈 게 아니다). 다시 켜려면 env OLLINDA_DRIP_ON=1 — 명시적으로만 열린다.
     from app.services import drip
+    if os.environ.get("OLLINDA_DRIP_ON", "") != "1":
+        return JSONResponse({"ok": False, "sent": 0,
+                             "reason": "드립 발송이 꺼져 있습니다(2026-08-18 사장님 지시). "
+                                       "리드의 이메일 보유율이 0.1%라 보낼 곳이 없습니다. "
+                                       "동의받은 문의 고객이 쌓이면 OLLINDA_DRIP_ON=1 로 켭니다."})
     return JSONResponse(drip.run(limit=100, dry=bool(dry)))
 
 

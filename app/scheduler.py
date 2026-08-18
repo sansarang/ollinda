@@ -43,8 +43,12 @@ def start() -> None:
         sch.add_job(_publish_reminder, "cron", hour=18, minute=0,
                     id="publish_reminder", replace_existing=True)
         # 리드·미전환 자동 이메일 드립(마케팅 F, 2026-08-11) — 매일 14시, Resend/SMTP 설정 시만
-        sch.add_job(_drip_run, "cron", hour=14, minute=0,
-                    id="drip_daily", replace_existing=True)
+        # 🔇 2026-08-18 사장님 지시: "메일은 꺼라."
+        #   실측이 이유다 — 리드 2,438건 중 **이메일이 3건(0.1%)**뿐이다.
+        #   네이버 블로그는 이메일을 공개하지 않는다(scout이 RSS·프로필·홈페이지를
+        #   다 훑어서 3건). 그래서 드립 대상이 사장님 본인·테스트 계정 5개뿐이었고,
+        #   매일 14시에 사장님 메일함으로만 나갔다. 바깥으로 간 것은 한 통도 없다.
+        #   → 자동 발송 중단. 모듈은 남긴다(문의로 **동의받은 사람**이 쌓이면 다시 켠다).
         # 순위 자동추적(상위노출 PHASE 3) — tenant×타겟키워드 일일 스냅샷(아침, 스캔과 시차)
         sch.add_job(_rank_track, "cron", hour=7, minute=30,
                     id="rank_track_daily", replace_existing=True)
@@ -433,17 +437,6 @@ def _publish_reminder() -> None:
         pubcal.remind_stale_tenants()
     except Exception:
         logging.exception("[scheduler] 발행 리마인더 실패")
-
-
-def _drip_run() -> None:
-    """리드·미전환 자동 이메일 드립(마케팅 F)."""
-    _mark("drip_daily")
-    try:
-        from app.services import drip
-        r = drip.run(limit=100)
-        logging.info("[scheduler] 드립 발송: %s", r)
-    except Exception:
-        logging.exception("[scheduler] 드립 실패")
 
 
 def _weekly_blog_report() -> None:
