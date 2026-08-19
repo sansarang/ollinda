@@ -475,7 +475,8 @@ class BlogDraftGenerator(Generator):
             f"{seo.BLOG_DIRECTIVES}\n{seo.BLOG_SELL_STRUCT}\n{seo.RETENTION_DENSITY}\n{seo.MOBILE_SPEC}\n{seo.COPY_PSYCH}\n{seo.FACTS_RULE}\n{seo.HUMAN_TOUCH}\n"
             + seo.geo_directive(getattr(tenant, "biz_type", "local") or "local", tenant.name, prof.name,
                                 _creg, getattr(tenant, "brand_name", "") or "",
-                                seo.geo_questions(prof.name, _creg, getattr(prof, "pain_points", "")))
+                                seo.geo_questions(prof.name, _creg, getattr(prof, "pain_points", "")),
+                                shape_id=_shape["id"])   # 요약·FAQ 지시는 골격이 정한다
             + (seo.blog_angle_directive(getattr(asset, "angle", "")) + "\n"
                if getattr(asset, "angle", "") else "")
             + "[실경험 강화 · D.I.A.+ 핵심] 위 '사진 분석'의 구체 사실(색·질감·전후 변화·차종/제품·수치)을 "

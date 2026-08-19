@@ -378,6 +378,45 @@ def _surface_first(cands: list, tenant_id: str = "") -> list:
         return cands
 
 
+#: 이 미만이면 1위를 해도 손님이 오지 않는다. 월 100회 = 하루 3~4명.
+#: 2026-08-19 실측 — 주력 키워드가 월 20회(하루 0.7명)였다.
+MIN_MONTHLY_VOLUME = 100
+
+
+def _volume_first(cands: list, verify: bool = True) -> str:
+    """후보 중 **검색량이 확인된 첫 키워드**를 고른다(매장·셀러 공통 관문).
+
+    ★ 무측정(None)은 통과시킨다 — 검색광고 API가 못 재는 말도 있고,
+      임의 숫자로 채우면 그게 날조다(정직 게이트). 다만 **0으로 측정된 것은 버린다.**
+    ★ 전부 미달이면 빈 문자열 — 부르는 쪽이 자기 폴백을 쓴다.
+    """
+    if not cands:
+        return ""
+    if not verify:
+        return cands[0]
+    try:
+        from app.services import searchad as _sa
+        if not _sa.configured():
+            return cands[0]
+        vols = {(v.get("keyword") or "").replace(" ", ""): v.get("total")
+                for v in _sa.keyword_volumes(cands[:8], limit=80)}
+    except Exception:
+        return cands[0]                      # 조회 실패로 생성을 막지 않는다
+    import logging as _lgv
+    skipped = []
+    for c in cands:
+        v = vols.get(c.replace(" ", ""))
+        if v is None or v >= MIN_MONTHLY_VOLUME:
+            if skipped:                      # 왜 건너뛰었는지 남긴다(침묵 폴백 금지)
+                _lgv.getLogger("shopcast.seo").info(
+                    "[검색량 관문] 미달 제외 %s → 선택 %r", skipped[:5], c)
+            return c
+        skipped.append(f"{c}({v}회)")
+    _lgv.getLogger("shopcast.seo").warning(
+        "[검색량 관문] 후보 전부 월 %d회 미만 — %s", MIN_MONTHLY_VOLUME, skipped[:6])
+    return ""
+
+
 def select_target_keyword(candidates: list, biz_type: str = "local", region: str = "",
                           industry: str = "", tenant_id: str = "", verify_volume: bool = True,
                           primary_model: str = "", allow_inventory_rank: bool = False,
@@ -392,7 +431,17 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
     cands = _surface_first(cands, tenant_id)             # ★ 통합검색에 블로그 지면이 있는 판을 앞으로
     cands = _gap_first(cands, tenant_id, note)           # ★ 소재가 뒷받침하는 빈자리를 그보다 앞으로
     if biz not in ("seller", "hybrid"):
-        return cands[0] if cands else (f"{_kw_shorten(region)} {ind0}".strip() if ind0 else "")
+        # 🔍 2026-08-19 — **매장(local)도 검색량 관문을 거친다.**
+        #   실사고: 루마썬팅(local)의 주력 키워드가 '부산 동구 썬팅업체'였는데 **월 20회**였다.
+        #   12편을 그 키워드로 썼고, 1위를 해도 하루 0.7명이라 손님이 오지 않는다.
+        #   그 검색 결과 상위에는 썬팅 글이 하나도 없었다(지역화폐·직업훈련비·2008년 글) —
+        #   네이버가 그 쿼리에 블로그를 제대로 안 뿌린다는 뜻이고, 우리가 1위였던 건
+        #   잘해서가 아니라 **아무도 없어서**였다.
+        #   원인은 이 한 줄이었다 — 셀러만 검증하고 매장은 `cands[0]`을 그대로 돌려줬다.
+        #   함수 설명에는 '③ 검색량 검증(월 100회+)'이 있었는데 그 코드가 셀러 분기 안에만 있었다.
+        #   헌법 금지선: '검색량 없는 키워드 욱여넣기'.
+        _local_fb = (f"{_kw_shorten(region)} {ind0}".strip() if ind0 else "")
+        return _volume_first(cands, verify_volume) or _local_fb
     # 기초지역 배제
     cands = [c for c in cands if not is_basic_region_kw(c, region, biz)]
     # 매물 속성(핵심 속성·분류) — 세트 컨텍스트 + 업종 스키마 attribute_axes에서 공급(전 업종)
@@ -429,23 +478,11 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
     def _tier(c):
         return _kw_rank_tier(c, models, classes, wide, ind0)
     cands.sort(key=_tier)
-    # 검색량 검증 — 서열 순으로 첫 통과
+    # 검색량 검증 — 매장·셀러가 **같은 관문**을 쓴다(2026-08-19).
+    #   전에는 이 로직이 셀러 분기 안에만 있어서 매장은 검증 없이 통과했고,
+    #   그래서 월 20회짜리가 주력 키워드가 됐다. 같은 판정이 두 곳에 살면 한쪽만 낫는다.
     fallback = f"{wide} {ind0} 추천".strip() if wide else (f"{ind0} 추천" if ind0 else "")
-    if verify_volume:
-        try:
-            from app.services import searchad as _sa
-            if _sa.configured() and cands:
-                vols = {}
-                for vv in _sa.keyword_volumes(cands[:8], limit=80):
-                    vols[(vv.get("keyword") or "").replace(" ", "")] = vv.get("total", 0)
-                for c in cands:
-                    v = vols.get(c.replace(" ", ""))
-                    if v is None or v >= 100:          # 무측정은 통과(임의 숫자 금지), 측정은 100회+
-                        return c
-                return fallback or (cands[0] if cands else "")
-        except Exception:
-            pass
-    return cands[0] if cands else fallback
+    return _volume_first(cands, verify_volume) or fallback or (cands[0] if cands else "")
 
 
 def parent_keyword(kw: str, region: str = "", address: str = "") -> str:
@@ -952,7 +989,7 @@ BLOG_DIRECTIVES = (
     "- 제목: **핵심 키워드를 맨 앞**에(예: '지역+업종+추천/후기'), 25~35자 롱테일. 숫자·연도·혜택 넣으면 클릭↑.\n"
     "- **첫 문장에 핵심 키워드 1회**(검색 의도 즉시 충족, 2~3문장 인트로).\n"
     "- **연관 검색어**(같은 의도의 변형어 2~3개)를 자연스럽게 본문에 녹여라 → D.I.A+ 가점.\n"
-    "- **'## 자주 묻는 질문'(이번 글의 질문 섹션 이름) 1개**(Q&A 2~3쌍, '저장각' 정보) → 네이버 Q&A·체류 가점.\n"
+    # 🦴 2026-08-19 — 질문 섹션 요구는 여기서 뺐다. 골격(services/blogshape.py)이 정한다.
     "- 분량 1200~1800자, 소제목(##) 3~5개, 타겟 키워드 4~6회(남발 금지).\n"
     "- 신뢰·체류↑: 가격대·찾아오는길·영업시간·주차·예약을 표/목록으로.\n"
     "- [사진N] 마커를 본문 곳곳(체류↑). 마지막 방문/예약 CTA+연락 안내.\n"
@@ -977,23 +1014,31 @@ def geo_questions(industry: str, region: str = "", pain_points: str = "") -> lis
 
 
 def geo_directive(biz_type: str, name: str, industry: str, region: str = "",
-                  brand: str = "", questions: list[str] | None = None) -> str:
+                  brand: str = "", questions: list[str] | None = None,
+                  shape_id: str = "") -> str:
     """블로그 프롬프트 주입용 GEO 구조 지시 — 매장(NAP)/셀러(SPU) 분기.
 
     ★ 섹션 이름은 글마다 변형된다(services/sections.py). 여기서는 글 시드를 모르므로
       기준형을 쓰되 관문을 거친다 — 이름 목록을 여기 복사하면 한쪽만 고쳐진다.
       호출부(text_claude)가 이번 글의 이름을 따로 지시하므로 모델은 그쪽을 따른다.
+
+    ★ 2026-08-19 — 요약·FAQ 지시는 **골격이 요구할 때만** 넣는다(shape_id).
+      실측: 골격을 넣고도 3편 연속 FAQ가 붙었다. FAQ를 요구하는 자리가 여덟 곳이었고
+      그중 여기가 하나였다. 지시가 한 곳이라도 남으면 모델은 '쓰라'는 쪽을 따른다.
     """
+    from app.services import blogshape as _shp
     from app.services import sections as _sec
     _sm = _sec.SUMMARY[0]
-    qline = " / ".join(questions or [])
+    _want_sum = _shp.needs_summary(shape_id)
+    _want_faq = _shp.needs_faq(shape_id)
+    qline = " / ".join(questions or []) if _want_faq else ""
     if (biz_type or "local") == "seller":
         pname = f"{brand} {name}".strip() if brand and brand not in (name or "") else (name or "")
         return (
             "[GEO — AI 검색(ChatGPT·Perplexity 등)이 인용하기 쉬운 구조로]\n"
             f"- 첫 문단에 상품 정의문 한 문장: \"{pname}은(는) ~한 {industry}다\" 꼴로 자연스럽게(무엇인지 한 문장으로 규정).\n"
-            f"- '## {_sm}' 소제목 1개: 핵심 3줄(- 목록) — 검색자가 답만 뽑아가게.\n"
-            "- '## 솔직 장단점' 소제목 1개: 입력에 근거한 장점 2~3개 + 아쉬운 점 1개(솔직함이 AI 인용 신뢰를 높인다. 없는 단점 지어내기 금지).\n"
+            + (f"- '## {_sm}' 소제목 1개: 핵심 3줄(- 목록) — 검색자가 답만 뽑아가게.\n" if _want_sum else "")
+            + "- '## 솔직 장단점' 소제목 1개: 입력에 근거한 장점 2~3개 + 아쉬운 점 1개(솔직함이 AI 인용 신뢰를 높인다. 없는 단점 지어내기 금지).\n"
             f"- 비교 질문 Q&A 1개: \"{name} 비슷한 제품과 차이는?\" — 입력 정보로만 답하고 타사 비방·비교 우위 날조 금지.\n"
             + (f"- FAQ 질문은 실제 검색 질문형으로: {qline}\n" if qline else "")
             + "- 상품명·스토어명·구매링크(SPU) 표기는 본문 전체에서 한 글자도 다르지 않게 일관되게.\n")
@@ -1001,7 +1046,7 @@ def geo_directive(biz_type: str, name: str, industry: str, region: str = "",
     return (
         "[GEO — AI 검색(ChatGPT·Perplexity 등)이 인용하기 쉬운 구조로]\n"
         f"- 첫 문단에 정의문 한 문장: \"{name}은(는) {place} 전문점이다\" 꼴로 자연스럽게(무엇을 하는 곳인지 한 문장으로 규정).\n"
-        f"- '## {_sm}' 소제목 1개: 핵심 3줄(- 목록) — 검색자·AI가 답만 뽑아가게.\n"
+        + (f"- '## {_sm}' 소제목 1개: 핵심 3줄(- 목록) — 검색자·AI가 답만 뽑아가게.\n" if _want_sum else "")
         + (f"- FAQ 질문은 실제 검색 질문형으로: {qline}\n" if qline else "")
         + f"- 상호는 항상 '{name}', 지역은 '{region}'으로 본문 전체 일관 표기(NAP 일관 = 인용 신뢰 신호).\n")
 
@@ -1185,7 +1230,7 @@ BLOG_SELL_STRUCT = (
     "① 첫 3줄=PAS: 문제 제기→공감/증폭→'그래서 오늘 보여드릴게요'(검색 유입자 이탈 방지=체류=상위노출).\n"
     "② 스펙이 아니라 FAB: 기능→'그래서 당신에게 뭐가 좋은지'(혜택)로 번역해서 써라.\n"
     "③ 특정 손님 스토리(BAB): 한 사람 사례(전→과정→후)로 몰입시켜라.\n"
-    "④ 반론 선제 해소: FAQ에 손님이 망설이는 것(가격/AS/효과/배송)을 미리 답하라.\n"
+    "④ 반론 선제 해소: 손님이 망설이는 것(가격/AS/효과/배송)을 본문에서 미리 답하라.\n"
     "⑤ CTA 계단: 저장→댓글→검색·예약→방문·구매 순(바로 '사세요'는 저항).\n"
     "⑥ 스마트블록 대응: 그 키워드의 세부 검색의도(가격·후기·방법·비교·추천)를 각각 소제목(##)으로 다뤄라 "
     "— 스마트블록·AI 답변 인용에 잡히게(정확·전문적으로 써야 AI가 인용)."
