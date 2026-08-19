@@ -451,30 +451,58 @@ def _upstage_generate(prompt: str, model: str, max_tokens: int, task: str = "") 
     key = os.environ.get("UPSTAGE_API_KEY", "")
     if not key:
         raise RuntimeError("UPSTAGE_API_KEY 미설정")
-    r = _rq.post("https://api.upstage.ai/v1/chat/completions",
-                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                 json={"model": model, "max_tokens": max(max_tokens * 3, 6000),  # 추론 토큰이 출력에 포함
-                       # ★ 출력 예산을 함께 넘긴다 — 짧으면 effort가 자동으로 낮아진다.
-                       #   예산이 작은데 medium이면 추론이 예산을 다 먹고 빈 응답이 난다.
-                       "reasoning_effort": solar_effort(task, max_tokens),
-                       "messages": [{"role": "user", "content": prompt}]},
-                 timeout=300)          # 추론 모드는 느리다(실측 60~150초)
-    d = r.json()
-    if r.status_code != 200:
-        raise RuntimeError(f"upstage {r.status_code}: {str(d)[:160]}")
-    u = d.get("usage") or {}
-    tin, tout = u.get("prompt_tokens", 0), u.get("completion_tokens", 0)
-    USAGE["upstage"]["n"] += 1
-    USAGE["upstage"]["in"] += tin
-    USAGE["upstage"]["out"] += tout
-    _track_cost("solar", tin, tout)
+    _budget = max(max_tokens * 3, 6000)
+    # ⏱ 대기 시간을 예산에 맞춘다 — 본문(예산 15,000)은 300초로 모자란다.
+    #   2026-08-19 실측: 같은 본문 호출이 한 번은 514초에 성공, 두 번은 300초에서 끊겼다.
+    #   끊기면 anthropic 폴백으로 넘어가고, 크레딧이 없으면 글이 아예 안 나온다.
+    _timeout = 300 if _budget <= 6000 else 600
+
+    def _once(effort: str) -> tuple:
+        r = _rq.post("https://api.upstage.ai/v1/chat/completions",
+                     headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                     json={"model": model, "max_tokens": _budget,  # 추론 토큰이 출력에 포함
+                           "reasoning_effort": effort,
+                           "messages": [{"role": "user", "content": prompt}]},
+                     timeout=_timeout)  # 추론 모드는 느리다(실측 60~514초)
+        d = r.json()
+        if r.status_code != 200:
+            raise RuntimeError(f"upstage {r.status_code}: {str(d)[:160]}")
+        u = d.get("usage") or {}
+        USAGE["upstage"]["n"] += 1
+        USAGE["upstage"]["in"] += u.get("prompt_tokens", 0)
+        USAGE["upstage"]["out"] += u.get("completion_tokens", 0)
+        _track_cost("solar", u.get("prompt_tokens", 0), u.get("completion_tokens", 0))
+        try:
+            return (d["choices"][0]["message"].get("content") or "").strip(), u
+        except Exception:
+            raise RuntimeError(f"upstage 응답 파싱 실패: {str(d)[:160]}")
+
+    _eff = solar_effort(task, max_tokens)
     try:
-        txt = (d["choices"][0]["message"].get("content") or "").strip()
-    except Exception:
-        raise RuntimeError(f"upstage 응답 파싱 실패: {str(d)[:160]}")
+        txt, u = _once(_eff)
+    except (_rq.exceptions.Timeout, _rq.exceptions.ConnectionError) as _e:
+        # 시간이 모자라거나 끊긴 경우도 **낮은 추론으로 한 번 더** — 벤더 폴백보다 값싸다.
+        #   low는 추론 토큰을 거의 안 써서 눈에 띄게 빠르다(실측).
+        if _eff == "low":
+            raise
+        import logging as _lgt
+        _lgt.getLogger("shopcast.llm").warning(
+            "[llm] upstage %s %s → low로 재시도", task or "?", type(_e).__name__)
+        txt, u = _once("low")
+    # ★ 빈 응답 = 추론이 출력 예산을 다 먹은 것. **effort를 낮춰 같은 호출을 한 번 더 한다.**
+    #   2026-08-19 — 같은 계열 결함 3회째다(spoken·caption → analysis → body).
+    #   앞선 두 번은 '예산이 작으면 low'라는 규칙으로 막았는데, 이번엔 예산이 큰 쪽에서 났다:
+    #     본문 max_tokens=5000 → 실제 15,000 요청 → reasoning 14,998 → 본문 0자.
+    #   예산 크기로는 못 막는다. 판정 기준을 **결과(빈 응답)**로 옮긴다 —
+    #   벤더 폴백(=크레딧 소진 시 생성 중단)보다 먼저 시도해야 할 값싼 복구다.
+    if not txt and _eff != "low":
+        import logging as _lgu
+        _lgu.getLogger("shopcast.llm").warning(
+            "[llm] upstage %s 빈 응답(effort=%s reasoning=%s) → low로 재시도",
+            task or "?", _eff, (u.get("completion_tokens_details") or {}).get("reasoning_tokens"))
+        txt, u = _once("low")
     if not txt:                        # 추론만 하고 본문을 안 낸 경우 — 침묵 폴백 금지
-        raise RuntimeError(f"upstage 빈 응답(effort={solar_effort(task, max_tokens)} "
-                           f"max_tokens={max_tokens} "
+        raise RuntimeError(f"upstage 빈 응답(effort={_eff}→low max_tokens={max_tokens} "
                            f"reasoning={(u.get('completion_tokens_details') or {}).get('reasoning_tokens')})")
     return txt
 

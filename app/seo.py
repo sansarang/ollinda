@@ -378,6 +378,22 @@ def _surface_first(cands: list, tenant_id: str = "") -> list:
         return cands
 
 
+#: 업종명 뒤에 붙는 **일반 업태어** — 업종이 아니라 '업소'를 뜻하는 말이다.
+#: 2026-08-19 실측: 프로필 업종명이 '썬팅업체'라 지면 판정이 제목에서 '썬팅업체'를 찾았다.
+#: 상위 글 제목은 '부산 썬팅 후기'처럼 쓰지 '썬팅업체'라고 쓰지 않는다 → 살아 있는 판까지 죽었다.
+#: ★ 업종어가 아니라 업태어 목록이다(어느 업종에나 똑같이 붙는다) — 업종 중립 유지.
+GENERIC_BIZ_SUFFIX = ("업체", "전문점", "전문", "매장", "가게", "센터", "샵")
+
+
+def industry_core(industry: str) -> str:
+    """'썬팅업체'→'썬팅', '인테리어 전문점'→'인테리어'. 판정·후보 생성의 공통 어간."""
+    t = re.sub(r"\s+", "", (industry or "").split(",")[0])
+    for suf in GENERIC_BIZ_SUFFIX:
+        if t.endswith(suf) and len(t) > len(suf) + 1:
+            return t[: -len(suf)]
+    return t
+
+
 #: 이 미만이면 1위를 해도 손님이 오지 않는다. 월 100회 = 하루 3~4명.
 #: 2026-08-19 실측 — 주력 키워드가 월 20회(하루 0.7명)였다.
 MIN_MONTHLY_VOLUME = 100
@@ -426,7 +442,8 @@ def slot_score(keyword: str, volume: int, docs: int, top_age_days: "int | None")
             "opp": opp, "age": top_age_days, "stale": stale, "rank": score}
 
 
-def _volume_first(cands: list, verify: bool = True, deep: bool = True) -> str:
+def _volume_first(cands: list, verify: bool = True, deep: bool = True,
+                  industry: str = "") -> str:
     """후보 중 **가장 이길 만한 자리**를 고른다(매장·셀러 공통 관문).
 
     deep=True면 문서 수·상위글 나이까지 재서 slot_score로 정렬한다(무료 API, 후보 5개까지).
@@ -472,24 +489,46 @@ def _volume_first(cands: list, verify: bool = True, deep: bool = True) -> str:
         from app.services import blogrank as _br
         if not _br.configured():
             return passed[0][0]
-        now, scored = _dt.datetime.utcnow(), []
+        now, scored, dead = _dt.datetime.utcnow(), [], []
+        _ind = industry_core(industry)
         for c, v in passed[:5]:
             if v is None:
                 continue
             try:
                 docs = _br.doc_count(c) or 0
+                items = _br._search_blog(c, 10)
                 ages = []
-                for it in _br._search_blog(c, 5):
+                for it in items[:5]:
                     try:
                         ages.append((now - _dt.datetime.strptime(
                             it.get("postdate", ""), "%Y%m%d")).days)
                     except Exception:
                         pass
                 age = int(sum(ages) / len(ages)) if ages else None
+                # 🧱 **지면이 살아 있는가** — 상위 10개가 이 업종 글이 아니면 그 쿼리엔 판이 없다.
+                #   실측(2026-08-19): '부산 썬팅업체'(월 100회+) 상위 10개가 '평택시 지역화폐',
+                #   '국민내일배움카드' 같은 스팸이었다. 죽은 '부산 동구 썬팅업체'와 같은 모양이다.
+                #   여기서 1위를 해도 잘해서가 아니라 아무도 없어서다 — 손님은 오지 않는다.
+                #   ★ 업종어는 인자로만 온다(하드코딩 0). 못 재면(검색 실패) 판정하지 않는다.
+                if _ind and items:
+                    _hit = sum(1 for it in items
+                               if _ind in re.sub(r"<[^>]+>|\s+", "",
+                                                 (it.get("title") or "") + (it.get("description") or "")))
+                    if _hit < 2:
+                        dead.append(f"{c}(지면 무관 {_hit}/{len(items)})")
+                        continue
                 scored.append(slot_score(c, v, docs, age))
             except Exception:
                 continue
         scored = [s for s in scored if s.get("ok")]
+        if dead:
+            _log.warning("[자리 판정] 지면 없음 제외 — %s", dead[:4])
+            if not scored:
+                # ★ 전부 죽은 판이면 **빈 문자열**로 돌려준다(헌법: 침묵 폴백 금지).
+                #   여기서 passed[0]을 그냥 돌려주면 방금 '죽었다'고 판정한 자리를
+                #   그대로 쓰게 된다 — 실제로 그래서 '부산 썬팅업체'가 다시 뽑혔다.
+                _log.warning("[자리 판정] 살아 있는 판이 없다 — 폴백에 맡긴다")
+                return ""
         if scored:
             scored.sort(key=lambda s: -s["rank"])
             best = scored[0]
@@ -529,7 +568,31 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
         #   함수 설명에는 '③ 검색량 검증(월 100회+)'이 있었는데 그 코드가 셀러 분기 안에만 있었다.
         #   헌법 금지선: '검색량 없는 키워드 욱여넣기'.
         _local_fb = (f"{_kw_shorten(region)} {ind0}".strip() if ind0 else "")
-        return _volume_first(cands, verify_volume) or _local_fb
+        # 🗺 매장은 **지역이 붙은 후보 안에서만** 자리를 고른다(2026-08-19 실측으로 추가).
+        #   관문을 열자마자 '썬팅 추천'(전국 1,020회·문서 65만)이 뽑혔다. 상위글이 낡아
+        #   점수는 높지만, 부산 동구 가게가 전국 키워드에서 1위를 지킬 수도 없고
+        #   1위를 해도 검색자가 전국이라 가게에 손님이 오지 않는다 — 존재 이유(1항)에 어긋난다.
+        #   지역 후보가 전부 수요 미달이면 빈 문자열로 두고 부르는 쪽 폴백에 맡긴다.
+        _wide = _region_wide(region)
+        # ★ 광역 자리를 후보에 넣어준다(2026-08-19 실측). 후보 생성기는 구·군 조합만 만든다 —
+        #   '부산 동구 썬팅'(월 30회) 계열뿐이라, 관문을 통과시켜도 고를 것이 없었다.
+        #   같은 판의 광역 자리 '부산 썬팅'은 월 670회다. 이게 실제로 이길 수 있는 자리다.
+        _core = industry_core(ind0)
+        for _w in ([f"{_wide} {_core}", f"{_wide} {ind0}"] if _wide and ind0 else []):
+            #   ★ 어간 쪽('부산 썬팅')을 먼저 — 업태어가 붙은 말('부산 썬팅업체')은
+            #     검색량이 있어도 지면이 죽어 있는 경우가 많다(2026-08-19 실측).
+            if _w.strip() and _w not in cands:
+                cands = cands + [_w]
+        _wide_kw = f"{_wide} {_core}".strip() if (_wide and ind0) else ""
+        if _wide_kw:                          # 폴백도 광역으로 — 구·군 폴백은 수요가 없다
+            _local_fb = _wide_kw
+        _in_region = [c for c in cands if _wide and _wide in c.replace(" ", "")]
+        _picked = _volume_first(_in_region or cands, verify_volume, industry=ind0)
+        if not _picked and _in_region:
+            import logging as _lgl
+            _lgl.getLogger("shopcast.seo").warning(
+                "[자리 판정] 지역(%s) 후보 %d개 전부 수요 미달 — 제네릭 폴백", _wide, len(_in_region))
+        return _picked or _local_fb
     # 기초지역 배제
     cands = [c for c in cands if not is_basic_region_kw(c, region, biz)]
     # 매물 속성(핵심 속성·분류) — 세트 컨텍스트 + 업종 스키마 attribute_axes에서 공급(전 업종)
@@ -570,7 +633,7 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
     #   전에는 이 로직이 셀러 분기 안에만 있어서 매장은 검증 없이 통과했고,
     #   그래서 월 20회짜리가 주력 키워드가 됐다. 같은 판정이 두 곳에 살면 한쪽만 낫는다.
     fallback = f"{wide} {ind0} 추천".strip() if wide else (f"{ind0} 추천" if ind0 else "")
-    return _volume_first(cands, verify_volume) or fallback or (cands[0] if cands else "")
+    return _volume_first(cands, verify_volume, industry=ind0) or fallback or (cands[0] if cands else "")
 
 
 def parent_keyword(kw: str, region: str = "", address: str = "") -> str:
@@ -801,6 +864,12 @@ def resolve_target_keyword(industry: str, region: str, note: str, biz: str = "lo
         kw0 = tkw
         kws = list(dict.fromkeys([tkw] + kws))[:10]
     _biz = biz or "local"
+    # ★ 매장(local)도 여기를 지난다(2026-08-19 실측으로 잡음).
+    #   select_target_keyword 안의 검색량 관문만 고쳤더니 아무것도 안 바뀌었다 —
+    #   **매장은 이 위 블록이 seller/hybrid 전용이라 그 함수까지 오지도 못했다.**
+    #   루마썬팅이 12편을 월 20회짜리 '부산 동구 썬팅업체'로 쓴 진짜 경로가 여기다.
+    #   phantom(재고 속성) 처리는 여전히 셀러 전용, **검색량 관문은 전 업태 공통**으로 가른다.
+    _pm, _anchor_missing, _model_toks = "", False, []
     if content_type != "info" and _biz in ("seller", "hybrid"):
         import re as _rpm
         try:
@@ -828,7 +897,9 @@ def resolve_target_keyword(industry: str, region: str, note: str, biz: str = "lo
             return next((t for t in _model_toks
                          if t and _rpm.search(r"(?<![가-힣])" + _rpm.escape(t), src or "")), "")
         _pm = _fm(note) or _fm(kw0)
-        if _model_toks and not _pm and not _fm(" ".join(kws)):     # 앵커 부재 → 검색량 랭킹 보류·제네릭
+        _anchor_missing = bool(_model_toks and not _pm and not _fm(" ".join(kws)))
+    if content_type != "info":
+        if _anchor_missing:                        # 앵커 부재 → 검색량 랭킹 보류·제네릭(셀러 전용 조건)
             _gk = f"{_kw_shorten(region or '')} {prof_name}".strip() or prof_name
             _slog.warning("[resolve-kw] 앵커 부재 → 제네릭 확정: %r", _gk)
         else:
@@ -1103,12 +1174,14 @@ def geo_questions(industry: str, region: str = "", pain_points: str = "") -> lis
 
 def geo_directive(biz_type: str, name: str, industry: str, region: str = "",
                   brand: str = "", questions: list[str] | None = None,
-                  shape_id: str = "") -> str:
+                  shape_id: str = "", summary_head: str = "") -> str:
     """블로그 프롬프트 주입용 GEO 구조 지시 — 매장(NAP)/셀러(SPU) 분기.
 
-    ★ 섹션 이름은 글마다 변형된다(services/sections.py). 여기서는 글 시드를 모르므로
-      기준형을 쓰되 관문을 거친다 — 이름 목록을 여기 복사하면 한쪽만 고쳐진다.
-      호출부(text_claude)가 이번 글의 이름을 따로 지시하므로 모델은 그쪽을 따른다.
+    ★ 섹션 이름은 글마다 변형된다(services/sections.py). **이번 글의 이름을 인자로 받는다.**
+      2026-08-19 실측 — 전에는 여기서 기준형('한눈 요약')을 쓰고 "호출부가 이번 글 이름을
+      따로 지시하니 모델이 그쪽을 따른다"고 뒀는데, 한 프롬프트에 이름이 둘이 되자
+      모델이 **요약 섹션을 두 개** 만들었다('한눈 요약'과 '요약하면'이 한 글에 같이 실렸다).
+      지시가 둘이면 모델은 둘 다 따른다 — 이름을 정하는 곳은 하나여야 한다.
 
     ★ 2026-08-19 — 요약·FAQ 지시는 **골격이 요구할 때만** 넣는다(shape_id).
       실측: 골격을 넣고도 3편 연속 FAQ가 붙었다. FAQ를 요구하는 자리가 여덟 곳이었고
@@ -1116,7 +1189,7 @@ def geo_directive(biz_type: str, name: str, industry: str, region: str = "",
     """
     from app.services import blogshape as _shp
     from app.services import sections as _sec
-    _sm = _sec.SUMMARY[0]
+    _sm = (summary_head or "").strip() or _sec.SUMMARY[0]
     _want_sum = _shp.needs_summary(shape_id)
     _want_faq = _shp.needs_faq(shape_id)
     qline = " / ".join(questions or []) if _want_faq else ""

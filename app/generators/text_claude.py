@@ -377,7 +377,10 @@ class BlogDraftGenerator(Generator):
             _anat_line = _ba.baseline_line(kw0)
             # 🗺 판 유형별 작전 지시서(2026-08-01) — 4신호를 글쓰기 작전으로(치열한 판=각도 전환,
             #   열린 판=속전속결·최신성, 상승 추세=시의성 톤). 신호 없으면 빈 문자열(기존 그대로).
-            _bp_line, _battle_meta = _ba.battle_plan(kw0, tenant_id=getattr(tenant, 'id', '') or '')
+            # 재료(사진 분석·사장님 답변)를 함께 넘긴다 — 상위글이 안 다룬 항목을 골라내려면
+            # '우리가 무엇을 말할 수 있는지'를 알아야 한다(없는 것을 빈자리로 제안하지 않기 위해).
+            _bp_line, _battle_meta = _ba.battle_plan(
+                kw0, tenant_id=getattr(tenant, 'id', '') or '', materials=(asset.note or ""))
             _anat_line = _anat_line + _bp_line
         except Exception:
             pass
@@ -476,7 +479,8 @@ class BlogDraftGenerator(Generator):
             + seo.geo_directive(getattr(tenant, "biz_type", "local") or "local", tenant.name, prof.name,
                                 _creg, getattr(tenant, "brand_name", "") or "",
                                 seo.geo_questions(prof.name, _creg, getattr(prof, "pain_points", "")),
-                                shape_id=_shape["id"])   # 요약·FAQ 지시는 골격이 정한다
+                                shape_id=_shape["id"],   # 요약·FAQ 지시는 골격이 정한다
+                                summary_head=_sec_names["summary"])  # 이름은 이 글의 것 하나만
             + (seo.blog_angle_directive(getattr(asset, "angle", "")) + "\n"
                if getattr(asset, "angle", "") else "")
             + "[실경험 강화 · D.I.A.+ 핵심] 위 '사진 분석'의 구체 사실(색·질감·전후 변화·차종/제품·수치)을 "
@@ -681,7 +685,10 @@ class BlogDraftGenerator(Generator):
         tags = list(dict.fromkeys(parsed + kws))[:10]
         # 발현률 게이트: 체류 3장치(첫 문장 답 예고·①②③ 예고·이정표)를 기계 검사, 누락분만 보충
         # — 프롬프트 지시는 확률, 게이트는 보장(제목·FAQ 보강과 동일 패턴)
-        _body_raw, _dwell_rep = _ensure_dwell_devices(d.get("본문") or raw, kw0)
+        # 소제목이 문단 끝에 붙어 나오면 이후 전 단계(체류 장치·사진 배치·게이트·GEO 채점)가
+        # 그 소제목을 못 본다 — 가장 먼저 제 줄로 내린다.
+        _body_raw, _dwell_rep = _ensure_dwell_devices(
+            _own_line_headings(d.get("본문") or raw), kw0)
         # 글-사진 의미 매칭: LLM 마커 배치 대신 사진 설명↔문단 어절 겹침으로 결정적 재배치(레이트리밋 무관)
         body = _semantic_photo_placement(_body_raw, asset.note or "", len(imgs),
                                         tenant_id=tenant.id)
@@ -1016,6 +1023,18 @@ def _semantic_photo_placement(body: str, note: str, n: int, tenant_id: str = "")
             out.append(f"[사진{i}]")
     result = "\n\n".join(out)
     return _ensure_photo_markers(result, n)           # 최종 무결성(중복·누락) 보정
+
+
+#: 소제목이 문단 끝에 붙어 나오는 경우 — '…이어집니다. ## 가장자리 맞춤이' 처럼.
+#: 2026-08-19 실측: 한 글에서 4개 중 3개가 이 꼴이었고, 그래서 소제목이 **하나도 없는 글**로
+#: 집계됐다(GEO 50점, FAQ 미검출). 발행하면 네이버에도 본문 한 덩이로 올라간다.
+#: ★ 프롬프트 지시는 확률, 기계 보정은 보장 — 제목·FAQ 보강과 같은 패턴이다.
+_INLINE_HEAD = re.compile(r"(?<=[^\n])[ \t]*(#{2,4})[ \t]*(?=[^\s#])")
+
+
+def _own_line_headings(body: str) -> str:
+    """줄 가운데 붙은 ## 소제목을 제 줄로 내린다(내용은 그대로)."""
+    return _INLINE_HEAD.sub(lambda m: "\n\n" + m.group(1) + " ", body or "")
 
 
 def _ensure_photo_markers(body: str, n: int) -> str:

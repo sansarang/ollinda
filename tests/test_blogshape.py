@@ -116,3 +116,42 @@ def test_FAQ를_요구하지_않는_골격에_코드가_도로_붙이지_않는�
     assert "needs_faq" in inspect.getsource(seo.quality_audit), "감점이 골격을 안 본다"
     assert "needs_faq" in inspect.getsource(seo.geo_audit), "GEO 채점이 골격을 안 본다"
     assert "needs_faq" in inspect.getsource(qc), "품질 게이트가 골격을 안 본다"
+
+
+def test_모든_골격이_본문_소제목을_요구한다():
+    """★ 2026-08-19 실측 — 체크리스트형 글이 소제목 0개로 나왔다(GEO 33점).
+
+    골격을 도입하면서 옛 [필수 섹션] 지시를 지웠는데, 그 지시가 **본문 소제목을 강제하던
+    유일한 곳**이었다. 마무리 블록(FAQ·요약)은 골격마다 달라도 되지만,
+    본문 소제목은 다르다 — 검색에서 **문단 단위로 뜨는 단위**가 소제목이다.
+    """
+    for s in bs.SHAPES:
+        blk = bs.prompt_block(s["id"], "자주 묻는 질문", "한눈 요약")
+        assert "소제목" in blk and "## " in blk, f"{s['id']}가 소제목을 요구하지 않는다"
+        assert "줄 맨 앞" in blk, f"{s['id']}: 줄 맨 앞 지시가 없다(문단 끝에 붙어 나온다)"
+
+
+def test_한_프롬프트에_요약_섹션_이름이_하나다():
+    """★ 2026-08-19 실측 — 한 글에 '한눈 요약'과 '요약하면'이 **둘 다** 실렸다.
+
+    GEO 지시는 기준형 이름을, 골격 지시는 이 글의 이름을 쓰고 있었다.
+    "호출부가 따로 지시하니 모델이 그쪽을 따른다"는 가정이 틀렸다 —
+    지시가 둘이면 모델은 둘 다 따른다.
+    """
+    from app import seo
+    d = seo.geo_directive("local", "가게", "업종", "지역",
+                          questions=["질문1"], shape_id="problem", summary_head="요약하면")
+    assert "요약하면" in d, "이 글의 요약 이름을 안 쓴다"
+    from app.services import sections as sec
+    for other in sec.SUMMARY:
+        if other != "요약하면":
+            assert other not in d, f"다른 요약 이름이 같이 들어간다: {other}"
+
+
+def test_생성기가_이_글의_요약_이름을_넘긴다():
+    """안 넘기면 기준형으로 돌아가 다시 두 개가 된다."""
+    import inspect
+    from app.generators import text_claude as tc
+    src = inspect.getsource(tc)
+    i = src.find("geo_directive(")
+    assert "summary_head" in src[i:i + 420], "생성기가 요약 이름을 안 넘긴다"

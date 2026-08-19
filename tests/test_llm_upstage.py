@@ -264,3 +264,129 @@ def test_보조호출도_라우팅을_탄다():
     assert src.count('task="aux"') >= 3, "보조 호출이 여전히 anthropic 직행이다"
     assert llm.route("aux")[0] == "upstage"
     assert llm.solar_effort("aux") == "low", "짧은 호출에 추론을 많이 주면 빈 응답이 난다"
+
+
+# ── 빈 응답 복구 (2026-08-19 실측) ─────────────────────────────────────
+#   같은 계열 결함 **3회째**다. spoken·caption에서 나서 task 이름으로 막았고,
+#   analysis에서 또 나서 '출력 예산이 작으면 low'라는 공통 규칙으로 바꿨다.
+#   오늘은 **예산이 큰 쪽**에서 났다 — 본문 max_tokens=5000(실제 15,000 요청)인데
+#   reasoning이 14,998을 먹고 본문 0자. 예산 크기로는 못 막는다.
+#   판정을 **결과(빈 응답)**로 옮긴다: 빈 응답이면 effort를 낮춰 한 번 더 부른다.
+#
+#   ★ 이게 없으면 벤더 폴백(anthropic)으로 넘어가고, 크레딧이 없으면 생성이 멈춘다.
+#     실제로 오늘 그렇게 2편이 죽었다.
+
+def _resp(content, reasoning=14998):
+    class _R:
+        status_code = 200
+        def json(self):
+            return {"choices": [{"message": {"content": content}}],
+                    "usage": {"prompt_tokens": 100, "completion_tokens": 15000,
+                              "completion_tokens_details": {"reasoning_tokens": reasoning}}}
+    return _R()
+
+
+def test_빈_응답이면_추론을_낮춰_다시_부른다(monkeypatch):
+    """★ 이 골든의 존재 이유. 벤더 폴백보다 값싼 복구를 먼저 한다."""
+    seen = []
+
+    def _post(*a, **k):
+        seen.append((k.get("json") or {}).get("reasoning_effort"))
+        return _resp("" if len(seen) == 1 else "본문입니다")
+    monkeypatch.setenv("UPSTAGE_API_KEY", "up_test")
+    monkeypatch.setattr("requests.post", _post)
+    got = llm._upstage_generate("x", "solar-pro4", 5000, task="body")
+    assert got == "본문입니다", f"재시도가 없다: {got!r}"
+    assert seen == ["medium", "low"], f"재시도 강도가 틀렸다: {seen}"
+
+
+def test_재시도도_비면_실패로_올린다(monkeypatch):
+    """두 번 다 비면 조용히 넘기지 않는다(침묵 폴백 금지)."""
+    monkeypatch.setenv("UPSTAGE_API_KEY", "up_test")
+    monkeypatch.setattr("requests.post", lambda *a, **k: _resp(""))
+    try:
+        llm._upstage_generate("x", "solar-pro4", 5000, task="body")
+        raise AssertionError("빈 응답이 통과했다")
+    except RuntimeError as e:
+        assert "빈 응답" in str(e)
+
+
+def test_성공하면_두_번_부르지_않는다(monkeypatch):
+    """멀쩡한 호출에 재시도가 붙으면 원가·시간이 두 배가 된다."""
+    n = []
+
+    def _post(*a, **k):
+        n.append(1)
+        return _resp("정상 본문")
+    monkeypatch.setenv("UPSTAGE_API_KEY", "up_test")
+    monkeypatch.setattr("requests.post", _post)
+    assert llm._upstage_generate("x", "solar-pro4", 5000, task="body") == "정상 본문"
+    assert len(n) == 1, f"불필요한 재호출 {len(n)}회"
+
+
+def test_이미_low면_같은_호출을_반복하지_않는다(monkeypatch):
+    """low에서도 비면 낮출 곳이 없다 — 같은 값으로 두 번 부르는 것은 낭비다."""
+    n = []
+
+    def _post(*a, **k):
+        n.append((k.get("json") or {}).get("reasoning_effort"))
+        return _resp("")
+    monkeypatch.setenv("UPSTAGE_API_KEY", "up_test")
+    monkeypatch.setattr("requests.post", _post)
+    try:
+        llm._upstage_generate("x", "solar-pro4", 100, task="analysis")   # 짧은 출력 → low
+    except RuntimeError:
+        pass
+    assert n == ["low"], f"low인데 재시도했다: {n}"
+
+
+def test_본문은_더_오래_기다린다(monkeypatch):
+    """★ 2026-08-19 실측 — 같은 본문 호출이 514초에 성공하고, 두 번은 300초에서 끊겼다.
+    끊기면 anthropic 폴백으로 넘어가고 크레딧이 없으면 글이 아예 안 나온다."""
+    seen = {}
+
+    def _post(*a, **k):
+        seen["timeout"] = k.get("timeout")
+        seen["budget"] = (k.get("json") or {}).get("max_tokens")
+        return _resp("본문")
+    monkeypatch.setenv("UPSTAGE_API_KEY", "up_test")
+    monkeypatch.setattr("requests.post", _post)
+    llm._upstage_generate("x", "solar-pro4", 5000, task="body")
+    assert seen["timeout"] >= 600, f"본문 대기 {seen['timeout']}초 — 실측 514초를 못 기다린다"
+    # 짧은 보조 호출까지 10분을 기다리면 파이프라인이 멈춘다
+    llm._upstage_generate("x", "solar-pro4", 100, task="analysis")
+    assert seen["timeout"] == 300
+
+
+def test_타임아웃도_low로_한_번_더_시도한다(monkeypatch):
+    """벤더 폴백(=크레딧 소진 시 생성 중단)보다 값싼 복구를 먼저 한다."""
+    import requests
+    seen = []
+
+    def _post(*a, **k):
+        seen.append((k.get("json") or {}).get("reasoning_effort"))
+        if len(seen) == 1:
+            raise requests.exceptions.ReadTimeout("timeout")
+        return _resp("본문")
+    monkeypatch.setenv("UPSTAGE_API_KEY", "up_test")
+    monkeypatch.setattr("requests.post", _post)
+    assert llm._upstage_generate("x", "solar-pro4", 5000, task="body") == "본문"
+    assert seen == ["medium", "low"], f"재시도 강도가 틀렸다: {seen}"
+
+
+def test_low에서_끊기면_그대로_올린다(monkeypatch):
+    """더 낮출 곳이 없다 — 같은 호출을 반복하면 시간만 두 배로 버린다."""
+    import requests
+    n = []
+
+    def _post(*a, **k):
+        n.append(1)
+        raise requests.exceptions.ReadTimeout("timeout")
+    monkeypatch.setenv("UPSTAGE_API_KEY", "up_test")
+    monkeypatch.setattr("requests.post", _post)
+    try:
+        llm._upstage_generate("x", "solar-pro4", 100, task="analysis")   # 짧은 출력 → low
+        raise AssertionError("실패가 통과했다")
+    except requests.exceptions.ReadTimeout:
+        pass
+    assert len(n) == 1, f"low인데 {len(n)}회 시도했다"

@@ -170,7 +170,13 @@ def _query_phrases(seg: str, text: str) -> list:
             words.append(w)
     # 단일 도메인 용어('성능점검기록부','유리막코팅','주행거리') — 동사·부사 활용형은 제외.
     # 한국어 명사는 아래 어미로 끝나지 않는다는 언어 규칙만 사용(업종 어휘 하드코딩 0).
-    _VERB_TAIL = re.compile(r"(요|다|고|서|지|나|까|네|죠|히|며|면|든|랑|께|든지|니|든가)$")
+    # 활용형 꼬리 — 동사·형용사·부사가 '시장 공통 용어'로 잡히면 빈자리 판정이 무의미해진다.
+    #   실측(2026-08-19 '부산 썬팅'): 상위 25개 중 15개가 '합리적인·쾌적한·깔끔하게·실제로·
+    #   그대로·효과적'이었다. 이걸 '이미 덮인 항목'이라고 주면 차별 항목을 못 가른다.
+    #   ★ 감수한 손실: '고속도로·외국인'처럼 이 꼬리로 끝나는 진짜 명사도 함께 빠진다.
+    #     노이즈 15/25보다 명사 몇 개를 잃는 쪽이 낫다고 판단(업종 어휘 하드코딩 0은 유지).
+    _VERB_TAIL = re.compile(r"(요|다|고|서|지|나|까|네|죠|히|며|면|든|랑|께|든지|니|든가"
+                            r"|한|인|운|된|게|적|로|라|하)$")
     for w in words:
         if len(w) >= 3 and re.search(r"[가-힣]{3,}", w) and not _VERB_TAIL.search(w):
             _push(w)
@@ -307,10 +313,67 @@ def anatomize(keyword: str, top_n: int = 5) -> "dict | None":
     return out
 
 
-def battle_plan(keyword: str, tenant_id: str = "") -> "tuple[str, dict]":
+def topic_gap(keyword: str, an: "dict | None" = None, materials: str = "") -> dict:
+    """🕳 **상위 10개가 다룬 항목 vs 안 다룬 항목** — 내용 단위 빈자리(2026-08-19 사장님 지시).
+
+    사장님: "이길자리는 1위부터 10위까지 글을 크롤링해서 정보성을 차별화 두는거는 어때?"
+
+    왜 각도만으로는 부족한가:
+      battle_plan은 상위글을 4각도(가격·방법·추천·후기)로만 갈랐다. 그래서 지시가
+      "가격형으로 써라"까지밖에 못 갔고, **같은 각도 안에서 또 비슷한 글**이 나왔다.
+      상위 10개가 '가격의 무엇'을 다뤘는지는 안 봤기 때문이다.
+
+    무엇을 하는가:
+      이미 뽑아둔 `common_phrases`(2개 이상 블로그가 함께 쓴 구절 = 시장이 이미 덮은 항목)와
+      우리 재료(사진 분석·사장님 답변)를 대조해 **덮인 것 / 우리만 말할 수 있는 것**을 가른다.
+      LLM 1콜(Solar). 크롤링·본문 저장은 하지 않는다 — anatomize가 이미 지표만 남긴다.
+
+    ★ 업종 중립 — 항목 목록을 코드에 갖지 않는다. 재료는 그 판의 구절과 이 세트의 입력뿐이다.
+    ★ 없는 것을 지어내지 않는다. 우리 재료에 근거가 없으면 '차별 항목 없음'으로 둔다(정직 게이트).
+    """
+    an = an or cached(keyword) or {}
+    covered = [p["p"] for p in (an.get("common_phrases") or [])][:20]
+    if not covered:
+        return {"covered": [], "gaps": [], "why": "상위글 해부 데이터 없음"}
+    if not (materials or "").strip():
+        # 재료가 없으면 '무엇이 덮였는지'만 알려준다(빈자리 제안은 근거가 있어야 한다)
+        return {"covered": covered, "gaps": [], "why": "이 세트 재료 없음 — 덮인 항목만 보고"}
+    try:
+        from app import llm
+        v = llm.call_task(
+            "analysis",
+            "너는 검색 결과 분석가다. 아래 [이미 덮인 항목]은 그 검색어 상위 글들이 공통으로 다룬 것이다.\n"
+            "[우리 재료]에서 **상위 글들이 다루지 않은** 항목만 골라라.\n"
+            "규칙: ① 우리 재료에 실제로 있는 것만(없는 것을 지어내지 마라) "
+            "② 덮인 항목과 같은 말·같은 뜻이면 제외 ③ 검색자가 궁금해할 만한 것만 "
+            "④ 최대 3개, 각 12자 이내 명사구 ⑤ 없으면 '없음' 한 단어만.\n"
+            "출력: 쉼표로 구분한 항목만(설명 금지).\n\n"
+            f"[검색어] {keyword}\n"
+            f"[이미 덮인 항목] {', '.join(covered)}\n"
+            f"[우리 재료]\n{materials[:1800]}",
+            max_tokens=120)
+        raw = " ".join((v or "").split()).strip().strip("\"'")
+        if not raw or raw.startswith("없음"):
+            return {"covered": covered, "gaps": [], "why": "우리 재료에 차별 항목 없음"}
+        gaps = [g.strip() for g in raw.replace("·", ",").split(",") if 1 < len(g.strip()) <= 16][:3]
+        low = [c.replace(" ", "") for c in covered]
+        gaps = [g for g in gaps if g.replace(" ", "") not in low]     # 덮인 것과 겹치면 버린다
+        return {"covered": covered, "gaps": gaps,
+                "why": ("상위글이 안 다룬 항목" if gaps else "제안이 덮인 항목과 겹쳐 폐기")}
+    except Exception:
+        _log.exception("[anatomy] 항목 빈자리 판정 실패 kw=%r", keyword)
+        return {"covered": covered, "gaps": [], "why": "판정 실패"}
+
+
+def battle_plan(keyword: str, tenant_id: str = "", materials: str = "") -> "tuple[str, dict]":
     """🗺 판 유형별 작전 지시서(2026-08-01 사장님 승인) — 4신호(공급·추세·상대전력·해부)를
     글쓰기 작전으로 변환해 프롬프트에 주입. 반환 (프롬프트 블록, 감사용 meta).
-    신호가 없으면 빈 문자열(기존 글쓰기 그대로) — 파이프라인을 절대 막지 않는다."""
+    신호가 없으면 빈 문자열(기존 글쓰기 그대로) — 파이프라인을 절대 막지 않는다.
+
+    materials: 이 세트의 재료(사진 분석·사장님 답변). 있으면 **내용 단위 빈자리**까지 판정한다
+               (2026-08-19 사장님 지시 — 상위 10개가 안 다룬 항목으로 치고 들어간다).
+    """
+    _materials_hint = materials or ""
     kw = " ".join((keyword or "").split())
     if not kw:
         return "", {}
@@ -390,6 +453,24 @@ def battle_plan(keyword: str, tenant_id: str = "") -> "tuple[str, dict]":
                          "맥락)을 자연스럽게 한 문장 녹여라(과장·날조 금지, 사실 프레임만).")
         elif falling:
             lines.append("[톤 — 에버그린] 유행 표현을 피하고 오래 읽힐 기본기형으로 써라(시점 표현 최소화).")
+        # 🕳 내용 단위 빈자리(2026-08-19) — 각도만 틀면 같은 각도 안에서 또 비슷한 글이 나온다.
+        #   상위 10개가 이미 덮은 항목을 알려주고, 우리 재료에만 있는 것을 앞세우게 한다.
+        try:
+            _tg = topic_gap(kw, an, materials=_materials_hint)
+            meta["topic_gap"] = {"covered": (_tg.get("covered") or [])[:10],
+                                 "gaps": _tg.get("gaps") or [], "why": _tg.get("why")}
+            _cov = ", ".join((_tg.get("covered") or [])[:8])
+            _gap = ", ".join(_tg.get("gaps") or [])
+            if _gap:
+                lines.append(f"[내용 빈자리 — 여기로 치고 들어가라] 상위 글들이 이미 덮은 것: {_cov}. "
+                             f"**이 글에서 앞세울 것: {_gap}** — 소제목 하나를 여기에 쓰고 "
+                             "우리 재료의 실측·사진으로만 뒷받침하라(없는 내용 지어내기 금지). "
+                             "덮인 항목은 짧게 스치고 지나가라(같은 말을 길게 반복하면 유사문서다).")
+            elif _cov:
+                lines.append(f"[내용 — 이미 덮인 것] {_cov}. 이 항목들은 짧게만 다루고, "
+                             "우리 사진·기록에서만 나오는 구체 장면으로 분량을 채워라.")
+        except Exception:
+            pass
         return "\n".join(lines) + "\n", meta
     except Exception:
         return "", meta
