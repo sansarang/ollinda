@@ -3046,3 +3046,20 @@ def client_contact(tid: str) -> dict:
                 "name": (r["client_name"] or "") if r else ""}
     except sqlite3.OperationalError:
         return {"email": "", "name": ""}
+
+
+def recent_blog_shapes(tenant_id: str, limit: int = 6) -> list[str]:
+    """그 가게가 최근에 쓴 글 골격 id — 최신순(2026-08-19).
+
+    같은 뼈대가 연속으로 나가는 것을 막기 위해 blogshape.pick()이 이 목록을 피한다.
+    실측: 루마썬팅 8편이 전부 같은 뼈대였다.
+    """
+    try:
+        with _conn() as c:
+            rows = c.execute(
+                "SELECT json_extract(payload,'$.blog_shape') AS s FROM content_pieces "
+                "WHERE tenant_id=? AND kind='blog' ORDER BY created_at DESC LIMIT ?",
+                (tenant_id, limit)).fetchall()
+        return [r["s"] for r in rows if r["s"]]
+    except sqlite3.OperationalError:
+        return []

@@ -1022,15 +1022,23 @@ def geo_audit(kind: str, payload: dict, name: str = "", industry: str = "",
         hits.append("정의문(첫 문단에 상호+업종/지역)")
     else:
         misses.append("첫 문단 정의문 없음")
+    from app.services import blogshape as _shp
     from app.services import sections as _sec
-    if _sec.has_summary(text):
-        hits.append("한눈 요약")
-    else:
-        misses.append("요약 섹션 없음")   # 이름은 글마다 다르다 — 특정 변형을 진단문에 박지 않는다
-    if _sec.has_faq(text):
-        hits.append("Q&A")
-    else:
-        misses.append("Q&A 없음")
+    # 🦴 2026-08-19 — 골격이 요구하지 않는 섹션은 **채점하지 않는다**(있고 없고를 묻지 않는다).
+    #   전에는 모든 글에 요약·Q&A를 요구해 점수를 줬고, 그래서 모든 글이 그 둘을 달았다.
+    #   점수를 받으려고 같은 블록을 붙이는 것이 뼈대 획일화의 원인이었다.
+    #   ★ 없는 것을 감점하지도, 있다고 가점하지도 않는다 — 그 글에 해당 없는 항목이다.
+    _shape_id = (payload.get("blog_shape") or "")
+    if _shp.needs_summary(_shape_id):
+        if _sec.has_summary(text):
+            hits.append("한눈 요약")
+        else:
+            misses.append("요약 섹션 없음")   # 이름은 글마다 다르다 — 특정 변형을 진단문에 박지 않는다
+    if _shp.needs_faq(_shape_id):
+        if _sec.has_faq(text):
+            hits.append("Q&A")
+        else:
+            misses.append("Q&A 없음")
     if biz_type == "seller":
         if any(s in text for s in ("솔직 장단점", "아쉬운 점", "단점")):
             hits.append("솔직 장단점")

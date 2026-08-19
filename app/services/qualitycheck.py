@@ -87,8 +87,16 @@ def run_checks(asset_id: str) -> dict:
         _chk(checks, "표 존재", "|" in body)
         # 섹션 문구는 글마다 변형된다 — 판정은 services/sections.py 단일 관문으로(2026-08-16)
         from app.services import sections as _sec
-        _chk(checks, "FAQ 존재", _sec.has_faq(body))
-        _chk(checks, "한눈 요약 존재", _sec.has_summary(body))
+        # 🦴 2026-08-19 — FAQ·요약을 **모든 글에** 요구하던 것을 골격 기준으로 바꿨다.
+        #   전에는 무조건 검사해서, 시공 기록 글에도 '자주 묻는 질문'이 억지로 붙었다.
+        #   그래서 8편이 같은 뼈대가 됐다(사장님: "글쓰기 형식이 전부다 똑같잔항").
+        #   ★ 게이트를 같이 안 고치면 골격만 바꿨을 때 점수가 깎여 발행이 막힌다.
+        from app.services import blogshape as _shp
+        _shape_id = pl.get("blog_shape") or ""
+        if _shp.needs_faq(_shape_id):
+            _chk(checks, "FAQ 존재", _sec.has_faq(body))
+        if _shp.needs_summary(_shape_id):
+            _chk(checks, "한눈 요약 존재", _sec.has_summary(body))
         _mk = re.findall(r"\[사진(\d+)\]", body)
         _chk(checks, "사진 마커 존재·중복 없음", bool(_mk) and len(_mk) == len(set(_mk)),
              f"{len(_mk)}개")

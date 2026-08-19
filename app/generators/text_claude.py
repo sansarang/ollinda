@@ -386,6 +386,17 @@ class BlogDraftGenerator(Generator):
             _sec_names = _secm.prompt_names(getattr(asset, "id", "") or tenant.id)
         except Exception:
             _sec_names = {"summary": "한눈 요약", "faq": "자주 묻는 질문", "related": "함께 보면 좋은 글"}
+        # 🦴 이 글의 골격 — 그 가게가 최근에 쓴 것은 피해서 고른다(결정적).
+        try:
+            from app import db as _dbsh
+            from app.services import blogshape as _shm
+            _recent = _dbsh.recent_blog_shapes(tenant.id, limit=6)
+            _shape = _shm.pick(getattr(asset, "id", "") or tenant.id, _recent)
+            _shape_block = _shm.prompt_block(_shape["id"], _sec_names["faq"], _sec_names["summary"])
+        except Exception:
+            from app.services import blogshape as _shm
+            _shape = _shm.DEFAULT
+            _shape_block = _shm.prompt_block(_shape["id"], _sec_names["faq"], _sec_names["summary"])
         try:      # 🗣 사장님 말투(A안) — 사장님이 직접 쓰신 문장에서만. 표본이 얇으면 빈 문자열.
             from app.services import ownervoice as _ovm
             _voice_rule = _ovm.directive(tenant.id)
@@ -496,12 +507,11 @@ class BlogDraftGenerator(Generator):
               "단계·수치·근거를 **한 문단 안에 모아** 써라. 한 줄짜리 문단으로 흩뿌리지 마라.\n"
               "· 그 문단만 따로 읽어도 뜻이 통해야 한다(앞 문단을 가리키는 말 금지).\n"
               "· 표는 **필수가 아니다.** 항목이 정말 표로 볼 때 더 명확한 경우에만 1개 쓴다.\n"
-            # 📛 섹션 이름은 글마다 바뀐다(2026-08-16) — 실물 6편에서 '## 한눈 요약'·'## 자주 묻는 질문'이
-            #   6/6 글자 하나 안 틀리고 같았다. 수십 편 쌓이면 사람 눈에도 기계 티가 나고
-            #   유사문서 위험도 커진다. 이름은 services/sections.py 단일 관문이 정한다(검사기도 같은 관문을 본다).
-            + f"[필수 섹션] ① '## {_sec_names['faq']}'(Q&A 정확히 3쌍) ② '## {_sec_names['summary']}'(핵심 3줄 목록 — GEO).\n"
-              "  이 둘만 필수다. **소제목 이름은 위에 준 그대로 써라**(다른 말로 바꾸지 마라). "
-              "그 외 관리용 섹션을 임의로 늘리지 마라.\n"
+            # 🦴 글 골격은 글마다 바뀐다(2026-08-19 사장님: "글쓰기 형식이 전부다 똑같잔항").
+            #   2026-08-16에 **이름만** 돌렸더니(sections.py) 뼈대가 그대로 남아 8편이 같았다.
+            #   같은 계열 2회째라 표면이 아니라 구성 규칙 자체를 바꾼다 — services/blogshape.py.
+            #   마무리 섹션(FAQ·요약)도 골격이 정한다: 기록형에 '자주 묻는 질문'이 붙는 어색함이 그 탓이었다.
+            + _shape_block
             # 💬 말 걸기(2026-08-16) — 논문 지표로 재보니 우리 글의 물음표가 **0개**였다.
             #   사람 글과 AI 글을 가르는 강한 신호가 engagement marker(질문·개인적 곁말)인데
             #   우리 글엔 전무했다. 단, 개수를 못 박으면 그 자체가 새로운 기계 패턴이 된다.
@@ -805,6 +815,9 @@ class BlogDraftGenerator(Generator):
                      "battle_plan": _battle_meta,               # 판 분석·작전(2026-08-01) 감사 기록
                      "win_score": _win_rec,                     # 🎲 쓰기 전 승산 실측(근거 포함)
                      "subject_check": ("" if _subj_b is None else ("ok" if _subj_b else "miss")),
+                     # 🦴 이 글의 골격 — 다음 글이 이걸 피해서 고른다(같은 뼈대 반복 방지).
+                     #   게이트도 이 값을 보고 'FAQ·요약이 필요한 글인가'를 판단한다.
+                     "blog_shape": _shape["id"],
 
                      "fixed_info_block": fixed_block,      # 발행 화면 컴포넌트 가이드용(템플릿 PHASE 2·3)
                      "raw": raw, "image_path": imgs[0], "image_paths": imgs},
