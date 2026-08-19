@@ -383,8 +383,54 @@ def _surface_first(cands: list, tenant_id: str = "") -> list:
 MIN_MONTHLY_VOLUME = 100
 
 
-def _volume_first(cands: list, verify: bool = True) -> str:
-    """후보 중 **검색량이 확인된 첫 키워드**를 고른다(매장·셀러 공통 관문).
+#: 상위글이 이만큼 오래됐으면 '아무도 관리하지 않는 자리' — 올라가면 지킬 수 있다.
+#: 반대로 최근 글이 계속 들어오는 자리는 1위를 해도 곧 밀린다.
+STALE_TOP_DAYS = 180
+
+
+def slot_score(keyword: str, volume: int, docs: int, top_age_days: "int | None") -> dict:
+    """'치고 들어갈 자리'인가 — 세 축으로 판정한다(2026-08-19 사장님 지시).
+
+    사장님: "이길 수 있는 자리에 글을 써야 1위를 뛰어넘고 1위를 지속할 수 있다."
+
+    ① 수요   — 검색량. 이게 없으면 1위여도 손님이 안 온다(월 20회 = 하루 0.7명).
+    ② 경쟁   — 기회지수(검색량÷문서수). 공급이 수요보다 많으면 뚫기 어렵다.
+    ③ **지속** — 상위글 나이. 낡았으면 아무도 관리하지 않는 자리라 **지킬 수 있다.**
+                 최근 글이 계속 들어오는 자리는 올라가도 밀린다.
+
+    실측(루마썬팅, 2026-08-19):
+      부산 썬팅      670회 · 26만건 · 494일  → 수요 있고 상위글 낡음 = **최선**
+      썬팅 가격    4,280회 · 86만건 ·  37일  → 수요 크지만 새 글이 계속 들어옴
+      차량 썬팅    1,770회 · 226만건 ·  51일  → 레드오션
+      부산 동구 썬팅   30회 · 3,489건 · 2076일 → **기회지수 1위인데 수요가 없다**
+    ★ 기회지수만 보면 아무도 안 찾는 말이 1등으로 뽑힌다 — 그게 지금까지의 함정이었다.
+    """
+    vol = int(volume or 0)
+    opp = (vol / docs) if docs and docs > 0 else 0.0
+    stale = bool(top_age_days and top_age_days >= STALE_TOP_DAYS)
+    if vol < MIN_MONTHLY_VOLUME:
+        return {"keyword": keyword, "ok": False, "why": f"수요 없음(월 {vol}회)",
+                "vol": vol, "docs": docs, "opp": opp, "age": top_age_days, "rank": -1}
+    # 점수 = 수요(로그) × 기회지수 × **지속성**
+    #   ★ 지속성이 결정적이다(2026-08-19). 처음엔 stale에 ×1.6만 줬더니
+    #     '썬팅 가격'(4,280회·86만건·상위글 37일)이 1등으로 뽑혔다.
+    #     수요는 크지만 새 글이 계속 밀고 들어오는 자리라 **1위를 해도 지키지 못한다.**
+    #     사장님: "이길 수 있는 자리에 글을 써야 1위를 뛰어넘고 1위를 지속할 수 있다."
+    #     → 낡지 않은 자리는 **감점**한다(×0.5). 올라가는 것보다 지키는 것이 어렵다.
+    #   ★ 수요를 로그로 누르는 이유 — 안 그러면 문서 226만 건짜리 거대 키워드가 독식한다.
+    import math
+    score = math.log10(max(vol, 10)) * (1 + opp * 200) * (1.6 if stale else 0.5)
+    why = ("상위글이 낡아 지킬 수 있다" if stale else
+           "수요는 있으나 상위가 최근 글로 계속 갱신된다(지키기 어렵다)")
+    return {"keyword": keyword, "ok": True, "why": why, "vol": vol, "docs": docs,
+            "opp": opp, "age": top_age_days, "stale": stale, "rank": score}
+
+
+def _volume_first(cands: list, verify: bool = True, deep: bool = True) -> str:
+    """후보 중 **가장 이길 만한 자리**를 고른다(매장·셀러 공통 관문).
+
+    deep=True면 문서 수·상위글 나이까지 재서 slot_score로 정렬한다(무료 API, 후보 5개까지).
+    deep=False면 검색량 하한만 본다(빠른 경로).
 
     ★ 무측정(None)은 통과시킨다 — 검색광고 API가 못 재는 말도 있고,
       임의 숫자로 채우면 그게 날조다(정직 게이트). 다만 **0으로 측정된 것은 버린다.**
@@ -394,6 +440,8 @@ def _volume_first(cands: list, verify: bool = True) -> str:
         return ""
     if not verify:
         return cands[0]
+    import logging as _lgv
+    _log = _lgv.getLogger("shopcast.seo")
     try:
         from app.services import searchad as _sa
         if not _sa.configured():
@@ -402,19 +450,59 @@ def _volume_first(cands: list, verify: bool = True) -> str:
                 for v in _sa.keyword_volumes(cands[:8], limit=80)}
     except Exception:
         return cands[0]                      # 조회 실패로 생성을 막지 않는다
-    import logging as _lgv
-    skipped = []
+
+    passed, skipped = [], []
     for c in cands:
         v = vols.get(c.replace(" ", ""))
-        if v is None or v >= MIN_MONTHLY_VOLUME:
-            if skipped:                      # 왜 건너뛰었는지 남긴다(침묵 폴백 금지)
-                _lgv.getLogger("shopcast.seo").info(
-                    "[검색량 관문] 미달 제외 %s → 선택 %r", skipped[:5], c)
-            return c
-        skipped.append(f"{c}({v}회)")
-    _lgv.getLogger("shopcast.seo").warning(
-        "[검색량 관문] 후보 전부 월 %d회 미만 — %s", MIN_MONTHLY_VOLUME, skipped[:6])
-    return ""
+        if v is None:                        # 못 잰 말 — 통과시키되 순위는 뒤로
+            passed.append((c, None))
+        elif v >= MIN_MONTHLY_VOLUME:
+            passed.append((c, v))
+        else:
+            skipped.append(f"{c}({v}회)")
+    if not passed:
+        _log.warning("[자리 판정] 후보 전부 월 %d회 미만 — %s", MIN_MONTHLY_VOLUME, skipped[:6])
+        return ""
+    if not deep:
+        return passed[0][0]
+
+    # 🎯 이길 자리 판정 — 문서 수·상위글 나이까지 실측(네이버 API 무료, 24h 캐시)
+    try:
+        import datetime as _dt
+        from app.services import blogrank as _br
+        if not _br.configured():
+            return passed[0][0]
+        now, scored = _dt.datetime.utcnow(), []
+        for c, v in passed[:5]:
+            if v is None:
+                continue
+            try:
+                docs = _br.doc_count(c) or 0
+                ages = []
+                for it in _br._search_blog(c, 5):
+                    try:
+                        ages.append((now - _dt.datetime.strptime(
+                            it.get("postdate", ""), "%Y%m%d")).days)
+                    except Exception:
+                        pass
+                age = int(sum(ages) / len(ages)) if ages else None
+                scored.append(slot_score(c, v, docs, age))
+            except Exception:
+                continue
+        scored = [s for s in scored if s.get("ok")]
+        if scored:
+            scored.sort(key=lambda s: -s["rank"])
+            best = scored[0]
+            _log.info("[자리 판정] 선택 %r — 월 %s회·문서 %s건·상위글 %s일 (%s)%s",
+                      best["keyword"], f"{best['vol']:,}", f"{best['docs']:,}",
+                      best["age"], best["why"],
+                      (" · 제외 " + ", ".join(skipped[:4])) if skipped else "")
+            return best["keyword"]
+    except Exception:
+        pass
+    if skipped:
+        _log.info("[자리 판정] 수요 미달 제외 %s → 선택 %r", skipped[:5], passed[0][0])
+    return passed[0][0]
 
 
 def select_target_keyword(candidates: list, biz_type: str = "local", region: str = "",
