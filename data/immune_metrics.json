@@ -3,7 +3,7 @@
  "months": [
   {
    "month": "2026-08",
-   "commits": 589,
+   "commits": 587,
    "user_found": 10,
    "system_found": 4,
    "unknown": 71,
@@ -12,7 +12,7 @@
   },
   {
    "month": "2026-07",
-   "commits": 707,
+   "commits": 711,
    "user_found": 0,
    "system_found": 0,
    "unknown": 25,
