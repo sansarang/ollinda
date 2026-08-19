@@ -87,3 +87,32 @@ def test_골격_수가_줄지_않는다():
     """종류가 줄면 반복 주기가 짧아진다. 값을 리터럴로 박는다(상수 참조 금지)."""
     assert len(bs.SHAPES) >= 8, f"골격이 {len(bs.SHAPES)}종으로 줄었다"
     assert len({s["id"] for s in bs.SHAPES}) == len(bs.SHAPES), "id가 중복됐다"
+
+
+def test_FAQ를_요구하지_않는_골격에_코드가_도로_붙이지_않는다():
+    """★ 실측으로 잡은 결함(2026-08-19).
+
+    골격을 도입하고 3편을 만들었더니 '붙이지 마라'고 지시한 3편 **전부**에 FAQ가 붙었다.
+    FAQ를 다루는 곳이 넷이었는데 둘만 고쳤기 때문이다:
+      ① 프롬프트 구성 지시   ② 게이트(qualitycheck)    ← 고침
+      ③ 후처리 자동 보강     ④ 출력 형식 지시·감점(seo) ← 안 고침
+    하나만 남아도 원위치다. 네 곳이 같은 기준(blogshape.needs_faq)을 봐야 한다.
+    """
+    import inspect
+    from app.generators import text_claude as tc
+    from app import seo
+    from app.services import qualitycheck as qc
+
+    gen = inspect.getsource(tc)
+    i = gen.find("FAQ 섹션 누락 대비")
+    assert i > 0, "FAQ 보강 후처리를 못 찾음"
+    assert "needs_faq" in gen[i:i + 1400], "후처리가 골격을 안 본다 — 코드가 FAQ를 도로 붙인다"
+
+    # 출력 형식 지시가 FAQ를 또 요구하면 두 지시가 어긋나고 모델은 '있다'는 쪽을 따른다
+    fmt = gen[gen.find("📐 형식 개편"):gen.find("📐 형식 개편") + 700]
+    assert "_sec_names['faq']" not in fmt, "출력 형식 지시가 FAQ를 강제한다"
+
+    # 감점·채점도 같은 기준
+    assert "needs_faq" in inspect.getsource(seo.quality_audit), "감점이 골격을 안 본다"
+    assert "needs_faq" in inspect.getsource(seo.geo_audit), "GEO 채점이 골격을 안 본다"
+    assert "needs_faq" in inspect.getsource(qc), "품질 게이트가 골격을 안 본다"

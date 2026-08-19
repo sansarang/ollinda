@@ -177,13 +177,20 @@ def test_no_prompt_hardcodes_a_section_name():
 
 
 def test_faq_fallback_uses_this_articles_name():
-    """FAQ 누락 폴백이 기준형을 박으면, 변형 이름을 쓴 글에 다른 이름 섹션이 하나 더 붙는다."""
+    """FAQ 누락 폴백이 기준형을 박으면, 변형 이름을 쓴 글에 다른 이름 섹션이 하나 더 붙는다.
+
+    ★ 2026-08-19 — 검사 범위를 늘리고 조건을 하나 더 걸었다.
+      골격(blogshape)이 FAQ를 요구하지 않는 글에도 이 폴백이 **도로 붙이고 있었다.**
+      프롬프트·게이트는 고쳤는데 이 후처리를 안 고쳐서, LLM이 안 쓴 것을 코드가 되살렸다.
+      실측: '붙이지 마라'고 지시한 3편에 전부 FAQ가 붙었다.
+    """
     src = _src("app/generators/text_claude.py")
     i = src.find("FAQ 섹션 누락 대비")
     assert i > 0
-    seg = src[i:i + 500]
+    seg = src[i:i + 1400]
     assert "_sec_names['faq']" in seg, "폴백이 이번 글의 섹션 이름을 안 쓴다"
     assert "has_faq" in seg, "존재 판정이 관문을 안 거친다"
+    assert "needs_faq" in seg, "골격이 요구하지 않는 글에도 FAQ를 도로 붙인다"
 
 
 # ── 3-2: 화자 선언 중복 제거 (2026-08-16) ────────────────────────────────

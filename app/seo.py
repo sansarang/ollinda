@@ -1807,8 +1807,12 @@ def quality_audit(channel: str, kind: str, payload: dict, source: str = "") -> d
         if len(_fulls) >= 3:
             warnings.append(f"행정구역 풀네임 {len(_fulls)}회('{_fulls[0]}' 등) — 기계 삽입 티, 구어형으로")
             score -= 6
+        # 🦴 2026-08-19 — 골격이 FAQ를 요구하지 않는 글은 감점하지 않는다.
+        #   전에는 모든 글에서 -4를 매겨, 점수를 지키려면 FAQ를 붙일 수밖에 없었다.
+        #   그게 8편이 같은 뼈대가 된 이유 중 하나다(services/blogshape.py).
+        from app.services import blogshape as _shp2
         from app.services import sections as _sec2
-        if not _sec2.has_faq(text):
+        if _shp2.needs_faq(payload.get("blog_shape") or "") and not _sec2.has_faq(text):
             warnings.append("FAQ(자주 묻는 질문) 없음 → Q&A·체류 가점 놓침")
             score -= 4
         if len(text) < 1000:
