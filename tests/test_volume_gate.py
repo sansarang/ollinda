@@ -672,3 +672,26 @@ def test_업종_구분자_규칙이_한_곳에만_산다():
     import inspect
     src = inspect.getsource(seo)
     assert 'replace("/", ",").split(",")[0]' not in src, "옛 규칙 사본이 남아 있다"
+
+
+def test_넘어온_업종명도_관문을_거친다(monkeypatch):
+    """★ 2026-08-19 8업종 재실측 — 어간만 고치고 후보 생성기는 원본을 받고 있었다.
+
+    `prof_name or industry_first(...)`는 **부르는 쪽이 값을 넘기면 무효**다.
+    생성기가 prof.name('병원·의원')을 넘기므로 or 뒤가 영영 실행되지 않았고,
+    후보가 '인천 청라 병원·의원 후기'로 만들어졌다.
+    """
+    seen = {}
+
+    def _tk(prof, region, note, axis="local", brand=""):
+        seen["prof"] = prof
+        return [f"{region} {prof}"]
+    monkeypatch.setattr(seo, "target_keywords", _tk)
+    monkeypatch.setattr(seo, "keyword_plan", lambda *a, **k: {"headline": ""})
+    monkeypatch.setattr(seo, "region_conflict", lambda *a, **k: False)
+    monkeypatch.setattr(seo, "keyword_intent_ok", lambda *a, **k: True)
+    monkeypatch.setattr(seo, "searcher_term", lambda s: s)
+    _with_sa(monkeypatch, {})
+    seo.resolve_target_keyword("병원·의원", "인천 청라", "", biz="local",
+                               prof_name="병원·의원")
+    assert "·" not in seen["prof"], f"후보 생성기가 구분자를 그대로 받았다: {seen['prof']}"

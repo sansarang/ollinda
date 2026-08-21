@@ -1077,7 +1077,12 @@ def resolve_target_keyword(industry: str, region: str, note: str, biz: str = "lo
     생성기가 이 함수를 안 거치고 seo.target_keywords로 직접 키워드를 정하면 phantom·기초지역 누수 재발."""
     import logging as _lgk
     _slog = _lgk.getLogger("shopcast.seo")
-    prof_name = prof_name or industry_first(industry)
+    # ★ 넘어온 값도 **관문을 거친다**(2026-08-19 8업종 재실측).
+    #   `prof_name or industry_first(...)`로 뒀더니, 부르는 쪽(생성기)이 prof.name을
+    #   넘기므로 `or` 뒤가 영영 실행되지 않았다 — 어간만 고치고 **후보 생성기는
+    #   '병원·의원'을 그대로 받아** '인천 청라 병원·의원 후기'를 만들었다.
+    #   오늘 세 번째로 같은 모양이다: 기능은 고쳤는데 실제 값이 그 경로로 안 간다.
+    prof_name = industry_first(prof_name or industry)
     prof_name = searcher_term(prof_name) or prof_name     # 🗣 업종명 → 손님이 실제로 검색하는 말
     kws = target_keywords(prof_name, region, note, axis=keyword_axis, brand=brand)
     kplan = keyword_plan(prof_name, region, note, axis=keyword_axis, brand=brand)
