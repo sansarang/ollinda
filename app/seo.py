@@ -459,6 +459,15 @@ def slot_score(keyword: str, volume: int, docs: int, top_age_days: "int | None")
 #: 연관검색어에서 이만큼까지 거둔다.
 RELATED_HARVEST = 12
 
+#: 🖥 매장이 노릴 자리가 아닌 **온라인 채널어**(2026-08-19 8업종 실측).
+#:   '중고차매매사이트'(99,800회)·'인테리어사이트'가 대표로 뽑혔다. 검색자는 사이트를
+#:   찾는 사람이지 시공·매장을 찾는 사람이 아니다 — 1위를 해도 우리 손님이 아니다.
+#:   의도 게이트(LLM)가 한 번은 잡고 한 번은 통과시켰다 — 판정이 흔들리면 기계로 막는다.
+#:   ★ 업종어가 아니라 채널어다(어느 업종에나 똑같이 붙는다) — 업종 중립 유지.
+#:   ★★ 업종 어간과 겹치는 말은 검사에서 뺀다 — '카페'를 그냥 넣었더니 **카페 가게는
+#:      모든 후보가 걸러진다**(내가 넣자마자 만든 결함). 그 가게에겐 업종어다.
+ONLINE_CHANNEL_WORDS = ("사이트", "홈페이지", "어플", "쇼핑몰", "플랫폼", "카페")
+
 #: 문서수·상위글 나이까지 실측할 후보 수. **자르는 지점이 곧 판정의 상한**이다 —
 #: 5였을 때 좋은 자리가 측정도 안 된 채 탈락했다(2026-08-19 '테슬라중고차' 실측).
 #: 후보 하나당 무료 API 2콜이라 넉넉히 둔다.
@@ -579,6 +588,8 @@ def _with_related(cands: list, industry: str, wide: str = "",
             continue
         if vol < MIN_MONTHLY_VOLUME:
             continue
+        if any(w in flat for w in ONLINE_CHANNEL_WORDS if w not in core):
+            continue                       # 온라인 채널어 — 매장 손님이 아니다
         have.add(flat)
         got.append((vol, kw))
     if not got:
@@ -602,9 +613,26 @@ def _with_related(cands: list, industry: str, wide: str = "",
     return list(cands) + [k for _, k in got[:RELATED_HARVEST]], known
 
 
+def _looks_local_kw(kw: str, industry: str = "") -> bool:
+    """지역형 키워드로 보이는가 — '업종어 앞에 무언가 붙은 말'(예: 인계동헬스장, 관저동미용실).
+
+    ★ 지명 사전을 갖지 않는다(업종 중립·하드코딩 0). 업종 어간을 뺀 나머지가 남으면
+      그 자리에 지역·동네 이름이 있을 확률이 높다고 보고 '동네' 반경에서만 배제 판단에 쓴다.
+      전국 일반어('헬스장 추천')는 어간을 빼면 접미사만 남으므로 여기 걸리지 않는다.
+    """
+    core = industry_core(industry)
+    flat = (kw or "").replace(" ", "")
+    if not core or core not in flat:
+        return False
+    rest = flat.replace(core, "", 1)
+    # 접미사류(추천·후기·가격 등)는 2~3자, 지명은 보통 앞에 붙는다
+    return len(rest) >= 2 and not flat.startswith(core)
+
+
 def _volume_first(cands: list, verify: bool = True, deep: bool = True,
                   industry: str = "", known: "dict | None" = None,
-                  region: str = "", report: "dict | None" = None) -> str:
+                  region: str = "", report: "dict | None" = None,
+                  radius: str = "광역") -> str:
     """후보 중 **가장 이길 만한 자리**를 고른다(매장·셀러 공통 관문).
 
     deep=True면 문서 수·상위글 나이까지 재서 slot_score로 정렬한다(무료 API, 후보 5개까지).
@@ -712,7 +740,23 @@ def _volume_first(cands: list, verify: bool = True, deep: bool = True,
             #   점수 1등부터 훑어 통과하는 첫 자리를 쓴다(전량 검사가 아니라 필요한 만큼만).
             if region:
                 _kept = []
+                # 🏘 상권 반경(2026-08-19 사장님 결정 ⓒ) — '동네'면 **같은 시 안의 다른 동네도** 막는다.
+                #   실측: 수원 영통 헬스장에 '인계동헬스장', 대전 둔산 미용실에 '관저동미용실'.
+                #   헬스장·미용실은 매주 와야 해서 동네가 다르면 손님이 안 온다.
+                #   반대로 중고차는 원거리 거래가 흔하다 — 그래서 업종이 아니라 가게마다 정한다.
+                #   판정은 지명 사전 없이: 그 키워드가 **우리 지역 토큰을 하나도 안 갖고**
+                #   **다른 동네 이름처럼 보이는가**를 기존 region_conflict에 맡기되,
+                #   '동네' 반경에서는 우리 토큰이 없는 지역형 키워드를 추가로 막는다.
+                _rt = {t for t in (_kw_shorten(region).split()
+                                   + [_region_wide(region)]
+                                   + list(basic_region_cores(region))) if t}
                 for _s in scored[:4]:
+                    _kwf = _s["keyword"].replace(" ", "")
+                    if (radius == "동네" and _rt and not any(t in _kwf for t in _rt)
+                            and _looks_local_kw(_s["keyword"], industry)):
+                        _log.warning("[자리 판정] 상권 반경(동네) — 다른 동네 제외 %r", _s["keyword"])
+                        _rep["dropped"].append(_s["keyword"])
+                        continue
                     try:
                         if region_conflict(_s["keyword"], region):
                             _log.warning("[자리 판정] 다른 지역 키워드 제외 — %r (가게 %r)",
@@ -821,8 +865,15 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
                 if _a not in cands:
                     cands = [_a] + list(cands)
         cands, _known = _with_related(cands, ind0, _wide, anchor=_anchor)
+        _radius = "광역"
+        if tenant_id:
+            try:
+                from app import db as _dbr
+                _radius = _dbr.market_radius(tenant_id)
+            except Exception:
+                pass
         return _volume_first(cands, verify_volume, industry=ind0, known=_known,
-                             region=region, report=report) or _local_fb
+                             region=region, report=report, radius=_radius) or _local_fb
     # 기초지역 배제
     cands = [c for c in cands if not is_basic_region_kw(c, region, biz)]
     # 매물 속성(핵심 속성·분류) — 세트 컨텍스트 + 업종 스키마 attribute_axes에서 공급(전 업종)
@@ -1082,7 +1133,11 @@ def resolve_target_keyword(industry: str, region: str, note: str, biz: str = "lo
     #   넘기므로 `or` 뒤가 영영 실행되지 않았다 — 어간만 고치고 **후보 생성기는
     #   '병원·의원'을 그대로 받아** '인천 청라 병원·의원 후기'를 만들었다.
     #   오늘 세 번째로 같은 모양이다: 기능은 고쳤는데 실제 값이 그 경로로 안 간다.
-    prof_name = industry_first(prof_name or industry)
+    # ★ tenant가 적은 업종을 **프로필명보다 우선**한다(2026-08-19 8업종 실측).
+    #   동물병원 가게의 프로필명이 '병원·의원'이라 대표 키워드가 '인천 병원'이 됐다 —
+    #   가운뎃점은 사라졌지만 **사람 병원 검색자**를 노리게 된다. 1위를 해도 손님이 다르다.
+    #   프로필은 여러 업종을 묶은 분류다. 그 가게가 자기 업종을 적었으면 그게 더 정확하다.
+    prof_name = industry_first(industry or prof_name)
     prof_name = searcher_term(prof_name) or prof_name     # 🗣 업종명 → 손님이 실제로 검색하는 말
     kws = target_keywords(prof_name, region, note, axis=keyword_axis, brand=brand)
     kplan = keyword_plan(prof_name, region, note, axis=keyword_axis, brand=brand)

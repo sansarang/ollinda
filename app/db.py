@@ -78,7 +78,12 @@ def init_db() -> None:
                          #   가입하지 않으므로 owner가 없다 → 주소가 늘 비어 발송 0건이었다.
                          #   가게 자체에 연락처를 둔다(가입과 무관하게).
                          ("client_email", "TEXT"),
-                         ("client_name", "TEXT")]:
+                         ("client_name", "TEXT"),
+                         # 🗺 상권 반경(2026-08-19 사장님 결정 ⓒ) — 손님이 어디서 오는가.
+                         #   '동네' 우리 동네만 · '광역'(기본) 같은 시 안이면 다른 동네도 OK ·
+                         #   '전국' 전국 자리도 적극 노린다(중고차처럼 원거리 거래가 흔한 업종).
+                         #   업종이 아니라 **가게마다** 다르다 — 코드가 단정할 것이 아니다.
+                         ("market_radius", "TEXT")]:
             try:
                 c.execute(f"ALTER TABLE tenants ADD COLUMN {col} {ddl}")
             except sqlite3.OperationalError:
@@ -3046,6 +3051,38 @@ def client_contact(tid: str) -> dict:
                 "name": (r["client_name"] or "") if r else ""}
     except sqlite3.OperationalError:
         return {"email": "", "name": ""}
+
+
+#: 상권 반경 — 가게마다 손님이 오는 범위가 다르다(2026-08-19 사장님 결정).
+MARKET_RADIUS = ("동네", "광역", "전국")
+MARKET_RADIUS_DEFAULT = "광역"
+
+
+def market_radius(tid: str) -> str:
+    """그 가게의 상권 반경. 미설정이면 '광역'(대부분의 매장이 여기다).
+
+    왜 가게마다인가 — 실측(2026-08-19):
+      수원 영통 헬스장에 '인계동헬스장'(같은 시 다른 동네)이 뽑혔다. 헬스장은 매주 와야 해서
+      동네가 다르면 손님이 안 온다. 반면 중고차는 원거리 거래가 흔해 전국도 정당하다.
+      업종으로 단정할 수도, 코드가 정할 수도 없다 — 사장님이 가게별로 정한다.
+    """
+    try:
+        with _conn() as c:
+            r = c.execute("SELECT market_radius FROM tenants WHERE id=?", (tid,)).fetchone()
+        v = (r["market_radius"] or "").strip() if r else ""
+        return v if v in MARKET_RADIUS else MARKET_RADIUS_DEFAULT
+    except sqlite3.OperationalError:
+        return MARKET_RADIUS_DEFAULT
+
+
+def set_market_radius(tid: str, radius: str) -> bool:
+    """상권 반경 설정 — 아는 값만 받는다(오타로 가게 하나가 조용히 기본값으로 돌아가지 않게)."""
+    r = (radius or "").strip()
+    if r not in MARKET_RADIUS:
+        return False
+    with _conn() as c:
+        c.execute("UPDATE tenants SET market_radius=? WHERE id=?", (r, tid))
+    return True
 
 
 def recent_blog_shapes(tenant_id: str, limit: int = 6) -> list[str]:

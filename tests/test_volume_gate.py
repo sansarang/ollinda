@@ -695,3 +695,84 @@ def test_넘어온_업종명도_관문을_거친다(monkeypatch):
     seo.resolve_target_keyword("병원·의원", "인천 청라", "", biz="local",
                                prof_name="병원·의원")
     assert "·" not in seen["prof"], f"후보 생성기가 구분자를 그대로 받았다: {seen['prof']}"
+
+
+# ── 상권 반경 · 업종 우선순위 · 채널어 (2026-08-19 8업종 실측) ──────────
+
+def test_동네_반경이면_같은_시_다른_동네도_막는다():
+    """★ 사장님 결정 ⓒ — 가게마다 정한다. 헬스장·미용실은 매주 와야 해서 동네가 중요하다.
+    실측: 수원 영통 헬스장에 '인계동헬스장', 대전 둔산 미용실에 '관저동미용실'."""
+    import pytest
+    _mp = pytest.MonkeyPatch()
+    try:
+        _with_serp(_mp, {"인계동헬스장": ["인계동 헬스장 후기", "인계동 헬스장 가격"],
+                         "수원 헬스장": ["수원 헬스장 추천", "수원 헬스장 후기"]},
+                   {"인계동헬스장": 900, "수원 헬스장": 500})
+        _mp.setattr(seo, "region_conflict", lambda kw, reg: False)   # 같은 시라 게이트는 통과
+        got = seo._volume_first(["인계동헬스장", "수원 헬스장"], industry="헬스장",
+                                region="수원 영통", radius="동네")
+        assert got == "수원 헬스장", f"동네 반경인데 다른 동네를 골랐다: {got}"
+    finally:
+        _mp.undo()
+
+
+def test_광역_반경이면_같은_시_안은_허용한다():
+    """기본값은 광역 — 같은 시 안이면 동네가 달라도 손님이 올 수 있다."""
+    import pytest
+    _mp = pytest.MonkeyPatch()
+    try:
+        _with_serp(_mp, {"인계동헬스장": ["인계동 헬스장 후기", "인계동 헬스장 가격"]},
+                   {"인계동헬스장": 900})
+        _mp.setattr(seo, "region_conflict", lambda kw, reg: False)
+        got = seo._volume_first(["인계동헬스장"], industry="헬스장",
+                                region="수원 영통", radius="광역")
+        assert got == "인계동헬스장", "광역 반경인데 같은 시를 막았다"
+    finally:
+        _mp.undo()
+
+
+def test_전국_일반어는_동네_반경에서도_안_막힌다():
+    """'헬스장 추천'은 동네 이름이 아니다 — 지명 사전 없이 구분해야 한다."""
+    assert seo._looks_local_kw("헬스장 추천", "헬스장") is False
+    assert seo._looks_local_kw("인계동헬스장", "헬스장") is True
+    assert seo._looks_local_kw("관저동미용실", "미용실") is True
+
+
+def test_가게가_적은_업종을_프로필명보다_우선한다(monkeypatch):
+    """★ 실측 — 동물병원 가게의 프로필명이 '병원·의원'이라 '인천 병원'이 뽑혔다.
+    사람 병원 검색자를 노리게 된다. 1위를 해도 오는 손님이 다르다."""
+    seen = {}
+    monkeypatch.setattr(seo, "target_keywords",
+                        lambda prof, region, note, axis="local", brand="": (
+                            seen.setdefault("prof", prof), [f"{region} {prof}"])[1])
+    monkeypatch.setattr(seo, "keyword_plan", lambda *a, **k: {"headline": ""})
+    monkeypatch.setattr(seo, "region_conflict", lambda *a, **k: False)
+    monkeypatch.setattr(seo, "keyword_intent_ok", lambda *a, **k: True)
+    monkeypatch.setattr(seo, "searcher_term", lambda s: s)
+    _with_sa(monkeypatch, {})
+    seo.resolve_target_keyword("동물병원", "인천 청라", "", biz="local", prof_name="병원·의원")
+    assert seen["prof"] == "동물병원", f"프로필명이 가게 업종을 덮었다: {seen['prof']}"
+
+
+def test_매장에_온라인_채널어를_거두지_않는다(monkeypatch):
+    """'중고차매매사이트'(99,800회)·'인테리어사이트'가 대표로 뽑혔다 — 사이트 찾는 사람은
+    우리 손님이 아니다. 의도 게이트(LLM)가 한 번은 잡고 한 번은 놓쳤다."""
+    import app.services.searchad as sa
+    monkeypatch.setattr(sa, "configured", lambda: True)
+    monkeypatch.setattr(sa, "keyword_volumes", lambda kws, limit=80: [
+        {"keyword": "중고차매매사이트", "total": 99800},
+        {"keyword": "중고차사이트", "total": 45900},
+        {"keyword": "부산중고차", "total": 9250}])
+    got, _ = seo._with_related(["부산 중고차"], "중고차", "부산")
+    flat = {c.replace(" ", "") for c in got}
+    assert "중고차매매사이트" not in flat and "중고차사이트" not in flat, f"채널어를 거뒀다: {flat}"
+
+
+def test_카페_가게는_카페가_업종어다(monkeypatch):
+    """★ 채널어 목록을 만들자마자 낸 결함 — '카페'를 넣었더니 카페 가게는 후보가 전멸한다."""
+    import app.services.searchad as sa
+    monkeypatch.setattr(sa, "configured", lambda: True)
+    monkeypatch.setattr(sa, "keyword_volumes", lambda kws, limit=80: [
+        {"keyword": "성수동카페", "total": 5000}, {"keyword": "카페추천", "total": 3000}])
+    got, _ = seo._with_related(["성남 카페"], "카페", "성남")
+    assert len(got) > 1, f"카페 가게의 후보가 전멸했다: {got}"
