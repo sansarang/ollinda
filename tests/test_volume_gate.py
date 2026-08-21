@@ -164,6 +164,20 @@ def test_세_축을_전부_본다():
 #   ★ 교훈: 관문 안쪽만 고치면 관문 앞의 분기가 그대로 통과시킨다.
 #     '고쳤다'의 증거는 함수 단위 테스트가 아니라 **부르는 쪽 경로**여야 한다.
 
+_last_cands: list = []
+
+
+def _spy_cands(monkeypatch):
+    """_volume_first가 실제로 무엇을 후보로 받았는지 본다(거둔 후보가 들어왔나)."""
+    orig = seo._volume_first
+
+    def _wrap(cands, *a, **k):
+        _last_cands.clear()
+        _last_cands.extend(cands)
+        return orig(cands, *a, **k)
+    monkeypatch.setattr(seo, "_volume_first", _wrap)
+
+
 def _stub_resolve(monkeypatch, cands, headline):
     monkeypatch.setattr(seo, "target_keywords", lambda *a, **k: list(cands))
     monkeypatch.setattr(seo, "keyword_plan", lambda *a, **k: {"headline": headline})
@@ -201,27 +215,6 @@ def test_정보성_글은_그대로_둔다(monkeypatch):
     assert kw0 == "가 나"
 
 
-def test_매장은_전국_키워드로_새지_않는다(monkeypatch):
-    """★ 관문을 열자마자 나온 부작용(2026-08-19).
-
-    '썬팅 추천'은 전국 1,020회에 상위글이 낡아 점수가 가장 높았다. 그런데 부산 동구
-    가게가 전국 키워드 1위를 지킬 수 없고, 되더라도 검색자가 전국이라 가게에 안 온다.
-    헌법 1항(각 업체가 노출되는 것)의 주어는 **그 가게**다.
-    """
-    _with_sa(monkeypatch, {"썬팅 추천": 1020, "부산 썬팅": 670, "부산 동구 썬팅업체": 20})
-    got = seo.select_target_keyword(["썬팅 추천", "부산 썬팅", "부산 동구 썬팅업체"],
-                                    biz_type="local", region="부산광역시 동구", industry="썬팅",
-                                    verify_volume=True)
-    assert "부산" in got, f"지역 없는 전국 키워드를 골랐다: {got}"
-
-
-def test_지역_후보가_전부_미달이면_제네릭으로_간다(monkeypatch):
-    """수요 없는 지역이라면 전국 키워드로 도망가지 않는다 — 지역+업종 제네릭으로 둔다."""
-    _with_sa(monkeypatch, {"썬팅 추천": 5000, "부산 썬팅": 20})
-    got = seo.select_target_keyword(["부산 썬팅", "썬팅 추천"], biz_type="local",
-                                    region="부산광역시 동구", industry="썬팅", verify_volume=True)
-    assert got != "썬팅 추천", "지역 후보 미달 시 전국으로 샜다"
-    assert "썬팅" in got
 
 
 def test_광역_자리가_후보에_들어간다(monkeypatch):
@@ -334,5 +327,316 @@ def test_전부_죽은_판이면_그중_하나를_고르지_않는다():
                    {"부산 썬팅업체": 1000})
         assert seo._volume_first(["부산 썬팅업체"], industry="썬팅") == "", \
             "죽은 판을 그대로 돌려줬다(침묵 폴백)"
+    finally:
+        _mp.undo()
+
+
+# ── 지역 형식 (2026-08-19 다섯 번째 실측 — 배포 직후 잡은 회귀) ──────────
+#   "매장은 지역이 붙은 후보 안에서만 고른다"는 가드를 넣고 배포했는데,
+#   그 가드가 `_region_wide()`에 의존했다. 그 함수는 '광역시/특별시/도' 접미사가
+#   있어야 값을 준다 — 실계정 주안모터스의 region은 **'부산 기장'**이고,
+#   시연 tenant들도 '수원 영통'·'가평 청평'이다. 전부 빈 값이라 **가드가 통째로 통과**됐고,
+#   헬스장(수원 영통) 실측에서 대표 키워드가 '헬스장 추천'(전국)으로 나왔다.
+#
+#   ★ 가드는 '조건이 맞을 때 막는 것'이 아니라 '조건을 못 읽으면 막는 것'이어야 한다.
+
+def test_행정접미사가_없는_지역도_광역_자리를_만든다(monkeypatch):
+    """실계정 주안모터스가 이 형식이다('부산 기장') — 광역 후보를 못 만들면 고를 자리가 없다.
+
+    ★ 지역을 **강제하지는 않는다**(2026-08-19 사장님 지적). 여기서 '부산 중고차'가
+      뽑히는 이유는 지역이라서가 아니라 상위글이 10년 낡아 세 축 점수가 높기 때문이다.
+    """
+    _with_sa(monkeypatch, {"중고차 추천": 5000, "부산 중고차": 800})
+    _spy_cands(monkeypatch)
+    got = seo.select_target_keyword(["중고차 추천"], biz_type="local",
+                                    region="부산 기장", industry="중고차", verify_volume=True)
+    assert got in ("부산 중고차", "중고차 추천"), got
+    assert "부산 중고차" in _last_cands, "광역 자리를 후보에 못 넣었다"
+
+
+def test_시군_이름만_있는_지역도_광역_자리를_만든다(monkeypatch):
+    """후보에 **들어가는지**만 본다 — 이기는지는 세 축이 정한다(지역이라서 이기지 않는다).
+
+    ★ 전에는 여기서 '수원 헬스장'이 뽑히는 것을 단언했다. 그건 지역 강제를 전제한 기대였다.
+      강제를 걷어낸 지금, 상위글 나이·문서수가 같다면 수요 큰 쪽이 이기는 게 맞다.
+    """
+    _with_sa(monkeypatch, {"헬스장 추천": 5000, "수원 헬스장": 500, "수원 영통 헬스장": 30})
+    _spy_cands(monkeypatch)
+    seo.select_target_keyword(["수원 영통 헬스장", "헬스장 추천"], biz_type="local",
+                              region="수원 영통", industry="헬스장", verify_volume=True)
+    assert "수원 헬스장" in _last_cands, f"광역 자리를 후보에 못 넣는다: {_last_cands}"
+
+
+
+def test_기초지역_후보도_후보로_남는다(monkeypatch):
+    """'수원 영통 헬스장'도 이 가게의 자리다 — 광역만 남기고 지우지 않는다."""
+    _with_sa(monkeypatch, {"수원 영통 헬스장": 300, "헬스장 추천": 9000})
+    got = seo.select_target_keyword(["수원 영통 헬스장", "헬스장 추천"], biz_type="local",
+                                    region="수원 영통", industry="헬스장", verify_volume=True)
+    assert "수원" in got, f"전국으로 샜다: {got}"
+
+
+def test_지역을_몰라도_글은_나간다(monkeypatch):
+    """지역이 없는 tenant의 글을 막아버리면 안 된다."""
+    _with_sa(monkeypatch, {"헬스장 추천": 5000})
+    got = seo.select_target_keyword(["헬스장 추천"], biz_type="local",
+                                    region="", industry="헬스장", verify_volume=True)
+    assert got == "헬스장 추천", "지역 없는 tenant의 글을 막아버렸다"
+
+
+# ── 후보 수집 (2026-08-19 사장님 지적) ────────────────────────────────
+#   "중고차면 중고차지 왜 하필 지역특화로 한 거냐."
+#   후보 생성기가 [업종어+지역+접미사] 조합만 만들어서 풀 안에 쓸 자리가 없었다.
+#   검색광고 API는 힌트 하나에 연관검색어 ~40개를 검색량과 함께 준다 — 받아놓고 버리고 있었다.
+
+class _FakeRelated:
+    """연관검색어까지 돌려주는 검색광고 대역(실제 API 동작 — 공백 없는 형태로 온다)."""
+    RELATED = [{"keyword": "자동차썬팅", "total": 5660},
+               {"keyword": "썬팅가격", "total": 4280},
+               {"keyword": "썬팅재시공", "total": 620},
+               {"keyword": "버텍스1100", "total": 3040},      # 업종어 없음 → 버려야 한다
+               {"keyword": "신차패키지", "total": 1300},      # 업종어 없음
+               {"keyword": "윈도틴팅", "total": 20}]          # 수요 미달
+
+    def configured(self):
+        return True
+
+    def keyword_volumes(self, kws, limit=80):
+        base = [{"keyword": k, "total": {"부산 동구 썬팅": 30}.get(k)} for k in kws]
+        return base + self.RELATED
+
+
+def _with_related_sa(monkeypatch):
+    import app.services.searchad as sa
+    f = _FakeRelated()
+    monkeypatch.setattr(sa, "configured", f.configured)
+    monkeypatch.setattr(sa, "keyword_volumes", f.keyword_volumes)
+
+
+def test_시장이_쓰는_말을_후보로_거둔다(monkeypatch):
+    """★ 이 판정의 존재 이유. 우리가 만들 수 없는 말이 여기서 들어온다."""
+    _with_related_sa(monkeypatch)
+    _spy_cands(monkeypatch)
+    seo.select_target_keyword(["부산 동구 썬팅"], biz_type="local",
+                              region="부산광역시 동구", industry="썬팅", verify_volume=True)
+    flat = {c.replace(" ", "") for c in _last_cands}
+    assert "자동차썬팅" in flat and "썬팅가격" in flat, f"연관검색어를 안 거뒀다: {_last_cands}"
+    assert "썬팅재시공" in flat, "롱테일도 거둬야 한다"
+
+
+def test_업종어가_없는_말은_거두지_않는다(monkeypatch):
+    """'버텍스1100'·'신차패키지'는 우리 재료가 뒷받침한다는 보장이 없다 — 날조 후보가 된다."""
+    _with_related_sa(monkeypatch)
+    _spy_cands(monkeypatch)
+    seo.select_target_keyword(["부산 동구 썬팅"], biz_type="local",
+                              region="부산광역시 동구", industry="썬팅", verify_volume=True)
+    flat = {c.replace(" ", "") for c in _last_cands}
+    assert "버텍스1100" not in flat and "신차패키지" not in flat, f"근거 없는 후보를 넣었다: {flat}"
+
+
+def test_수요_미달은_거두지_않는다(monkeypatch):
+    _with_related_sa(monkeypatch)
+    _spy_cands(monkeypatch)
+    seo.select_target_keyword(["부산 동구 썬팅"], biz_type="local",
+                              region="부산광역시 동구", industry="썬팅", verify_volume=True)
+    assert "윈도틴팅" not in {c.replace(" ", "") for c in _last_cands}
+
+
+def test_거둔_검색량을_다시_조회하지_않는다(monkeypatch):
+    """★ 거두고도 못 쓰는 결함 방지. 조회 창(앞 8개) 밖으로 밀리면 '무측정'이 되어 버려진다."""
+    _with_related_sa(monkeypatch)
+    calls = []
+    import app.services.searchad as sa
+    orig = sa.keyword_volumes
+    monkeypatch.setattr(sa, "keyword_volumes",
+                        lambda kws, limit=80: (calls.append(list(kws)), orig(kws, limit))[1])
+    seo._volume_first(["가 나"], industry="썬팅", known={"가나": 900}, deep=False)
+    assert not calls, "이미 잰 값을 두고 다시 조회했다"
+
+
+def test_다른_지역_키워드는_고르지_않는다(monkeypatch):
+    """★ 2026-08-01 '김해썬팅' 실사고 · 2026-08-19 재발.
+
+    지역 강제를 걷어내자 연관검색어에서 '대구중고차사이트'가 **부산 가게**의 대표
+    키워드로 뽑혔다. 전국 키워드는 정당하지만 남의 동네는 미끼 글이다 — 헌법 금지.
+    """
+    import pytest
+    _mp = pytest.MonkeyPatch()
+    try:
+        _with_serp(_mp, {"대구 중고차": ["대구 중고차 후기", "대구 중고차 매매"],
+                         "부산 중고차": ["부산 중고차 후기", "부산 중고차 시세"]},
+                   {"대구 중고차": 9000, "부산 중고차": 800})
+        _mp.setattr(seo, "region_conflict",
+                    lambda kw, reg: "대구" in kw and "대구" not in reg)
+        got = seo._volume_first(["대구 중고차", "부산 중고차"],
+                                industry="중고차", region="부산 기장")
+        assert got == "부산 중고차", f"남의 동네 키워드를 골랐다: {got}"
+    finally:
+        _mp.undo()
+
+
+def test_전국_키워드는_막지_않는다(monkeypatch):
+    """지역이 없는 말('중고차 시세')은 남의 동네가 아니다 — 이건 정당한 자리다."""
+    import pytest
+    _mp = pytest.MonkeyPatch()
+    try:
+        _with_serp(_mp, {"중고차 시세": ["중고차 시세 조회", "중고차 시세표"]},
+                   {"중고차 시세": 50000})
+        _mp.setattr(seo, "region_conflict", lambda kw, reg: False)
+        got = seo._volume_first(["중고차 시세"], industry="중고차", region="부산 기장")
+        assert got == "중고차 시세", f"전국 자리를 막았다: {got}"
+    finally:
+        _mp.undo()
+
+
+def test_지역_판정이_실패해도_글은_나간다(monkeypatch):
+    """LLM 판정이 죽었다고 생성을 멈추면 안 된다(무키·실패는 통과)."""
+    import pytest
+    _mp = pytest.MonkeyPatch()
+    try:
+        _with_serp(_mp, {"부산 중고차": ["부산 중고차 후기", "부산 중고차 시세"]},
+                   {"부산 중고차": 800})
+
+        def _boom(*a, **k):
+            raise RuntimeError("판정 죽음")
+        _mp.setattr(seo, "region_conflict", _boom)
+        assert seo._volume_first(["부산 중고차"], industry="중고차",
+                                 region="부산 기장") == "부산 중고차"
+    finally:
+        _mp.undo()
+
+
+# ── 세트 앵커 (2026-08-19 사장님 질문) ────────────────────────────────
+#   "테슬라 중고차 판매를 목적으로 글을 쓴다고 가정하자. 키워드 선정은 어떻게 되는데?"
+#   실측 답: '부산 중고차' — **그 차가 키워드에 한 글자도 없었다.**
+#   앵커를 업종 스키마의 미리 만든 토큰 목록에서만 찾았는데, 그 목록은 국산차뿐이라
+#   테슬라·BMW·벤츠·볼보가 통째로 안 보였다. 목록은 끝이 없다 — 재료가 답을 갖고 있다.
+
+def test_목록에_없는_대상도_재료에서_뽑는다(monkeypatch):
+    """★ 이 판정의 존재 이유. 수입차 전체가 안 보이던 구멍."""
+    from app import llm
+    monkeypatch.setattr(llm, "call_task", lambda *a, **k: "테슬라 모델3")
+    note = "[사진1] 매장 전시장의 흰색 테슬라 모델3, 무사고.\n[사진2] 주행거리 3만8천km."
+    assert seo.set_anchor(note, "중고차판매") == "테슬라 모델3"
+
+
+def test_재료에_없는_말은_앵커로_쓰지_않는다(monkeypatch):
+    """★ 프롬프트가 날조를 시키는 통로가 되면 안 된다 — LLM이 헛말을 해도 코드가 막는다."""
+    from app import llm
+    monkeypatch.setattr(llm, "call_task", lambda *a, **k: "그랜저 하이브리드")
+    note = "[사진1] 흰색 테슬라 모델3 외관."
+    assert seo.set_anchor(note, "중고차판매") == "", "재료에 없는 말을 앵커로 썼다"
+
+
+def test_재료가_없으면_앵커도_없다(monkeypatch):
+    from app import llm
+    monkeypatch.setattr(llm, "call_task", lambda *a, **k: "아무거나")
+    assert seo.set_anchor("", "중고차판매") == ""
+
+
+def test_LLM이_죽어도_글은_나간다(monkeypatch):
+    from app import llm
+
+    def _boom(*a, **k):
+        raise RuntimeError("죽음")
+    monkeypatch.setattr(llm, "call_task", _boom)
+    assert seo.set_anchor("[사진1] 흰색 테슬라 모델3", "중고차판매") == ""
+
+
+def test_앵커가_후보와_씨앗에_들어간다(monkeypatch):
+    """★ '뽑았다'와 '그 경로로 간다'는 다르다 — 앵커가 후보에 안 들어가면 장식이다."""
+    seeds = []
+    import app.services.searchad as sa
+    monkeypatch.setattr(sa, "configured", lambda: True)
+    monkeypatch.setattr(sa, "keyword_volumes",
+                        lambda kws, limit=80: (seeds.append(list(kws)),
+                                               [{"keyword": k, "total": 500} for k in kws])[1])
+    _spy_cands(monkeypatch)
+    # industry는 이미 손님말로 바뀐 값이 온다(resolve_target_keyword가 searcher_term 통과) —
+    # '중고차판매'가 아니라 '중고차'. 실호출과 같은 값을 준다.
+    seo.select_target_keyword(["부산 중고차"], biz_type="local", region="부산 기장",
+                              industry="중고차", primary_model="테슬라 모델3",
+                              verify_volume=True)
+    flat = {c.replace(" ", "") for c in _last_cands}
+    assert "테슬라모델3중고차" in flat, f"앵커 자리가 후보에 없다: {_last_cands}"
+    assert any("테슬라" in " ".join(s) for s in seeds), f"앵커를 씨앗으로 안 썼다: {seeds}"
+
+
+def test_앵커가_든_후보를_먼저_측정한다(monkeypatch):
+    """★ 2026-08-19 실측 — 검색량 순으로 줄 세웠더니 거대 일반어가 앞을 다 차지했다.
+
+      중고차(290,700)·중고차매매사이트(99,800)·중고차사이트(45,900)·현대중고차사이트(12,550)
+      → 이 세트의 '테슬라중고차'(4,930회·문서 10만·점수 19.40)가 7번째로 밀려
+        **측정도 안 된 채** 탈락하고, 점수 9.98짜리가 뽑혔다.
+      검색량 순 ≠ 좋은 자리 순이다.
+    """
+    import app.services.searchad as sa
+    monkeypatch.setattr(sa, "configured", lambda: True)
+    monkeypatch.setattr(sa, "keyword_volumes", lambda kws, limit=80: [
+        {"keyword": "중고차", "total": 290700},
+        {"keyword": "중고차매매사이트", "total": 99800},
+        {"keyword": "중고차사이트", "total": 45900},
+        {"keyword": "현대중고차사이트", "total": 12550},
+        {"keyword": "포르쉐인증중고차", "total": 6840},
+        {"keyword": "테슬라중고차", "total": 4930}])
+    got, _known = seo._with_related(["부산 중고차"], "중고차", "부산", anchor="테슬라 모델3")
+    idx = [i for i, c in enumerate(got) if "테슬라" in c]
+    assert idx and idx[0] <= 2, f"앵커 자리가 뒤로 밀렸다: {got}"
+
+
+def test_측정_창이_좁아지지_않는다():
+    """자르는 지점이 곧 판정의 상한이다 — 값을 리터럴로 박는다(상수 참조 금지)."""
+    assert seo.DEEP_MEASURE >= 10, f"측정 후보가 {seo.DEEP_MEASURE}개로 줄었다"
+
+
+# ── 확장 목록·폴백 (2026-08-19 실측) ──────────────────────────────────
+#   대표 키워드만 고치고 확장 목록을 그대로 뒀더니 두 곳에서 죽은 자리가 되살아났다:
+#     ⑴ 의도 게이트가 대표를 기각하자 되돌아갈 곳이 구·군 조합뿐 → '부산 기장 중고차'(70회)
+#     ⑵ 그 말들이 그대로 **태그로 발행**됐다(루마썬팅 글 태그에 '부산 동구 썬팅업체' 계열 5개)
+
+def test_수요_미달로_버린_말을_확장에_남기지_않는다(monkeypatch):
+    """★ 태그·소제목이 이 목록에서 나온다 — 죽은 말이 표면에 실리면 키워드 스터핑이다."""
+    _with_sa(monkeypatch, {"부산 썬팅": 670, "부산 동구 썬팅업체": 20,
+                           "부산 동구 썬팅업체 추천": 20})
+    _stub_resolve(monkeypatch, ["부산 동구 썬팅업체", "부산 동구 썬팅업체 추천"],
+                  "부산 동구 썬팅업체")
+    kw0, kws = seo.resolve_target_keyword("썬팅", "부산광역시 동구", "", biz="local")
+    dead = [k for k in kws if "썬팅업체" in k]
+    assert not dead, f"수요 미달로 버린 말이 확장에 남았다: {dead}"
+
+
+def test_판정_보고서가_살아남은_자리를_준다():
+    """의도 게이트가 되돌아갈 곳이 있어야 한다 — 없으면 죽은 자리로 떨어진다."""
+    import pytest
+    _mp = pytest.MonkeyPatch()
+    try:
+        _with_serp(_mp, {"부산 썬팅": ["부산 썬팅 후기", "부산 썬팅 가격"],
+                         "썬팅 가격": ["썬팅 가격 비교", "썬팅 가격표"]},
+                   {"부산 썬팅": 670, "썬팅 가격": 4280})
+        _mp.setattr(seo, "region_conflict", lambda kw, reg: False)
+        rep: dict = {}
+        got = seo._volume_first(["부산 썬팅", "썬팅 가격"], industry="썬팅",
+                                region="부산광역시 동구", report=rep)
+        assert got in rep["ranked"], "고른 자리가 보고서에 없다"
+        assert len(rep["ranked"]) >= 2, f"차순위가 없다: {rep}"
+    finally:
+        _mp.undo()
+
+
+def test_남의_동네가_확장에도_남지_않는다():
+    """★ 2026-08-19 실측 — 대표에서 걸러낸 '대구중고차사이트'가 확장에 그대로 실렸다.
+    확장은 태그·소제목이 되어 **발행된다**. 대표만 막는 것은 절반만 막는 것이다."""
+    import pytest
+    _mp = pytest.MonkeyPatch()
+    try:
+        _with_serp(_mp, {"대구 중고차": ["대구 중고차 후기", "대구 중고차 매매"],
+                         "부산 중고차": ["부산 중고차 후기", "부산 중고차 시세"]},
+                   {"대구 중고차": 9000, "부산 중고차": 800})
+        _mp.setattr(seo, "region_conflict", lambda kw, reg: "대구" in kw and "대구" not in reg)
+        rep: dict = {}
+        seo._volume_first(["대구 중고차", "부산 중고차"], industry="중고차",
+                          region="부산 기장", report=rep)
+        assert "대구 중고차" in rep["dropped"], f"버린 이유를 안 남겼다: {rep}"
+        assert "대구 중고차" not in rep["ranked"], "남의 동네가 확장 후보로 남았다"
     finally:
         _mp.undo()

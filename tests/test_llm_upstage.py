@@ -354,8 +354,9 @@ def test_본문은_더_오래_기다린다(monkeypatch):
     llm._upstage_generate("x", "solar-pro4", 5000, task="body")
     assert seen["timeout"] >= 600, f"본문 대기 {seen['timeout']}초 — 실측 514초를 못 기다린다"
     # 짧은 보조 호출까지 10분을 기다리면 파이프라인이 멈춘다
+    #   (2026-08-19 실측으로 300 → 120으로 더 줄였다 — 60토큰 콜이 5분을 세웠다)
     llm._upstage_generate("x", "solar-pro4", 100, task="analysis")
-    assert seen["timeout"] == 300
+    assert seen["timeout"] <= 120
 
 
 def test_타임아웃도_low로_한_번_더_시도한다(monkeypatch):
@@ -390,3 +391,22 @@ def test_low에서_끊기면_그대로_올린다(monkeypatch):
     except requests.exceptions.ReadTimeout:
         pass
     assert len(n) == 1, f"low인데 {len(n)}회 시도했다"
+
+
+def test_짧은_호출은_짧게_기다린다(monkeypatch):
+    """★ 2026-08-19 실측 — 60토큰짜리 앵커 추출이 300초를 기다리며 파이프라인을 세웠다.
+
+    예산 하한(max_tokens*3, 최소 6,000) 때문에 짧은 호출도 전부 300초로 묶여 있었다.
+    low 추론이면 정상 응답은 수 초다 — 120초를 넘기면 그 콜은 죽은 것이다.
+    """
+    seen = {}
+
+    def _post(*a, **k):
+        seen["t"] = k.get("timeout")
+        return _resp("답")
+    monkeypatch.setenv("UPSTAGE_API_KEY", "up_test")
+    monkeypatch.setattr("requests.post", _post)
+    llm._upstage_generate("x", "solar-pro4", 60, task="analysis")
+    assert seen["t"] <= 120, f"짧은 호출이 {seen['t']}초를 기다린다"
+    llm._upstage_generate("x", "solar-pro4", 5000, task="body")
+    assert seen["t"] >= 600, "본문은 오래 기다려야 한다(실측 514초 성공)"

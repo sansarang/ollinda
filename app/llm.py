@@ -455,7 +455,11 @@ def _upstage_generate(prompt: str, model: str, max_tokens: int, task: str = "") 
     # ⏱ 대기 시간을 예산에 맞춘다 — 본문(예산 15,000)은 300초로 모자란다.
     #   2026-08-19 실측: 같은 본문 호출이 한 번은 514초에 성공, 두 번은 300초에서 끊겼다.
     #   끊기면 anthropic 폴백으로 넘어가고, 크레딧이 없으면 글이 아예 안 나온다.
-    _timeout = 300 if _budget <= 6000 else 600
+    #   ★ 짧은 호출은 짧게 기다린다(2026-08-19 실측). 예산 하한(6,000) 때문에 60토큰짜리
+    #     앵커 추출도 300초를 기다렸고, 그 한 콜이 파이프라인을 5분 넘게 세웠다.
+    #     low 추론이라 정상이면 수 초에 온다 — 120초를 넘기면 그 콜은 죽은 것이다.
+    _timeout = (120 if max_tokens < SHORT_OUTPUT_TOKENS
+                else (300 if _budget <= 6000 else 600))
 
     def _once(effort: str) -> tuple:
         r = _rq.post("https://api.upstage.ai/v1/chat/completions",

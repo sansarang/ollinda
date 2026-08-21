@@ -442,8 +442,155 @@ def slot_score(keyword: str, volume: int, docs: int, top_age_days: "int | None")
             "opp": opp, "age": top_age_days, "stale": stale, "rank": score}
 
 
+#: 연관검색어에서 이만큼까지 거둔다.
+RELATED_HARVEST = 12
+
+#: 문서수·상위글 나이까지 실측할 후보 수. **자르는 지점이 곧 판정의 상한**이다 —
+#: 5였을 때 좋은 자리가 측정도 안 된 채 탈락했다(2026-08-19 '테슬라중고차' 실측).
+#: 후보 하나당 무료 API 2콜이라 넉넉히 둔다.
+DEEP_MEASURE = 10
+
+
+def set_anchor(note: str, industry: str = "", biz: str = "local") -> str:
+    """🔑 이 세트가 **무엇에 대한 글인가** — 재료에서 대상 하나를 뽑는다(2026-08-19).
+
+    사장님: "테슬라 중고차 판매를 목적으로 글을 쓴다고 가정하자. 키워드 선정은 어떻게 되는데?"
+      실측 — 대표 키워드가 '부산 중고차'로 나왔다. **그 차가 키워드에 한 글자도 없었다.**
+
+    원인: 앵커를 업종 스키마의 **미리 만들어둔 토큰 목록**에서만 찾았다.
+      중고차판매 축0 = 모닝·레이·스파크·아반떼·쏘나타·그랜저·K3~K8·코나·티볼리·셀토스
+      전부 국산차다. 테슬라·BMW·벤츠·볼보는 목록에 없어 **수입차가 통째로 안 보였다.**
+      목록을 늘리는 것은 끝이 없다 — 목록이 아니라 **재료**가 답을 갖고 있다.
+
+    ① 스키마 토큰이 재료에 있으면 그것(무료·즉시).
+    ② 없으면 LLM에게 재료의 대상을 명사 하나로 뽑게 한다(업종 중립 — 목록 없음).
+    ★ 뽑은 말이 **재료에 실제로 있는지 확인**한다. 없으면 버린다(정직 게이트 — 날조 금지).
+    """
+    src = (note or "").strip()
+    if not src:
+        return ""
+    try:                                       # ① 목록에 있으면 공짜로 끝
+        import re as _ra
+        from app.services import indschema as _isa
+        _axes = (_isa.get_schema(industry, biz).get("attribute_axes") or [])
+        for t in ((_axes[0].get("tokens") if _axes else []) or []):
+            if t and _ra.search(r"(?<![가-힣])" + _ra.escape(t), src):
+                return t
+    except Exception:
+        pass
+    try:                                       # ② 재료에서 직접
+        from app import llm
+        v = llm.call_task(
+            "analysis",
+            "아래 [재료]는 가게가 오늘 올릴 사진의 설명이다. 이 글이 **무엇에 대한 글인지**를\n"
+            "손님이 검색할 법한 **명사구 하나**로만 답하라(최대 12자).\n"
+            "규칙: ① 재료에 실제로 적힌 말만 쓴다(지어내지 마라) ② 업종 일반어 말고 "
+            "**이번 것**을 가리키는 말 ③ **색상·크기·상태 같은 수식어는 빼고 이름만** "
+            "(예: '흰색 ○○ △△' → '○○ △△') ④ 없으면 '없음' 한 단어만 ⑤ 설명 금지.\n\n"
+            f"[재료]\n{src[:1200]}",
+            max_tokens=60)
+        cand = " ".join((v or "").split()).strip().strip("\"'.,")
+        if not cand or cand.startswith("없음") or len(cand) > 14:
+            return ""
+        # ★ 재료에 없는 말이면 버린다 — 프롬프트가 날조를 시키는 통로가 되면 안 된다
+        flat = src.replace(" ", "")
+        if cand.replace(" ", "") not in flat:
+            return ""
+        return cand
+    except Exception as e:                     # 침묵하지 않는다 — 앵커가 없으면 키워드가 달라진다
+        import logging as _lga
+        _lga.getLogger("shopcast.seo").warning("[세트 앵커] 추출 실패 — %s", repr(e)[:80])
+        return ""
+
+
+def _with_related(cands: list, industry: str, wide: str = "",
+                  anchor: str = "") -> tuple:
+    """🌾 검색광고 연관검색어를 후보에 더한다 — **시장이 쓰는 말**을 우리가 지어내지 않는다.
+
+    2026-08-19 사장님: "중고차면 중고차지 왜 하필 지역특화로 한 거냐."
+      후보 생성기가 [업종어+지역+접미사] 조합만 만들어서, 쓸 만한 자리가 애초에 풀에 없었다.
+      '부산 썬팅'(670회)도 '부산 중고차'(9,250회)도 코드가 억지로 끼워 넣어야 나왔다.
+
+    검색광고 API는 힌트 키워드 하나에 연관검색어 ~40개를 **검색량과 함께** 준다.
+    지금까지는 그 응답을 '내가 만든 후보의 검색량 확인'에만 쓰고 나머지는 버렸다.
+
+    ★ 업종 어간이 든 말만 거둔다(하드코딩 0 — 어간은 인자로 온다).
+      '버텍스1100'·'신차패키지'처럼 업종어가 없는 말은 우리 재료가 뒷받침한다는 보장이 없어
+      제외한다(정직 게이트 — 없는 것을 쓰게 만들 후보는 넣지 않는다).
+    ★ 조회 실패·무키는 원래 후보 그대로(파이프라인을 막지 않는다).
+
+    반환 (후보, 이미 잰 검색량 맵) — **잰 값을 버리지 않는다.** 뒤에서 다시 조회하면
+    후보가 조회 창(앞 8개) 밖으로 밀려 '무측정'으로 취급된다(거두고도 못 쓰는 결함).
+    """
+    core = industry_core(industry)
+    if not core:
+        return cands, {}
+    try:
+        from app.services import searchad as _sa
+        if not _sa.configured():
+            return cands, {}          # ★ 무키 경로도 (후보, 맵) — 반환 모양이 갈리면 부르는 쪽이 죽는다
+        # 씨앗 = [앵커 토큰별 자리, 광역 자리, 원 후보].
+        #   ★ 앵커를 **문자열 하나로** 쓰면 수식어 하나에 무너진다(2026-08-19 실측):
+        #     앵커가 '흰색 테슬라 모델3'으로 나온 실행에서 씨앗이 '흰색 테슬라 모델3 중고차'가
+        #     됐고, API가 일반어만 돌려줘 '테슬라중고차'(4,930회)가 통째로 안 거둬졌다.
+        #     같은 재료로 앞선 실행에서는 '테슬라 모델3'이 나왔다 — LLM 답은 매번 흔들린다.
+        #   토큰별로 씨앗을 만들면 '흰색'이 섞여도 '테슬라 ○○'가 살아남는다.
+        _aseeds = [f"{t} {core}".strip() for t in (anchor or "").split() if len(t) >= 2]
+        seeds = [c for c in ([f"{wide} {core}".strip()] + list(cands)) if c][:3]
+        rows = _sa.keyword_volumes(seeds, limit=80) or []
+        # ★ 앵커는 **따로 한 번 더** 묻는다(2026-08-19 실측).
+        #   씨앗 3개를 섞어 던진 회차에서 테슬라 계열이 29개 중 0개였다 — 같은 재료로
+        #   앵커만 던진 회차에서는 '테슬라중고차'(4,930회)가 나왔다. 응답이 흔들린다.
+        #   무료 API 1콜을 더 쓰고 앵커 공간을 확보한다(이 세트의 주제가 후보에서 빠지면 끝이다).
+        if _aseeds:
+            try:
+                rows = (_sa.keyword_volumes(_aseeds[:2], limit=80) or []) + rows
+            except Exception:
+                pass
+    except Exception:
+        return cands, {}
+    have = {(c or "").replace(" ", "") for c in cands}
+    known, got = {}, []
+    for r in rows:
+        kw = " ".join((r.get("keyword") or "").split())
+        flat = kw.replace(" ", "")
+        if not flat:
+            continue
+        try:
+            vol = int(r.get("total") or 0)
+        except Exception:
+            continue
+        known[flat] = vol                     # 원 후보의 검색량도 여기서 확보된다
+        if flat in have or core not in flat:
+            continue
+        if vol < MIN_MONTHLY_VOLUME:
+            continue
+        have.add(flat)
+        got.append((vol, kw))
+    if not got:
+        return cands, known
+    # ★ 검색량 순으로만 줄 세우면 거대 일반어가 앞을 다 차지한다(2026-08-19 실측):
+    #   중고차(290,700)·중고차매매사이트(99,800)·중고차사이트(45,900)·현대중고차사이트(12,550)…
+    #   그래서 이 세트의 앵커가 든 '테슬라중고차'(4,930회·문서 10만·점수 19.40)가 7번째로 밀려
+    #   **측정조차 안 됐고**, 대신 점수 9.98짜리가 뽑혔다. 검색량 순 ≠ 좋은 자리 순이다.
+    #   ★ 앵커 **전체**가 아니라 토큰으로 본다 — 앵커가 '테슬라 모델3'일 때 시장의 말은
+    #     '테슬라중고차'다. 전체 문자열로 맞추면 하나도 안 걸린다(첫 시도에서 그랬다).
+    _atoks = [t for t in (anchor or "").split() if len(t) >= 2]
+
+    def _anchored(kw: str) -> bool:
+        flat = kw.replace(" ", "")
+        return any(t in flat for t in _atoks)
+    got.sort(key=lambda t: (0 if _anchored(t[1]) else 1, -t[0]))
+    import logging as _lgr
+    _lgr.getLogger("shopcast.seo").info(
+        "[자리 수집] 연관검색어 %d개 편입 — %s", len(got),
+        ", ".join(f"{k}({v:,})" for v, k in got[:6]))
+    return list(cands) + [k for _, k in got[:RELATED_HARVEST]], known
+
+
 def _volume_first(cands: list, verify: bool = True, deep: bool = True,
-                  industry: str = "") -> str:
+                  industry: str = "", known: "dict | None" = None,
+                  region: str = "", report: "dict | None" = None) -> str:
     """후보 중 **가장 이길 만한 자리**를 고른다(매장·셀러 공통 관문).
 
     deep=True면 문서 수·상위글 나이까지 재서 slot_score로 정렬한다(무료 API, 후보 5개까지).
@@ -463,12 +610,18 @@ def _volume_first(cands: list, verify: bool = True, deep: bool = True,
         from app.services import searchad as _sa
         if not _sa.configured():
             return cands[0]
-        vols = {(v.get("keyword") or "").replace(" ", ""): v.get("total")
-                for v in _sa.keyword_volumes(cands[:8], limit=80)}
+        vols = dict(known or {})         # 수집 단계에서 이미 잰 값 우선(재조회 없음)
+        _miss = [c for c in cands[:8] if c.replace(" ", "") not in vols]
+        if _miss:
+            vols.update({(v.get("keyword") or "").replace(" ", ""): v.get("total")
+                         for v in _sa.keyword_volumes(_miss, limit=80)})
     except Exception:
         return cands[0]                      # 조회 실패로 생성을 막지 않는다
 
     passed, skipped = [], []
+    _rep = report if report is not None else {}
+    _rep.setdefault("ranked", [])
+    _rep.setdefault("dropped", [])
     for c in cands:
         v = vols.get(c.replace(" ", ""))
         if v is None:                        # 못 잰 말 — 통과시키되 순위는 뒤로
@@ -477,6 +630,12 @@ def _volume_first(cands: list, verify: bool = True, deep: bool = True,
             passed.append((c, v))
         else:
             skipped.append(f"{c}({v}회)")
+    # ★ 보고서는 **여기서 먼저** 채운다(2026-08-19 골든이 잡음).
+    #   깊은 측정은 blogrank 무키·실패면 중간에 돌아간다 — 그 경로에서 보고서가 비면
+    #   부르는 쪽이 '버린 말이 없다'고 오해해 죽은 말을 다시 확장에 넣는다.
+    _rep["dropped"] = [c for c, v in ((c, vols.get(c.replace(" ", ""))) for c in cands)
+                       if v is not None and v < MIN_MONTHLY_VOLUME]
+    _rep["ranked"] = [c for c, _ in passed]
     if not passed:
         _log.warning("[자리 판정] 후보 전부 월 %d회 미만 — %s", MIN_MONTHLY_VOLUME, skipped[:6])
         return ""
@@ -491,7 +650,7 @@ def _volume_first(cands: list, verify: bool = True, deep: bool = True,
             return passed[0][0]
         now, scored, dead = _dt.datetime.utcnow(), [], []
         _ind = industry_core(industry)
-        for c, v in passed[:5]:
+        for c, v in passed[:DEEP_MEASURE]:
             if v is None:
                 continue
             try:
@@ -531,6 +690,36 @@ def _volume_first(cands: list, verify: bool = True, deep: bool = True,
                 return ""
         if scored:
             scored.sort(key=lambda s: -s["rank"])
+            # 🚫 **남의 동네는 안 된다**(2026-08-01 '김해썬팅' 실사고 · 2026-08-19 재발).
+            #   지역 강제를 걷어내자 연관검색어에서 '대구중고차사이트'가 부산 가게의 대표
+            #   키워드로 뽑혔다. 전국 키워드('중고차 시세')는 정당하지만, **다른 지역**을
+            #   겨냥한 말은 그 지역 검색자에게 미끼 글이 된다 — 헌법이 금지한 것.
+            #   판정은 기존 단일 관문 region_conflict(LLM YES/NO · 7일 캐시)를 그대로 쓴다.
+            #   점수 1등부터 훑어 통과하는 첫 자리를 쓴다(전량 검사가 아니라 필요한 만큼만).
+            if region:
+                _kept = []
+                for _s in scored[:4]:
+                    try:
+                        if region_conflict(_s["keyword"], region):
+                            _log.warning("[자리 판정] 다른 지역 키워드 제외 — %r (가게 %r)",
+                                         _s["keyword"], region)
+                            # ★ 버린 이유를 보고서에 남긴다 — 안 남기면 **확장 목록으로 되살아난다**.
+                            #   실측(2026-08-19): 대표에서는 걸러낸 '대구중고차사이트'가
+                            #   확장에 그대로 실렸다. 확장은 태그·소제목이 되어 발행된다.
+                            _rep["dropped"].append(_s["keyword"])
+                            continue
+                    except Exception:
+                        pass
+                    _kept.append(_s)
+                scored = _kept + scored[4:]
+            if not scored:
+                _log.warning("[자리 판정] 남은 자리가 없다 — 폴백에 맡긴다")
+                return ""
+            # ★ 살아남은 자리를 밖으로 낸다 — 의도 게이트가 되돌아갈 곳이 필요하다.
+            #   실측(2026-08-19): '중고차매매사이트'가 의도 게이트에 걸리자 확장 목록에
+            #   구·군 조합밖에 없어 **월 70회짜리 죽은 자리로 되돌아갔다.**
+            _rep["ranked"] = [x["keyword"] for x in scored]
+            _rep["dropped"] = list(_rep["dropped"]) + [d.split("(")[0] for d in dead]
             best = scored[0]
             _log.info("[자리 판정] 선택 %r — 월 %s회·문서 %s건·상위글 %s일 (%s)%s",
                       best["keyword"], f"{best['vol']:,}", f"{best['docs']:,}",
@@ -547,7 +736,7 @@ def _volume_first(cands: list, verify: bool = True, deep: bool = True,
 def select_target_keyword(candidates: list, biz_type: str = "local", region: str = "",
                           industry: str = "", tenant_id: str = "", verify_volume: bool = True,
                           primary_model: str = "", allow_inventory_rank: bool = False,
-                          note: str = "") -> str:
+                          note: str = "", report: "dict | None" = None) -> str:
     """★ 타깃 키워드 최종 선택 단일 관문(오토큐·직접생성 공통).
     ① 기초지역(구·군) 하드 배제(셀러·병행) ② 매물 속성 서열 정렬 ③ 검색량 검증(월 100회+, 실패 시 스킵).
     후보 전부 탈락하면 광역+업종 폴백. 매장(local)은 지역 규칙 미적용(원 후보 유지)."""
@@ -568,12 +757,25 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
         #   함수 설명에는 '③ 검색량 검증(월 100회+)'이 있었는데 그 코드가 셀러 분기 안에만 있었다.
         #   헌법 금지선: '검색량 없는 키워드 욱여넣기'.
         _local_fb = (f"{_kw_shorten(region)} {ind0}".strip() if ind0 else "")
-        # 🗺 매장은 **지역이 붙은 후보 안에서만** 자리를 고른다(2026-08-19 실측으로 추가).
-        #   관문을 열자마자 '썬팅 추천'(전국 1,020회·문서 65만)이 뽑혔다. 상위글이 낡아
-        #   점수는 높지만, 부산 동구 가게가 전국 키워드에서 1위를 지킬 수도 없고
-        #   1위를 해도 검색자가 전국이라 가게에 손님이 오지 않는다 — 존재 이유(1항)에 어긋난다.
-        #   지역 후보가 전부 수요 미달이면 빈 문자열로 두고 부르는 쪽 폴백에 맡긴다.
-        _wide = _region_wide(region)
+        # 🗺 지역은 **조건이 아니라 후보의 한 갈래다**(2026-08-19 사장님 지적으로 되돌림).
+        #   한때 여기서 '매장은 지역이 붙은 후보 안에서만 고른다'로 강제했다. 그건 내가 만든
+        #   규칙이지 사장님이 정한 것도, 실측에서 나온 것도 아니었다. 사장님: "중고차면
+        #   중고차지 왜 하필 지역특화로 한 거냐."
+        #   실측으로 확인한 결과 **강제가 없어도 세 축이 같은 답을 낸다**:
+        #     부산 썬팅 6.81 > 썬팅 가격 3.63 > 자동차 썬팅 3.06 > 썬팅 추천 1.98
+        #     부산 중고차 25.67 > 중고차 시세 12.80 > 중고차 추천 1.87
+        #   지역 자리가 이기는 이유는 '지역이라서'가 아니라 **상위글이 낡아 지킬 수 있어서**다.
+        #   강제는 답을 만들지 않았고 얹혀 있었을 뿐이며, 답이 갈리는 날엔 근거 없이 세 축을 이긴다.
+        #   (업종에 따라 전국이 맞다 — 중고차는 원거리 거래가 흔하다.)
+        # ★ 광역 어간을 **지역 문자열 형식에 상관없이** 뽑는다(2026-08-19 두 번째 실측).
+        #   `_region_wide`는 '광역시/특별시/도' 접미사가 있어야 값을 준다. 그런데 실계정
+        #   주안모터스의 region은 '부산 기장'이고, 시연 tenant들도 '수원 영통'·'가평 청평'이다.
+        #   → 광역이 '' 이면 아래 지역 가드가 **통째로 통과**되어 전국 키워드가 이겼다
+        #     (헬스장(수원 영통) 실측: 대표 키워드가 '헬스장 추천'으로 나왔다).
+        #   `_kw_shorten`은 모든 형식에서 사람 말로 줄여준다('경기도 수원시 영통구' → '수원 영통구').
+        #   그 첫 토큰이 사람이 실제로 검색하는 광역이다 — '경기'보다 '수원'이 맞다.
+        _short_toks = _kw_shorten(region).split()
+        _wide = (_short_toks[0] if _short_toks else "") or _region_wide(region)
         # ★ 광역 자리를 후보에 넣어준다(2026-08-19 실측). 후보 생성기는 구·군 조합만 만든다 —
         #   '부산 동구 썬팅'(월 30회) 계열뿐이라, 관문을 통과시켜도 고를 것이 없었다.
         #   같은 판의 광역 자리 '부산 썬팅'은 월 670회다. 이게 실제로 이길 수 있는 자리다.
@@ -586,13 +788,27 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
         _wide_kw = f"{_wide} {_core}".strip() if (_wide and ind0) else ""
         if _wide_kw:                          # 폴백도 광역으로 — 구·군 폴백은 수요가 없다
             _local_fb = _wide_kw
-        _in_region = [c for c in cands if _wide and _wide in c.replace(" ", "")]
-        _picked = _volume_first(_in_region or cands, verify_volume, industry=ind0)
-        if not _picked and _in_region:
-            import logging as _lgl
-            _lgl.getLogger("shopcast.seo").warning(
-                "[자리 판정] 지역(%s) 후보 %d개 전부 수요 미달 — 제네릭 폴백", _wide, len(_in_region))
-        return _picked or _local_fb
+        # 🌾 **시장이 쓰는 말을 후보로 거둔다**(2026-08-19 사장님 지적).
+        #   지금까지 후보는 [업종어 + 지역 + 접미사] 기계 조합뿐이었다 —
+        #   '부산 동구 썬팅 추천/후기/잘하는곳/실력'(전부 월 20~30회). 그 안에 쓸 자리가 없었다.
+        #   검색광고 API는 힌트 하나에 **연관검색어 40개를 검색량과 함께** 돌려주는데
+        #   ('자동차썬팅 5,660 · 썬팅가격 4,280 · 썬팅재시공 620 …) 우리는 받아놓고 버리고 있었다.
+        # 🔑 이번 세트의 앵커(그 매물·그 차종)를 후보와 **씨앗**으로 넣는다.
+        #   실측(2026-08-19): 테슬라 모델3 글의 대표 키워드가 '부산 중고차'였다 — 그 차가
+        #   키워드에 한 글자도 없었다. 씨앗을 업종어로만 주니 API가 일반어만 돌려준 탓이다.
+        #   앵커를 씨앗으로 주면 시장이 모델별 자리를 알려준다
+        #   ('테슬라중고차' 4,930회·문서 10만 / '테슬라모델3중고' 1,760회).
+        _anchor = " ".join((primary_model or "").split())
+        if _anchor and _core:
+            #   전체 구절 하나만 넣으면 '흰색 테슬라 모델3 중고차'(월 20회)가 된다 —
+            #   토큰별로도 넣어 시장이 실제로 쓰는 형태('테슬라 중고차')가 후보에 오르게 한다.
+            _atoks = [t for t in _anchor.split() if len(t) >= 2]
+            for _a in ([f"{t} {_core}" for t in _atoks] + [f"{_anchor} {_core}"]):
+                if _a not in cands:
+                    cands = [_a] + list(cands)
+        cands, _known = _with_related(cands, ind0, _wide, anchor=_anchor)
+        return _volume_first(cands, verify_volume, industry=ind0, known=_known,
+                             region=region, report=report) or _local_fb
     # 기초지역 배제
     cands = [c for c in cands if not is_basic_region_kw(c, region, biz)]
     # 매물 속성(핵심 속성·분류) — 세트 컨텍스트 + 업종 스키마 attribute_axes에서 공급(전 업종)
@@ -633,7 +849,8 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
     #   전에는 이 로직이 셀러 분기 안에만 있어서 매장은 검증 없이 통과했고,
     #   그래서 월 20회짜리가 주력 키워드가 됐다. 같은 판정이 두 곳에 살면 한쪽만 낫는다.
     fallback = f"{wide} {ind0} 추천".strip() if wide else (f"{ind0} 추천" if ind0 else "")
-    return _volume_first(cands, verify_volume, industry=ind0) or fallback or (cands[0] if cands else "")
+    return (_volume_first(cands, verify_volume, industry=ind0, region=region, report=report)
+            or fallback or (cands[0] if cands else ""))
 
 
 def parent_keyword(kw: str, region: str = "", address: str = "") -> str:
@@ -898,18 +1115,39 @@ def resolve_target_keyword(industry: str, region: str, note: str, biz: str = "lo
                          if t and _rpm.search(r"(?<![가-힣])" + _rpm.escape(t), src or "")), "")
         _pm = _fm(note) or _fm(kw0)
         _anchor_missing = bool(_model_toks and not _pm and not _fm(" ".join(kws)))
+    elif content_type != "info":
+        # 🔑 **매장도 이번 세트의 앵커를 뽑는다**(2026-08-19 사장님 지적).
+        #   실측: 테슬라 모델3를 파는 글인데 대표 키워드가 '부산 중고차'로 나왔다 —
+        #   **키워드에 그 차가 한 글자도 없었다.** 시장은 '테슬라중고차'(월 4,930회·문서 10만)를
+        #   치는데, 후보에 오르지도 못했다.
+        #   원인은 앵커 추출이 seller/hybrid 블록 안에만 있었던 것 — 오늘 아침 검색량 관문과
+        #   **같은 모양의 결함**이다(기능은 있는데 실계정 업태가 그 분기에 못 들어간다).
+        #   ★ 셀러처럼 '즉시 확정'하지는 않는다. 앵커는 **후보를 공급**하고, 고르는 것은
+        #     세 축 + 지면 생존이다(앵커 자리가 항상 좋은 자리라는 보장은 없다).
+        _pm = set_anchor(note or "", industry, _biz)
+        if _pm:
+            _slog.info("[resolve-kw] 세트 앵커: %r (재료에서)", _pm)
     if content_type != "info":
         if _anchor_missing:                        # 앵커 부재 → 검색량 랭킹 보류·제네릭(셀러 전용 조건)
             _gk = f"{_kw_shorten(region or '')} {prof_name}".strip() or prof_name
             _slog.warning("[resolve-kw] 앵커 부재 → 제네릭 확정: %r", _gk)
         else:
+            _rep: dict = {}
             _gk = select_target_keyword([kw0] + list(kws), _biz, region or "", prof_name,
                                         tenant_id=tenant_id, primary_model=_pm,
-                                        verify_volume=verify_volume, note=note)
+                                        verify_volume=verify_volume, note=note, report=_rep)
         if _gk:
             kw0 = _gk
-            kws = list(dict.fromkeys([_gk] + [k for k in kws
-                       if not is_basic_region_kw(k, region or "", _biz)]))[:10]
+            # 🏷 확장 목록 = **측정에서 살아남은 자리 먼저**, 그 다음 원 후보.
+            #   실측(2026-08-19): 확장이 구·군 조합뿐이라 ⑴ 의도 게이트가 죽은 자리로 되돌아가고
+            #   ⑵ 그 죽은 말들이 그대로 **태그로 발행**됐다(루마썬팅 글 태그에 '부산 동구
+            #   썬팅업체' 계열 5개). 수요가 없다고 이미 판정한 말을 표면에 내보내면 안 된다.
+            _dropped = {d for d in (locals().get("_rep", {}) or {}).get("dropped", [])}
+            _survived = [k for k in ((locals().get("_rep", {}) or {}).get("ranked") or [])
+                         if k != _gk]
+            _rest = [k for k in kws
+                     if not is_basic_region_kw(k, region or "", _biz) and k not in _dropped]
+            kws = list(dict.fromkeys([_gk] + _survived + _rest))[:10]
     # ⑥ 의도 정합 게이트(제목 개선 ①) — 진단·큐가 준 override 포함 전 경로 공통.
     #   기각 시 차순위 후보(최대 4개 검사) → 전부 기각이면 지역+업종 제네릭(글이 답 못 주는 키워드로 안 쓴다).
     if content_type != "info" and kw0:
@@ -923,7 +1161,12 @@ def resolve_target_keyword(industry: str, region: str, note: str, biz: str = "lo
                         kws = list(dict.fromkeys([_cand] + kws))[:10]
                     break
             else:
-                _gk2 = f"{_kw_shorten(region or '')} {prof_name}".strip() or prof_name
+                # ★ 폴백도 **광역**으로(2026-08-19 실측). 구·군 폴백('부산 기장 중고차' 월 70회)은
+                #   오늘 아침 죽은 자리로 판정한 그 말이다 — 게이트가 기각한 뒤 거기로 돌아가면
+                #   고친 것이 전부 무효가 된다.
+                _wtok = _kw_shorten(region or "").split()
+                _wide2 = _wtok[0] if _wtok else ""
+                _gk2 = f"{_wide2} {prof_name}".strip() or prof_name
                 _slog.warning("[resolve-kw] 후보 전부 의도 불일치 → 제네릭 폴백: %r", _gk2)
                 kw0 = _gk2
                 kws = list(dict.fromkeys([_gk2] + kws))[:10]
@@ -1224,7 +1467,14 @@ def geo_audit(kind: str, payload: dict, name: str = "", industry: str = "",
         return {}
     hits, misses = [], []
     head = text[:260]
-    if name and name in head and (industry in head or (region and region.split()[0] in head)):
+    # ★ 지역 표기는 **사람 말**로 맞춘다(2026-08-19 실측한 채점 결함).
+    #   전에는 region.split()[0] = '부산광역시'를 찾았다. 글은 '부산'이라고 쓰지
+    #   '부산광역시'라고는 절대 안 쓴다 — 그래서 이 항목이 사실상 통과 불가였다.
+    #   (실측: 상호 3회·'부산' 9회인 글이 '표기 일관성 약함'으로 감점됐다.)
+    #   판정 기준을 canonical 단일 관문과 같은 축약형으로 맞춘다.
+    _rtoks = [t for t in _kw_shorten(region or "").split() if t] or (
+        [region.split()[0]] if region else [])
+    if name and name in head and (industry in head or any(t in head for t in _rtoks)):
         hits.append("정의문(첫 문단에 상호+업종/지역)")
     else:
         misses.append("첫 문단 정의문 없음")
@@ -1252,7 +1502,8 @@ def geo_audit(kind: str, payload: dict, name: str = "", industry: str = "",
             misses.append("솔직 장단점 없음")
         consistent = bool(name) and text.count(name) >= 2
     else:
-        consistent = bool(name) and text.count(name) >= 2 and (not region or region.split()[0] in text)
+        consistent = (bool(name) and text.count(name) >= 2
+                      and (not _rtoks or any(t in text for t in _rtoks)))
     if consistent:
         hits.append("표기 일관(NAP/SPU)")
     else:

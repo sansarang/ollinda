@@ -409,3 +409,30 @@ def test_title_speaker_is_the_shop_not_the_customer():
     only_kw = f"{kw} 후기 정리 — 투싼 N라인 57,216km 성능점검부 공개"
     t2, _ = _pick_title([only_kw], kw, body)
     assert t2 == only_kw, "'후기' 키워드가 들어간 정상 제목까지 탈락 — 과교정"
+
+
+def test_GEO_지역표기가_사람_말로_채점된다():
+    """★ 2026-08-19 실측한 **채점 결함** — 글이 아니라 측정이 틀렸다.
+
+    전에는 region.split()[0] = '부산광역시'를 본문에서 찾았다. 글은 '부산'이라고 쓰지
+    '부산광역시'라고는 절대 안 쓴다. 그래서 상호 3회·'부산' 9회인 멀쩡한 글이
+    '표기 일관성 약함'으로 깎였고, GEO 50점으로 보고됐다(고치니 100점).
+    헌법: 정직 게이트는 산출물만이 아니라 **측정에도** 적용된다.
+    """
+    from app import seo
+    body = ("루마썬팅 현대상사는 부산 동구의 썬팅 전문점입니다. 오늘은 앞유리 시공을 정리했습니다.\n\n"
+            "## 시공 순서\n부산에서 오시는 분들이 많이 묻는 것부터 적습니다. "
+            "루마썬팅 현대상사에서는 투과율을 먼저 잽니다.\n")
+    g = seo.geo_audit("blog", {"body": body, "blog_shape": "record"},
+                      "루마썬팅 현대상사", "썬팅", "부산광역시 동구", "local")
+    assert "첫 문단 정의문 없음" not in g["misses"], g
+    assert "상호/상품 표기 일관성 약함" not in g["misses"], g
+
+
+def test_지역이_아예_안_나오면_여전히_깎인다():
+    """느슨해지기만 하면 안 된다 — 지역 표기가 없는 글은 실제로 감점 대상이다."""
+    from app import seo
+    body = "루마썬팅 현대상사는 썬팅 전문점입니다.\n\n## 시공\n루마썬팅 현대상사 작업입니다.\n"
+    g = seo.geo_audit("blog", {"body": body, "blog_shape": "record"},
+                      "루마썬팅 현대상사", "썬팅", "부산광역시 동구", "local")
+    assert "상호/상품 표기 일관성 약함" in g["misses"], g

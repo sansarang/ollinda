@@ -280,12 +280,26 @@ def anatomize(keyword: str, top_n: int = 5) -> "dict | None":
         except Exception:
             pass
         time.sleep(1.2)                               # 저속 원칙(사람 브라우징 수준)
+    # ★ 본문을 한 편도 못 읽어도 **아는 것까지는 남긴다**(2026-08-19 실측).
+    #   '부산 중고차'·'부산 썬팅업체'에서 6초 만에 None이 나왔다 — 상위 결과가 티스토리 등
+    #   네이버 밖 글이라 본문 파싱이 전부 실패한 것이다. None을 돌려주면
+    #   **작전 지시서·내용 빈자리가 통째로 죽는다**(그 글들이 "빈자리 없음"으로 나온 이유).
+    #   검색 API가 준 것(제목 각도·발행일·계정 활력)은 본문 없이도 안다.
     if not rows:
-        return None
+        if not (items or vitals or ages):
+            return None
+        _log.warning("[해부] '%s' 상위글 본문을 한 편도 못 읽었다(네이버 밖 글 추정) — "
+                     "각도·나이·계정만 남긴다", kw)
+        return _save(kw, {"keyword": kw, "n": 0, "partial": True,
+                          "age_days_median": (sorted(ages)[len(ages) // 2] if ages else None),
+                          "blogs_checked": len(vitals),
+                          "weak_blogs": sum(1 for v in vitals if v == "weak"),
+                          "strong_blogs": sum(1 for v in vitals if v == "strong"),
+                          "angles": angles, "common_phrases": []})
 
     def _avg(k):
         return round(sum(r[k] for r in rows) / len(rows))
-    out = {"keyword": kw, "n": len(rows),
+    out = {"keyword": kw, "n": len(rows), "partial": False,
            "avg_chars": _avg("chars"), "avg_imgs": _avg("imgs"), "avg_heads": _avg("heads"),
            "video_pct": round(100 * sum(1 for r in rows if r["video"]) / len(rows)),
            "table_pct": round(100 * sum(1 for r in rows if r["table"]) / len(rows)),
@@ -302,11 +316,17 @@ def anatomize(keyword: str, top_n: int = 5) -> "dict | None":
                               for p, b in sorted(phrase_blogs.items(),
                                                  key=lambda x: (-len(x[1]), -len(x[0])))
                               if len(b) >= max(2, min(3, len(rows) // 2))][:25]}
+    return _save(kw, out)
+
+
+def _save(kw: str, out: dict) -> dict:
+    """해부 결과 저장 — 전체든 부분이든 **같은 경로**로 남긴다(규칙이 두 곳에 살지 않게)."""
     try:
         with db._conn() as c:
             _ensure(c)
             c.execute("INSERT OR REPLACE INTO kw_anatomy(keyword, captured_at, data) VALUES(?,?,?)",
-                      (kw, __import__("datetime").datetime.utcnow().isoformat(), json.dumps(out, ensure_ascii=False)))
+                      (kw, __import__("datetime").datetime.utcnow().isoformat(),
+                       json.dumps(out, ensure_ascii=False)))
         _log.info("[anatomy] %r → %s", kw, out)
     except Exception:
         pass

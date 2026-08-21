@@ -125,3 +125,35 @@ def test_도메인_명사는_그대로_살아남는다():
     got = [g for g in _ba._query_phrases(html, "") if " " not in g]
     for w in ("시인성", "프라이버시", "유리막코팅", "차단율", "적외선", "성능점검기록부"):
         assert w in got, f"도메인 용어를 잃었다: {w} — {got}"
+
+
+# ── 부분 해부 (2026-08-19 실측) ───────────────────────────────────────
+#   '부산 중고차'·'부산 썬팅업체'에서 anatomize가 6초 만에 None을 냈다.
+#   상위 결과가 티스토리 등 네이버 밖 글이라 본문 파싱이 전부 실패한 것이다.
+#   None이면 작전 지시서와 내용 빈자리가 **통째로 죽는다**
+#   (그 글들이 "빈자리 없음 — 해부 데이터 없음"으로 나온 이유).
+#   ★ 본문을 못 읽어도 검색 API가 준 것(제목 각도·발행일·계정 활력)은 안다.
+
+def test_본문을_못_읽어도_아는_것은_남긴다(monkeypatch):
+    """★ 이 골든의 존재 이유. 전부 아니면 무(無)로 두면 그 판 정보가 사라진다."""
+    from app.services import bloganatomy as _ba
+    from app.services import blogrank as _br
+    monkeypatch.setattr(_br, "_search_blog", lambda kw, n=10: [
+        {"title": "부산 중고차 후기", "link": "https://kt99.tistory.com/1", "postdate": "20240101"},
+        {"title": "부산 중고차 가격", "link": "https://kt99.tistory.com/2", "postdate": "20240201"}])
+    monkeypatch.setattr(_ba, "_fetch_post_html", lambda url: "")     # 본문 파싱 전부 실패
+    monkeypatch.setattr(_ba, "_blog_vitals", lambda bid: None)
+    got = _ba.anatomize("부산 중고차")
+    assert got is not None, "아는 것이 있는데 None을 돌려줬다"
+    assert got.get("partial") is True, "부분 결과임을 표시하지 않았다"
+    assert got.get("age_days_median") is not None, "발행일은 본문 없이도 안다"
+    assert got.get("angles"), "제목 각도는 본문 없이도 안다"
+    assert got.get("common_phrases") == [], "본문을 못 읽었는데 구절이 있다(날조)"
+
+
+def test_아무것도_못_얻으면_None이다(monkeypatch):
+    """검색 결과 자체가 없으면 남길 것이 없다 — 빈 껍데기를 캐시하면 그게 거짓말이다."""
+    from app.services import bloganatomy as _ba
+    from app.services import blogrank as _br
+    monkeypatch.setattr(_br, "_search_blog", lambda kw, n=10: [])
+    assert _ba.anatomize("없는말") is None
