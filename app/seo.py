@@ -246,6 +246,20 @@ def _dedup_tokens(s: str) -> str:
     return " ".join(out)
 
 
+def industry_first(industry: str) -> str:
+    """업종 문자열에서 **첫 업종 하나**만 — 구분자 단일 관문(2026-08-19 8업종 실측).
+
+    같은 규칙이 네 곳에 복사돼 있었고 전부 `,`와 `/`만 잘랐다. 그래서 프로필 업종명에
+    가운뎃점이 든 업종이 통째로 깨졌다:
+        동물병원 → '병원·의원'  → 키워드 '강아지 병원·의원', '인천 청라 병원·의원 잘하는곳'
+        인테리어 → '인테리어·리모델링' · 펜션 → '펜션·숙박'
+    아무도 검색하지 않는 말이고, **지면 생존 판정까지 무력화**한다
+    (상위 글 제목에 '병원·의원'이 있을 리 없으니 살아 있는 판도 죽은 것으로 나온다).
+    실계정 둘이 '썬팅,광택'·'중고차판매'라 쉼표뿐이어서 하루 종일 안 보였다.
+    """
+    return re.split(r"[,·/|>]", (industry or "").strip())[0].strip()
+
+
 def canonical_industry(category: str) -> str:
     """지도 카테고리 → 사람이 실제로 치는 업종어. 단일 관문(2026-08-14).
 
@@ -284,7 +298,7 @@ def canonical_region(region: str, biz_type: str = "local", industry: str = "",
     if not cores:
         return _dedup_tokens(wide or _kw_shorten(region))   # 기초지역 없음 → 광역
     basic = cores[0]
-    ind0 = ((industry or "").replace("/", ",").split(",")[0] or "").strip()
+    ind0 = industry_first(industry)
     if verify_volume and ind0:
         try:
             from app.services import searchad as _sa
@@ -387,7 +401,7 @@ GENERIC_BIZ_SUFFIX = ("업체", "전문점", "전문", "매장", "가게", "센�
 
 def industry_core(industry: str) -> str:
     """'썬팅업체'→'썬팅', '인테리어 전문점'→'인테리어'. 판정·후보 생성의 공통 어간."""
-    t = re.sub(r"\s+", "", (industry or "").split(",")[0])
+    t = re.sub(r"\s+", "", industry_first(industry))
     for suf in GENERIC_BIZ_SUFFIX:
         if t.endswith(suf) and len(t) > len(suf) + 1:
             return t[: -len(suf)]
@@ -743,7 +757,7 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
     cands = [" ".join((c or "").split()) for c in (candidates or []) if c and c.strip()]
     cands = list(dict.fromkeys(cands))
     biz = (biz_type or "local")
-    ind0 = ((industry or "").replace("/", ",").split(",")[0] or "").strip()
+    ind0 = industry_first(industry)
     cands = _surface_first(cands, tenant_id)             # ★ 통합검색에 블로그 지면이 있는 판을 앞으로
     cands = _gap_first(cands, tenant_id, note)           # ★ 소재가 뒷받침하는 빈자리를 그보다 앞으로
     if biz not in ("seller", "hybrid"):
@@ -1012,7 +1026,7 @@ def keyword_intent_ok(kw: str, industry: str, biz: str, content_type: str, note:
     kw = " ".join((kw or "").split())
     if not kw:
         return True
-    ind0 = ((industry or "").replace("/", ",").split(",")[0] or "").strip()
+    ind0 = industry_first(industry)
     try:
         from app import ratelimit as _rl
         _ck = f"kwintent:{kw}|{ind0}|{content_type}"
@@ -1063,7 +1077,7 @@ def resolve_target_keyword(industry: str, region: str, note: str, biz: str = "lo
     생성기가 이 함수를 안 거치고 seo.target_keywords로 직접 키워드를 정하면 phantom·기초지역 누수 재발."""
     import logging as _lgk
     _slog = _lgk.getLogger("shopcast.seo")
-    prof_name = prof_name or ((industry or "").replace("/", ",").split(",")[0].strip())
+    prof_name = prof_name or industry_first(industry)
     prof_name = searcher_term(prof_name) or prof_name     # 🗣 업종명 → 손님이 실제로 검색하는 말
     kws = target_keywords(prof_name, region, note, axis=keyword_axis, brand=brand)
     kplan = keyword_plan(prof_name, region, note, axis=keyword_axis, brand=brand)
