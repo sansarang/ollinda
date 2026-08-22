@@ -864,3 +864,24 @@ def test_수집이_실제로_이_게이트를_쓴다(monkeypatch):
     got, _ = seo._with_related(["부산 중고차"], "중고차판매", "부산",
                                materials="[사진1] 쏘나타 디 엣지 외관")
     assert "레이중고차" not in {c.replace(" ", "") for c in got}, f"게이트를 안 쓴다: {got}"
+
+
+def test_주입된_후보도_정직_게이트를_지난다(monkeypatch):
+    """★ 5차 실측 — '자동차썬팅지'가 살아남았다. 내 수집이 아니라 기존 volume-boost
+    주입으로 들어온 말이었고, 그쪽 가드는 '자동차썬팅지' 안의 '썬팅'을 보고 통과시킨다
+    (붙여쓴 말에 뚫리는 구멍). 게이트는 **후보가 어디서 왔든** 걸려야 한다."""
+    _with_sa(monkeypatch, {"자동차썬팅지": 430, "부산 썬팅": 670})
+    _spy_cands(monkeypatch)
+    seo.select_target_keyword(["자동차썬팅지", "부산 썬팅"], biz_type="local",
+                              region="부산광역시 동구", industry="썬팅", verify_volume=True,
+                              note="[사진1] 앞유리 필름 시공, 헤라 마감")
+    assert "자동차썬팅지" not in _last_cands, f"주입 후보가 게이트를 안 지난다: {_last_cands}"
+
+
+def test_재료가_없으면_후보를_지우지_않는다(monkeypatch):
+    """못 재는 것과 어긋난 것은 다르다 — 재료가 없으면 판정 근거가 없다."""
+    _with_sa(monkeypatch, {"자동차썬팅지": 430})
+    _spy_cands(monkeypatch)
+    seo.select_target_keyword(["자동차썬팅지"], biz_type="local",
+                              region="부산광역시 동구", industry="썬팅", verify_volume=True)
+    assert "자동차썬팅지" in _last_cands, "재료도 없이 후보를 지웠다"

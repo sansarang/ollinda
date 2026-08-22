@@ -958,6 +958,21 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
                 if _a not in cands:
                     cands = [_a] + list(cands)
         cands, _known = _with_related(cands, ind0, _wide, anchor=_anchor, materials=note)
+        # 🧹 **전 후보**에 정직 게이트(2026-08-19 5차 실측). 거둔 후보에만 걸었더니
+        #   '자동차썬팅지'가 살아남았다 — 그건 내 수집이 아니라 기존 volume-boost 주입으로
+        #   들어온 말이었다(그쪽 가드 `_no_new_subject`는 '자동차썬팅지' 안의 '썬팅'을 보고
+        #   아는 말로 통과시킨다 — 붙여쓴 말에 뚫리는 구멍).
+        #   ★ 판정 재료에 후보 자신을 넣으면 스스로를 근거로 통과한다 —
+        #     재료·앵커·지역만으로 판정한다.
+        if (note or "").strip():
+            _gctx = ((note or "") + (_anchor or "") + region).replace(" ", "")
+            _kept_g = [c for c in cands if _grounded_kw(c, ind0, _gctx)]
+            _lost = [c for c in cands if c not in _kept_g]
+            if _lost:
+                import logging as _lgg
+                _lgg.getLogger("shopcast.seo").warning(
+                    "[자리 판정] 우리 것이 아닌 후보 제외(%d): %s", len(_lost), _lost[:5])
+            cands = _kept_g or cands       # 전부 걸리면 판정 불가로 보고 원래대로(막지 않는다)
         # 반경 = ① 가게 설정 → ② 업종 기본값 → ③ 광역. 가게가 정했으면 그게 최우선이다.
         _radius = ""
         if tenant_id:
