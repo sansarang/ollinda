@@ -1313,9 +1313,18 @@ def resolve_target_keyword(industry: str, region: str, note: str, biz: str = "lo
         if _pm:
             _slog.info("[resolve-kw] 세트 앵커: %r (재료에서)", _pm)
     if content_type != "info":
-        if _anchor_missing:                        # 앵커 부재 → 검색량 랭킹 보류·제네릭(셀러 전용 조건)
-            _gk = f"{_kw_shorten(region or '')} {prof_name}".strip() or prof_name
-            _slog.warning("[resolve-kw] 앵커 부재 → 제네릭 확정: %r", _gk)
+        if _anchor_missing:
+            # 앵커 부재(셀러 전용 조건) — 매물 속성으로 랭킹하지 않는다.
+            #   ★ 그렇다고 **검증까지 건너뛰지는 않는다**(2026-08-19 경로 골든이 잡음).
+            #     전에는 여기서 제네릭을 즉시 확정해 검색량 관문을 통째로 넘겼고,
+            #     그 제네릭이 '부산 동구 썬팅'(월 30회) — 루마썬팅 12편 헛발질과 같은 계열이다.
+            #     제네릭 하나만 후보로 두고 관문에 통과시킨다(랭킹은 안 하지만 판정은 한다).
+            _gen = f"{_kw_shorten(region or '')} {prof_name}".strip() or prof_name
+            _slog.warning("[resolve-kw] 앵커 부재 → 제네릭 %r (관문은 거친다)", _gen)
+            _rep = {}
+            _gk = select_target_keyword([_gen], _biz, region or "", prof_name,
+                                        tenant_id=tenant_id, verify_volume=verify_volume,
+                                        note=note, report=_rep) or _gen
         else:
             _rep: dict = {}
             _gk = select_target_keyword([kw0] + list(kws), _biz, region or "", prof_name,
