@@ -3059,7 +3059,7 @@ MARKET_RADIUS_DEFAULT = "광역"
 
 
 def market_radius(tid: str) -> str:
-    """그 가게의 상권 반경. 미설정이면 '광역'(대부분의 매장이 여기다).
+    """그 가게의 **명시 설정** 상권 반경. 미설정이면 빈 문자열(업종 기본값으로 넘어간다).
 
     왜 가게마다인가 — 실측(2026-08-19):
       수원 영통 헬스장에 '인계동헬스장'(같은 시 다른 동네)이 뽑혔다. 헬스장은 매주 와야 해서
@@ -3070,9 +3070,9 @@ def market_radius(tid: str) -> str:
         with _conn() as c:
             r = c.execute("SELECT market_radius FROM tenants WHERE id=?", (tid,)).fetchone()
         v = (r["market_radius"] or "").strip() if r else ""
-        return v if v in MARKET_RADIUS else MARKET_RADIUS_DEFAULT
+        return v if v in MARKET_RADIUS else ""      # 미설정은 빈 값 — 부르는 쪽이 업종 기본값을 쓴다
     except sqlite3.OperationalError:
-        return MARKET_RADIUS_DEFAULT
+        return ""
 
 
 def set_market_radius(tid: str, radius: str) -> bool:

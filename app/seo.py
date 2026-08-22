@@ -526,8 +526,44 @@ def set_anchor(note: str, industry: str = "", biz: str = "local") -> str:
         return ""
 
 
+#: 검색어 뒤에 붙는 **일반 의도어** — 어느 업종에나 똑같이 붙는다(업종어 아님).
+GENERIC_INTENT_WORDS = ("추천", "후기", "가격", "비용", "시세", "비교", "종류", "방법",
+                        "잘하는곳", "순위", "업체", "전문점", "근처", "저렴", "싼", "좋은",
+                        "잘하는", "유명한", "정보", "문의", "상담", "예약", "가성비")
+
+
+def _grounded_kw(kw: str, industry: str, ctx_flat: str) -> bool:
+    """거둔 키워드가 **우리가 파는 것**인가 — 키워드판 정직 게이트(2026-08-19 실측).
+
+    실사고: 연관검색어 수집을 켜자 실계정 둘이 이렇게 나왔다.
+      루마썬팅  → '자동차썬팅지'  (필름 자재 — 시공을 맡길 손님이 아니다)
+      주안모터스 → '레이중고차'    (기아 레이. 우리 매물이 아니다)
+    같은 방어(drop_phantom_attr_kws)가 있었지만 셀러 전용이었고, 매장은 과거 오탐
+    사고(썬팅지 오제거) 때문에 의도적으로 빠져 있었다 → **거둔 키워드에만** 건다.
+
+    판정: 업종 스키마가 **제품·자재·차종으로 아는 말**(attribute_axes 토큰)이 키워드에 있는데
+      그것이 이 세트 재료에 없으면 = 우리가 안 파는 것 → 버린다.
+    ★ 그 외에는 통과시킨다. 처음엔 '재료에 없는 말은 전부 버린다'로 짰다가 골든이 잡았다 —
+      '자동차썬팅'·'썬팅재시공'까지 버렸다. 그 둘은 그 가게가 실제로 하는 일이다.
+      **모르는 말을 버리는 게 아니라, 아는 말이 어긋날 때 버린다.**
+    """
+    flat = (kw or "").replace(" ", "")
+    if not flat:
+        return False
+    try:
+        from app.services import indschema as _isg
+        axes = (_isg.get_schema(industry, "local").get("attribute_axes") or [])
+    except Exception:
+        return True                       # 스키마를 못 읽으면 판정하지 않는다(막지 않는다)
+    toks = [t for ax in axes[:1] for t in (ax.get("tokens") or []) if t and len(t) >= 2]
+    for t in toks:
+        if t in flat and t not in ctx_flat:
+            return False
+    return True
+
+
 def _with_related(cands: list, industry: str, wide: str = "",
-                  anchor: str = "") -> tuple:
+                  anchor: str = "", materials: str = "") -> tuple:
     """🌾 검색광고 연관검색어를 후보에 더한다 — **시장이 쓰는 말**을 우리가 지어내지 않는다.
 
     2026-08-19 사장님: "중고차면 중고차지 왜 하필 지역특화로 한 거냐."
@@ -573,7 +609,9 @@ def _with_related(cands: list, industry: str, wide: str = "",
     except Exception:
         return cands, {}
     have = {(c or "").replace(" ", "") for c in cands}
-    known, got = {}, []
+    known, got, _ungrounded = {}, [], []
+    #: 우리 것으로 설명되는 말인지 판정할 재료 — 후보 + 앵커 + 이번 세트 재료(사진 분석)
+    _ctx_flat = ("".join(cands) + (anchor or "") + (materials or "")).replace(" ", "")
     for r in rows:
         kw = " ".join((r.get("keyword") or "").split())
         flat = kw.replace(" ", "")
@@ -590,8 +628,15 @@ def _with_related(cands: list, industry: str, wide: str = "",
             continue
         if any(w in flat for w in ONLINE_CHANNEL_WORDS if w not in core):
             continue                       # 온라인 채널어 — 매장 손님이 아니다
+        if not _grounded_kw(kw, industry, _ctx_flat):
+            _ungrounded.append(kw)         # 우리가 팔지 않는 것(다른 차종·자재 등)
+            continue
         have.add(flat)
         got.append((vol, kw))
+    if _ungrounded:
+        import logging as _lgu
+        _lgu.getLogger("shopcast.seo").warning(
+            "[자리 수집] 우리 것이 아닌 말 제외(%d): %s", len(_ungrounded), _ungrounded[:5])
     if not got:
         return cands, known
     # ★ 검색량 순으로만 줄 세우면 거대 일반어가 앞을 다 차지한다(2026-08-19 실측):
@@ -611,6 +656,54 @@ def _with_related(cands: list, industry: str, wide: str = "",
         "[자리 수집] 연관검색어 %d개 편입 — %s", len(got),
         ", ".join(f"{k}({v:,})" for v, k in got[:6]))
     return list(cands) + [k for _, k in got[:RELATED_HARVEST]], known
+
+
+def industry_radius(industry: str) -> str:
+    """🗺 그 **업종의** 기본 상권 반경 — 손님이 어디서 오는가(2026-08-19 사장님 지시).
+
+    사장님: "주안모터스 전국, 루마썬팅 광역으로 해라. 모든 업종에 적용해라 — 2업체만
+    국한하지 말고." 가게별 설정(tenants.market_radius)이 우선이고, 없으면 이 값을 쓴다.
+
+    ★ 업종 목록을 코드에 갖지 않는다(헌법 업종 중립). 판정은 이 저장소가 이미 쓰는 방식 —
+      LLM 1회 + 캐시(region_conflict·searcher_term과 같은 패턴). 무키·실패는 '광역'.
+
+    기준(프롬프트에 그대로 들어간다):
+      동네 — 매주·매달 반복해서 방문해야 하는 업종(가까워야 간다)
+      광역 — 필요할 때 시내에서 찾아가는 업종
+      전국 — 원거리 거래·배송·여행이 흔해 다른 지역 손님도 실제로 오는 업종
+    """
+    ind = industry_first(industry)
+    if not ind:
+        return "광역"
+    try:
+        from app import ratelimit as _rl
+        _ck = f"radius:{ind}"
+        hit = _rl.cache_get(_ck, 30 * 86400)
+        if hit is not None and (hit.get("r") in ("동네", "광역", "전국")):
+            return hit["r"]
+    except Exception:
+        _rl = None
+    try:
+        from app import llm
+        v = llm.call_task(
+            "judge",
+            "업종을 하나 준다. 그 가게의 **손님이 어디서 오는지**를 셋 중 하나로만 답하라.\n"
+            "동네 — 매주·매달 반복해 방문해야 해서 가까워야 가는 업종\n"
+            "광역 — 필요할 때 시내에서 찾아가는 업종\n"
+            "전국 — 원거리 거래·배송·여행이 흔해 다른 지역 손님도 실제로 오는 업종\n"
+            "출력: 동네 / 광역 / 전국 중 한 단어만. 설명 금지.\n\n"
+            f"[업종] {ind}",
+            max_tokens=12)
+        r = " ".join((v or "").split()).strip()
+        r = r if r in ("동네", "광역", "전국") else "광역"
+    except Exception:
+        return "광역"                      # 판정 실패로 글을 막지 않는다
+    try:
+        if _rl:
+            _rl.cache_set(f"radius:{ind}", {"r": r})
+    except Exception:
+        pass
+    return r
 
 
 def _looks_local_kw(kw: str, industry: str = "") -> bool:
@@ -864,14 +957,17 @@ def select_target_keyword(candidates: list, biz_type: str = "local", region: str
             for _a in ([f"{t} {_core}" for t in _atoks] + [f"{_anchor} {_core}"]):
                 if _a not in cands:
                     cands = [_a] + list(cands)
-        cands, _known = _with_related(cands, ind0, _wide, anchor=_anchor)
-        _radius = "광역"
+        cands, _known = _with_related(cands, ind0, _wide, anchor=_anchor, materials=note)
+        # 반경 = ① 가게 설정 → ② 업종 기본값 → ③ 광역. 가게가 정했으면 그게 최우선이다.
+        _radius = ""
         if tenant_id:
             try:
                 from app import db as _dbr
                 _radius = _dbr.market_radius(tenant_id)
             except Exception:
-                pass
+                _radius = ""
+        if not _radius:
+            _radius = industry_radius(ind0)
         return _volume_first(cands, verify_volume, industry=ind0, known=_known,
                              region=region, report=report, radius=_radius) or _local_fb
     # 기초지역 배제

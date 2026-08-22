@@ -776,3 +776,91 @@ def test_카페_가게는_카페가_업종어다(monkeypatch):
         {"keyword": "성수동카페", "total": 5000}, {"keyword": "카페추천", "total": 3000}])
     got, _ = seo._with_related(["성남 카페"], "카페", "성남")
     assert len(got) > 1, f"카페 가게의 후보가 전멸했다: {got}"
+
+
+# ── 업종 기본 반경 (2026-08-19 사장님 지시: "모든 업종에 적용해라") ────────
+
+def test_업종_목록을_코드에_갖지_않는다():
+    """헌법 업종 중립 — 판정은 LLM+캐시로 한다(region_conflict와 같은 패턴)."""
+    import inspect
+    src = inspect.getsource(seo.industry_radius)
+    body = src.split('"""')[-1]
+    for w in ("중고차", "헬스", "미용", "맛집", "펜션", "썬팅", "인테리어"):
+        assert w not in body, f"업종명이 코드에 박혔다: {w}"
+
+
+def test_판정이_실패해도_글은_나간다(monkeypatch):
+    from app import llm
+
+    def _boom(*a, **k):
+        raise RuntimeError("죽음")
+    monkeypatch.setattr(llm, "call_task", _boom)
+    assert seo.industry_radius("중고차판매") == "광역"
+
+
+def test_이상한_답은_광역으로_떨어진다(monkeypatch):
+    """LLM이 '반경 넓음' 같은 말을 해도 아는 값만 받는다."""
+    from app import llm
+    monkeypatch.setattr(llm, "call_task", lambda *a, **k: "반경 넓음")
+    monkeypatch.setattr(seo, "industry_first", lambda x: "이상업종")
+    assert seo.industry_radius("이상업종") == "광역"
+
+
+def test_가게_설정이_업종_기본값을_이긴다(monkeypatch):
+    """★ 가게마다 정한다는 결정(ⓒ)이 업종 일괄값에 덮이면 안 된다."""
+    seen = {}
+    monkeypatch.setattr(seo, "industry_radius",
+                        lambda ind: (seen.setdefault("called", True), "전국")[1])
+    import app.db as _db
+    monkeypatch.setattr(_db, "market_radius", lambda tid: "동네")
+    orig = seo._volume_first
+    monkeypatch.setattr(seo, "_volume_first",
+                        lambda *a, **k: (seen.setdefault("radius", k.get("radius")), "x")[1])
+    _with_sa(monkeypatch, {"가 나": 500})
+    seo.select_target_keyword(["가 나"], biz_type="local", region="수원 영통",
+                              industry="헬스장", tenant_id="t1", verify_volume=True)
+    assert seen.get("radius") == "동네", f"가게 설정이 무시됐다: {seen}"
+    assert "called" not in seen, "가게가 정했는데 업종 판정을 또 불렀다(불필요한 LLM 콜)"
+
+
+# ── 거둔 키워드 정직 게이트 (2026-08-19 실측 회귀) ─────────────────────
+#   연관검색어 수집을 켜자 실계정 둘이 이렇게 나왔다:
+#     루마썬팅  → '자동차썬팅지'  (필름 자재 — 시공 손님이 아니다)
+#     주안모터스 → '레이중고차'    (기아 레이. 우리 매물이 아니다)
+#   방어(drop_phantom_attr_kws)는 있었지만 셀러 전용이었고, 매장은 과거 오탐 사고
+#   (썬팅지 오제거) 때문에 의도적으로 빠져 있었다 → 거둔 키워드에만 게이트를 건다.
+
+def test_우리_매물이_아닌_차종은_거두지_않는다():
+    """★ 이 게이트의 존재 이유. 쏘나타를 파는 글에 '레이중고차'가 대표가 됐다.
+    '레이'는 업종 스키마가 차종으로 아는 말인데 이 세트 재료에 없다."""
+    ctx = "부산중고차쏘나타디엣지성능점검기록부주행거리"
+    assert seo._grounded_kw("레이중고차", "중고차판매", ctx) is False
+    assert seo._grounded_kw("쏘나타중고차", "중고차판매", ctx) is True
+
+
+def test_그_가게가_하는_일은_막지_않는다():
+    """★ 처음엔 '재료에 없는 말은 전부 버린다'로 짰다가 골든이 잡았다 —
+    '자동차썬팅'·'썬팅재시공'까지 버렸다. 그 둘은 썬팅 가게가 실제로 하는 일이다.
+    모르는 말을 버리는 게 아니라, **아는 말이 어긋날 때** 버린다."""
+    ctx = "부산썬팅앞유리필름시공"
+    for kw in ("자동차썬팅", "썬팅재시공", "앞유리 썬팅", "썬팅 가격", "중고차 추천"):
+        assert seo._grounded_kw(kw, "썬팅", ctx) is True, kw
+
+
+def test_스키마를_못_읽으면_판정하지_않는다(monkeypatch):
+    """못 재는 것과 어긋난 것은 다르다 — 모르면 막지 않는다(정직 게이트)."""
+    from app.services import indschema
+    monkeypatch.setattr(indschema, "get_schema", lambda *a, **k: (_ for _ in ()).throw(RuntimeError()))
+    assert seo._grounded_kw("아무말", "중고차판매", "") is True
+
+
+def test_수집이_실제로_이_게이트를_쓴다(monkeypatch):
+    """'만들었다'와 '그 경로로 간다'는 다르다 — 오늘 네 번 당했다."""
+    import app.services.searchad as sa
+    monkeypatch.setattr(sa, "configured", lambda: True)
+    monkeypatch.setattr(sa, "keyword_volumes", lambda kws, limit=80: [
+        {"keyword": "레이중고차", "total": 5000},
+        {"keyword": "부산중고차", "total": 9250}])
+    got, _ = seo._with_related(["부산 중고차"], "중고차판매", "부산",
+                               materials="[사진1] 쏘나타 디 엣지 외관")
+    assert "레이중고차" not in {c.replace(" ", "") for c in got}, f"게이트를 안 쓴다: {got}"
